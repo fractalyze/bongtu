@@ -411,7 +411,11 @@ enforcement (`disburseCiphertextLen==2054`, no plain disburse). This supersedes 
 
 Owner/deployer `0xe92a97e645351268F3d60d5a27EB842A5b293058`; verified on-chain through the proxy:
 `B()==256`, `initialized==true`, `disburseCiphertextLen==2054`, ERC-1967 impl slot → the impl above. A real
-`deposit` (now carrying the auditor envelope) succeeded (nextLeafIndex 0→2, custodied 3000 kKRW). **Whole
+`deposit` (now carrying the auditor envelope) succeeded (nextLeafIndex 0→2, custodied 3000 kKRW). **A real
+256-recipient private disburse then ran end-to-end on this v2 pool** (deposit→disburse256, GPU proof against
+the live root, full receiver++authority ciphertext on-chain): tx
+`0xe254240a5df042a163073c028399a5fc63cf87434a7e7ebbf5ddfea73c803bd6`, nextLeafIndex 4→512, ~15,126 gas/recipient,
+total 2.34e-5 ETH (warm GPU proof 149.8s incl. one-time zkey compile). **Whole
 v2 deploy + smoke cost 1.66e-5 ETH** (L2 0.001 gwei; L1/blob DA fee negligible — the earlier §11-7 DA worry
 stays refuted at these params). Arbiter key = the realproofs authority key
 (`0x08a72afc…`); a live 256-disburse demo needs the 256 proof re-proven against this key (zkey unchanged,

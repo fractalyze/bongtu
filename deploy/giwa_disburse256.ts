@@ -41,9 +41,11 @@ if (!PK) throw new Error("DEPLOYER_KEY env required");
 const H = 32, B = 256;
 const CIRC_OUT = join(ROOT, "circuits", "out");
 const CONTRACTS_OUT = join(ROOT, "contracts", "out");
-// reused 256 artifacts (byte-identical to disburse256): wasm + 1.24GB zkey
-const WASM256 = join(DISCLO, "zeto/zkp/circuits/out_imt256/run_nonrep_imt_256_js/run_nonrep_imt_256.wasm");
-const GENW256 = join(DISCLO, "zeto/zkp/circuits/out_imt256/run_nonrep_imt_256_js/generate_witness.js");
+// The belted + unified-arbiter-key disburse256 (v2): wasm/witness from the vendored
+// circuit build, zkey = the regenerated 1.24GB proving key. The old zeto
+// out_imt256/run_nonrep_imt_256 build is pre-belt and no longer matches this zkey.
+const WASM256 = join(CIRC_OUT, "disburse256_js", "disburse256.wasm");
+const GENW256 = join(CIRC_OUT, "disburse256_js", "generate_witness.js");
 const ZKEY256 = join(DISCLO, "artifacts/circuit.zkey");
 const SCRATCH = "/tmp/claude-1000/-home-a41-Workspace/a46e0b1b-a259-4c09-a106-e94cd5151974/scratchpad";
 const JV = "/home/a41/Workspace/jolt-zorch/.venv/bin/python";
