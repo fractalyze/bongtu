@@ -1,0 +1,25 @@
+{
+  "name": "@bongtu/prover-cli",
+  "version": "0.0.0",
+  "description": "bongtu prover-cli — pure prover: a resolved ProvingRequest (complete circom witness input) -> Groth16 solidity calldata {a,b,c,pub}. CPU (snarkjs) for deposit/transfer/withdraw, GPU (rabbitsnark) for 1x256 disburse. No CSV / addr-resolve / membership-build / tx (SPEC §6).",
+  "type": "module",
+  "license": "Apache-2.0",
+  "private": true,
+  "bin": {
+    "prover-cli": "./src/index.ts"
+  },
+  "exports": {
+    ".": "./src/prove.ts",
+    "./types": "./src/types.ts"
+  },
+  "scripts": {
+    "start": "node --import tsx src/index.ts",
+    "test": "node --import tsx --test --test-force-exit test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
