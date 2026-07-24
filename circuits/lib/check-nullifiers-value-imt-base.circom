@@ -22,6 +22,7 @@ include "lib/check-positive.circom";
 include "lib/check-hashes.circom";
 include "lib/check-nullifiers.circom";
 include "lib/check-imt-proof.circom";
+include "node_modules/circomlib/circuits/comparators.circom"; // IsZero for the §5.2 zero-commitment belt (also reached transitively via check-imt-proof)
 
 template CheckNullifiersInputsOutputsValueIMT(nInputs, nOutputs, nLevels) {
   signal input nullifiers[nInputs];
@@ -79,6 +80,19 @@ template CheckNullifiersInputsOutputsValueIMT(nInputs, nOutputs, nLevels) {
   for (var i = 0; i < nInputs; i++) {
     enabled[i] * (enabled[i] - 1) === 0;        // enabled is boolean
     (1 - enabled[i]) * inputValues[i] === 0;    // a disabled input MUST carry zero value
+
+    // §5.2 CRITICAL correction: a zero-commitment input must NEVER be enabled.
+    // The index-keyed IMT commits zeros[0]=0 at every padded / ahead-of-frontier
+    // index, so 0 is a GENUINE membership-provable leaf — unlike Zeto's value-keyed
+    // SMT, where commitment==0 can never be a member. Meanwhile CheckHashes' zero-
+    // commitment escape leaves value/salt/owner UNBOUND. Without this belt an attacker
+    // spends a padded 0-leaf at enabled=1 with a fresh nullifier and ARBITRARY value X
+    // (membership holds, the enabled-belt above is vacuous at enabled=1) => `out`
+    // pays X from nothing (permissionless withdraw drain). Forbidding a zero-commitment
+    // enabled input restores the SMT's implicit invariant explicitly. Ref spec §5.2.
+    var isZeroInputCommitment;
+    isZeroInputCommitment = IsZero()(in <== inputCommitments[i]);
+    enabled[i] * isZeroInputCommitment === 0;   // enabled=1 => inputCommitment != 0
   }
 
   // check that the sum of input values is greater than or equal to the sum of output values
