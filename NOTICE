@@ -1,0 +1,15 @@
+bongtu
+Copyright 2026 Fractalyze
+
+This product includes software developed as part of Zeto
+(https://github.com/hyperledger-labs/zeto), Copyright (c) 2024 Kaleido, Inc.,
+licensed under the Apache License, Version 2.0.
+
+Portions of the circom circuits and the on-chain / SDK design are derived from
+Zeto and have been modified. Modified files retain the original Apache-2.0
+license header and Kaleido copyright and carry a notice describing the change
+(see the per-file headers and THIRD_PARTY_NOTICES.md).
+
+This product also bundles forge-std (https://github.com/foundry-rs/forge-std)
+under contracts/lib/forge-std/, dual-licensed under MIT and Apache-2.0
+(see contracts/lib/forge-std/LICENSE-MIT and LICENSE-APACHE).
