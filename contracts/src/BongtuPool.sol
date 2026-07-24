@@ -1,0 +1,439 @@
+// SPDX-License-Identifier: Apache-2.0
+pragma solidity ^0.8.20;
+
+import {IPoseidon2} from "./interfaces/IPoseidon2.sol";
+import {IDepositVerifier, IWithdrawVerifier, IDisburseVerifier, ITransferVerifier} from "./interfaces/IVerifiers.sol";
+import {IERC20} from "./utils/IERC20.sol";
+import {SafeERC20} from "./utils/SafeERC20.sol";
+import {Ownable2Step} from "./utils/Ownable2Step.sol";
+
+/// @title BongtuPool — unified single-frontier IMT shielded pool (SPEC §5).
+///
+/// One height-`H` Poseidon-v1 Incremental Merkle Tree holds BOTH incremental
+/// single-leaf inserts (deposit / transfer / withdraw outputs) AND B-leaf batch
+/// subtrees (disburse), sharing one `nextLeafIndex` and one `filledSubtrees`
+/// frontier, so a batch-inserted note is spendable by transfer/withdraw against
+/// the same root (§5.1). The tree is byte-identical to the JS reference
+/// `sdk/src/imt.ts` — the Foundry differential test asserts `root() ==
+/// ImtTree.getRoot()` after every insert.
+///
+/// The load-bearing soundness fix (§5.2): for every verifier call the contract
+/// DERIVES `enabled[i] = (nullifier[i] != 0)` from its own view and injects it
+/// into the public-signal vector, and injects the arbiter pubkey from storage —
+/// `enabled` and the authority key are NEVER read from calldata. A proof made
+/// with `enabled=0` on a value-carrying (nonzero-nullifier) input therefore
+/// fails verification (mint-from-nothing is closed).
+contract BongtuPool is Ownable2Step {
+    using SafeERC20 for IERC20;
+
+    // --- IMT (single-frontier, Poseidon-v1) -----------------------------------
+    uint256 public constant H = 32; // tree height (2^32 leaf capacity)
+    uint256 public immutable B; // disburse batch size (M0 = 16, prod = 256)
+    uint256 public immutable LOG_B; // level at which a disburse subtree attaches
+
+    IPoseidon2 public immutable poseidon;
+
+    uint256[33] public zeros; // zeros[0]=0, zeros[k]=H(zeros[k-1],zeros[k-1]); k in 0..H
+    uint256[32] public filledSubtrees; // Tornado frontier, level 0..H-1
+    uint256 public root;
+    uint256 public nextLeafIndex;
+
+    // --- verifiers (immutable per pool; a circuit change ships via new impl) ---
+    IDepositVerifier public immutable depositVerifier;
+    IWithdrawVerifier public immutable withdrawVerifier;
+    IDisburseVerifier public immutable disburseVerifier;
+    ITransferVerifier public immutable transferVerifier;
+
+    // --- roots / nullifiers / custody -----------------------------------------
+    mapping(uint256 => bool) public knownRoots; // §5.3 any-historical-root (no ring)
+    mapping(uint256 => bool) public nullifierUsed;
+    IERC20 public immutable token;
+
+    // --- arbiter epochs (§5.3) -------------------------------------------------
+    struct ArbiterEpoch {
+        uint256 keyX;
+        uint256 keyY;
+        uint256 activatedBlock;
+    }
+
+    ArbiterEpoch[] public arbiterEpochs;
+    bool public initialized;
+
+    // --- disburse access control (caller-gated, §5.3) -------------------------
+    mapping(address => bool) public disburseAllowed;
+
+    // --- public-signal indices (derived from out/<name>.public.json + .sym) ----
+    // deposit  (3):  [0]=out [1]=oc0 [2]=oc1
+    // withdraw (7):  [0]=out [1]=nf0 [2]=nf1 [3]=root [4]=en0 [5]=en1 [6]=oc0
+    // disburse (10): [0..1]=ecdhPub [2]=disclosureHash [3]=subtreeRoot [4]=nf
+    //                [5]=root [6]=enabled [7]=nonce [8..9]=authorityPubKey
+    // transfer (36): [0..1]=ecdhPub [2..9]=cipherTexts[2][4]
+    //                [10..25]=cipherTextAuthority[16] [26..27]=nf [28]=root
+    //                [29..30]=enabled [31..32]=oc [33]=nonce [34..35]=authorityPubKey
+
+    // --- events (all ciphertext copied from verified publicSignals) -----------
+    event Appended(uint256 indexed leafIndex, uint256 leaf, uint256 root);
+    event SubtreeAppended(uint256 indexed startLeafIndex, uint256 subtreeRoot, uint256 root);
+    event Deposited(uint256 firstLeafIndex, uint256 oc0, uint256 oc1, uint256 amount, uint256 root);
+    event Transferred(
+        uint256 indexed epoch,
+        uint256[2] nullifiers,
+        uint256[2] outputCommitments,
+        uint256[2] ecdhPublicKey,
+        uint256[4] encryptedValuesForReceiver0,
+        uint256[4] encryptedValuesForReceiver1,
+        uint256[16] encryptedValuesForAuthority,
+        uint256 encryptionNonce,
+        uint256 root
+    );
+    event Disbursed(
+        uint256 indexed epoch,
+        uint256 nullifier,
+        uint256 subtreeRoot,
+        uint256 disclosureHash,
+        uint256[2] ecdhPublicKey,
+        uint256 encryptionNonce,
+        uint256 root
+    );
+    /// @notice Raw receiver ciphertext bytes for a disburse batch (SPEC §5.3 /
+    ///         §4 disburse note): 4 field elements per output note
+    ///         (`SymmetricEncrypt(2)` of [value, salt]), flattened in leaf order
+    ///         from `startLeafIndex`. Free calldata bound only by the proof's
+    ///         `disclosureHash` (indexer/recipient duty, §6b) — the chain does not
+    ///         re-hash it (2,054 Poseidons, infeasible §4). Without these bytes
+    ///         (plus `ecdhPublicKey`+`encryptionNonce` from Disbursed) a recipient
+    ///         cannot derive its note by trial-decrypt.
+    event DisburseCiphertexts(uint256 indexed startLeafIndex, uint256[] receiverCiphertexts);
+    event Withdrawn(uint256[2] nullifiers, uint256 amount, uint256 changeCommitment, uint256 root);
+    event ArbiterRotated(uint256 indexed epoch, uint256 keyX, uint256 keyY, uint256 activatedBlock);
+    event DisburseAllowlist(address indexed account, bool allowed);
+
+    // --- errors ---------------------------------------------------------------
+    error AlreadyInitialized();
+    error NotInitialized();
+    error ZeroArbiterKey();
+    error UnknownRoot(uint256 root);
+    error NullifierAlreadyUsed(uint256 nullifier);
+    error ZeroNullifier();
+    error InvalidProof();
+    error NotDisburseAuthorized(address caller);
+    error Reentrancy();
+    error BatchSizeNotPowerOfTwo(uint256 batchSize);
+    error MisalignedInsert();
+    error TreeFull();
+
+    // --- reentrancy guard -----------------------------------------------------
+    uint256 private _locked = 1;
+
+    modifier nonReentrant() {
+        if (_locked != 1) revert Reentrancy();
+        _locked = 2;
+        _;
+        _locked = 1;
+    }
+
+    modifier whenInitialized() {
+        if (!initialized) revert NotInitialized();
+        _;
+    }
+
+    constructor(
+        IPoseidon2 _poseidon,
+        IDepositVerifier _depositVerifier,
+        IWithdrawVerifier _withdrawVerifier,
+        IDisburseVerifier _disburseVerifier,
+        ITransferVerifier _transferVerifier,
+        IERC20 _token,
+        uint256 _batchSize
+    ) Ownable2Step(msg.sender) {
+        if (_batchSize <= 1 || (_batchSize & (_batchSize - 1)) != 0) revert BatchSizeNotPowerOfTwo(_batchSize);
+        poseidon = _poseidon;
+        depositVerifier = _depositVerifier;
+        withdrawVerifier = _withdrawVerifier;
+        disburseVerifier = _disburseVerifier;
+        transferVerifier = _transferVerifier;
+        token = _token;
+        B = _batchSize;
+
+        uint256 logB = 0;
+        while ((uint256(1) << logB) < _batchSize) logB++;
+        LOG_B = logB;
+
+        // zeros ladder — identical to ImtTree: zeros[0]=0, zeros[k]=H(z,z).
+        zeros[0] = 0;
+        for (uint256 k = 1; k <= H; k++) {
+            zeros[k] = poseidon.poseidon([zeros[k - 1], zeros[k - 1]]);
+        }
+        for (uint256 i = 0; i < H; i++) {
+            filledSubtrees[i] = zeros[i];
+        }
+        root = zeros[H];
+        knownRoots[root] = true; // the empty-tree root is a known root
+    }
+
+    /// @notice One-shot init that REQUIRES a non-zero arbiter key (§5.3, Q9):
+    ///         kills the (0,0) footgun and seeds epoch 0.
+    function initialize(uint256[2] calldata arbiterKey) external onlyOwner {
+        if (initialized) revert AlreadyInitialized();
+        if (arbiterKey[0] == 0 || arbiterKey[1] == 0) revert ZeroArbiterKey();
+        initialized = true;
+        arbiterEpochs.push(ArbiterEpoch({keyX: arbiterKey[0], keyY: arbiterKey[1], activatedBlock: block.number}));
+        emit ArbiterRotated(0, arbiterKey[0], arbiterKey[1], block.number);
+    }
+
+    /// @notice Append an epoch and emit its index; the arbiter pubkey is read
+    ///         from storage at execution (never calldata) so a sender cannot
+    ///         encrypt to their own key and silently kill non-repudiation.
+    function rotateArbiter(uint256[2] calldata newKey) external onlyOwner whenInitialized {
+        if (newKey[0] == 0 || newKey[1] == 0) revert ZeroArbiterKey();
+        uint256 e = arbiterEpochs.length;
+        arbiterEpochs.push(ArbiterEpoch({keyX: newKey[0], keyY: newKey[1], activatedBlock: block.number}));
+        emit ArbiterRotated(e, newKey[0], newKey[1], block.number);
+    }
+
+    function currentEpoch() public view returns (uint256) {
+        return arbiterEpochs.length - 1;
+    }
+
+    function currentArbiterKey() public view returns (uint256 x, uint256 y) {
+        ArbiterEpoch storage ep = arbiterEpochs[arbiterEpochs.length - 1];
+        return (ep.keyX, ep.keyY);
+    }
+
+    function setDisburseAllowed(address account, bool allowed) external onlyOwner {
+        disburseAllowed[account] = allowed;
+        emit DisburseAllowlist(account, allowed);
+    }
+
+    function isKnownRoot(uint256 r) public view returns (bool) {
+        return knownRoots[r];
+    }
+
+    // ==========================================================================
+    //                               OPERATIONS
+    // ==========================================================================
+
+    /// @notice deposit (0-in / 2-out mint): verify, append the two output notes,
+    ///         then pull `out` tokens from the caller (SafeERC20, CEI).
+    function deposit(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[3] calldata pub)
+        external
+        nonReentrant
+        whenInitialized
+    {
+        if (!depositVerifier.verifyProof(a, b, c, pub)) revert InvalidProof();
+
+        uint256 first = nextLeafIndex;
+        _appendLeaf(pub[1]);
+        _appendLeaf(pub[2]);
+
+        emit Deposited(first, pub[1], pub[2], pub[0], root);
+        token.safeTransferFrom(msg.sender, address(this), pub[0]);
+    }
+
+    /// @notice disburse (1-in / 16-out): pad the frontier to a B boundary and
+    ///         attach the in-circuit subtreeRoot. Caller-gated (§5.3). Contract
+    ///         injects enabled=(nullifier!=0) and the arbiter key from storage.
+    function disburse(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[10] calldata pub)
+        external
+        nonReentrant
+        whenInitialized
+    {
+        _disburseCore(a, b, c, pub);
+    }
+
+    /// @notice Same as `disburse` but also publishes the raw receiver ciphertext
+    ///         bytes on-chain (a `DisburseCiphertexts` event) so a recipient can
+    ///         discover + trial-decrypt its note from chain data alone (SPEC §5.3).
+    ///         The bytes are free calldata bound off-chain by the proof's
+    ///         `disclosureHash` (§4 / §6b); the chain does not re-hash them.
+    function disburseWithCiphertexts(
+        uint[2] calldata a,
+        uint[2][2] calldata b,
+        uint[2] calldata c,
+        uint[10] calldata pub,
+        uint256[] calldata receiverCiphertexts
+    ) external nonReentrant whenInitialized {
+        uint256 start = _disburseCore(a, b, c, pub);
+        emit DisburseCiphertexts(start, receiverCiphertexts);
+    }
+
+    /// @dev disburse verification + subtree attach, shared by both entry points.
+    ///      Caller-gated (§5.3); contract injects enabled=1 and the arbiter key
+    ///      from storage (§5.2). Returns the batch's start leaf index.
+    function _disburseCore(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[10] calldata pub)
+        private
+        returns (uint256 start)
+    {
+        if (msg.sender != owner() && !disburseAllowed[msg.sender]) revert NotDisburseAuthorized(msg.sender);
+        if (!knownRoots[pub[5]]) revert UnknownRoot(pub[5]);
+
+        uint256 nf = pub[4];
+        if (nf == 0) revert ZeroNullifier(); // 1-in disburse is always real
+        if (nullifierUsed[nf]) revert NullifierAlreadyUsed(nf);
+
+        // §5.2 contract-derived enabled + §5.3 arbiter-key-from-storage injection.
+        // disburse has a single input and reverts above on nf==0, so enabled is
+        // unconditionally 1 (membership on the sole input is always required).
+        uint[10] memory injected = pub;
+        injected[6] = 1;
+        (injected[8], injected[9]) = currentArbiterKey();
+        if (!disburseVerifier.verifyProof(a, b, c, injected)) revert InvalidProof();
+
+        nullifierUsed[nf] = true;
+        start = _attachSubtree(pub[3]);
+
+        emit Disbursed(
+            currentEpoch(), nf, pub[3], pub[2], [pub[0], pub[1]], pub[7], root
+        );
+        emit SubtreeAppended(start, pub[3], root);
+    }
+
+    /// @notice transfer (2-in / 2-out): permissionless. Contract injects
+    ///         enabled[i]=(nullifier[i]!=0) and the arbiter key from storage,
+    ///         spends the real (nonzero) nullifiers, appends the 2 outputs.
+    function transfer(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[36] calldata pub)
+        external
+        nonReentrant
+        whenInitialized
+    {
+        if (!knownRoots[pub[28]]) revert UnknownRoot(pub[28]);
+
+        uint[36] memory injected = pub;
+        injected[29] = pub[26] != 0 ? 1 : 0;
+        injected[30] = pub[27] != 0 ? 1 : 0;
+        (injected[34], injected[35]) = currentArbiterKey();
+        if (!transferVerifier.verifyProof(a, b, c, injected)) revert InvalidProof();
+
+        _spendNullifier(pub[26]);
+        _spendNullifier(pub[27]);
+
+        _appendLeaf(pub[31]);
+        _appendLeaf(pub[32]);
+
+        uint256[4] memory ct0 = [pub[2], pub[3], pub[4], pub[5]];
+        uint256[4] memory ct1 = [pub[6], pub[7], pub[8], pub[9]];
+        uint256[16] memory cta;
+        for (uint256 i = 0; i < 16; i++) {
+            cta[i] = pub[10 + i];
+        }
+        emit Transferred(
+            currentEpoch(),
+            [pub[26], pub[27]],
+            [pub[31], pub[32]],
+            [pub[0], pub[1]],
+            ct0,
+            ct1,
+            cta,
+            pub[33],
+            root
+        );
+    }
+
+    /// @notice withdraw (2-in / 1-out): permissionless (no authority env).
+    ///         Contract injects enabled[i]=(nullifier[i]!=0), spends the real
+    ///         nullifiers, appends the change output, pushes `out` tokens.
+    function withdraw(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[7] calldata pub)
+        external
+        nonReentrant
+        whenInitialized
+    {
+        if (!knownRoots[pub[3]]) revert UnknownRoot(pub[3]);
+
+        uint[7] memory injected = pub;
+        injected[4] = pub[1] != 0 ? 1 : 0;
+        injected[5] = pub[2] != 0 ? 1 : 0;
+        if (!withdrawVerifier.verifyProof(a, b, c, injected)) revert InvalidProof();
+
+        _spendNullifier(pub[1]);
+        _spendNullifier(pub[2]);
+
+        _appendLeaf(pub[6]);
+
+        emit Withdrawn([pub[1], pub[2]], pub[0], pub[6], root);
+        token.safeTransfer(msg.sender, pub[0]);
+    }
+
+    // ==========================================================================
+    //                              IMT INTERNALS
+    // ==========================================================================
+
+    /// @dev Mark a nullifier used; a zero nullifier is a padded/disabled input
+    ///      (enabled injected to 0) and is skipped, never marked.
+    function _spendNullifier(uint256 nf) private {
+        if (nf == 0) return;
+        if (nullifierUsed[nf]) revert NullifierAlreadyUsed(nf);
+        nullifierUsed[nf] = true;
+    }
+
+    /// @dev Standard Tornado single-leaf insert at nextLeafIndex — byte-identical
+    ///      to ImtTree._insertNode(node, 0). Emits Appended for the differential
+    ///      test + the indexer.
+    function _appendLeaf(uint256 leaf) private {
+        uint256 index = nextLeafIndex;
+        _insertNode(leaf, 0);
+        knownRoots[root] = true;
+        emit Appended(index, leaf, root);
+    }
+
+    /// @dev disburse batch attach — ImtTree.attachSubtree: close the pending
+    ///      partial block up to a B boundary with dead zero leaves, then attach
+    ///      subtreeRoot at level LOG_B.
+    ///
+    ///      The close is done in O(LOG_B) folds, NOT O(B) individual zero-leaf
+    ///      inserts: at B=256 the naive loop pads up to 255 leaves x 32 hashes
+    ///      (~248M gas, over any block limit), so a disburse right after a deposit
+    ///      would be unexecutable on-chain. Instead we compute the partial block's
+    ///      level-LOG_B node treating positions rem..B-1 as zeros — bit i of rem
+    ///      selects the real left sibling filledSubtrees[i] (when the path node is a
+    ///      right child) or an empty right sibling zeros[i]. Root-identical to
+    ///      padding one leaf at a time (the differential test pins contract==oracle
+    ///      across the interleaved sequence). The sub-LOG_B frontier is left stale,
+    ///      which is safe: nextLeafIndex is now B-aligned, so a fresh block
+    ///      overwrites filledSubtrees[i] (i<LOG_B) as a left child before any read.
+    function _attachSubtree(uint256 subtreeRoot) private returns (uint256 start) {
+        uint256 rem = nextLeafIndex % B;
+        if (rem != 0) {
+            uint256 node = zeros[0];
+            for (uint256 i = 0; i < LOG_B; i++) {
+                if (((rem >> i) & 1) == 1) {
+                    node = poseidon.poseidon([filledSubtrees[i], node]);
+                } else {
+                    node = poseidon.poseidon([node, zeros[i]]);
+                }
+            }
+            nextLeafIndex -= rem; // back to the B-aligned block start
+            _insertNode(node, LOG_B); // place the closed partial block, advance by B
+        }
+        start = nextLeafIndex;
+        _insertNode(subtreeRoot, LOG_B);
+        knownRoots[root] = true;
+    }
+
+    /// @dev Fold `node` (at level startLevel, position nextLeafIndex/2^startLevel)
+    ///      up to the root, updating filledSubtrees + root, then advance
+    ///      nextLeafIndex by 2^startLevel. Mirrors ImtTree._insertNode exactly.
+    function _insertNode(uint256 node, uint256 startLevel) private {
+        uint256 stride = uint256(1) << startLevel;
+        if (nextLeafIndex % stride != 0) revert MisalignedInsert();
+        if (nextLeafIndex + stride > (uint256(1) << H)) revert TreeFull();
+
+        uint256 currentIndex = nextLeafIndex / stride;
+        uint256 current = node;
+        for (uint256 i = startLevel; i < H; i++) {
+            uint256 left;
+            uint256 right;
+            if (currentIndex % 2 == 0) {
+                left = current;
+                right = zeros[i];
+                filledSubtrees[i] = current;
+            } else {
+                left = filledSubtrees[i];
+                right = current;
+            }
+            current = poseidon.poseidon([left, right]);
+            currentIndex = currentIndex / 2;
+        }
+        root = current;
+        nextLeafIndex += stride;
+    }
+}
