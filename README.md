@@ -32,7 +32,7 @@ this v2 pool needs the 256 proof re-proven against its arbiter key — see `docs
 - `contracts/` — Foundry: `BongtuPool` (unified single-frontier IMT + contract-derived enabled + arbiter epochs) + verifiers
 - `sdk/` — TS: single-frontier IMT, Poseidon, BabyJubjub keys, note/encrypt, trial-decrypt
 - `deploy/` — Foundry deploy script (local anvil + GIWA), the live 256-disburse runner, the M0 cross-circuit e2e
-- `indexer/` — event ingest → SDK-IMT mirror (root == on-chain root), merkle-path + ciphertext-feed API, disclosure alarms
+- `indexer/` — event ingest → MirrorTree mirror (root == on-chain root), merkle-path + ciphertext-feed API, disclosure alarms; **arbiter mode** (`AUTHORITY_KEY`) decrypts every envelope to serve `/notes?owner=` + within-batch paths
 - `docs/` — specification, milestone records, toolchain (see the index below)
 
 ## Run

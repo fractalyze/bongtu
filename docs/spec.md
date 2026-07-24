@@ -268,11 +268,32 @@ value still counts → **mint-from-nothing**. Fix, applied to **every** verifier
 Post-Q4 the indexer is a **convenience/availability layer, not trust-critical** for funds (see §11-7), but the
 public app depends on it for UX. Contract:
 
-- `GET /events?cursor` → `[{ txHash, blockNumber, ecdhPublicKey, encryptionNonce, epoch, slices:[{offset,
-  elts, leafIndex}] }]` — the ciphertext feed a wallet trial-decrypts. `leafIndex` per slice is required for
-  later merkle paths.
-- `GET /path/{leafIndex}` → merkle path against the current root.
-- `GET /head` → current root + `nextLeafIndex`.
+**Implemented endpoints (`indexer/`, built 2026-07-24):**
+- `GET /events?cursor=&limit=` → the ciphertext feed a wallet trial-decrypts (`{ seq, txHash, blockNumber,
+  kind, epoch, ecdhPublicKey, encryptionNonce, slices:[{offset, elts, leafIndex}], ciphertext[], disclosure? }`);
+  `leafIndex` per slice drives later merkle paths.
+- `GET /path/{leafIndex}` → merkle path against the current root (`{siblings, pathIndices, root}`); a
+  disburse-batch interior leaf → **422** in public mode (siblings not chain-recoverable, §11-7), served in
+  arbiter mode (below).
+- `GET /head` → current root + `nextLeafIndex` (from the ingested mirror).
+- `GET /alarms` → every non-passing disclosure (`mismatch` proven tamper; `unverifiable`/`withheld`
+  publication gaps) — the auditor console's first-class alarm channel.
+- `GET /nullifiers` → the spent nullifier set collected from events (public, key-free).
+- `GET /health` → `{ ok, lastBlock, nextLeafIndex, batchSize }`.
+
+**Two modes.** *Public mode* (no key) serves only public chain data. *Arbiter mode* (the indexer holds the
+`AUTHORITY_KEY`) additionally decrypts every op's authority envelope into a per-owner note directory and
+serves:
+- `GET /notes?owner=<x,y>` → that owner's notes `[{value, salt, leafIndex, commitment, txHash, spent}]` —
+  the user reads their own notes directly (no full-feed trial-decrypt). `spent` is derived from envelopes
+  alone (a spending op's input envelope names the consumed note), needing no owner key or nullifier linkage.
+  **Auth: bjj-signature check `sign(ownerPubKey ‖ timestamp)` is SPEC'd but DEFERRED** — v1 serves
+  unauthenticated, so `/notes` is an institution-internal endpoint until it lands (owner pubkeys aren't
+  secret; anyone reaching the indexer could otherwise read any owner). Viewing-key separation (Zcash IVK) is
+  out of bongtu's trust model and not built.
+- within-batch `GET /path/{leafIndex}` — the arbiter recomputes the B batch commitments from the decrypted
+  notes, fills them into the mirror, and serves a real path that folds to root.
+
 - **Invariants:** after every ingested event, `indexer.root == contract.root` (conformance test + a
   TS-Poseidon-vs-circomlib fixture test). **disclosureHash duty:** for every `disburse`, recompute the
   Poseidon chain over the emitted bytes, compare to the on-chain `disclosureHash`, and surface any mismatch

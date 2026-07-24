@@ -22,3 +22,15 @@ Read `README.md` once at session start; for anything deeper, follow its
   reused going forward — do not redeploy for new work; UUPS upgrade only if circuits change.
 - **Heavy gates**: iterate on `sdk` tests + `tsc`; run `deploy/e2e_m0.sh` and the indexer
   conformance test as the final gate, not per iteration (each spins an anvil + CPU proofs).
+- **Indexer modes**: the indexer runs *public* (no key) by default; setting `AUTHORITY_KEY`
+  (the arbiter bjj private key) flips it to *arbiter mode* — it then decrypts every op's
+  authority envelope, serves `GET /notes?owner=` and within-batch `/path`, and must be treated
+  as institution-internal (unauthenticated `/notes` exposes every owner until the deferred
+  bjj-sig auth lands). Never log or return the key.
+- **GIWA redeploy arbiter key**: deploy with `ARBITER_KEY_X/Y` matching the smoke proof's key
+  (the committed deposit proof is bound to the realproofs authority key, not the disburse256
+  default) or the smoke deposit reverts `InvalidProof`.
+- **GPU regen recipe** (disburse-256, after a circuit change): compile → `groth16 setup` (CPU,
+  ~2.5min, 1.24GB zkey) → export verifier/vkey → witness → `rabbitsnark circom prove` on GPU0
+  (cold zkey-compile ~120s + warm proof ~0.47s). Runner: `jolt-zorch/.venv/bin/python -m
+  rabbitsnark.cli circom prove <zkey> <proof> <public> --wtns <wtns>` from `rabbitsnark-py`.
