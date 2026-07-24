@@ -23,6 +23,7 @@ import { MirrorTree } from "./tree.js";
 import { ethers, poolAbi, type ChainConfig } from "./chain.js";
 import { Store, type Slice } from "./store.js";
 import { verifyDisclosure } from "./disclosure.js";
+import { NoteLedger } from "./ledger.js";
 
 const H = 32; // IMT height — a system-wide constant (SPEC §4)
 
@@ -48,11 +49,20 @@ export class Indexer {
   readonly store = new Store();
   tree!: MirrorTree;
   batchSize = 0;
+  // Arbiter mode (SPEC §6b v2): set when the config carries the arbiter private
+  // key. The key lives only inside `ledger`; `arbiterMode` is the routing flag
+  // the API uses to register /notes + serve within-batch paths. The key itself
+  // is NEVER read back out for logging or HTTP.
+  readonly arbiterPriv: bigint | null;
+  readonly arbiterMode: boolean;
+  ledger: NoteLedger | null = null;
 
   constructor(cfg: ChainConfig) {
     this.cfg = cfg;
     this.provider = new ethers.providers.JsonRpcProvider(cfg.rpc);
     this.pool = new ethers.Contract(cfg.pool, poolAbi(), this.provider);
+    this.arbiterPriv = cfg.authorityKey ?? null;
+    this.arbiterMode = this.arbiterPriv !== null;
   }
 
   /** Live head state straight from the contract (the mirror is asserted against it). */
@@ -114,12 +124,17 @@ export class Indexer {
    * the feed. Safe to call repeatedly for incremental tails (the mirror + store
    * persist across calls). Asserts mirror == contract per insert and at head.
    */
-  async ingest(fromBlock = this.cfg.startBlock): Promise<void> {
+  async ingest(fromBlock = this.cfg.startBlock, toBlock?: number): Promise<void> {
     if (!this.tree) {
       this.batchSize = Number(bn(await this.pool.B()));
       this.tree = new MirrorTree(H, this.batchSize);
+      // Arbiter mode: the ledger holds the arbiter key + owns the note directory
+      // and batch fills. Built once, persists across incremental ingest calls.
+      if (this.arbiterPriv !== null) this.ledger = new NoteLedger(this.arbiterPriv, this.batchSize, this.tree);
     }
-    const head = await this.provider.getBlockNumber();
+    // `toBlock` bounds the replay (used for phased ingest / conformance); default
+    // is the live head. The head invariant below is asserted at exactly this block.
+    const head = toBlock ?? (await this.provider.getBlockNumber());
     if (fromBlock > head) return;
     const logs = await this.getLogsChunked(fromBlock, head);
 
@@ -187,11 +202,24 @@ export class Indexer {
         const i1 = takeAppend(l.txHash, oc1, "Deposited#oc1");
         this.tree.recordLeaf(i0, oc0);
         this.tree.recordLeaf(i1, oc1);
-        this.store.addEvent({
+        // Public feed shape is unchanged (deposit envelope bytes are NOT added to
+        // the public /events entry). The arbiter ledger reads the raw Deposited
+        // authority envelope (ecdhPublicKey/encryptedValuesForAuthority/nonce)
+        // directly, gated on first-sight so a replayed range does not double-record.
+        const dEntry = this.store.addEvent({
           txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
           kind: "deposit", epoch: null, ecdhPublicKey: null, encryptionNonce: null,
           slices: [], ciphertext: [],
         });
+        if (dEntry && this.ledger) {
+          this.ledger.apply({
+            kind: "deposit", txHash: l.txHash,
+            ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
+            nonce: bn(l.args.encryptionNonce),
+            authorityCt: (l.args.encryptedValuesForAuthority as unknown[]).map(bn),
+            outputLeaves: [{ leafIndex: i0, commitment: oc0 }, { leafIndex: i1, commitment: oc1 }],
+          });
+        }
       } else if (l.name === "Transferred") {
         const oc0 = bn(l.args.outputCommitments[0]);
         const oc1 = bn(l.args.outputCommitments[1]);
@@ -210,22 +238,49 @@ export class Indexer {
           { offset: 4, elts: 4, leafIndex: i1 },
           { offset: 8, elts: 16, leafIndex: null }, // authority envelope (not a leaf)
         ];
-        this.store.addEvent({
+        const tEntry = this.store.addEvent({
           txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
           kind: "transfer", epoch: Number(bn(l.args.epoch)),
           ecdhPublicKey: [dec(bn(l.args.ecdhPublicKey[0])), dec(bn(l.args.ecdhPublicKey[1]))],
           encryptionNonce: dec(bn(l.args.encryptionNonce)),
           slices, ciphertext: ct.map(dec),
         });
+        if (tEntry) {
+          this.store.addNullifiers([bn(l.args.nullifiers[0]), bn(l.args.nullifiers[1])]);
+          if (this.ledger) {
+            this.ledger.apply({
+              kind: "transfer", txHash: l.txHash,
+              ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
+              nonce: bn(l.args.encryptionNonce),
+              // authority envelope = ct[8..23] (receiver0[4] ++ receiver1[4] ++ authority[16])
+              authorityCt: (l.args.encryptedValuesForAuthority as unknown[]).map(bn),
+              outputLeaves: [{ leafIndex: i0, commitment: oc0 }, { leafIndex: i1, commitment: oc1 }],
+            });
+          }
+        }
       } else if (l.name === "Withdrawn") {
         const chg = bn(l.args.changeCommitment);
         const ci = takeAppend(l.txHash, chg, "Withdrawn#change");
         this.tree.recordLeaf(ci, chg);
-        this.store.addEvent({
+        // Public feed shape unchanged; the arbiter ledger reads the raw Withdrawn
+        // authority envelope directly. Both input nullifiers join the public set.
+        const wEntry = this.store.addEvent({
           txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
           kind: "withdraw", epoch: null, ecdhPublicKey: null, encryptionNonce: null,
           slices: [], ciphertext: [],
         });
+        if (wEntry) {
+          this.store.addNullifiers([bn(l.args.nullifiers[0]), bn(l.args.nullifiers[1])]);
+          if (this.ledger) {
+            this.ledger.apply({
+              kind: "withdraw", txHash: l.txHash,
+              ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
+              nonce: bn(l.args.encryptionNonce),
+              authorityCt: (l.args.encryptedValuesForAuthority as unknown[]).map(bn),
+              outputLeaves: [{ leafIndex: ci, commitment: chg }],
+            });
+          }
+        }
       } else if (l.name === "Disbursed") {
         const st = subtreesByTx.get(l.txHash)?.shift();
         if (!st) throw new Error(`ingest: Disbursed in tx ${l.txHash} has no matching SubtreeAppended log`);
@@ -245,13 +300,31 @@ export class Indexer {
         if (disclosure.status !== "verified") {
           console.error(`ALARM disclosure ${disclosure.status.toUpperCase()} tx=${l.txHash} start=${start} recomputed=${disclosure.recomputed} expected=${disclosure.expected}`);
         }
-        this.store.addEvent({
+        const dsEntry = this.store.addEvent({
           txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
           kind: "disburse", epoch: Number(bn(l.args.epoch)),
           ecdhPublicKey: [dec(bn(l.args.ecdhPublicKey[0])), dec(bn(l.args.ecdhPublicKey[1]))],
           encryptionNonce: dec(bn(l.args.encryptionNonce)),
           slices, ciphertext: ct.map(dec), disclosure,
         });
+        if (dsEntry) {
+          this.store.addNullifiers([bn(l.args.nullifier)]);
+          // Arbiter mode: decrypt the authority TAIL (ct after the 4*B receiver
+          // run) to recover every recipient's (owner,value,salt), cross-check the
+          // fold against the on-chain subtreeRoot, then fill the batch so /path
+          // into it serves a real path. Absent an authority tail (receiver-only /
+          // withheld publish) there is nothing to open — skip.
+          if (this.ledger && ct.length > B * 4) {
+            this.ledger.apply({
+              kind: "disburse", txHash: l.txHash,
+              ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
+              nonce: bn(l.args.encryptionNonce),
+              authorityCt: ct.slice(B * 4),
+              outputLeaves: [],
+              batch: { startLeafIndex: start, subtreeRoot: st.subtreeRoot },
+            });
+          }
+        }
       }
     }
 

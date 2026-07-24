@@ -126,6 +126,14 @@ export interface DisburseInfo {
   nonce: string; // decimal
 }
 
+/** One note the arbiter test tracks through its create -> spend transition. */
+export interface ArbiterNote {
+  owner: [string, string]; // decimal bjj pubkey
+  leafIndex: number;
+  value: string; // decimal
+  salt: string; // decimal
+}
+
 export interface ScenarioResult {
   rpc: string;
   poolAddr: string;
@@ -136,6 +144,12 @@ export interface ScenarioResult {
   disburseHonest: DisburseInfo;
   tamperedStartLeafIndex: number; // second (tampered) disburse batch start
   singleLeaves: SingleLeaf[]; // real single-append leaves for the /path test
+  // ---- arbiter-mode fixtures (SPEC §6b v2) ---------------------------------
+  arbiterPrivateKey: string; // decimal — the AUTHORITY keypair's private scalar
+  blockAfterHonestDisburse: number; // block height after disburse#1, BEFORE the transfer
+  recipient0Note: ArbiterNote; // recipient #0's disburse-batch note (spent by the transfer)
+  payeeNote: ArbiterNote; // the payee's transfer output note (created by the transfer)
+  spentNullifiers: string[]; // decimal — the real (nonzero) nullifiers this run produces
 }
 
 export async function runScenario(): Promise<ScenarioResult> {
@@ -229,6 +243,9 @@ export async function runScenario(): Promise<ScenarioResult> {
     // publish FULL ciphertext (receiver ++ authority) so the whole chain recomputes
     await (await pool.disburseWithCiphertexts(a, b, c, pub, [...ctFlat, ...authCt].map(dec))).wait();
   }
+  // Block boundary the arbiter test ingests up to for the spent=false snapshot:
+  // anvil mines one block per tx, so this precedes the transfer that spends @16.
+  const blockAfterHonestDisburse = await provider.getBlockNumber();
 
   // recipient #0 note value/salt (also what a wallet recovers by trial-decrypt)
   const recoveredValue0 = amounts[0], recoveredSalt0 = sR(0);
@@ -333,6 +350,33 @@ export async function runScenario(): Promise<ScenarioResult> {
     singleLeaves: [
       { leafIndex: 0, commitment: dec(dNoteV) },
       { leafIndex: payLeaf, commitment: dec(payCommit) },
+    ],
+    // ---- arbiter-mode fixtures -----------------------------------------------
+    // The AUTHORITY keypair IS the arbiter key (the indexer decrypts with its
+    // private scalar); the recipient/payee notes + spent nullifiers let the
+    // arbiter test assert the note ledger + spent transition from envelopes alone.
+    arbiterPrivateKey: dec(AUTHORITY.formattedPrivateKey),
+    blockAfterHonestDisburse,
+    recipient0Note: {
+      owner: [dec(RCPTS[0].publicKey[0]), dec(RCPTS[0].publicKey[1])],
+      leafIndex: honestStart, // 16 — recipient #0's batch leaf, spent by the transfer
+      value: dec(recoveredValue0),
+      salt: dec(recoveredSalt0),
+    },
+    payeeNote: {
+      owner: [dec(PAYEE.publicKey[0]), dec(PAYEE.publicKey[1])],
+      leafIndex: payLeaf, // 32 — created by the transfer
+      value: dec(payVal),
+      salt: dec(sPay),
+    },
+    // Real (nonzero) nullifiers, in spend order: deposit note(V)@0 (disburse#1),
+    // recipient0 batch note @16 (transfer), change @33 (withdraw), note(0)@1
+    // (tampered disburse#2). Transfer/withdraw pad inputs have nullifier 0 (skipped).
+    spentNullifiers: [
+      dec(nfDepositV),
+      dec(nfBatch0),
+      dec(nfChange),
+      dec(nf0),
     ],
   };
 }

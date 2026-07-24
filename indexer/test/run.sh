@@ -8,6 +8,9 @@
 # trial-decrypts to real leaves with correct leafIndex annotations;
 # disclosureHash passes for the honest disburse and ALARMS "mismatch" on the
 # tampered one. (§6b v2 removes plain disburse(), so "withheld" is unreachable.)
+# Also runs the ARBITER-mode path (§6b v2): a second indexer holding the arbiter
+# private key decrypts the authority envelopes into a note ledger (spent status
+# from envelopes alone), serves /notes + within-batch /path, and /nullifiers.
 #
 #   cd indexer && npm test        # (== bash test/run.sh) exits 0 iff all pass
 #

@@ -51,6 +51,10 @@ export class Store {
   // (txHash, logIndex) of every feed entry — a replayed log range (poll retry
   // after a mid-ingest throw) must not double-add entries.
   private seen = new Set<string>();
+  // The spent nullifier set (PUBLIC chain data), collected from Transferred /
+  // Withdrawn / Disbursed events. Deduped by value, so a replayed range is safe;
+  // zero (padded/disabled) nullifiers are never added (the contract skips them).
+  private nullifierSet = new Set<string>();
   private seq = 0;
   /** Highest fully-ingested block (exclusive cursor for incremental tails). */
   lastBlock = -1;
@@ -85,5 +89,15 @@ export class Store {
 
   getAlarms(): DisclosureResult[] {
     return this.alarms;
+  }
+
+  /** Add an op's nullifiers to the spent set (nonzero only; deduped by value). */
+  addNullifiers(nfs: bigint[]): void {
+    for (const nf of nfs) if (nf !== 0n) this.nullifierSet.add(nf.toString());
+  }
+
+  /** The spent nullifier set as decimal strings (GET /nullifiers). */
+  nullifiers(): string[] {
+    return [...this.nullifierSet];
   }
 }

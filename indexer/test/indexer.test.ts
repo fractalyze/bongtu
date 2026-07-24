@@ -12,6 +12,14 @@
 //      (nothing-published) disburse is no longer producible on-chain.
 //   5. GET /path/:i for a disburse-batch leaf is refused (siblings not
 //      chain-recoverable, SPEC §11-7); bad /events params are refused (400)
+//   6. PUBLIC mode: /nullifiers is served (key-free) and carries the spent set;
+//      /notes 404s (arbiter-only route).
+//   7. ARBITER mode (SPEC §6b v2, second indexer holding the arbiter private key):
+//      a recipient's GET /notes lists its disburse-batch note (value/salt/leaf,
+//      spent=false); after the transfer spends it, the note reads spent=true (from
+//      the input envelope alone) and the payee's new note is present; GET /path for
+//      that batch leaf now folds to root() (the ledger filled the batch); the
+//      arbiter /nullifiers carries the spent set; bad /notes params 400.
 //
 // Anvil is started + trap-killed by run.sh; this file only talks to E2E_RPC.
 
@@ -44,6 +52,79 @@ function foldToRoot(leaf: bigint, siblings: bigint[], pathIndices: number[]): bi
 async function get(base: string, path: string): Promise<{ status: number; body: unknown }> {
   const r = await fetch(base + path);
   return { status: r.status, body: await r.json() };
+}
+
+// Arbiter-mode conformance (SPEC §6b v2): a second indexer holding the arbiter
+// private key ingests the SAME pool in two phases to exercise the note ledger's
+// create -> spend transition, within-batch paths, and the arbiter /nullifiers.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function runArbiter(sc: any): Promise<void> {
+  const r0 = sc.recipient0Note;
+  const pay = sc.payeeNote;
+  const ownerQ = (o: [string, string]): string => `/notes?owner=${o[0]},${o[1]}`;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const noteAt = (list: any[], leafIndex: number) => list.find((n) => n.leafIndex === leafIndex);
+
+  const aix = new Indexer({ rpc: sc.rpc, pool: sc.poolAddr, startBlock: 0, authorityKey: BigInt(sc.arbiterPrivateKey) });
+  ok(aix.arbiterMode === true, "second indexer is in ARBITER mode (AUTHORITY key set)");
+
+  step("ARBITER phase 1: ingest deposit + honest disburse ONLY (up to the pre-transfer block)");
+  await aix.ingest(0, sc.blockAfterHonestDisburse);
+  const aapi = await startApi(aix, Number(process.env.INDEXER_TEST_PORT || 0));
+  const abase = `http://127.0.0.1:${aapi.port}`;
+  try {
+    // recipient #0's disburse-batch note is present, unspent, decrypted from the
+    // authority envelope alone (right value/salt/leafIndex).
+    const n1 = await get(abase, ownerQ(r0.owner));
+    ok(n1.status === 200, "GET /notes (recipient#0) 200 (arbiter)");
+    const note1 = noteAt(n1.body as unknown[], r0.leafIndex);
+    ok(!!note1, `recipient#0 /notes lists its batch note @${r0.leafIndex}`);
+    ok(note1.value === r0.value, `note value == disbursed amount (${r0.value})`);
+    ok(note1.salt === r0.salt, "note salt == the disbursed salt");
+    ok(note1.commitment === sc.disburseHonest.outCommits[0], "note commitment == the on-chain batch leaf");
+    ok(note1.spent === false, "recipient#0 batch note spent == false (pre-transfer)");
+
+    step("ARBITER phase 2: ingest the rest (transfer spends @16, withdraw, tampered disburse)");
+    await aix.ingest(sc.blockAfterHonestDisburse + 1);
+
+    // Same note now reads spent=true — from the transfer's INPUT envelope, no key.
+    const n2 = await get(abase, ownerQ(r0.owner));
+    const note2 = noteAt(n2.body as unknown[], r0.leafIndex);
+    ok(!!note2 && note2.spent === true, `recipient#0 batch note @${r0.leafIndex} now spent == true (after transfer)`);
+
+    // The payee's transfer output note is present + unspent.
+    const np = await get(abase, ownerQ(pay.owner));
+    ok(np.status === 200, "GET /notes (payee) 200");
+    const notep = noteAt(np.body as unknown[], pay.leafIndex);
+    ok(!!notep, `payee /notes lists its transfer note @${pay.leafIndex}`);
+    ok(notep.value === pay.value && notep.spent === false, `payee note value == ${pay.value}, spent == false`);
+
+    // /notes header documents the deferred auth (v1 serves unauthenticated).
+    const rawNotes = await fetch(abase + ownerQ(r0.owner));
+    ok(!!rawNotes.headers.get("x-bongtu-auth"), "/notes response carries the deferred-auth header");
+
+    // ARBITER /path into the disburse batch now serves a REAL path folding to root.
+    step("ARBITER /path — within-batch leaf now servable (ledger filled the batch)");
+    const bp = await get(abase, `/path/${r0.leafIndex}`);
+    ok(bp.status === 200, `GET /path/${r0.leafIndex} → 200 in arbiter mode (was 422 public)`);
+    const p = bp.body as { siblings: string[]; pathIndices: number[]; root: string };
+    const folded = foldToRoot(BigInt(sc.disburseHonest.outCommits[0]), p.siblings.map(BigInt), p.pathIndices);
+    ok(folded.toString() === sc.headRoot, `batch leaf ${r0.leafIndex} path folds to head root`);
+    ok(p.root === sc.headRoot, `/path/${r0.leafIndex} reports head root`);
+
+    // /nullifiers (also served in arbiter mode) carries every spent nullifier.
+    step("ARBITER /nullifiers — spent nullifier set");
+    const nf = await get(abase, "/nullifiers");
+    ok(nf.status === 200, "GET /nullifiers 200 (arbiter)");
+    const nfSet = new Set(nf.body as string[]);
+    for (const x of sc.spentNullifiers as string[]) ok(nfSet.has(x), `/nullifiers contains ${x.slice(0, 12)}…`);
+
+    // bad /notes params are refused.
+    const bad = await get(abase, "/notes?owner=abc");
+    ok(bad.status === 400, "GET /notes?owner=abc → 400 (needs two field elements)");
+  } finally {
+    await aapi.stop();
+  }
 }
 
 async function main(): Promise<void> {
@@ -152,11 +233,25 @@ async function main(): Promise<void> {
     ok(badCursor.status === 400, "GET /events?cursor=abc → 400");
     const badLimit = await get(base, "/events?limit=0");
     ok(badLimit.status === 400, "GET /events?limit=0 → 400");
+
+    step("PUBLIC mode: /nullifiers served (key-free), /notes 404 (arbiter-only)");
+    const nfRes = await get(base, "/nullifiers");
+    ok(nfRes.status === 200, "GET /nullifiers 200 (public)");
+    const nfSet = new Set(nfRes.body as string[]);
+    for (const nf of sc.spentNullifiers) ok(nfSet.has(nf), `/nullifiers contains spent nullifier ${nf.slice(0, 12)}…`);
+    const notesPublic = await get(base, `/notes?owner=${sc.recipient0Note.owner[0]},${sc.recipient0Note.owner[1]}`);
+    ok(notesPublic.status === 404, "GET /notes → 404 in public mode (route not registered)");
   } finally {
     await api.stop();
   }
 
-  console.log(`\n${failures === 0 ? "INDEXER TEST PASS — mirror==contract, /path folds, feed trial-decrypts, disclosureHash pass + tamper alarm" : `INDEXER TEST FAIL — ${failures} assertion(s)`}`);
+  // ======================= ARBITER MODE (SPEC §6b v2) =======================
+  // A SECOND indexer built WITH the arbiter private key, ingesting the SAME pool.
+  // It decrypts every op's authority envelope → a note ledger + within-batch paths,
+  // with spent status derived from envelopes ALONE (no user key, no nullifier link).
+  await runArbiter(sc);
+
+  console.log(`\n${failures === 0 ? "INDEXER TEST PASS — mirror==contract, /path folds, feed trial-decrypts, disclosureHash pass + tamper alarm, arbiter note-ledger spent-transition + batch paths + /nullifiers" : `INDEXER TEST FAIL — ${failures} assertion(s)`}`);
   process.exit(failures === 0 ? 0 : 1);
 }
 

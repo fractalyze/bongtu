@@ -53,6 +53,12 @@ export class MirrorTree {
   // mixed (a disburse pads to a B boundary before attaching, §5.1), so this
   // cleanly tags which block-level nodes are opaque batches.
   private readonly batchRoots: (bigint | undefined)[] = [];
+  // Blocks whose B underlying leaves have been recovered + filled (arbiter mode
+  // only, via fillBatch). A filled batch is no longer opaque: path()/blockNode
+  // fold it from its known leaves instead of treating it as a 422 hole. Public
+  // mode never fills, so a batch leaf there always returns the batch-leaf
+  // sentinel. Persisted across ingest calls so a poll-retry replay stays correct.
+  private readonly filled = new Set<number>();
   // zeros[k] = the value of an all-empty subtree of height k (memoised).
   private readonly zeros: bigint[];
 
@@ -110,9 +116,14 @@ export class MirrorTree {
     // The subtree root is the block-level node a single-append leaf's path folds
     // THROUGH, so /path stays servable despite the opaque batch leaves. The B
     // slots stay holes (a path INTO the batch returns the sentinel, not a wrong
-    // path). Recorded unconditionally so a replay re-tags to the same values.
-    for (let k = 0; k < this.B; k++) this.leaves[startLeafIndex + k] = undefined;
-    this.batchRoots[startLeafIndex / this.B] = subtreeRoot;
+    // path). Recorded unconditionally so a replay re-tags to the same values —
+    // EXCEPT the leaf-wipe is skipped once a block has been arbiter-filled, so a
+    // replayed attach never clobbers recovered batch leaves back to holes.
+    const block = startLeafIndex / this.B;
+    if (!this.filled.has(block)) {
+      for (let k = 0; k < this.B; k++) this.leaves[startLeafIndex + k] = undefined;
+    }
+    this.batchRoots[block] = subtreeRoot;
   }
 
   /** Record a real single-append leaf value (pass 2), the source a path folds from. */
@@ -121,16 +132,17 @@ export class MirrorTree {
   }
 
   /**
-   * Record the B real underlying leaves of a disburse batch. Currently UNUSED: a
-   * plain disburse only publishes the subtree root, so ingest never has these.
-   * Wired for a future arbiter-mode unit that trial-decrypts the authority
-   * envelope and can then serve within-batch paths — at which point path() would
-   * fold the block from these leaves instead of returning the sentinel. Until
-   * that unit lands, path() still tags the block a batch (via batchRoots) and
-   * returns the sentinel, so filling the leaves here is observationally inert.
+   * Record the B real underlying leaves of a disburse batch and mark the block
+   * filled (ARBITER MODE). Once filled, path()/blockNode fold the block from these
+   * leaves — so /path into the batch serves a real path that folds to root()
+   * instead of the 422 batch-leaf sentinel. Public mode never calls this, so a
+   * batch leaf there stays opaque. The caller (NoteLedger) folds these leaves to
+   * the on-chain subtreeRoot before filling; the fold-to-root assert in path() is
+   * the internal backstop, so a bad fill surfaces as a 500, not a wrong path.
    */
   fillBatch(startLeafIndex: number, leaves: bigint[]): void {
     for (let k = 0; k < leaves.length; k++) this.leaves[startLeafIndex + k] = leaves[k];
+    this.filled.add(startLeafIndex / this.B);
   }
 
   /**
@@ -150,7 +162,10 @@ export class MirrorTree {
     const LOG_B = this.LOG_B;
     const nli = this.nextLeafIndex();
     const block = Math.floor(leafIndex / B);
-    if (this.batchRoots[block] !== undefined) return { batchLeaf: true };
+    // An unfilled batch is opaque (siblings encrypted to other recipients) → 422
+    // sentinel. An arbiter-FILLED batch folds from its recovered leaves like any
+    // other block, so it serves a real path.
+    if (this.batchRoots[block] !== undefined && !this.filled.has(block)) return { batchLeaf: true };
 
     const siblings: bigint[] = new Array(this.H);
     const pathIndices: number[] = new Array(this.H);
@@ -207,10 +222,12 @@ export class MirrorTree {
     return v === undefined ? 0n : v;
   }
 
-  /** Block-level node for block k: batch subtree root, else fold of its leaves. */
+  /** Block-level node for block k: unfilled batch subtree root, else fold of its leaves. */
   private blockNode(k: number): bigint {
     const batch = this.batchRoots[k];
-    if (batch !== undefined) return batch;
+    // A filled batch folds from its recovered leaves (which equal the subtree
+    // root by construction); an unfilled batch returns the opaque subtree root.
+    if (batch !== undefined && !this.filled.has(k)) return batch;
     let level: bigint[] = new Array(this.B);
     for (let i = 0; i < this.B; i++) level[i] = this.leafValue(k * this.B + i);
     for (let d = 0; d < this.LOG_B; d++) {

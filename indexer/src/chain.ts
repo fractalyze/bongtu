@@ -45,6 +45,16 @@ export interface ChainConfig {
   rpc: string;
   pool: string;
   startBlock: number;
+  // The arbiter PRIVATE key (a bjj scalar). Set => ARBITER MODE: the indexer
+  // decrypts every op's authority envelope, builds a note ledger, serves /notes,
+  // and can fold within-batch merkle paths. Undefined/null => PUBLIC MODE (no
+  // /notes, batch /path 422s). NEVER logged or returned over HTTP.
+  authorityKey?: bigint | null;
+}
+
+/** Parse a bjj scalar from decimal ("123…") or hex ("0x…") — BigInt() accepts both. */
+export function parseScalar(s: string): bigint {
+  return BigInt(s.trim());
 }
 
 export function resolveConfig(): ChainConfig {
@@ -57,5 +67,7 @@ export function resolveConfig(): ChainConfig {
     pool = JSON.parse(readFileSync(addrPath, "utf8")).pool;
   }
   if (!pool) throw new Error("no pool address (set POOL env or deploy/addresses.<chainId>.json)");
-  return { rpc, pool, startBlock };
+  // Arbiter mode is gated purely on AUTHORITY_KEY presence (the arbiter private key).
+  const authorityKey = process.env.AUTHORITY_KEY ? parseScalar(process.env.AUTHORITY_KEY) : null;
+  return { rpc, pool, startBlock, authorityKey };
 }
