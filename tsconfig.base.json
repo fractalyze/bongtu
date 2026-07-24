@@ -1,0 +1,16 @@
+{
+  "// note": "Shared compiler options for every bongtu TS package/script tree. ESM (NodeNext) matches the poseidon-lite import + the .js-extensioned relative imports; strict is on. Third-party libs loaded via createRequire (snarkjs, ethers v5) come back as `any` by design — real typing is on OUR code.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "types": ["node"]
+  }
+}

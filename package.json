@@ -1,0 +1,16 @@
+{
+  "name": "bongtu-scripts",
+  "version": "0.0.0",
+  "description": "TS tooling for the bongtu deploy/circuits/fixtures scripts \u2014 run via tsx, type-checked via the root tsconfig.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "license": "Apache-2.0"
+}

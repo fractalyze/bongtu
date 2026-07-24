@@ -1,0 +1,9 @@
+node_modules/
+out/
+cache/
+*.zkey
+*.wtns
+*.r1cs
+*_js/
+build/
+.env
