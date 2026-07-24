@@ -8,6 +8,7 @@
   "scripts": {
     "start": "node --import tsx src/index.ts",
     "test": "bash test/run.sh",
+    "test:tree": "node --import tsx test/tree.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

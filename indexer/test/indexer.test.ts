@@ -19,7 +19,7 @@ import { poseidon2, poseidonN } from "../../sdk/src/poseidon.js";
 import { ecdhSharedSecret, poseidonDecrypt } from "../../sdk/src/note.js";
 import { ImtTree } from "../../sdk/src/imt.js";
 import { Indexer } from "../src/ingest.js";
-import { startApi } from "../src/api.js";
+import { startApi } from "../src/api/router.js";
 import { runScenario } from "./scenario.js";
 
 let failures = 0;
@@ -57,9 +57,9 @@ async function main(): Promise<void> {
 
   // (1) mirror == contract at head
   const hd = await ix.head();
-  ok(ix.mirror.getRoot().toString() === sc.headRoot, "mirror root == contract root at head");
-  ok(ix.mirror.getRoot() === hd.root, "mirror root == live pool.root()");
-  ok(ix.mirror.getNextLeafIndex() === sc.nextLeafIndex, `mirror nextLeafIndex == contract (${sc.nextLeafIndex})`);
+  ok(ix.tree.root().toString() === sc.headRoot, "mirror root == contract root at head");
+  ok(ix.tree.root() === hd.root, "mirror root == live pool.root()");
+  ok(ix.tree.nextLeafIndex() === sc.nextLeafIndex, `mirror nextLeafIndex == contract (${sc.nextLeafIndex})`);
   ok(hd.nextLeafIndex === sc.nextLeafIndex, "head() nextLeafIndex == contract");
 
   const api = await startApi(ix, Number(process.env.INDEXER_TEST_PORT || 0));

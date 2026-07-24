@@ -19,9 +19,9 @@
 // and the per-slice leafIndex a wallet needs to request a path after it
 // trial-decrypts. Every disburse also runs the disclosureHash check (§6b).
 
-import { ImtTree } from "../../sdk/src/imt.js";
+import { MirrorTree } from "./tree.js";
 import { ethers, poolAbi, type ChainConfig } from "./chain.js";
-import { Store, type EventKind, type Slice } from "./store.js";
+import { Store, type Slice } from "./store.js";
 import { verifyDisclosure } from "./disclosure.js";
 
 const H = 32; // IMT height — a system-wide constant (SPEC §4)
@@ -46,7 +46,7 @@ export class Indexer {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly pool: any;
   readonly store = new Store();
-  mirror!: ImtTree;
+  tree!: MirrorTree;
   batchSize = 0;
 
   constructor(cfg: ChainConfig) {
@@ -115,9 +115,9 @@ export class Indexer {
    * persist across calls). Asserts mirror == contract per insert and at head.
    */
   async ingest(fromBlock = this.cfg.startBlock): Promise<void> {
-    if (!this.mirror) {
+    if (!this.tree) {
       this.batchSize = Number(bn(await this.pool.B()));
-      this.mirror = new ImtTree(H, this.batchSize);
+      this.tree = new MirrorTree(H, this.batchSize);
     }
     const head = await this.provider.getBlockNumber();
     if (fromBlock > head) return;
@@ -135,36 +135,14 @@ export class Indexer {
       if (l.name === "Appended") {
         const leafIndex = Number(bn(l.args.leafIndex));
         const leaf = bn(l.args.leaf);
-        const root = bn(l.args.root);
-        if (leafIndex >= this.mirror.getNextLeafIndex()) {
-          this.mirror.appendLeaf(leaf);
-          if (this.mirror.getNextLeafIndex() - 1 !== leafIndex) {
-            throw new Error(`ingest: Appended leafIndex ${leafIndex} != mirror index ${this.mirror.getNextLeafIndex() - 1}`);
-          }
-          if (this.mirror.getRoot() !== root) {
-            throw new Error(`ingest: mirror root diverged after Appended @leaf ${leafIndex}`);
-          }
-        }
+        this.tree.applyAppend(leafIndex, leaf, bn(l.args.root));
         const arr = appendedByTx.get(l.txHash) ?? [];
         arr.push({ leafIndex, leaf });
         appendedByTx.set(l.txHash, arr);
       } else if (l.name === "SubtreeAppended") {
         const startLeafIndex = Number(bn(l.args.startLeafIndex));
         const subtreeRoot = bn(l.args.subtreeRoot);
-        const root = bn(l.args.root);
-        if (startLeafIndex >= this.mirror.getNextLeafIndex()) {
-          this.mirror.attachSubtree(subtreeRoot, null); // batch leaves not chain-recoverable → holes
-          if (this.mirror.getNextLeafIndex() !== startLeafIndex + this.batchSize) {
-            throw new Error(`ingest: SubtreeAppended start ${startLeafIndex} != mirror attach point ${this.mirror.getNextLeafIndex() - this.batchSize}`);
-          }
-          if (this.mirror.getRoot() !== root) {
-            throw new Error(`ingest: mirror root diverged after SubtreeAppended @start ${startLeafIndex}`);
-          }
-        }
-        this.store.setBatchHoles(startLeafIndex, this.batchSize, l.txHash);
-        // The subtree root is the block-level node a single-append leaf's path
-        // folds THROUGH, so /path stays servable despite the opaque batch leaves.
-        this.store.setBatch(startLeafIndex / this.batchSize, subtreeRoot);
+        this.tree.applyAttach(startLeafIndex, subtreeRoot, bn(l.args.root));
         const arr = subtreesByTx.get(l.txHash) ?? [];
         arr.push({ startLeafIndex, subtreeRoot });
         subtreesByTx.set(l.txHash, arr);
@@ -207,8 +185,8 @@ export class Indexer {
         const oc1 = bn(l.args.oc1);
         const i0 = takeAppend(l.txHash, oc0, "Deposited#oc0");
         const i1 = takeAppend(l.txHash, oc1, "Deposited#oc1");
-        this.setLeaf(i0, oc0, l.txHash, "deposit");
-        this.setLeaf(i1, oc1, l.txHash, "deposit");
+        this.tree.recordLeaf(i0, oc0);
+        this.tree.recordLeaf(i1, oc1);
         this.store.addEvent({
           txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
           kind: "deposit", epoch: null, ecdhPublicKey: null, encryptionNonce: null,
@@ -219,8 +197,8 @@ export class Indexer {
         const oc1 = bn(l.args.outputCommitments[1]);
         const i0 = takeAppend(l.txHash, oc0, "Transferred#out0");
         const i1 = takeAppend(l.txHash, oc1, "Transferred#out1");
-        this.setLeaf(i0, oc0, l.txHash, "transfer");
-        this.setLeaf(i1, oc1, l.txHash, "transfer");
+        this.tree.recordLeaf(i0, oc0);
+        this.tree.recordLeaf(i1, oc1);
         // ciphertext layout: receiver0[4] ++ receiver1[4] ++ authority[16]
         const ct: bigint[] = [
           ...(l.args.encryptedValuesForReceiver0 as unknown[]).map(bn),
@@ -242,7 +220,7 @@ export class Indexer {
       } else if (l.name === "Withdrawn") {
         const chg = bn(l.args.changeCommitment);
         const ci = takeAppend(l.txHash, chg, "Withdrawn#change");
-        this.setLeaf(ci, chg, l.txHash, "withdraw");
+        this.tree.recordLeaf(ci, chg);
         this.store.addEvent({
           txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
           kind: "withdraw", epoch: null, ecdhPublicKey: null, encryptionNonce: null,
@@ -283,16 +261,12 @@ export class Indexer {
     // advances only after the invariant holds, so a failed pass is retried
     // over the same range (pass 1/pass 2 are replay-idempotent).
     const at = await this.headAt(head);
-    if (this.mirror.getRoot() !== at.root) {
-      throw new Error(`ingest: mirror root ${this.mirror.getRoot()} != contract root ${at.root} @block ${head}`);
+    if (this.tree.root() !== at.root) {
+      throw new Error(`ingest: mirror root ${this.tree.root()} != contract root ${at.root} @block ${head}`);
     }
-    if (this.mirror.getNextLeafIndex() !== at.nextLeafIndex) {
-      throw new Error(`ingest: mirror nextLeafIndex ${this.mirror.getNextLeafIndex()} != contract ${at.nextLeafIndex} @block ${head}`);
+    if (this.tree.nextLeafIndex() !== at.nextLeafIndex) {
+      throw new Error(`ingest: mirror nextLeafIndex ${this.tree.nextLeafIndex()} != contract ${at.nextLeafIndex} @block ${head}`);
     }
     this.store.lastBlock = head;
-  }
-
-  private setLeaf(leafIndex: number, leaf: bigint, txHash: string, kind: EventKind): void {
-    this.store.setLeaf({ leafIndex, leaf: dec(leaf), txHash, kind });
   }
 }

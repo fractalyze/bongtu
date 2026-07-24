@@ -1,8 +1,13 @@
-// Storage for the indexer: the ordered event/ciphertext feed + a per-leaf index.
+// Storage for the indexer: the ordered event/ciphertext feed + the ingest cursor.
 //
 // In-memory only, re-derived from chain on every start. That is sufficient for
 // the PoC (SPEC §6b: the indexer is a convenience/availability layer, not
 // trust-critical for funds) and keeps chain the single source of truth.
+//
+// Scope: the feed + alarm channel + block cursor ONLY. The tree state (leaf
+// values, batch subtree roots, the merkle-path builder) lives in `MirrorTree`
+// (tree.ts) — the Store no longer mirrors any tree, so the two are not kept in
+// sync by call-site discipline.
 //
 // NOTE (client-side-decrypt model, SPEC §7): the store holds ONLY public chain
 // data — ciphertext bytes, commitments, roots, nullifiers. It never holds or
@@ -40,23 +45,9 @@ export interface FeedEntry {
   disclosure?: DisclosureResult; // present for `disburse`
 }
 
-/** A single tree leaf as the indexer mirror knows it. */
-export interface LeafRecord {
-  leafIndex: number;
-  leaf: string | null; // decimal; null = inside a disburse batch (not chain-recoverable)
-  txHash: string;
-  kind: EventKind;
-}
-
 export class Store {
   private feed: FeedEntry[] = [];
-  private leaves: LeafRecord[] = [];
   private alarms: DisclosureResult[] = [];
-  // batchRoots[block] = a disburse subtree root (decimal), block = startLeafIndex/B.
-  // A block is either all single-append/pad leaves OR one batch subtree (never
-  // mixed — a disburse pads to a B boundary first, §5.1), so this cleanly tags
-  // which blocks are opaque batches when the path builder walks the tree.
-  private batchRoots: (string | undefined)[] = [];
   // (txHash, logIndex) of every feed entry — a replayed log range (poll retry
   // after a mid-ingest throw) must not double-add entries.
   private seen = new Set<string>();
@@ -81,39 +72,6 @@ export class Store {
       this.alarms.push(entry.disclosure);
     }
     return entry;
-  }
-
-  /** Record a leaf at its tree index (bigint stored as decimal string). */
-  setLeaf(rec: LeafRecord): void {
-    this.leaves[rec.leafIndex] = rec;
-  }
-
-  /** Mark the B slots of a disburse batch as holes (leaves not chain-recoverable). */
-  setBatchHoles(startLeafIndex: number, batchSize: number, txHash: string): void {
-    for (let i = 0; i < batchSize; i++) {
-      this.leaves[startLeafIndex + i] = {
-        leafIndex: startLeafIndex + i,
-        leaf: null,
-        txHash,
-        kind: "disburse",
-      };
-    }
-    this.batchRoots[startLeafIndex / batchSize] = undefined; // set via setBatch
-  }
-
-  /** Record a disburse batch's subtree root at its block (startLeafIndex/B). */
-  setBatch(block: number, subtreeRoot: bigint): void {
-    this.batchRoots[block] = subtreeRoot.toString();
-  }
-
-  /** The batch subtree root at `block`, or undefined if that block is not a batch. */
-  getBatchRoot(block: number): bigint | undefined {
-    const v = this.batchRoots[block];
-    return v === undefined ? undefined : BigInt(v);
-  }
-
-  getLeaf(leafIndex: number): LeafRecord | undefined {
-    return this.leaves[leafIndex];
   }
 
   /** Feed entries with seq > cursor (cursor -1/undefined returns all), capped. */

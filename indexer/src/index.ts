@@ -12,7 +12,7 @@
 
 import { resolveConfig } from "./chain.js";
 import { Indexer } from "./ingest.js";
-import { startApi } from "./api.js";
+import { startApi } from "./api/router.js";
 
 async function main(): Promise<void> {
   const cfg = resolveConfig();
