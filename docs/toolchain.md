@@ -8,7 +8,8 @@ M0 uses **CPU proving** (`snarkjs groth16 prove`), NOT the rabbitsnark GPU path 
 ```sh
 CIRCOM='/lib64/ld-linux-x86-64.so.2 /usr/local/bin/circom'          # v2.2.2 — direct exec fails, shim required
 SNARKJS='node --max-old-space-size=16000 /home/a41/Workspace/zkx-snap/circuits/node_modules/.bin/snarkjs'
-CIRCOMLIB=/home/a41/Workspace/research/disclosure-poc/zeto/zkp/circuits/node_modules   # -l points here (has circomlib/)
+ZETO=/home/a41/Workspace/research/disclosure-poc/zeto/zkp/circuits                     # -l root: TRACKED upstream sub-checks (lib/check-*, encrypt-outputs) + node_modules/circomlib
+CIRCOMLIB="$ZETO/node_modules"                                                          # -l root: bare circomlib/circuits/*
 # ptau (BN254, Hermez): pot22 covers every M0 circuit (biggest ~150K << 2^22)
 PTAU=/home/a41/Workspace/zkx-snap/circuits/ptau/pot22_hez.ptau       # 4.8GB; pot15_hez (2^15) too small for transfer(~60K)
 FORGE=/home/a41/.foundry/bin/forge                                   # v1.7.1  (anvil alongside)
@@ -19,7 +20,7 @@ NODE=/home/a41/.nvm/versions/node/v22.17.1/bin/node                  # v22.17.1
 
 ```sh
 cd /home/a41/Workspace/research/disclosure-poc/bongtu/circuits
-$CIRCOM <name>.circom --r1cs --wasm --sym -o out/ -l "$CIRCOMLIB" -l lib      # lib/ = vendored zeto libs
+$CIRCOM <name>.circom --r1cs --wasm --sym -o out/ -l "$ZETO" -l "$CIRCOMLIB" -l lib   # lib/ = bongtu-vendored bases + check-imt-proof
 $SNARKJS groth16 setup out/<name>.r1cs "$PTAU" out/<name>.zkey                # seconds for small arities
 $SNARKJS zkey export verificationkey out/<name>.zkey out/<name>.vkey.json
 $SNARKJS zkey export solidityverifier out/<name>.zkey out/<name>_verifier.sol
@@ -30,14 +31,20 @@ $SNARKJS groth16 verify out/<name>.vkey.json public.json proof.json           # 
 
 ## Reusable sources (read, don't reinvent)
 
-- ⚠ **Provenance (see `docs/zeto-derivation.md`):** `check-imt-proof.circom`,
-  `anon_enc_nullifier_non_repudiation_imt_base.circom`, and `run_nonrep_imt_256.circom` are **NOT upstream
-  Zeto** — they are git-untracked project-authored files living in the zeto checkout. Unit 0 vendors them
-  into `bongtu/circuits/lib/` with provenance headers; until then a fresh zeto clone will not build.
-- Circuits to vendor/adapt: `../zeto/zkp/circuits/lib/check-imt-proof.circom` (IMT membership, index-keyed,
-  enabled-gated), `.../basetokens/anon_enc_nullifier_non_repudiation_imt_base.circom` (256 base — the small
-  transfer base is derived from this), `.../lib/check-nullifiers-value-base.circom` (withdraw SMT→IMT rebase
-  points at :21/:44/:84), `.../deposit.circom` (stock 0×2), `.../run_nonrep_imt_256.circom` (top-level pattern).
+- ✅ **Provenance (see `docs/zeto-derivation.md`) — VENDORED (Unit 0):** `check-imt-proof.circom` (the IMT
+  membership gadget) and `anon_enc_nullifier_non_repudiation_imt_base.circom` (the 256 disburse base) were
+  **NOT upstream Zeto** — git-untracked project-authored files living in the zeto checkout. They are now
+  vendored into **`bongtu/circuits/lib/`** with provenance headers, and the 256 base additionally carries the
+  §5.2 zero-commitment belt. `disburse.circom` / `disburse256.circom` include the vendored base by bare name
+  (resolved via `-l lib`), so **a fresh checkout builds `disburse` with no dependency on any untracked zeto
+  file** (verified by hiding the untracked files and recompiling). The third untracked file
+  `run_nonrep_imt_256.circom` is **superseded by `circuits/disburse256.circom`** (same base + public list) —
+  not vendored.
+- Sub-checks that STILL resolve into the pinned zeto checkout (TRACKED upstream, byte-identical by
+  construction, via `-l $ZETO` / `-l $ZETO/node_modules`): `lib/check-positive.circom`, `lib/check-hashes.circom`,
+  `lib/check-sum.circom`, `lib/check-nullifiers.circom`, `lib/encrypt-outputs.circom`, and `circomlib`.
+- Other circuits to adapt: `.../lib/check-nullifiers-value-base.circom` (withdraw SMT→IMT rebase points at
+  :21/:44/:84 — vendored as `lib/check-nullifiers-value-imt-base.circom`), `.../deposit.circom` (stock 0×2).
 - Contract patterns: `../onchain/src/BatchInsertPoolV2.sol` (frontier + root-history + subtree attach — but
   it burns a 256-block per deposit; §5.1 replaces that with incremental single-frontier append),
   `../onchain/test/*.t.sol` (Poseidon parity gate, stub-verifier isolation, gas assertions),

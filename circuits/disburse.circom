@@ -8,6 +8,8 @@ pragma circom 2.2.2;
 //
 // Public: [nullifiers, encryptionNonce, root, enabled, authorityPublicKey]
 //         + circuit outputs ecdhPublicKey[2], disclosureHash, subtreeRoot.
-include "basetokens/anon_enc_nullifier_non_repudiation_imt_base.circom";
+// Base is the VENDORED copy in circuits/lib (resolves via `-l lib`); a fresh
+// checkout no longer depends on any untracked zeto file (docs/zeto-derivation.md).
+include "anon_enc_nullifier_non_repudiation_imt_base.circom";
 
 component main { public [ nullifiers, encryptionNonce, root, enabled, authorityPublicKey ] } = Zeto(1, 16, 32);

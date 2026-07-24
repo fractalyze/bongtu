@@ -2,9 +2,9 @@
 # §5.2 CRITICAL-correction security regression (SPEC §5.2, docs/zeto-derivation.md).
 #
 # Proves the zero-commitment belt `enabled[i] * IsZero(inputCommitments[i]) === 0`
-# closes the SMT->IMT zero-leaf mint-from-nothing at the CIRCUIT level, for BOTH
-# permissionless spending circuits (transfer + withdraw), while leaving honest
-# spends provable.
+# closes the SMT->IMT zero-leaf mint-from-nothing at the CIRCUIT level, for ALL
+# THREE spending circuits (transfer + withdraw permissionless, disburse caller-gated),
+# while leaving honest spends provable.
 #
 # For each of transfer, withdraw:
 #   <name>_zero_leaf  (commitment=0, value=X, enabled=1, fresh nullifier, genuine
@@ -32,8 +32,9 @@ mkdir -p out inputs
 echo '{ "type": "commonjs" }' > out/package.json
 
 echo "== regenerating honest + zero-leaf exploit input fixtures =="
-$NODE --import tsx gen_inputs.ts          || { echo "FATAL: honest input gen failed"; exit 1; }
-$NODE --import tsx gen_zero_leaf_inputs.ts || { echo "FATAL: zero-leaf input gen failed"; exit 1; }
+$NODE --import tsx gen_inputs.ts            || { echo "FATAL: honest input gen failed"; exit 1; }
+$NODE --import tsx gen_zero_leaf_inputs.ts  || { echo "FATAL: transfer/withdraw zero-leaf input gen failed"; exit 1; }
+$NODE --import tsx gen_disburse_zero_leaf.ts || { echo "FATAL: disburse zero-leaf input gen failed"; exit 1; }
 
 compile_if_missing() {
   local name="$1"
@@ -57,10 +58,10 @@ run_witness() {
   fi
 }
 
-declare -A TEMPLATE=( [transfer]="ZetoTransferSmall" [withdraw]="CheckNullifiersInputsOutputsValueIMT" )
+declare -A TEMPLATE=( [transfer]="ZetoTransferSmall" [withdraw]="CheckNullifiersInputsOutputsValueIMT" [disburse]="Zeto" )
 failures=0
 
-for name in transfer withdraw; do
+for name in transfer withdraw disburse; do
   compile_if_missing "$name"
   tmpl="${TEMPLATE[$name]}"
 
@@ -96,7 +97,7 @@ echo ""
 echo "======================================================================"
 if [ "$failures" -eq 0 ]; then
   echo "ZERO-LEAF BELT GATE: PASS — the zero-commitment mint-from-nothing is"
-  echo "unsatisfiable at witness-gen for transfer AND withdraw; honest spends prove."
+  echo "unsatisfiable at witness-gen for transfer, withdraw AND disburse; honest spends prove."
   exit 0
 else
   echo "ZERO-LEAF BELT GATE: FAIL ($failures)"

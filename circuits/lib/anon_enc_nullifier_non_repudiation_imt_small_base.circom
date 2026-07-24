@@ -28,7 +28,7 @@ include "lib/check-positive.circom";
 include "lib/check-hashes.circom";
 include "lib/check-sum.circom";
 include "lib/check-nullifiers.circom";
-include "lib/check-imt-proof.circom";
+include "check-imt-proof.circom";   // vendored IMT membership (bongtu/circuits/lib, via -l lib)
 include "lib/encrypt-outputs.circom";
 include "node_modules/circomlib/circuits/babyjub.circom";
 include "node_modules/circomlib/circuits/comparators.circom"; // IsZero for the §5.2 zero-commitment belt (also reached transitively via check-imt-proof)
