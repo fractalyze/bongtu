@@ -252,6 +252,14 @@ value still counts → **mint-from-nothing**. Fix, applied to **every** verifier
   recovered balance is inflated and produced proofs revert. (Works because Q4 puts all ciphertext on-chain;
   stock Zeto's random off-chain salts made this impossible.) DoD test: `balance_after == balance_before`
   across a spend.
+> **§6 as-built (2026-07-25): prover-cli is a PURE prover.** Decision (user): `prover-cli/` takes a typed,
+> already-resolved `ProvingRequest` (complete circom witness input per circuit) and returns Groth16 calldata —
+> nothing more. CSV parsing, ETH→bjj address resolution, membership-witness building, and tx submission are the
+> **admin app's** job (`apps/admin/`), not the prover's. CPU (snarkjs) for deposit/transfer/withdraw, GPU
+> (rabbitsnark) for disburse, selected by a `backend` field. The `apps/public/` wallet proves its own small
+> transfer/withdraw in the browser (GPL decision (a)); the note-owner identifier everywhere is the **compressed
+> bjj pubkey** (`sdk/pubkey.ts`). Original sketch (below) is superseded on the CSV/tx-in-prover point.
+
 - **Prover (`prover-cli/`, employer self-host):** CSV(addr,amount) → witness (circom `witness_calculator`,
   ~89MB witness for disburse) → **rabbitsnark GPU** Groth16 → calldata → tx. Prover-host block: state the GPU
   VRAM floor (measure rabbitsnark high-water), CUDA version, and that **for the PoC "we prove in the demo" is

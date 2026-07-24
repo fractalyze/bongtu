@@ -33,6 +33,9 @@ this v2 pool needs the 256 proof re-proven against its arbiter key — see `docs
 - `sdk/` — TS: single-frontier IMT, Poseidon, BabyJubjub keys, note/encrypt, trial-decrypt
 - `deploy/` — Foundry deploy script (local anvil + GIWA), the live 256-disburse runner, the M0 cross-circuit e2e
 - `indexer/` — event ingest → MirrorTree mirror (root == on-chain root), merkle-path + ciphertext-feed API, disclosure alarms; **arbiter mode** (`AUTHORITY_KEY`) decrypts every envelope to serve `/notes?owner=` + within-batch paths
+- `prover-cli/` — pure prover: a typed `ProvingRequest` → Groth16 calldata (snarkjs CPU / rabbitsnark GPU); no CSV/addr-resolve/tx
+- `apps/admin/` — role-moded console: employer-mode (recipients → request → prover-cli → tx) + auditor-mode (arbiter `/notes` ledger)
+- `apps/public/` — MetaMask wallet: sign → bjj key, balance from `/notes`, transfer/withdraw with browser snarkjs proving
 - `docs/` — specification, milestone records, toolchain (see the index below)
 
 ## Run
