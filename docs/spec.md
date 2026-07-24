@@ -363,26 +363,32 @@ gas cap = 16,777,216** — disburse256 (1.03M) fits with huge margin; naive 256-
 permissionless, `--verifier blockscout`. Mainnet **not launched** — all PoC data is testnet. Full facts:
 knowledge `giwa-chain-facts-for-deployment`.
 
-### Deployed to GIWA Sepolia (2026-07-24) — the full B=256 stack is LIVE
+### Deployed to GIWA Sepolia — the full B=256 stack is LIVE
+
+**v2 redeploy (2026-07-24)** — behind a **UUPS (ERC-1967) proxy**, carrying the security-hardened circuits
+(zero-commitment belt on all spending paths), the four-op auditor envelopes, and on-chain disclosure
+enforcement (`disburseCiphertextLen==2054`, no plain disburse). This supersedes the v1 pool
+`0x22a2F38a…` (belt/envelope-less, non-upgradeable — left on-chain, no longer referenced).
 
 | contract | address |
 |---|---|
-| BongtuPool (B=256) | `0x22a2F38a24a2647E430dc28a5154D390F93Ccf7b` |
-| Poseidon-v1 | `0xFa309Ff90ef2cd1781824Cf8a7Fdb1Bf0D237E9E` |
-| DepositVerifier | `0x73AB0c199381B293CE73B85A0aC3CDfa0A06Bf72` |
-| Disburse256Verifier | `0xD6CD19bc45adD901003390d9Ba314887B7bbFc8b` |
-| TransferVerifier | `0x0DdC36CDCcA2b7408Cc86DEB55A43644A727CBcd` |
-| WithdrawVerifier | `0x997339910c19d56FAD48484be30De859664c9d74` |
-| mock kKRW | `0x278b3374995c8ec6aEaECBfDCa06f26CB167FC13` |
+| **BongtuPool (proxy, B=256)** | `0x93365980784ef504613EF5822ce1289CF858Fc10` |
+| BongtuPool impl | `0x459f80A457f11328eBd67aeBFa9F90D05c58b27f` |
+| Poseidon-v1 | `0xaA7778c778C83cE5655d5F217bDfE7782e01Bc50` |
+| DepositVerifier | `0xF3b5D0eb5558B9427Fe599792E728b9B2bD20B2E` |
+| WithdrawVerifier | `0xaA581CFB50F69144C6a9B6380193858E8f4B00Db` |
+| Disburse256Verifier | `0xD030602597CC7F47107e6F96d0d1D6b73a71698F` |
+| TransferVerifier | `0x594408F216d096E8BCB21cdceb58a14186895892` |
+| mock kKRW | `0x17A89cC5FF3395Bb01464c9E422749CcDbFa8C3f` |
 
-Owner/deployer `0xe92a97e645351268F3d60d5a27EB842A5b293058`; `B()==256`, `initialized==true` verified on-chain.
-Explorer: `https://sepolia-explorer.giwa.io/address/0x22a2F38a24a2647E430dc28a5154D390F93Ccf7b`. A real
-`deposit` tx succeeded against it (`0xc7053b4bf0d0f6fce67ed27279bb89ec6e54525646d0b824fa4d8a5a7951668c`,
-nextLeafIndex 0→2). **Measured deposit cost = L2 2,518,396 gas × 0.001 gwei (~2.52e-6 ETH) + L1 data fee
-24,017,990,112 wei (~2.4e-8 ETH) ≈ 0.0000025 ETH (~$0.008); the L1/DA fee is ~1% of total** (blob DA is
-cheap → calldata cost is a non-issue, refuting the earlier §11-7 worry at these params). Full deploy + smoke
-spent 0.000014 ETH of the 0.01 faucet grant. Blockscout source-verification (`--verify`) is an optional
-follow-up. addresses in `deploy/addresses.91342.json`.
+Owner/deployer `0xe92a97e645351268F3d60d5a27EB842A5b293058`; verified on-chain through the proxy:
+`B()==256`, `initialized==true`, `disburseCiphertextLen==2054`, ERC-1967 impl slot → the impl above. A real
+`deposit` (now carrying the auditor envelope) succeeded (nextLeafIndex 0→2, custodied 3000 kKRW). **Whole
+v2 deploy + smoke cost 1.66e-5 ETH** (L2 0.001 gwei; L1/blob DA fee negligible — the earlier §11-7 DA worry
+stays refuted at these params). Arbiter key = the realproofs authority key
+(`0x08a72afc…`); a live 256-disburse demo needs the 256 proof re-proven against this key (zkey unchanged,
+one warm GPU prove — tracked follow-up). Blockscout `--verify` optional. Addresses in
+`deploy/addresses.91342.json`.
 
 **A real 256-recipient private disburse ran live (2026-07-24, `deploy/giwa_disburse256.ts`):** an employer
 deposited a note, then spent it to **256 recipients in one tx** with a rabbitsnark-GPU proof, publishing all

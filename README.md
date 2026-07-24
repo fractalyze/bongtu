@@ -12,16 +12,19 @@ O(tree height).
 
 ## Status
 
-Live on **GIWA Sepolia** (chain 91342). A real 256-recipient private disburse has run end-to-end on the
-deployed pool.
+Live on **GIWA Sepolia** (chain 91342), behind a **UUPS proxy** carrying the security-hardened circuits and
+enforced four-op auditor disclosure.
 
-| | address / tx |
+| | address |
 |---|---|
-| BongtuPool (B=256) | [`0x22a2F38a24a2647E430dc28a5154D390F93Ccf7b`](https://sepolia-explorer.giwa.io/address/0x22a2F38a24a2647E430dc28a5154D390F93Ccf7b) |
-| 256-recipient disburse | [`0xc97836e0…abc37e`](https://sepolia-explorer.giwa.io/tx/0xc97836e05651756c333fc18bbb4698182f5d5690e41bd103e3e42eb178abc37e) |
+| BongtuPool (proxy, B=256) | [`0x93365980784ef504613EF5822ce1289CF858Fc10`](https://sepolia-explorer.giwa.io/address/0x93365980784ef504613EF5822ce1289CF858Fc10) |
+| BongtuPool impl | [`0x459f80A457f11328eBd67aeBFa9F90D05c58b27f`](https://sepolia-explorer.giwa.io/address/0x459f80A457f11328eBd67aeBFa9F90D05c58b27f) |
 
-Measured: 256-payout ≈ 3.03M L2 gas (11.8k / recipient, under the Karst cap); warm GPU proof ~0.47s; the L1
-data fee is ~0.05% of cost even with all 256 ciphertexts on-chain.
+Verified on-chain through the proxy: `B()==256`, `disburseCiphertextLen==2054` (disclosure enforced), a real
+envelope-carrying `deposit`. Measured: warm 256-disburse GPU proof **~0.47s** (2.79M constraints); on-chain
+256-payout ~3M L2 gas (~11.8k/recipient, under the Karst cap); the L1/blob-DA fee is negligible even with all
+ciphertext on-chain. (The headline 256-disburse ran end-to-end on the v1 pool `0x22a2F38a…`; re-demoing it on
+this v2 pool needs the 256 proof re-proven against its arbiter key — see `docs/spec.md` §9.)
 
 ## Layout
 

@@ -13,8 +13,9 @@ import {MockERC20} from "bongtu-test/mocks/MockERC20.sol";
 /// Reads the addresses `Deploy.s.sol` wrote (`deploy/addresses.<chainid>.json`),
 /// then reuses the COMMITTED real deposit proof (`realproofs.json .deposit`, the
 /// same one `RealProof.t.sol::testDepositAccepts` exercises) to do a genuine
-/// `deposit` — a 0-in/2-out mint that needs no membership root, so it verifies
-/// against the deployed REAL DepositVerifier regardless of the pool's arbiter key.
+/// `deposit` — a 0-in/2-out mint. Post-U0c the deposit proof is bound to the
+/// arbiter key (its authority envelope), so the pool MUST be deployed with the
+/// arbiter key the committed deposit proof was made against (realproofs.json).
 ///
 /// Steps (all broadcast from the deployer): mint the deposit's `out` amount of
 /// mock kKRW, approve the pool, `deposit(a,b,c,pub)`. Then asserts the deployed
