@@ -310,7 +310,7 @@ bongtu/                       # one monorepo, Apache-2.0
   indexer/                    # event ingest, IMT mirror, path API, disclosureHash verify, arbiter ledger
   apps/ admin/  public/       # role-moded admin; MetaMask wallet
   deploy/                     # Foundry scripts → GIWA Sepolia (Blockscout verify)
-  SPEC.md
+  docs/                       # spec (this file), milestone records, toolchain
 ```
 
 ---

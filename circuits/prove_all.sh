@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bongtu M0 Unit U2 gate (SPEC §4, M0_GOAL Done#2).
+# bongtu M0 Unit U2 gate (spec §4, docs/milestone-m0.md Done#2).
 #
 # For each of the 4 circuits: compile -> groth16 setup (pot22) -> export vkey +
 # solidity verifier -> generate_witness from the JS-produced input.json ->

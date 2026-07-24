@@ -18,8 +18,8 @@ import { createRequire } from "node:module";
 import { ImtTree } from "../../../sdk/src/imt.js";
 
 const require = createRequire(import.meta.url);
-// Single toolchain-node_modules constant (see TOOLCHAIN.md `SNARKJS`/`CIRCOMLIB`);
-// override with BONGTU_NODE_MODULES. Default = the verified TOOLCHAIN.md path.
+// Single toolchain-node_modules constant (see docs/toolchain.md `SNARKJS`/`CIRCOMLIB`);
+// override with BONGTU_NODE_MODULES. Default = the verified docs/toolchain.md path.
 const NODE_MODULES =
   process.env.BONGTU_NODE_MODULES || "/home/a41/Workspace/zkx-snap/circuits/node_modules";
 // snarkjs ships no usable types here and is loaded via createRequire, so it is `any`.

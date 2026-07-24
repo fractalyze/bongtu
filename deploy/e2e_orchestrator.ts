@@ -1,6 +1,6 @@
 // bongtu M0 Unit U4 — cross-circuit spend cycle e2e on a live anvil.
 //
-// THE CAPSTONE (M0 DoD, M0_GOAL Done#4 / SPEC §5, §10b): drive a REAL EVM
+// THE CAPSTONE (M0 DoD, docs/milestone-m0.md Done#4 / spec §5, §10b): drive a REAL EVM
 // (anvil) through the full cycle with REAL Groth16 proofs (snarkjs CPU) and a
 // GENUINE recipient trial-decrypt, asserting tree/value invariants at every
 // step:

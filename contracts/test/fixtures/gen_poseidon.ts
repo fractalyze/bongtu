@@ -10,8 +10,8 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-// Single toolchain-node_modules constant (see TOOLCHAIN.md); override with
-// BONGTU_NODE_MODULES. Default = the verified TOOLCHAIN.md path.
+// Single toolchain-node_modules constant (see docs/toolchain.md); override with
+// BONGTU_NODE_MODULES. Default = the verified docs/toolchain.md path.
 const NODE_MODULES =
   process.env.BONGTU_NODE_MODULES || "/home/a41/Workspace/zkx-snap/circuits/node_modules";
 const CIRCOMLIBJS = join(NODE_MODULES, "circomlibjs");

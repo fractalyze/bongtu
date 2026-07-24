@@ -29,7 +29,8 @@ data fee is ~0.05% of cost even with all 256 ciphertexts on-chain.
 - `contracts/` — Foundry: `BongtuPool` (unified single-frontier IMT + contract-derived enabled + arbiter epochs) + verifiers
 - `sdk/` — TS: single-frontier IMT, Poseidon, BabyJubjub keys, note/encrypt, trial-decrypt
 - `deploy/` — Foundry deploy script (local anvil + GIWA), the live 256-disburse runner, the M0 cross-circuit e2e
-- `SPEC.md` — the full specification (grilled + adversarially reviewed). `M0_GOAL.md` / `M1_GOAL.md` — milestone tracking. `TOOLCHAIN.md` — exact build commands.
+- `indexer/` — event ingest → SDK-IMT mirror (root == on-chain root), merkle-path + ciphertext-feed API, disclosure alarms
+- `docs/` — specification, milestone records, toolchain (see the index below)
 
 ## Run
 
@@ -46,20 +47,40 @@ cd circuits && bash prove_all.sh      # 4× snarkjs OK
 # cross-circuit spend cycle on a local anvil (TS orchestrator via tsx)
 bash deploy/e2e_m0.sh
 
+# indexer conformance (anvil scenario: ingest, mirror==contract, paths, alarms)
+cd indexer && npm test
+
 # deploy the full B=256 stack to a local node (or GIWA via env — see deploy/README.md)
 bash deploy/deploy_local.sh
+
+# run the indexer against the live GIWA pool (read-only)
+cd indexer && RPC=https://sepolia-rpc.giwa.io npm start
 ```
 
 The `.ts` scripts under `sdk/`, `deploy/`, `circuits/`, and `contracts/test/fixtures/` run on [`tsx`](https://github.com/privatenumber/tsx)
 (ESM / NodeNext, `strict`); `npm install` at the repo root installs the shared TS toolchain. Type-check everything with
 `npx tsc --noEmit -p tsconfig.json` (scripts) and `cd sdk && npx tsc --noEmit` (the sdk package).
 
-Copy `.env.example` → `.env` (gitignored) for a funded GIWA deployer key. Toolchain paths are in `TOOLCHAIN.md`.
+Copy `.env.example` → `.env` (gitignored) for a funded GIWA deployer key. Toolchain paths are in
+[`docs/toolchain.md`](docs/toolchain.md).
+
+## Docs
+
+- [Specification](docs/spec.md) — what bongtu is and why it is shaped this way: locked product decisions,
+  circuits/publics, IMT §5.1, indexer API §6b, apps §7, GIWA facts + live addresses §9, risk register §11.
+- [Milestone M0](docs/milestone-m0.md) — how the core was proven safe: 4 units, gates, and the two retired
+  critical risks (mixed-mode tree spend, enabled-forgery mint).
+- [Milestone M1](docs/milestone-m1.md) — how 1×256 GPU disburse + the GIWA deploy landed: gas numbers, the
+  O(log B) partial-block fix, deploy pipeline evidence.
+- [Toolchain](docs/toolchain.md) — the exact circom/snarkjs/ptau/forge invocations and paths that build and
+  prove everything.
+- [Deploy](deploy/README.md) — the reusable B=256 stack deploy: env config, local anvil gate, live GIWA runbook.
+- [Third-party notices](THIRD_PARTY_NOTICES.md) — dependency licenses and how GPL build tools stay un-bundled.
 
 ## Notes
 
 Testnet PoC: single-party trusted setup, a demo arbiter key, and a mock kKRW token — mainnet requires a
-phase-2 MPC ceremony and a real authority key (see `SPEC.md` §11/§13).
+phase-2 MPC ceremony and a real authority key (see [`docs/spec.md`](docs/spec.md) §11/§13).
 
 ## License & credits
 

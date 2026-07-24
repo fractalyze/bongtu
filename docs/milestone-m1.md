@@ -1,7 +1,7 @@
 # M1 — Goal & Done criteria
 
 **M1 scales M0 from the 1×16 dev loop to the real 1×256 disburse on GPU, proves it verifies on-chain under
-the gas cap, and deploys to GIWA Sepolia.** Ref: SPEC.md §4/§9/§10b (M1), M0 is complete (all 4 units).
+the gas cap, and deploys to GIWA Sepolia.** Ref: [spec.md](spec.md) §4/§9/§10b (M1), M0 is complete (all 4 units).
 
 Key reuse (verified 2026-07-24): bongtu `disburse` at nOutputs=256 is **byte-identical** to the existing
 `run_nonrep_imt_256` (same base `anon_enc_nullifier_non_repudiation_imt_base`, same public list
@@ -53,4 +53,4 @@ warm ~0.5s per the old PoC. **GPU hygiene (memory rule): CUDA_VISIBLE_DEVICES=0,
       Review fixes applied: GIWA cmds use --skip-simulation (Poseidon via assembly create), TOKEN_ADDRESS env
       hook, broadcast/cache gitignored. **GIWA deploy deferred pending a funded key from the user.**
 
-Status legend: [ ] pending · [~] in-progress · [x] done · [!] blocked. Toolchain: TOOLCHAIN.md. M0: M0_GOAL.md.
+Status legend: [ ] pending · [~] in-progress · [x] done · [!] blocked. Toolchain: [toolchain.md](toolchain.md). M0: [milestone-m0.md](milestone-m0.md).
