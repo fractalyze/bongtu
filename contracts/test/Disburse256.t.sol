@@ -107,9 +107,9 @@ contract Disburse256Test is Base {
     /// (withdraw appends exactly its change output). This reproduces the proof's
     /// membership root: pool.root() == pub[5], and pub[5] enters root history.
     function _seedInputAtLeaf0(BongtuPool pool) internal {
-        uint[7] memory w; // out=0, nf0=nf1=0 (nothing spent/pushed)
-        w[3] = pool.root(); // membership root = current (empty) root, known
-        w[6] = inputCommitment; // change output = the input note commitment
+        uint[25] memory w; // out=0, nf0=nf1=0 (nothing spent/pushed)
+        w[18] = pool.root(); // membership root = current (empty) root, known
+        w[21] = inputCommitment; // change output = the input note commitment
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = dummyABC();
         pool.withdraw(a, b, c, w);
         assertEq(pool.root(), seedRoot, "seed: pool.root() != pub[5] (membership root)");
@@ -118,19 +118,10 @@ contract Disburse256Test is Base {
         assertEq(pool.nextLeafIndex(), 1, "seed: input note must be the sole leaf 0");
     }
 
-    /// Fill the pending partial block (leaves 1..255) with dead zero leaves so the
-    /// frontier is 256-aligned. This mirrors the contract's own pad step exactly
-    /// (append zeros[0]=0) but moves that one-time boundary cost OUT of the
-    /// measured disburse — leaving the steady-state verify+attach cost.
-    function _alignToBoundary(BongtuPool pool) internal {
-        (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = dummyABC();
-        while (pool.nextLeafIndex() % B256 != 0) {
-            uint[7] memory w;
-            w[3] = pool.root();
-            w[6] = 0; // append a dead zero leaf
-            pool.withdraw(a, b, c, w);
-        }
-        assertEq(pool.nextLeafIndex(), B256, "align: frontier not at the 256 boundary");
+    /// A disburse ciphertext blob of exactly the enforced length (§6b v2). Content
+    /// is unchecked on-chain — the proof's disclosureHash binds it off-chain.
+    function _ctBlob(BongtuPool pool) internal view returns (uint256[] memory) {
+        return new uint256[](pool.disburseCiphertextLen());
     }
 
     // ========================================================================
@@ -152,14 +143,14 @@ contract Disburse256Test is Base {
     // ========================================================================
     function testDisburseAcceptsAttachesUnderCap() public {
         BongtuPool pool = _freshPool256();
-        _seedInputAtLeaf0(pool);
-        _alignToBoundary(pool); // move the one-time pad cost out of the measurement
+        _seedInputAtLeaf0(pool); // leaf 0 only; disburse pads the partial block in-call
 
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc();
         uint[10] memory pub = _pub();
+        uint256[] memory ct = _ctBlob(pool); // 2054 elements for B=256 (§6b v2)
 
         uint256 g = gasleft();
-        pool.disburse(a, b, c, pub); // reverts if the real Groth16 verify fails
+        pool.disburseWithCiphertexts(a, b, c, pub, ct); // reverts if the real Groth16 verify fails
         uint256 disburseGas = g - gasleft();
 
         // Verifier ACCEPTED (no revert) + the 256-subtree attached at block 1.
@@ -167,14 +158,15 @@ contract Disburse256Test is Base {
         assertEq(pool.nextLeafIndex(), 2 * B256, "attach: nextLeafIndex != 512 (block0 + subtree)");
         assertTrue(pool.nullifierUsed(pub[4]), "disburse nullifier not marked");
 
-        // (4) Karst per-tx cap + per-recipient figure.
-        emit log_named_uint("disburse256 gas (aligned, verify+attach)", disburseGas);
+        // (4) Karst per-tx cap + per-recipient figure. Now publishes the FULL
+        // ciphertext (receiver ++ authority = 2054 elements) on-chain (§6b v2).
+        emit log_named_uint("disburse256 gas (verify+attach+full ciphertext)", disburseGas);
         emit log_named_uint("per-recipient gas (gas / 256)", disburseGas / B256);
         assertLt(disburseGas, KARST_CAP, "disburse gas >= EIP-7825 Karst cap (16,777,216)");
 
         // Replay: same proof re-verifies (root still known) but the nullifier is spent.
         vm.expectRevert(abi.encodeWithSelector(BongtuPool.NullifierAlreadyUsed.selector, pub[4]));
-        pool.disburse(a, b, c, pub);
+        pool.disburseWithCiphertexts(a, b, c, pub, ct);
     }
 
     // ========================================================================
@@ -183,17 +175,38 @@ contract Disburse256Test is Base {
     function testTamperedPublicSignalReverts() public {
         BongtuPool pool = _freshPool256();
         _seedInputAtLeaf0(pool);
-        _alignToBoundary(pool);
 
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc();
         uint[10] memory pub = _pub();
         // Flip one bit of subtreeRoot (pub[3]). The membership root pub[5] is
         // untouched so the known-root guard still passes and the failure is
-        // isolated to the Groth16 verify.
+        // isolated to the Groth16 verify (length check passes first).
         pub[3] = pub[3] ^ 1;
 
+        // Build the blob BEFORE expectRevert — evaluating _ctBlob calls a view on
+        // the pool, which would otherwise be consumed as the "next call".
+        uint256[] memory ct = _ctBlob(pool);
         vm.expectRevert(BongtuPool.InvalidProof.selector);
-        pool.disburse(a, b, c, pub);
+        pool.disburseWithCiphertexts(a, b, c, pub, ct);
+    }
+
+    // ========================================================================
+    //  §6b v2 enforced disclosure: a receiver-ONLY publish (4*B = 1024 elements,
+    //  the old "unverifiable" flavor) is rejected on-chain — the ONLY disburse
+    //  path must publish the FULL ciphertext (4*B ++ authority = 2054).
+    // ========================================================================
+    function testWrongCiphertextLengthReverts() public {
+        BongtuPool pool = _freshPool256();
+        _seedInputAtLeaf0(pool);
+
+        (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc();
+        uint[10] memory pub = _pub();
+        // receiver-only length (4*256): auditor envelope omitted => enforced revert.
+        uint256[] memory short = new uint256[](4 * B256);
+        assertEq(pool.disburseCiphertextLen(), 2054, "enforced length must be 4*B + 1030 = 2054");
+
+        vm.expectRevert(abi.encodeWithSelector(BongtuPool.WrongCiphertextLength.selector, 4 * B256, 2054));
+        pool.disburseWithCiphertexts(a, b, c, pub, short);
     }
 
     // ========================================================================
@@ -210,7 +223,7 @@ contract Disburse256Test is Base {
         uint[10] memory pub = _pub();
 
         uint256 g = gasleft();
-        pool.disburse(a, b, c, pub);
+        pool.disburseWithCiphertexts(a, b, c, pub, _ctBlob(pool));
         uint256 fullGas = g - gasleft();
 
         assertEq(pool.root(), oracleRoot, "partial-block path root != oracle");

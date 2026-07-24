@@ -84,8 +84,18 @@ contract RealProofTest is Base {
     function _seed(BongtuPool pool, string memory key) internal {
         uint256[] memory seed = vm.parseJsonUintArray(j, string.concat(key, ".seedLeaves"));
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = dummyABC();
-        uint[3] memory pub = [uint256(0), seed[0], seed[1]];
+        // deposit publics (18): out=pub[0], oc0=pub[13], oc1=pub[14]. A stub
+        // deposit verifier accepts, so only the appended leaves matter for seeding.
+        uint[18] memory pub;
+        pub[13] = seed[0];
+        pub[14] = seed[1];
         pool.deposit(a, b, c, pub);
+    }
+
+    // Build a disburse ciphertext blob of exactly the enforced length (content is
+    // unchecked on-chain — the proof's disclosureHash binds it off-chain, §6b).
+    function _ctBlob(BongtuPool pool) internal view returns (uint256[] memory) {
+        return new uint256[](pool.disburseCiphertextLen());
     }
 
     // ======================= (v) REAL-PROOF ACCEPT ===========================
@@ -94,7 +104,8 @@ contract RealProofTest is Base {
         BongtuPool pool = _freshPool(true);
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".deposit");
         uint256[] memory p = _pub(".deposit");
-        uint[3] memory pub = [p[0], p[1], p[2]];
+        uint[18] memory pub;
+        for (uint256 i = 0; i < 18; i++) pub[i] = p[i];
         uint256 rootAfter = vm.parseJsonUint(j, ".deposit.rootAfter");
 
         uint256 balBefore = token.balanceOf(address(pool));
@@ -114,7 +125,7 @@ contract RealProofTest is Base {
         for (uint256 i = 0; i < 10; i++) pub[i] = p[i];
         uint256 rootAfter = vm.parseJsonUint(j, ".disburse.rootAfter");
 
-        pool.disburse(a, b, c, pub);
+        pool.disburseWithCiphertexts(a, b, c, pub, _ctBlob(pool));
 
         assertEq(pool.root(), rootAfter, "disburse root != oracle");
         assertEq(pool.nextLeafIndex(), 32, "disburse pad(2->16)+attach(16) => 32");
@@ -142,8 +153,8 @@ contract RealProofTest is Base {
         _seed(pool, ".withdraw");
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".withdraw");
         uint256[] memory p = _pub(".withdraw");
-        uint[7] memory pub;
-        for (uint256 i = 0; i < 7; i++) pub[i] = p[i];
+        uint[25] memory pub;
+        for (uint256 i = 0; i < 25; i++) pub[i] = p[i];
         uint256 rootAfter = vm.parseJsonUint(j, ".withdraw.rootAfter");
 
         uint256 balBefore = token.balanceOf(address(this));
@@ -151,7 +162,7 @@ contract RealProofTest is Base {
 
         assertEq(pool.nextLeafIndex(), 3, "withdraw appends 1 change leaf (seed 2 + 1)");
         assertEq(pool.root(), rootAfter, "withdraw root != oracle");
-        assertTrue(pool.nullifierUsed(p[1]) && pool.nullifierUsed(p[2]), "withdraw nullifiers not marked");
+        assertTrue(pool.nullifierUsed(p[16]) && pool.nullifierUsed(p[17]), "withdraw nullifiers not marked");
         assertEq(token.balanceOf(address(this)) - balBefore, p[0], "withdraw did not push `out` tokens");
     }
 
@@ -190,16 +201,16 @@ contract RealProofTest is Base {
         _seed(pool, ".withdraw_padded");
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".withdraw_padded");
         uint256[] memory p = _pub(".withdraw_padded");
-        uint[7] memory pub;
-        for (uint256 i = 0; i < 7; i++) pub[i] = p[i];
+        uint[25] memory pub;
+        for (uint256 i = 0; i < 25; i++) pub[i] = p[i];
 
-        assertEq(p[2], 0, "padded fixture must have nullifier[1]=0");
-        pub[5] = 1; // adversarial calldata lie: claim enabled[1]=1
+        assertEq(p[17], 0, "padded fixture must have nullifier[1]=0");
+        pub[20] = 1; // adversarial calldata lie: claim enabled[1]=1
 
-        // Contract injects injected[5]=(nullifier[1]!=0)=0, overriding the lie, so
+        // Contract injects injected[20]=(nullifier[1]!=0)=0, overriding the lie, so
         // the vector matches the proof and verification passes.
         pool.withdraw(a, b, c, pub);
-        assertTrue(pool.nullifierUsed(p[1]), "real nullifier[0] must be marked");
+        assertTrue(pool.nullifierUsed(p[16]), "real nullifier[0] must be marked");
     }
 
     /// A genuine padded slot (nullifier[1]=0, enabled[1]=0) is accepted: the
@@ -209,17 +220,17 @@ contract RealProofTest is Base {
         _seed(pool, ".withdraw_padded");
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".withdraw_padded");
         uint256[] memory p = _pub(".withdraw_padded");
-        uint[7] memory pub;
-        for (uint256 i = 0; i < 7; i++) pub[i] = p[i];
+        uint[25] memory pub;
+        for (uint256 i = 0; i < 25; i++) pub[i] = p[i];
         uint256 rootAfter = vm.parseJsonUint(j, ".withdraw_padded.rootAfter");
 
-        assertEq(p[2], 0, "padded fixture must have nullifier[1]=0");
-        assertEq(p[5], 0, "padded fixture must have enabled[1]=0");
+        assertEq(p[17], 0, "padded fixture must have nullifier[1]=0");
+        assertEq(p[20], 0, "padded fixture must have enabled[1]=0");
 
         pool.withdraw(a, b, c, pub);
 
         assertEq(pool.root(), rootAfter, "padded withdraw root != oracle");
-        assertTrue(pool.nullifierUsed(p[1]), "real nullifier[0] not marked");
+        assertTrue(pool.nullifierUsed(p[16]), "real nullifier[0] not marked");
         assertTrue(!pool.nullifierUsed(0), "zero nullifier must never be marked");
     }
 
@@ -230,14 +241,14 @@ contract RealProofTest is Base {
         _seed(pool, ".withdraw");
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".withdraw");
         uint256[] memory p = _pub(".withdraw");
-        uint[7] memory pub;
-        for (uint256 i = 0; i < 7; i++) pub[i] = p[i];
+        uint[25] memory pub;
+        for (uint256 i = 0; i < 25; i++) pub[i] = p[i];
 
         pool.withdraw(a, b, c, pub); // first spend OK
 
         // The proof's membership root is still known, so it re-verifies; the
         // second spend must revert on nullifier reuse.
-        vm.expectRevert(abi.encodeWithSelector(BongtuPool.NullifierAlreadyUsed.selector, p[1]));
+        vm.expectRevert(abi.encodeWithSelector(BongtuPool.NullifierAlreadyUsed.selector, p[16]));
         pool.withdraw(a, b, c, pub);
     }
 
@@ -248,13 +259,56 @@ contract RealProofTest is Base {
         _seed(pool, ".withdraw");
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".withdraw");
         uint256[] memory p = _pub(".withdraw");
-        uint[7] memory pub;
-        for (uint256 i = 0; i < 7; i++) pub[i] = p[i];
+        uint[25] memory pub;
+        for (uint256 i = 0; i < 25; i++) pub[i] = p[i];
 
-        // Flip one bit of the change-commitment public signal (pub[6]); the root
-        // (pub[3]) is untouched so the known-root guard still passes and the
+        // Flip one bit of the change-commitment public signal (pub[21]); the root
+        // (pub[18]) is untouched so the known-root guard still passes and the
         // failure is isolated to the Groth16 verify.
-        pub[6] = pub[6] ^ 1;
+        pub[21] = pub[21] ^ 1;
+
+        vm.expectRevert(BongtuPool.InvalidProof.selector);
+        pool.withdraw(a, b, c, pub);
+    }
+
+    // ============ §6b v2 enforced disclosure: WRONG AUTHORITY KEY =============
+
+    /// §6b v2 load-bearing enforcement: deposit() injects the STORED arbiter key
+    /// into the authority-envelope public signals (pub[16..17]) before verify, so a
+    /// proof encrypted to a DIFFERENT arbiter key cannot verify. We rotate the
+    /// stored key to a fresh value, then submit the committed real deposit proof
+    /// (encrypted to the epoch-0 key); the injected key no longer matches the
+    /// proof's commitment and Groth16 rejects. Control = testDepositAccepts(),
+    /// which submits the same proof against the un-rotated key and it accepts, so
+    /// this revert is attributable to the arbiter-key injection, not the proof.
+    function testWrongAuthorityKeyDepositReverts() public {
+        BongtuPool pool = _freshPool(true);
+        (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".deposit");
+        uint256[] memory p = _pub(".deposit");
+        uint[18] memory pub;
+        for (uint256 i = 0; i < 18; i++) pub[i] = p[i];
+
+        // Rotate the arbiter key away from the one the proof was encrypted to.
+        pool.rotateArbiter([uint256(0x1234), uint256(0x5678)]);
+
+        vm.expectRevert(BongtuPool.InvalidProof.selector);
+        pool.deposit(a, b, c, pub);
+    }
+
+    /// Same enforcement on the withdraw path: the stored arbiter key is injected at
+    /// pub[23..24]. Seeding makes the membership root known, and both fixture
+    /// nullifiers are nonzero so the injected enabled[i] match the proof — the
+    /// failure therefore isolates to the arbiter-key injection. Control =
+    /// testWithdrawAccepts() (same proof, un-rotated key, accepts).
+    function testWrongAuthorityKeyWithdrawReverts() public {
+        BongtuPool pool = _freshPool(false);
+        _seed(pool, ".withdraw");
+        (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".withdraw");
+        uint256[] memory p = _pub(".withdraw");
+        uint[25] memory pub;
+        for (uint256 i = 0; i < 25; i++) pub[i] = p[i];
+
+        pool.rotateArbiter([uint256(0x1234), uint256(0x5678)]);
 
         vm.expectRevert(BongtuPool.InvalidProof.selector);
         pool.withdraw(a, b, c, pub);
@@ -273,8 +327,9 @@ contract RealProofTest is Base {
 
         address operator = address(0xB0B);
         pool.setDisburseAllowed(operator, true);
+        uint256[] memory ct = _ctBlob(pool);
         vm.prank(operator);
-        pool.disburse(a, b, c, pub);
+        pool.disburseWithCiphertexts(a, b, c, pub, ct);
 
         assertTrue(pool.nullifierUsed(p[4]), "allowlisted disburse nullifier not marked");
     }
@@ -290,9 +345,10 @@ contract RealProofTest is Base {
         for (uint256 i = 0; i < 10; i++) pub[i] = p[i];
 
         address stranger = address(0xBAD);
+        uint256[] memory ct = _ctBlob(pool);
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(BongtuPool.NotDisburseAuthorized.selector, stranger));
-        pool.disburse(a, b, c, pub);
+        pool.disburseWithCiphertexts(a, b, c, pub, ct);
     }
 
     // ================= root / init negative controls =========================
@@ -303,10 +359,10 @@ contract RealProofTest is Base {
         BongtuPool pool = _freshPool(false); // deliberately NOT seeded
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".withdraw");
         uint256[] memory p = _pub(".withdraw");
-        uint[7] memory pub;
-        for (uint256 i = 0; i < 7; i++) pub[i] = p[i];
+        uint[25] memory pub;
+        for (uint256 i = 0; i < 25; i++) pub[i] = p[i];
 
-        vm.expectRevert(abi.encodeWithSelector(BongtuPool.UnknownRoot.selector, p[3]));
+        vm.expectRevert(abi.encodeWithSelector(BongtuPool.UnknownRoot.selector, p[18]));
         pool.withdraw(a, b, c, pub);
     }
 
@@ -323,7 +379,9 @@ contract RealProofTest is Base {
         ); // no initialize()
 
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = dummyABC();
-        uint[3] memory pub = [uint256(0), uint256(1), uint256(2)];
+        uint[18] memory pub;
+        pub[13] = 1;
+        pub[14] = 2;
         vm.expectRevert(BongtuPool.NotInitialized.selector);
         pool.deposit(a, b, c, pub);
     }

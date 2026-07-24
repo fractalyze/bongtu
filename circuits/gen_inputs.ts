@@ -101,6 +101,10 @@ function genDeposit() {
     outputValues: values,
     outputSalts: values.map((_, i) => salt(i)),
     outputOwnerPublicKeys: owners,
+    // §6b v2 auditor envelope (outputs-only; deposit is a mint, no input note).
+    ecdhPrivateKey: BigInt(ECDH_SK),
+    encryptionNonce: ENCRYPTION_NONCE,
+    authorityPublicKey: AUTHORITY.publicKey,
   };
 }
 
@@ -198,6 +202,10 @@ function genWithdraw() {
     outputValues: outValues,
     outputSalts: outValues.map((_, i) => salt(i)),
     outputOwnerPublicKeys: owners,
+    // §6b v2 auditor envelope (input owner + inputs + change note).
+    ecdhPrivateKey: BigInt(ECDH_SK),
+    encryptionNonce: ENCRYPTION_NONCE,
+    authorityPublicKey: AUTHORITY.publicKey,
   };
 }
 

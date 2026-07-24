@@ -67,10 +67,10 @@ contract DifferentialTest is Base {
 
         // deposit(2): out=1000 (pulls tokens), appends the two output notes.
         {
-            uint[3] memory pub;
+            uint[18] memory pub;
             pub[0] = 1000;
-            pub[1] = depositLeaves[0];
-            pub[2] = depositLeaves[1];
+            pub[13] = depositLeaves[0];
+            pub[14] = depositLeaves[1];
             (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = dummyABC();
             pool.deposit(a, b, c, pub);
         }
@@ -88,23 +88,25 @@ contract DifferentialTest is Base {
         }
 
         // disburse: pad the partial block to a B boundary, attach the subtree.
+        // The plain disburse() is removed (§6b v2); publish a length-correct blob
+        // (content unchecked on-chain — the differential test only cares about roots).
         {
             uint[10] memory pub;
             pub[3] = subtreeRoot;
             pub[4] = 333; // nullifier (nonzero => enabled=1)
             pub[5] = pool.root(); // membership root
             (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = dummyABC();
-            pool.disburse(a, b, c, pub);
+            pool.disburseWithCiphertexts(a, b, c, pub, new uint256[](pool.disburseCiphertextLen()));
         }
 
         // withdraw(1) with a PADDED slot: nullifier[1]=0 => enabled[1]=0.
         {
-            uint[7] memory pub;
+            uint[25] memory pub;
             pub[0] = 50; // withdrawn amount (pushes tokens)
-            pub[1] = 444; // real nullifier
-            pub[2] = 0; // padded input (enabled derived to 0)
-            pub[3] = pool.root();
-            pub[6] = withdrawChange;
+            pub[16] = 444; // real nullifier
+            pub[17] = 0; // padded input (enabled derived to 0)
+            pub[18] = pool.root();
+            pub[21] = withdrawChange;
             (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = dummyABC();
             pool.withdraw(a, b, c, pub);
         }

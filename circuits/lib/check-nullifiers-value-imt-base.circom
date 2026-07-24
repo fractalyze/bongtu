@@ -13,6 +13,16 @@
 //       100-bit inputs can reach 2^101, which violates GreaterEqThan(100)'s
 //       `< 2^100` precondition and would make honest near-max withdrawals lose
 //       their witness. 101 bits covers the sum of two 100-bit values exactly.
+//   (5) SPEC §6b v2 authority (auditor) envelope: new inputs ecdhPrivateKey,
+//       encryptionNonce, authorityPublicKey[2]; new outputs ecdhPublicKey[2] and
+//       cipherTextAuthority[l+1] = SymmetricEncrypt over the SAME plaintext the
+//       transfer non-repudiation base uses —
+//         [inputOwnerPub.x, inputOwnerPub.y] ++ [(inValue,inSalt) x nInputs]
+//         ++ [(outOwnerPub.x,.y) x nOutputs] ++ [(outValue,outSalt) x nOutputs]
+//       length 2 + 2*nInputs + 4*nOutputs (10 at (nIn=2,nOut=1) => 13 ct elts).
+//       So a withdraw's inputs + change note are auditor-decryptable from
+//       on-chain data alone; the contract injects the stored arbiter key into
+//       authorityPublicKey so a proof not encrypted to it FAILS.
 //
 // commitment = hash(value, salt, owner public key)
 // nullifier  = hash(value, salt, ownerPrivatekey)
@@ -21,7 +31,10 @@ pragma circom 2.2.2;
 include "lib/check-positive.circom";
 include "lib/check-hashes.circom";
 include "lib/check-nullifiers.circom";
+include "lib/ecdh.circom";
+include "lib/encrypt.circom";
 include "check-imt-proof.circom";   // vendored IMT membership (bongtu/circuits/lib, via -l lib)
+include "node_modules/circomlib/circuits/babyjub.circom"; // BabyPbk (owner + ecdh public keys)
 include "node_modules/circomlib/circuits/comparators.circom"; // IsZero for the §5.2 zero-commitment belt (also reached transitively via check-imt-proof)
 
 template CheckNullifiersInputsOutputsValueIMT(nInputs, nOutputs, nLevels) {
@@ -40,7 +53,22 @@ template CheckNullifiersInputsOutputsValueIMT(nInputs, nOutputs, nLevels) {
   signal input outputValues[nOutputs];
   signal input outputSalts[nOutputs];
   signal input outputOwnerPublicKeys[nOutputs][2];
+  // §6b v2 authority envelope: ecdhPrivateKey is private; encryptionNonce +
+  // authorityPublicKey are public (the contract injects the stored arbiter key).
+  signal input ecdhPrivateKey;
+  signal input encryptionNonce;
+  signal input authorityPublicKey[2];
+
   signal output out;
+  signal output ecdhPublicKey[2];
+
+  // authority (non-repudiation) plaintext length + Poseidon-sponge padding.
+  var authorityPlainLength = 2 + 2 * nInputs + 4 * nOutputs;
+  var lAuth = authorityPlainLength;
+  if (lAuth % 3 != 0) {
+    lAuth += (3 - (lAuth % 3));
+  }
+  signal output cipherTextAuthority[lAuth + 1];
 
   var inputOwnerPubKeyAx, inputOwnerPubKeyAy;
   (inputOwnerPubKeyAx, inputOwnerPubKeyAy) = BabyPbk()(in <== inputOwnerPrivateKey);
@@ -112,4 +140,39 @@ template CheckNullifiersInputsOutputsValueIMT(nInputs, nOutputs, nLevels) {
   greaterEqThan === 1;
 
   out <== sumInputs - sumOutputs;
+
+  // --- §6b v2 authority (auditor) envelope ---------------------------------
+  // Same plaintext + Poseidon-sponge encryption the transfer non-repudiation
+  // base uses, keyed by ECDH(ecdhPrivateKey, authorityPublicKey). Lets the
+  // auditor recover the input owner + each input (value,salt) + the change note
+  // (ownerPub,value,salt) from the on-chain cipherTextAuthority alone.
+  (ecdhPublicKey[0], ecdhPublicKey[1]) <== BabyPbk()(in <== ecdhPrivateKey);
+
+  var sharedSecretAuthority[2];
+  (sharedSecretAuthority) = Ecdh()(privKey <== ecdhPrivateKey, pubKey <== authorityPublicKey);
+
+  var plainText[2 + 2 * nInputs + 4 * nOutputs];
+  plainText[0] = inputOwnerPubKeyAx;
+  plainText[1] = inputOwnerPubKeyAy;
+  var idxAuth = 2;
+  for (var i = 0; i < nInputs; i++) {
+    plainText[idxAuth] = inputValues[i];
+    idxAuth++;
+    plainText[idxAuth] = inputSalts[i];
+    idxAuth++;
+  }
+  for (var i = 0; i < nOutputs; i++) {
+    plainText[idxAuth] = outputOwnerPublicKeys[i][0];
+    idxAuth++;
+    plainText[idxAuth] = outputOwnerPublicKeys[i][1];
+    idxAuth++;
+  }
+  for (var i = 0; i < nOutputs; i++) {
+    plainText[idxAuth] = outputValues[i];
+    idxAuth++;
+    plainText[idxAuth] = outputSalts[i];
+    idxAuth++;
+  }
+
+  cipherTextAuthority <== SymmetricEncrypt(2 + 2 * nInputs + 4 * nOutputs)(plainText <== plainText, key <== sharedSecretAuthority, nonce <== encryptionNonce);
 }

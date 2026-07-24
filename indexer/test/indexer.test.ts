@@ -1,6 +1,6 @@
 // Indexer conformance test (SPEC §6b DoD-4). Runs the full scenario on a live
-// anvil (deposit → disburse(16) → transfer → withdraw → tampered disburse →
-// plain disburse), ingests it, and asserts every indexer invariant:
+// anvil (deposit → disburse(16) → transfer → withdraw → tampered disburse),
+// ingests it, and asserts every indexer invariant:
 //
 //   1. mirror root == contract root AND nextLeafIndex match at head
 //   2. GET /path/:i for a real (single-append) leaf folds to the head root
@@ -8,8 +8,8 @@
 //      annotations; a recipient key trial-decrypts a slice → commitment == the
 //      tree leaf, and all B recovered commitments fold to the batch subtreeRoot
 //   4. disclosureHash passes for the honest disburse; the tampered one ALARMS
-//      ("mismatch"); the plain (no-ciphertext) one still appears in the feed
-//      and ALARMS as "withheld"
+//      ("mismatch"). §6b v2 removes the plain disburse() path, so a "withheld"
+//      (nothing-published) disburse is no longer producible on-chain.
 //   5. GET /path/:i for a disburse-batch leaf is refused (siblings not
 //      chain-recoverable, SPEC §11-7); bad /events params are refused (400)
 //
@@ -90,7 +90,7 @@ async function main(): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const feed = evRes.body as any[];
     const kinds = feed.map((e) => e.kind).join(",");
-    ok(kinds === "deposit,disburse,transfer,withdraw,disburse,disburse", `feed kinds in chain order: ${kinds}`);
+    ok(kinds === "deposit,disburse,transfer,withdraw,disburse", `feed kinds in chain order: ${kinds}`);
 
     const honest = feed.find((e) => e.kind === "disburse" && e.slices[0]?.leafIndex === sc.disburseHonest.startLeafIndex);
     ok(!!honest, "honest disburse present in feed");
@@ -126,33 +126,28 @@ async function main(): Promise<void> {
     const subRoot = new ImtTree(sc.H, sc.B).computeSubtreeRoot(recovered);
     ok(subRoot.toString() === sc.disburseHonest.subtreeRoot, `all ${sc.B} recovered commitments fold to the batch subtreeRoot`);
 
-    // (4) disclosure: honest passes; tampered alarms "mismatch"; plain disburse
-    // still appears in the feed and alarms "withheld"
-    step("disclosure: honest PASS + tampered MISMATCH alarm + plain WITHHELD alarm");
+    // (4) disclosure: honest passes; tampered alarms "mismatch". §6b v2 removes
+    // the plain disburse() path, so "withheld" is no longer producible on-chain.
+    step("disclosure: honest PASS + tampered MISMATCH alarm (enforced disclosure)");
     ok(honest.disclosure === "verified", "honest disburse disclosureHash status == verified");
     const tampered = feed.find((e) => e.kind === "disburse" && e.slices[0]?.leafIndex === sc.tamperedStartLeafIndex);
     ok(!!tampered, "tampered disburse present in feed");
     ok(tampered.disclosure === "mismatch", "tampered disburse disclosureHash status == mismatch (ALARM)");
-    const plain = feed.find((e) => e.kind === "disburse" && e.disclosure === "withheld");
-    ok(!!plain, "plain disburse (no ciphertext event) present in feed");
-    ok(plain.ciphertext.length === 0 && plain.slices.length === 0, "plain disburse entry has empty ciphertext + slices");
     const alarmRes = await get(base, "/alarms");
     ok(alarmRes.status === 200, "GET /alarms 200");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const alarms = alarmRes.body as any[];
-    ok(alarms.length === 2, "two disclosure alarms surfaced (tampered + withheld)");
+    ok(alarms.length === 1, "one disclosure alarm surfaced (tampered mismatch)");
     ok(alarms[0].status === "mismatch" && alarms[0].startLeafIndex === sc.tamperedStartLeafIndex,
       "alarm[0] == mismatch at the tampered batch");
-    ok(alarms[1].status === "withheld" && alarms[1].startLeafIndex === sc.plainStartLeafIndex,
-      "alarm[1] == withheld at the plain-disburse batch");
 
     // (5) /path into a disburse batch leaf is refused; bad /events params are 400
     step("API /path — disburse-batch leaf refused (siblings not chain-recoverable)");
     const batchPath = await get(base, `/path/${sc.disburseHonest.startLeafIndex}`);
     ok(batchPath.status === 422, `GET /path/${sc.disburseHonest.startLeafIndex} (batch leaf) → 422`);
     ok((batchPath.body as { reason: string }).reason === "batch-leaf", "422 reason == batch-leaf");
-    const plainPath = await get(base, `/path/${sc.plainStartLeafIndex}`);
-    ok(plainPath.status === 422, `GET /path/${sc.plainStartLeafIndex} (plain-disburse batch leaf) → 422`);
+    const tamperedPath = await get(base, `/path/${sc.tamperedStartLeafIndex}`);
+    ok(tamperedPath.status === 422, `GET /path/${sc.tamperedStartLeafIndex} (tampered-batch leaf) → 422`);
     const badCursor = await get(base, "/events?cursor=abc");
     ok(badCursor.status === 400, "GET /events?cursor=abc → 400");
     const badLimit = await get(base, "/events?limit=0");

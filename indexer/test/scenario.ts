@@ -123,7 +123,6 @@ export interface ScenarioResult {
   nextLeafIndex: number;
   disburseHonest: DisburseInfo;
   tamperedStartLeafIndex: number; // second (tampered) disburse batch start
-  plainStartLeafIndex: number; // third (plain, no-ciphertext) disburse batch start
   singleLeaves: SingleLeaf[]; // real single-append leaves for the /path test
 }
 
@@ -138,19 +137,20 @@ export async function runScenario(): Promise<ScenarioResult> {
   const recipient = (i: number): Keypair => deriveKeypair(2000000011n + BigInt(i) * 1000003n);
   const RCPTS = Array.from({ length: B }, (_, i) => recipient(i));
 
+  const ECDH_DEP = 600000000000000000007n;
   const ECDH_D1 = 700000000000000000001n;
   const ECDH_TRANSFER = 800000000000000000003n;
   const ECDH_D2 = 900000000000000000009n;
-  const ECDH_D3 = 1000000000000000000013n;
+  const ECDH_W = 950000000000000000021n;
+  const NONCE_DEP = 555555555555n;
   const NONCE_D1 = 111111111111n;
   const NONCE_TRANSFER = 222222222222n;
   const NONCE_D2 = 333333333333n;
-  const NONCE_D3 = 444444444444n;
+  const NONCE_W = 666666666666n;
 
   const sD0 = 5000001n, sD1 = 5000002n;
   const sR = (i: number): bigint => 6000000n + BigInt(i);
   const sR2 = (i: number): bigint => 6100000n + BigInt(i);
-  const sR3 = (i: number): bigint => 6200000n + BigInt(i);
   const sPay = 7000001n, sChg = 7000002n;
   const sPadT = 7100001n, sPadW = 7100002n, sRes = 7200001n;
 
@@ -183,6 +183,7 @@ export async function runScenario(): Promise<ScenarioResult> {
     const { a, b, c, pub } = await prove("deposit", {
       outputCommitments: [dNoteV, dNote0], outputValues: [V, 0n],
       outputSalts: [sD0, sD1], outputOwnerPublicKeys: [EMPLOYER.publicKey, EMPLOYER.publicKey],
+      ecdhPrivateKey: ECDH_DEP, encryptionNonce: NONCE_DEP, authorityPublicKey: AUTHORITY.publicKey,
     });
     oracle.appendLeaf(dNoteV);
     oracle.appendLeaf(dNote0);
@@ -260,6 +261,7 @@ export async function runScenario(): Promise<ScenarioResult> {
       root: oracle.getRoot(), pathElements: [siblings, zeros], leafIndices: [BigInt(chgLeaf), 0n],
       enabled: [1n, 0n], outputCommitments: [resCommit], outputValues: [0n], outputSalts: [sRes],
       outputOwnerPublicKeys: [RCPTS[0].publicKey],
+      ecdhPrivateKey: ECDH_W, encryptionNonce: NONCE_W, authorityPublicKey: AUTHORITY.publicKey,
     });
     oracle.appendLeaf(resCommit);
     await (await pool.withdraw(a, b, c, pub)).wait();
@@ -293,24 +295,10 @@ export async function runScenario(): Promise<ScenarioResult> {
     await (await pool.disburseWithCiphertexts(a, b, c, pub, full.map(dec))).wait();
   }
 
-  // ---- disburse #3 (PLAIN): payee note @32 -> 16 recipients, no ciphertext event ----
-  const nfPay = nullifier(payVal, sPay, PAYEE.formattedPrivateKey);
-  const amounts3 = Array.from({ length: B }, (_, i) => (i === 0 ? payVal : 0n));
-  const outCommits3 = amounts3.map((v, i) => commitment(v, sR3(i), RCPTS[i].publicKey));
-  const subtreeRoot3 = oracle.computeSubtreeRoot(outCommits3);
-  const plainStart = 64; // nextLeafIndex is 64 (B-aligned) after the tampered batch
-  {
-    const { siblings } = oracle.merklePath(payLeaf);
-    const { a, b, c, pub } = await prove("disburse", {
-      nullifiers: [nfPay], inputCommitments: [payCommit], inputValues: [payVal], inputSalts: [sPay],
-      inputOwnerPrivateKey: PAYEE.formattedPrivateKey, ecdhPrivateKey: ECDH_D3,
-      root: oracle.getRoot(), pathElements: [siblings], leafIndices: [BigInt(payLeaf)], enabled: [1n],
-      outputCommitments: outCommits3, outputValues: amounts3, outputSalts: amounts3.map((_, i) => sR3(i)),
-      outputOwnerPublicKeys: rcptPubs, encryptionNonce: NONCE_D3, authorityPublicKey: AUTHORITY.publicKey,
-    });
-    oracle.attachSubtree(subtreeRoot3, outCommits3);
-    await (await pool.disburse(a, b, c, pub)).wait(); // plain entry point: no DisburseCiphertexts
-  }
+  // NOTE: §6b v2 removes the plain disburse() entry point, so a "withheld"
+  // (nothing-published) disburse is no longer producible on-chain — publication
+  // is enforced. The scenario therefore ends after the honest + tampered
+  // batches; the payee note @32 stays an unspent single-append leaf for /path.
 
   return {
     rpc: RPC,
@@ -330,7 +318,6 @@ export async function runScenario(): Promise<ScenarioResult> {
       nonce: dec(NONCE_D1),
     },
     tamperedStartLeafIndex: tamperedStart,
-    plainStartLeafIndex: plainStart,
     singleLeaves: [
       { leafIndex: 0, commitment: dec(dNoteV) },
       { leafIndex: payLeaf, commitment: dec(payCommit) },

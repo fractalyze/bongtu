@@ -2,12 +2,12 @@
 # bongtu indexer conformance gate (SPEC §6b DoD-4).
 #
 # Starts a local anvil, deploys a fresh B=16 pool + runs the full scenario
-# (deposit -> disburse(16) -> transfer -> withdraw -> tampered disburse -> plain
-# disburse), ingests it with the indexer, and asserts: mirror.root ==
-# contract.root + nextLeafIndex match at head; /path/:i folds to the head root;
-# /events feed trial-decrypts to real leaves with correct leafIndex annotations;
-# disclosureHash passes for the honest disburse, ALARMS "mismatch" on the
-# tampered one, and ALARMS "withheld" on the plain (no-ciphertext) one.
+# (deposit -> disburse(16) -> transfer -> withdraw -> tampered disburse),
+# ingests it with the indexer, and asserts: mirror.root == contract.root +
+# nextLeafIndex match at head; /path/:i folds to the head root; /events feed
+# trial-decrypts to real leaves with correct leafIndex annotations;
+# disclosureHash passes for the honest disburse and ALARMS "mismatch" on the
+# tampered one. (§6b v2 removes plain disburse(), so "withheld" is unreachable.)
 #
 #   cd indexer && npm test        # (== bash test/run.sh) exits 0 iff all pass
 #

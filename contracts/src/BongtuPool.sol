@@ -30,6 +30,10 @@ contract BongtuPool is Ownable2Step {
     uint256 public constant H = 32; // tree height (2^32 leaf capacity)
     uint256 public immutable B; // disburse batch size (M0 = 16, prod = 256)
     uint256 public immutable LOG_B; // level at which a disburse subtree attaches
+    // §6b v2 enforced disclosure: the ONLY disburse entry point must publish the
+    // FULL ciphertext = 4*B receiver elements ++ the authority envelope. For
+    // B=256 this is 1024 + 1030 = 2054. Precomputed from B in the constructor.
+    uint256 public immutable disburseCiphertextLen;
 
     IPoseidon2 public immutable poseidon;
 
@@ -63,8 +67,11 @@ contract BongtuPool is Ownable2Step {
     mapping(address => bool) public disburseAllowed;
 
     // --- public-signal indices (derived from out/<name>.public.json + .sym) ----
-    // deposit  (3):  [0]=out [1]=oc0 [2]=oc1
-    // withdraw (7):  [0]=out [1]=nf0 [2]=nf1 [3]=root [4]=en0 [5]=en1 [6]=oc0
+    // deposit  (18): [0]=out [1..2]=ecdhPub [3..12]=cipherTextAuthority[10]
+    //                [13..14]=oc [15]=nonce [16..17]=authorityPubKey
+    // withdraw (25): [0]=out [1..2]=ecdhPub [3..15]=cipherTextAuthority[13]
+    //                [16..17]=nf [18]=root [19..20]=enabled [21]=oc0(change)
+    //                [22]=nonce [23..24]=authorityPubKey
     // disburse (10): [0..1]=ecdhPub [2]=disclosureHash [3]=subtreeRoot [4]=nf
     //                [5]=root [6]=enabled [7]=nonce [8..9]=authorityPubKey
     // transfer (36): [0..1]=ecdhPub [2..9]=cipherTexts[2][4]
@@ -74,7 +81,21 @@ contract BongtuPool is Ownable2Step {
     // --- events (all ciphertext copied from verified publicSignals) -----------
     event Appended(uint256 indexed leafIndex, uint256 leaf, uint256 root);
     event SubtreeAppended(uint256 indexed startLeafIndex, uint256 subtreeRoot, uint256 root);
-    event Deposited(uint256 firstLeafIndex, uint256 oc0, uint256 oc1, uint256 amount, uint256 root);
+    // §6b v2: Deposited carries the authority (auditor) envelope so the minted
+    // output notes are decryptable from on-chain data alone. ecdhPublicKey +
+    // encryptionNonce + encryptedValuesForAuthority are copied from the proof's
+    // public signals (the contract injected the arbiter key before verify).
+    event Deposited(
+        uint256 indexed epoch,
+        uint256 firstLeafIndex,
+        uint256 oc0,
+        uint256 oc1,
+        uint256 amount,
+        uint256[2] ecdhPublicKey,
+        uint256[10] encryptedValuesForAuthority,
+        uint256 encryptionNonce,
+        uint256 root
+    );
     event Transferred(
         uint256 indexed epoch,
         uint256[2] nullifiers,
@@ -104,7 +125,18 @@ contract BongtuPool is Ownable2Step {
     ///         (plus `ecdhPublicKey`+`encryptionNonce` from Disbursed) a recipient
     ///         cannot derive its note by trial-decrypt.
     event DisburseCiphertexts(uint256 indexed startLeafIndex, uint256[] receiverCiphertexts);
-    event Withdrawn(uint256[2] nullifiers, uint256 amount, uint256 changeCommitment, uint256 root);
+    // §6b v2: Withdrawn carries the authority (auditor) envelope — the spent
+    // inputs' owner + values/salts and the change note — decryptable on-chain.
+    event Withdrawn(
+        uint256 indexed epoch,
+        uint256[2] nullifiers,
+        uint256 amount,
+        uint256 changeCommitment,
+        uint256[2] ecdhPublicKey,
+        uint256[13] encryptedValuesForAuthority,
+        uint256 encryptionNonce,
+        uint256 root
+    );
     event ArbiterRotated(uint256 indexed epoch, uint256 keyX, uint256 keyY, uint256 activatedBlock);
     event DisburseAllowlist(address indexed account, bool allowed);
 
@@ -121,6 +153,8 @@ contract BongtuPool is Ownable2Step {
     error BatchSizeNotPowerOfTwo(uint256 batchSize);
     error MisalignedInsert();
     error TreeFull();
+    error WrongCiphertextLength(uint256 got, uint256 want);
+    error ZeroOutputCommitment();
 
     // --- reentrancy guard -----------------------------------------------------
     uint256 private _locked = 1;
@@ -158,6 +192,13 @@ contract BongtuPool is Ownable2Step {
         uint256 logB = 0;
         while ((uint256(1) << logB) < _batchSize) logB++;
         LOG_B = logB;
+
+        // §6b v2: authority plaintext = 2 + 2*nInputs(=1) + 4*B = 4 + 4*B;
+        // Poseidon-sponge ct = pad plaintext to a multiple of 3, then +1. The
+        // enforced disburse ciphertext = 4*B receiver elements ++ that envelope.
+        uint256 authPlain = 4 + 4 * _batchSize;
+        uint256 authPad = (3 - (authPlain % 3)) % 3;
+        disburseCiphertextLen = 4 * _batchSize + (authPlain + authPad + 1);
 
         // zeros ladder — identical to ImtTree: zeros[0]=0, zeros[k]=H(z,z).
         zeros[0] = 0;
@@ -213,39 +254,45 @@ contract BongtuPool is Ownable2Step {
     //                               OPERATIONS
     // ==========================================================================
 
-    /// @notice deposit (0-in / 2-out mint): verify, append the two output notes,
-    ///         then pull `out` tokens from the caller (SafeERC20, CEI).
-    function deposit(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[3] calldata pub)
+    /// @notice deposit (0-in / 2-out mint): inject the stored arbiter key into the
+    ///         authority envelope's public key (§6b v2 enforced disclosure — a
+    ///         deposit not encrypted to the current arbiter key FAILS), verify,
+    ///         append the two output notes, then pull `out` tokens (SafeERC20, CEI).
+    function deposit(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[18] calldata pub)
         external
         nonReentrant
         whenInitialized
     {
-        if (!depositVerifier.verifyProof(a, b, c, pub)) revert InvalidProof();
+        uint[18] memory injected = pub;
+        (injected[16], injected[17]) = currentArbiterKey();
+        if (!depositVerifier.verifyProof(a, b, c, injected)) revert InvalidProof();
+
+        uint256 oc0 = pub[13];
+        uint256 oc1 = pub[14];
+        // A zero output commitment is a non-note (self-burn foot-gun); never append it.
+        if (oc0 == 0 || oc1 == 0) revert ZeroOutputCommitment();
 
         uint256 first = nextLeafIndex;
-        _appendLeaf(pub[1]);
-        _appendLeaf(pub[2]);
+        _appendLeaf(oc0);
+        _appendLeaf(oc1);
 
-        emit Deposited(first, pub[1], pub[2], pub[0], root);
+        uint256[10] memory cta;
+        for (uint256 i = 0; i < 10; i++) cta[i] = pub[3 + i];
+        emit Deposited(currentEpoch(), first, oc0, oc1, pub[0], [pub[1], pub[2]], cta, pub[15], root);
         token.safeTransferFrom(msg.sender, address(this), pub[0]);
     }
 
-    /// @notice disburse (1-in / 16-out): pad the frontier to a B boundary and
-    ///         attach the in-circuit subtreeRoot. Caller-gated (§5.3). Contract
-    ///         injects enabled=(nullifier!=0) and the arbiter key from storage.
-    function disburse(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[10] calldata pub)
-        external
-        nonReentrant
-        whenInitialized
-    {
-        _disburseCore(a, b, c, pub);
-    }
-
-    /// @notice Same as `disburse` but also publishes the raw receiver ciphertext
-    ///         bytes on-chain (a `DisburseCiphertexts` event) so a recipient can
-    ///         discover + trial-decrypt its note from chain data alone (SPEC §5.3).
-    ///         The bytes are free calldata bound off-chain by the proof's
-    ///         `disclosureHash` (§4 / §6b); the chain does not re-hash them.
+    /// @notice disburse (1-in / B-out): the ONLY disburse entry point (§6b v2 —
+    ///         the plain, ciphertext-free `disburse()` is removed so publication is
+    ///         enforced on-chain, not by convention). Requires the FULL ciphertext
+    ///         (4*B receiver elements ++ the authority envelope) so a recipient AND
+    ///         the auditor can discover + decrypt from chain data alone. The chain
+    ///         checks LENGTH only (gas ≈ free); content stays bound off-chain by the
+    ///         proof's `disclosureHash` (§4/§6b — 2,054 Poseidons are infeasible to
+    ///         re-hash on-chain). A length-padded junk publish still tx-succeeds but
+    ///         yields a provable `mismatch` alarm + undecryptable notes. Pads the
+    ///         frontier to a B boundary and attaches the in-circuit subtreeRoot;
+    ///         caller-gated (§5.3); injects enabled=1 and the arbiter key (§5.2/§5.3).
     function disburseWithCiphertexts(
         uint[2] calldata a,
         uint[2][2] calldata b,
@@ -253,6 +300,9 @@ contract BongtuPool is Ownable2Step {
         uint[10] calldata pub,
         uint256[] calldata receiverCiphertexts
     ) external nonReentrant whenInitialized {
+        if (receiverCiphertexts.length != disburseCiphertextLen) {
+            revert WrongCiphertextLength(receiverCiphertexts.length, disburseCiphertextLen);
+        }
         uint256 start = _disburseCore(a, b, c, pub);
         emit DisburseCiphertexts(start, receiverCiphertexts);
     }
@@ -307,6 +357,8 @@ contract BongtuPool is Ownable2Step {
         _spendNullifier(pub[26]);
         _spendNullifier(pub[27]);
 
+        // A zero output commitment is a non-note (self-burn foot-gun); never append it.
+        if (pub[31] == 0 || pub[32] == 0) revert ZeroOutputCommitment();
         _appendLeaf(pub[31]);
         _appendLeaf(pub[32]);
 
@@ -329,27 +381,35 @@ contract BongtuPool is Ownable2Step {
         );
     }
 
-    /// @notice withdraw (2-in / 1-out): permissionless (no authority env).
-    ///         Contract injects enabled[i]=(nullifier[i]!=0), spends the real
-    ///         nullifiers, appends the change output, pushes `out` tokens.
-    function withdraw(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[7] calldata pub)
+    /// @notice withdraw (2-in / 1-out): permissionless. Contract injects
+    ///         enabled[i]=(nullifier[i]!=0) (§5.2) AND the stored arbiter key into
+    ///         the authority envelope (§6b v2 — a withdraw not encrypted to the
+    ///         current arbiter key FAILS), spends the real nullifiers, appends the
+    ///         change output, pushes `out` tokens.
+    function withdraw(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[25] calldata pub)
         external
         nonReentrant
         whenInitialized
     {
-        if (!knownRoots[pub[3]]) revert UnknownRoot(pub[3]);
+        if (!knownRoots[pub[18]]) revert UnknownRoot(pub[18]);
 
-        uint[7] memory injected = pub;
-        injected[4] = pub[1] != 0 ? 1 : 0;
-        injected[5] = pub[2] != 0 ? 1 : 0;
+        uint[25] memory injected = pub;
+        injected[19] = pub[16] != 0 ? 1 : 0;
+        injected[20] = pub[17] != 0 ? 1 : 0;
+        (injected[23], injected[24]) = currentArbiterKey();
         if (!withdrawVerifier.verifyProof(a, b, c, injected)) revert InvalidProof();
 
-        _spendNullifier(pub[1]);
-        _spendNullifier(pub[2]);
+        _spendNullifier(pub[16]);
+        _spendNullifier(pub[17]);
 
-        _appendLeaf(pub[6]);
+        uint256 change = pub[21];
+        // A zero output commitment is a non-note (self-burn foot-gun); never append it.
+        if (change == 0) revert ZeroOutputCommitment();
+        _appendLeaf(change);
 
-        emit Withdrawn([pub[1], pub[2]], pub[0], pub[6], root);
+        uint256[13] memory cta;
+        for (uint256 i = 0; i < 13; i++) cta[i] = pub[3 + i];
+        emit Withdrawn(currentEpoch(), [pub[16], pub[17]], pub[0], change, [pub[1], pub[2]], cta, pub[22], root);
         token.safeTransfer(msg.sender, pub[0]);
     }
 

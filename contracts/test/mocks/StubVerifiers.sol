@@ -6,7 +6,7 @@ import {IDepositVerifier, IWithdrawVerifier, IDisburseVerifier, ITransferVerifie
 // Always-accept stubs: the differential test isolates the single-frontier IMT
 // tree logic, whose root correctness is independent of proof validity.
 contract StubDepositVerifier is IDepositVerifier {
-    function verifyProof(uint[2] calldata, uint[2][2] calldata, uint[2] calldata, uint[3] calldata)
+    function verifyProof(uint[2] calldata, uint[2][2] calldata, uint[2] calldata, uint[18] calldata)
         external
         pure
         returns (bool)
@@ -16,7 +16,7 @@ contract StubDepositVerifier is IDepositVerifier {
 }
 
 contract StubWithdrawVerifier is IWithdrawVerifier {
-    function verifyProof(uint[2] calldata, uint[2][2] calldata, uint[2] calldata, uint[7] calldata)
+    function verifyProof(uint[2] calldata, uint[2][2] calldata, uint[2] calldata, uint[25] calldata)
         external
         pure
         returns (bool)

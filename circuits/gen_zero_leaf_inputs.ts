@@ -139,6 +139,11 @@ function genWithdrawZeroLeaf() {
     outputValues: outValues,
     outputSalts: outValues.map((_, i) => salt(i)),
     outputOwnerPublicKeys: owners,
+    // §6b v2 authority envelope inputs (present + valid so witness-gen fails on
+    // the zero-commitment belt, not on a missing input).
+    ecdhPrivateKey: BigInt(ECDH_SK),
+    encryptionNonce: ENCRYPTION_NONCE,
+    authorityPublicKey: AUTHORITY.publicKey,
   };
 }
 

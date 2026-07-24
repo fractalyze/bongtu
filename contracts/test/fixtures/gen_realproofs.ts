@@ -64,11 +64,13 @@ async function main(): Promise<void> {
   const out: Record<string, any> = {};
 
   // --- deposit (mint, no membership) ---------------------------------------
+  // deposit publics (18): [0]=out [1..2]=ecdhPub [3..12]=cipherTextAuthority[10]
+  //                       [13..14]=oc [15]=nonce [16..17]=authorityPubKey
   {
     const cd = await calldata("deposit");
     const t = new ImtTree(H, B);
-    t.appendLeaf(BigInt(cd.pub[1]));
-    t.appendLeaf(BigInt(cd.pub[2]));
+    t.appendLeaf(BigInt(cd.pub[13]));
+    t.appendLeaf(BigInt(cd.pub[14]));
     out.deposit = { ...cd, rootAfter: s(t.getRoot()) };
   }
 
@@ -102,13 +104,16 @@ async function main(): Promise<void> {
   }
 
   // --- withdraw (2-in / 1-out) ---------------------------------------------
+  // withdraw publics (25): [0]=out [1..2]=ecdhPub [3..15]=cipherTextAuthority[13]
+  //   [16..17]=nf [18]=root [19..20]=enabled [21]=oc0(change) [22]=nonce
+  //   [23..24]=authorityPubKey
   {
     const cd = await calldata("withdraw");
     const inC = rd(join(INPUTS, "withdraw.json")).inputCommitments;
-    assertEq(rootAfterAppends(inC), cd.pub[3], "withdraw membership root != pub[3]");
+    assertEq(rootAfterAppends(inC), cd.pub[18], "withdraw membership root != pub[18]");
     const t = new ImtTree(H, B);
     for (const c of inC) t.appendLeaf(BigInt(c));
-    t.appendLeaf(BigInt(cd.pub[6]));
+    t.appendLeaf(BigInt(cd.pub[21]));
     out.withdraw = { ...cd, seedLeaves: inC.map(s), rootAfter: s(t.getRoot()) };
   }
 
@@ -123,18 +128,25 @@ async function main(): Promise<void> {
   {
     const cd = await calldata("withdraw_padded");
     const inC = rd(join(INPUTS, "withdraw_padded.json")).inputCommitments;
-    assertEq(rootAfterAppends(inC), cd.pub[3], "padded membership root != pub[3]");
+    assertEq(rootAfterAppends(inC), cd.pub[18], "padded membership root != pub[18]");
     const t = new ImtTree(H, B);
     for (const c of inC) t.appendLeaf(BigInt(c));
-    t.appendLeaf(BigInt(cd.pub[6]));
+    t.appendLeaf(BigInt(cd.pub[21]));
     out.withdraw_padded = { ...cd, seedLeaves: inC.map(s), rootAfter: s(t.getRoot()) };
   }
 
   // --- arbiter key (authority pubkey the real proofs encrypt to) ------------
-  // disburse pub[8..9] == transfer pub[34..35] == AUTHORITY.publicKey.
+  // Every circuit's authority envelope must encrypt to the SAME key, since the
+  // contract injects one stored arbiter key for ALL verifier calls (a proof made
+  // for a different key FAILS after injection). disburse pub[8..9] == transfer
+  // pub[34..35] == deposit pub[16..17] == withdraw pub[23..24] == AUTHORITY.publicKey.
   out.arbiterKey = [s(out.disburse.pub[8]), s(out.disburse.pub[9])];
   assertEq(out.transfer.pub[34], out.arbiterKey[0], "transfer authX != disburse authX");
   assertEq(out.transfer.pub[35], out.arbiterKey[1], "transfer authY != disburse authY");
+  assertEq(out.deposit.pub[16], out.arbiterKey[0], "deposit authX != disburse authX");
+  assertEq(out.deposit.pub[17], out.arbiterKey[1], "deposit authY != disburse authY");
+  assertEq(out.withdraw.pub[23], out.arbiterKey[0], "withdraw authX != disburse authX");
+  assertEq(out.withdraw.pub[24], out.arbiterKey[1], "withdraw authY != disburse authY");
 
   mkdirSync(HERE, { recursive: true });
   writeFileSync(join(HERE, "realproofs.json"), JSON.stringify(out, null, 2));

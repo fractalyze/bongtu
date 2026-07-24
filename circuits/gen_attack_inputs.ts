@@ -40,6 +40,17 @@ const SENDER = deriveKeypair(
 );
 const receiver = (i: number): Keypair => deriveKeypair(1000000007n + BigInt(i) * 1000003n);
 const salt = (i: number): bigint => 1000000n + BigInt(i);
+// §6b v2 authority-envelope material (matches gen_inputs.ts so withdraw_padded
+// encrypts to the SAME arbiter key the contract injects; the two throwing
+// fixtures still fail on the value-belt, not on a missing-input error).
+const ECDH_SK = 987654321987654321987654321n;
+const AUTHORITY = deriveKeypair(555555555555555555555555n);
+const ENCRYPTION_NONCE = 424242424242n;
+const authEnvelope = {
+  ecdhPrivateKey: BigInt(ECDH_SK),
+  encryptionNonce: ENCRYPTION_NONCE,
+  authorityPublicKey: AUTHORITY.publicKey,
+};
 
 function jsonify(v: unknown): unknown {
   if (typeof v === "bigint") return v.toString();
@@ -115,6 +126,7 @@ function genMint() {
     outputValues: outValues,
     outputSalts: [salt(0)],
     outputOwnerPublicKeys: owners,
+    ...authEnvelope,
   };
 }
 
@@ -143,6 +155,7 @@ function genAttack() {
     outputValues: outValues,
     outputSalts: outValues.map((_, i) => salt(i)),
     outputOwnerPublicKeys: owners,
+    ...authEnvelope,
   };
 }
 
@@ -172,6 +185,7 @@ function genPadded() {
     outputValues: outValues,
     outputSalts: outValues.map((_, i) => salt(i)),
     outputOwnerPublicKeys: owners,
+    ...authEnvelope,
   };
 }
 

@@ -28,7 +28,7 @@ contract Smoke is Script {
         uint[2] a;
         uint[2][2] b;
         uint[2] c;
-        uint[3] pub;
+        uint[18] pub;
     }
 
     function run() external {
@@ -95,6 +95,6 @@ contract Smoke is Script {
         p.a = [av[0], av[1]];
         p.b = [[b0[0], b0[1]], [b1[0], b1[1]]];
         p.c = [cv[0], cv[1]];
-        p.pub = [pv[0], pv[1], pv[2]];
+        for (uint256 i = 0; i < 18; i++) p.pub[i] = pv[i];
     }
 }

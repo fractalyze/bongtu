@@ -120,6 +120,8 @@ async function main(): Promise<void> {
   const recipient = (i: number): Keypair => deriveKeypair(4000000019n + BigInt(i) * 1000003n);
   const RCPTS = Array.from({ length: B }, (_, i) => recipient(i));
   const ECDH = 900000000000000000007n, NONCE = 424242424243n;
+  // §4: reusing one tx's ephemeral key + nonce for a second envelope is a two-time pad.
+  const ECDH_DEP = 610000000000000000011n, NONCE_DEP = 424242424244n;
   const sD0 = 8000001n, sD1 = 8000002n, sR = (i: number): bigint => 9000000n + BigInt(i);
   const amounts = Array.from({ length: B }, (_, i) => 100n + BigInt(i)); // 256 distinct positive
   const V = amounts.reduce((a, x) => a + x, 0n);
@@ -128,8 +130,9 @@ async function main(): Promise<void> {
   step("MIRROR: reconstruct the live GIWA tree and validate against the on-chain root");
   const oracle = new ImtTree(H, B);
   const rp = JSON.parse(readFileSync(join(ROOT, "contracts/test/fixtures/realproofs.json"), "utf8"));
-  oracle.appendLeaf(BigInt(rp.deposit.pub[1]));
-  oracle.appendLeaf(BigInt(rp.deposit.pub[2]));
+  // deposit publics (18): oc0=pub[13], oc1=pub[14] (the smoke deposit's two leaves).
+  oracle.appendLeaf(BigInt(rp.deposit.pub[13]));
+  oracle.appendLeaf(BigInt(rp.deposit.pub[14]));
   const liveRoot0 = (await pool.root()).toString();
   ok(oracle.getRoot().toString() === liveRoot0, `mirror root == live pool.root() (nextLeafIndex ${await pool.nextLeafIndex()})`);
 
@@ -143,6 +146,7 @@ async function main(): Promise<void> {
     const { a, b, c, pub } = await proveSnark("deposit", {
       outputCommitments: [dNoteV, dNote0], outputValues: [V, 0n],
       outputSalts: [sD0, sD1], outputOwnerPublicKeys: [EMPLOYER.publicKey, EMPLOYER.publicKey],
+      ecdhPrivateKey: ECDH_DEP, encryptionNonce: NONCE_DEP, authorityPublicKey: ARBITER,
     });
     ok(BigInt(pub[0]) === V, `deposit out == V (${V})`);
     oracle.appendLeaf(dNoteV); oracle.appendLeaf(dNote0);
@@ -182,8 +186,10 @@ async function main(): Promise<void> {
   ok(disclosureHash(ctFlat, authCt) === BigInt(pub[2]), "recomputed disclosureHash == pub[2] (on-chain ciphertext is the circuit's)");
 
   oracle.attachSubtree(subtreeRoot, outCommits); // pad leaves 4..255 dead, attach 256..511
-  step("SUBMIT disburseWithCiphertexts to GIWA (256*4 ciphertext elements on-chain)");
-  const tx = await pool.disburseWithCiphertexts(a, b, c, pub, ctFlat.map(dec), TX);
+  // §6b v2: the enforced-length disburse publishes the FULL ciphertext
+  // (256*4 receiver ++ authority = 2054 elements) — the contract reverts otherwise.
+  step("SUBMIT disburseWithCiphertexts to GIWA (full ciphertext: receiver ++ authority)");
+  const tx = await pool.disburseWithCiphertexts(a, b, c, pub, [...ctFlat, ...authCt].map(dec), TX);
   const rcpt = await tx.wait();
   ok((await pool.root()).toString() === oracle.getRoot().toString(), "after disburse: pool.root == mirror (256-subtree attached)");
   ok((await pool.nextLeafIndex()).toString() === "512", "after disburse: nextLeafIndex == 512 (pad 4->256 + 256 batch)");

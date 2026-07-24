@@ -75,13 +75,15 @@ contract GasReportTest is Base {
     function _seed(BongtuPool pool, string memory key) internal {
         uint256[] memory seed = vm.parseJsonUintArray(j, string.concat(key, ".seedLeaves"));
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = dummyABC();
-        uint[3] memory pub = [uint256(0), seed[0], seed[1]];
+        uint[18] memory pub;
+        pub[13] = seed[0];
+        pub[14] = seed[1];
         pool.deposit(a, b, c, pub);
     }
 
-    function _pub3(string memory key) internal view returns (uint[3] memory p) {
+    function _pub18(string memory key) internal view returns (uint[18] memory p) {
         uint256[] memory pv = _pub(key);
-        p = [pv[0], pv[1], pv[2]];
+        for (uint256 i = 0; i < 18; i++) p[i] = pv[i];
     }
 
     function _pub10(string memory key) internal view returns (uint[10] memory p) {
@@ -89,9 +91,9 @@ contract GasReportTest is Base {
         for (uint256 i = 0; i < 10; i++) p[i] = pv[i];
     }
 
-    function _pub7(string memory key) internal view returns (uint[7] memory p) {
+    function _pub25(string memory key) internal view returns (uint[25] memory p) {
         uint256[] memory pv = _pub(key);
-        for (uint256 i = 0; i < 7; i++) p[i] = pv[i];
+        for (uint256 i = 0; i < 25; i++) p[i] = pv[i];
     }
 
     function _pub36(string memory key) internal view returns (uint[36] memory p) {
@@ -102,10 +104,10 @@ contract GasReportTest is Base {
     function testGasDeposit() public {
         BongtuPool pool = _freshPool(true);
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".deposit");
-        uint[3] memory pub = _pub3(".deposit");
+        uint[18] memory pub = _pub18(".deposit");
         uint256 g = gasleft();
         pool.deposit(a, b, c, pub);
-        emit log_named_uint("gas deposit (0-in/2-out)", g - gasleft());
+        emit log_named_uint("gas deposit (0-in/2-out, +authority envelope)", g - gasleft());
     }
 
     function testGasTransfer() public {
@@ -122,10 +124,10 @@ contract GasReportTest is Base {
         BongtuPool pool = _freshPool(false);
         _seed(pool, ".withdraw");
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".withdraw");
-        uint[7] memory pub = _pub7(".withdraw");
+        uint[25] memory pub = _pub25(".withdraw");
         uint256 g = gasleft();
         pool.withdraw(a, b, c, pub);
-        emit log_named_uint("gas withdraw (2-in/1-out)", g - gasleft());
+        emit log_named_uint("gas withdraw (2-in/1-out, +authority envelope)", g - gasleft());
     }
 
     function testGasDisburse16() public {
@@ -133,8 +135,9 @@ contract GasReportTest is Base {
         _seed(pool, ".disburse");
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".disburse");
         uint[10] memory pub = _pub10(".disburse");
+        uint256[] memory ct = new uint256[](pool.disburseCiphertextLen());
         uint256 g = gasleft();
-        pool.disburse(a, b, c, pub);
-        emit log_named_uint("gas disburse (1-in/16-out, partial block)", g - gasleft());
+        pool.disburseWithCiphertexts(a, b, c, pub, ct);
+        emit log_named_uint("gas disburse (1-in/16-out, partial block, full ciphertext)", g - gasleft());
     }
 }

@@ -166,10 +166,14 @@ async function main(): Promise<void> {
 
   // fresh ephemeral ECDH key + nonce PER TRANSACTION (SPEC U2->U4 note: never
   // reuse an ephemeral key/nonce across txs — that would be a two-time pad).
+  const ECDH_DEPOSIT = 600000000000000000007n;
   const ECDH_DISBURSE = 700000000000000000001n;
   const ECDH_TRANSFER = 800000000000000000003n;
+  const ECDH_WITHDRAW = 900000000000000000009n;
+  const NONCE_DEPOSIT = 333333333333n;
   const NONCE_DISBURSE = 111111111111n;
   const NONCE_TRANSFER = 222222222222n;
+  const NONCE_WITHDRAW = 444444444444n;
 
   // salts (distinct per note)
   const sD0 = 5000001n, sD1 = 5000002n;
@@ -230,7 +234,13 @@ async function main(): Promise<void> {
       outputCommitments: [dNote0, dNote1],
       outputValues: [V, 0n],
       outputSalts: [sD0, sD1],
-      outputOwnerPublicKeys: [EMPLOYER.publicKey, EMPLOYER.publicKey], // deposit has no ciphertext -> dup owner is fine
+      // deposit has no per-recipient ciphertext (single authority envelope over all
+      // outputs), so dup owner pubkeys are fine (no two-time pad).
+      outputOwnerPublicKeys: [EMPLOYER.publicKey, EMPLOYER.publicKey],
+      // §6b v2 auditor envelope — fresh ephemeral key + nonce for THIS tx.
+      ecdhPrivateKey: ECDH_DEPOSIT,
+      encryptionNonce: NONCE_DEPOSIT,
+      authorityPublicKey: AUTHORITY.publicKey,
     };
     const { a, b, c, pub } = await prove("deposit", input);
     ok(BigInt(pub[0]) === V, `deposit out (pub[0]) == V (${V})`);
@@ -298,7 +308,9 @@ async function main(): Promise<void> {
       "recomputed disclosureHash == proof pub[2] (published ciphertext is the circuit's)");
 
     oracle.attachSubtree(subtreeRoot, outCommits); // pad 2->16 (dead 2..15) + attach 16..31
-    const rcpt = await (await pool.disburseWithCiphertexts(a, b, c, pub, ctFlat.map(dec))).wait();
+    // §6b v2: the ONLY disburse path publishes the FULL ciphertext (receiver ++
+    // authority) — the contract enforces receiverCiphertexts.length == 4*B + authLen.
+    const rcpt = await (await pool.disburseWithCiphertexts(a, b, c, pub, [...ctFlat, ...authCt].map(dec))).wait();
     await matchRoot("after disburse(pad+attach 16)");
     ok(await pool.nullifierUsed(dec(nfDepositV)), "disburse marked the deposit-note nullifier");
 
@@ -311,7 +323,8 @@ async function main(): Promise<void> {
       if (ev.name === "Disbursed") { disbEcdhPub = [ev.args.ecdhPublicKey[0].toBigInt(), ev.args.ecdhPublicKey[1].toBigInt()]; disbNonce = ev.args.encryptionNonce.toBigInt(); sawDisb = true; }
     }
     ok(sawCt && sawDisb, "disburse emitted DisburseCiphertexts + Disbursed events");
-    ok(disbCtFlat.length === B * 4, `event carries ${B}*4=${B * 4} receiver ciphertext elements`);
+    ok(disbCtFlat.length === B * 4 + authCt.length,
+      `event carries ${B}*4 receiver + ${authCt.length} authority ciphertext elements`);
   }
 
   // ==================== TRIAL-DECRYPT (recipient #0, genuine) ==============
@@ -406,6 +419,10 @@ async function main(): Promise<void> {
       outputValues: [0n], // withdraw the FULL change value
       outputSalts: [sRes],
       outputOwnerPublicKeys: [R0.publicKey],
+      // §6b v2 auditor envelope — fresh ephemeral key + nonce for THIS tx.
+      ecdhPrivateKey: ECDH_WITHDRAW,
+      encryptionNonce: NONCE_WITHDRAW,
+      authorityPublicKey: AUTHORITY.publicKey,
     };
     const { a, b, c, pub } = await prove("withdraw", input);
     withdrawnAmount = BigInt(pub[0]);
