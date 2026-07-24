@@ -5,6 +5,8 @@
     "sdk/src/**/*.ts",
     "deploy/**/*.ts",
     "circuits/**/*.ts",
-    "contracts/test/fixtures/**/*.ts"
+    "contracts/test/fixtures/**/*.ts",
+    "indexer/src/**/*.ts",
+    "indexer/test/**/*.ts"
   ]
 }

@@ -263,6 +263,23 @@ public app depends on it for UX. Contract:
   non-repudiation more than detect-only (§4 disburse note).
 - "Instant balance" holds at PoC scale: client work is linear in total slices.
 
+> **§6b addendum (2026-07-24, indexer-core built + adversarially reviewed).**
+> - **Alarm classes.** Every disclosure that does not fully check out surfaces on `GET /alarms`:
+>   `mismatch` (proven tamper), `unverifiable` (receiver-only publication — the chain covers
+>   receiver ++ authority, so it can never complete; this is the live GIWA disburse's flavor), and
+>   `withheld` (plain `disburse()`, nothing published). Receiver-only/withheld are auditor-policy
+>   judgments, not proven tampers — full alarm coverage requires emitting receiver ++ authority
+>   ciphertext, as the conformance scenario's honest disburse does.
+> - **Within-batch merkle paths** are structurally unservable from public chain data (only the
+>   `subtreeRoot` is emitted; sibling commitments are encrypted to other recipients):
+>   `/path/<batch-leaf>` → 422 by design (§11-7). A disburse recipient therefore spends via (a) the
+>   employer's own records, or (b) the **deferred arbiter-mode indexer unit**, which decrypts the
+>   authority envelope (it carries every recipient's `(pubkey, value, salt)`) and can serve both
+>   batch paths and a per-user note directory — `GET /notes?owner=<bjj-pubkey>` (note-query decision
+>   2026-07-24: auditor-key indexer; viewing-key separation deferred, outside bongtu's trust model).
+>   Both capabilities require the authority envelope to actually be published on-chain. The
+>   auditor-free alternative is publishing the B output commitments (~8 KB calldata at B=256).
+
 ---
 
 ## 7. Apps (2, admin is role-moded)
