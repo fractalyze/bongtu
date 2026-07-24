@@ -30,6 +30,10 @@ $SNARKJS groth16 verify out/<name>.vkey.json public.json proof.json           # 
 
 ## Reusable sources (read, don't reinvent)
 
+- ⚠ **Provenance (see `docs/zeto-derivation.md`):** `check-imt-proof.circom`,
+  `anon_enc_nullifier_non_repudiation_imt_base.circom`, and `run_nonrep_imt_256.circom` are **NOT upstream
+  Zeto** — they are git-untracked project-authored files living in the zeto checkout. Unit 0 vendors them
+  into `bongtu/circuits/lib/` with provenance headers; until then a fresh zeto clone will not build.
 - Circuits to vendor/adapt: `../zeto/zkp/circuits/lib/check-imt-proof.circom` (IMT membership, index-keyed,
   enabled-gated), `.../basetokens/anon_enc_nullifier_non_repudiation_imt_base.circom` (256 base — the small
   transfer base is derived from this), `.../lib/check-nullifiers-value-base.circom` (withdraw SMT→IMT rebase

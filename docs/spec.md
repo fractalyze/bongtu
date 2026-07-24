@@ -186,6 +186,23 @@ value still counts → **mint-from-nothing**. Fix, applied to **every** verifier
   unsatisfiable at witness-gen; a forgery test that only tries `nullifier≠0, enabled=0` misses it.
   (Knowledge: `zeto-enabled-flag-must-be-contract-derived-from-nullifier`.)
 
+> **★ 5.2 CRITICAL correction (2026-07-24, Zeto-derivation audit + 3/3 adversarial verify).** The belt above
+> is still **insufficient** — it closes only the `enabled=0` case. A second, distinct mint-from-nothing
+> survives at `enabled=1`, introduced by our SMT→IMT swap: `CheckHashes`' zero-commitment escape is sound in
+> stock Zeto only because its **value-keyed SMT** makes `commitment==0` structurally un-provable as a member.
+> Our **index-keyed IMT** commits `zeros[0]=0` at every position ahead of the frontier and at every disburse
+> pad slot, so **0 is a genuine, membership-provable leaf**. An attacker spends a padded 0-leaf declaring
+> arbitrary value X (CheckHashes escapes → value unbound; fresh nullifier → `enabled=1`; membership holds;
+> belt vacuous at `enabled=1`; `out=X`) — a **permissionless `withdraw`/`transfer` drain**, repeatable. No
+> real funds (testnet, mock kKRW), but the contract is unsound. **REQUIRED additional belt, every spending
+> base including `disburse`:** `enabled[i] * IsZero(inputCommitment[i]) === 0` (a zero-commitment input can
+> never be enabled) — restoring the SMT's implicit invariant explicitly. `disburse` IS in scope here (its
+> single input is `enabled=1`, so it is exploitable by a malicious/compromised discloser); adding the belt
+> changes its r1cs, so the **1.24 GB disburse-256 zkey is regenerated** (byte-identity reuse retired).
+> Mandatory regression: the 0-leaf-spend witness must be unsatisfiable at witness-gen AND revert on-chain.
+> Rationale + full trace: [[imt-membership-breaks-zeto-zero-commitment-escape]]; provenance in
+> `docs/zeto-derivation.md`.
+
 ### 5.3 Roots, nullifiers, custody, arbiter, events
 
 - **Known roots:** adopt the upstream policy — `mapping(uint256 root => bool)` recording **every** historical
@@ -279,6 +296,29 @@ public app depends on it for UX. Contract:
 >   2026-07-24: auditor-key indexer; viewing-key separation deferred, outside bongtu's trust model).
 >   Both capabilities require the authority envelope to actually be published on-chain. The
 >   auditor-free alternative is publishing the B output commitments (~8 KB calldata at B=256).
+
+> **★ §6b v2 — enforced auditor disclosure (2026-07-24, grill-locked; ships in Unit 0 redeploy).** The
+> product name is "enforced auditor disclosure", so **every note's creation and destruction must be
+> auditor-openable from on-chain data alone** — a convention + off-chain alarm is not enough, a malicious
+> employer could still withhold. Decisions:
+> - **All four operations emit an authority envelope**, encrypted to the arbiter key inside the proof
+>   (contract injects the stored arbiter key → wrong-key or no encryption ⇒ proof fails). Today only
+>   transfer/disburse do. **Add in-circuit authority envelopes to `deposit`** (outputs: `(ownerPub, value,
+>   salt)` ×2 → 10 ct elements) **and `withdraw`** (inputs `(ownerPub, value, salt)` + change → 13 ct
+>   elements), emitted in `Deposited`/`Withdrawn`. This also closes the deposit blind spot where an employer
+>   could hand value to an employee via a deposit output the auditor never sees. Supersedes the §11-1 gap.
+> - **disburse publication is enforced on-chain, not by convention.** `plain disburse()` is **removed**;
+>   the only entry point requires `receiverCiphertexts.length == 4·B + (authority envelope length)` — for
+>   B=256 that is `1024 + 1030 = 2054` elements (matching §4's "2,054 Poseidons"). The chain checks **length
+>   only** (gas ≈ free); content stays bound by `disclosureHash` (indexer-verified, §11-6). A length-padded
+>   junk publish still tx-succeeds but yields a provable `mismatch` alarm + undecryptable receiver notes.
+> - **`GET /notes?owner=<bjj-pubkey>` is authenticated by a bjj signature** (`sign(ownerPubKey ‖ timestamp)`;
+>   the indexer verifies against the queried pubkey) so only the key owner reads their own notes — the
+>   auditor-key indexer sees all users, so an unauthenticated `/notes` would expose everyone's payroll.
+>   Auth is SPEC'd here; **implementation deferred** to a follow-up (v1 ships `/notes` without it, documented).
+> - Because deposit/withdraw circuits change (envelopes) and every spending base gains the §5.2 zero-leaf
+>   belt, **all four verifiers + the disburse-256 zkey are regenerated** and the pool is redeployed behind a
+>   **UUPS (ERC-1967) proxy** (last forced redeploy; see `docs/zeto-derivation.md`).
 
 ---
 

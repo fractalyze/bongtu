@@ -74,6 +74,8 @@ Copy `.env.example` → `.env` (gitignored) for a funded GIWA deployer key. Tool
   O(log B) partial-block fix, deploy pipeline evidence.
 - [Toolchain](docs/toolchain.md) — the exact circom/snarkjs/ptau/forge invocations and paths that build and
   prove everything.
+- [Zeto derivation](docs/zeto-derivation.md) — which Zeto flavor bongtu uses, per-file circuit provenance, the
+  deliberate modifications, and the SMT→IMT soundness finding (why Unit 0 redeploys).
 - [Deploy](deploy/README.md) — the reusable B=256 stack deploy: env config, local anvil gate, live GIWA runbook.
 - [Third-party notices](THIRD_PARTY_NOTICES.md) — dependency licenses and how GPL build tools stay un-bundled.
 
