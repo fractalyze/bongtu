@@ -25,6 +25,8 @@
 
 import { poseidon2, poseidonN } from "../../sdk/src/poseidon.js";
 import { ecdhSharedSecret, poseidonDecrypt } from "../../sdk/src/note.js";
+import { packPubkey } from "../../sdk/src/pubkey.js";
+import { signNotesAuth, notesAuthMessage, packSignature } from "../../sdk/src/eddsa.js";
 import { ImtTree } from "../../sdk/src/imt.js";
 import { Indexer } from "../src/ingest.js";
 import { startApi } from "../src/api/router.js";
@@ -61,7 +63,20 @@ async function get(base: string, path: string): Promise<{ status: number; body: 
 async function runArbiter(sc: any): Promise<void> {
   const r0 = sc.recipient0Note;
   const pay = sc.payeeNote;
-  const ownerQ = (o: [string, string]): string => `/notes?owner=${o[0]},${o[1]}`;
+  // A /notes request is now AUTHENTICATED (SPEC §6b v2): owner is the COMPRESSED
+  // pubkey, plus a fresh unix ts and a bjj EdDSA-Poseidon sig over
+  // Poseidon(ownerPub.x, ownerPub.y, ts). `signPriv` is decoupled from `owner` so a
+  // test can sign the owner-bound message with a DIFFERENT key (the wrong-key attack).
+  const authedQ = (
+    owner: [string, string],
+    signPriv: string,
+    ts: number = Math.floor(Date.now() / 1000),
+  ): string => {
+    const pub: [bigint, bigint] = [BigInt(owner[0]), BigInt(owner[1])];
+    const compressed = packPubkey(pub);
+    const sig = packSignature(signNotesAuth(BigInt(signPriv), notesAuthMessage(pub, ts)));
+    return `/notes?owner=${compressed}&ts=${ts}&sig=${sig}`;
+  };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const noteAt = (list: any[], leafIndex: number) => list.find((n) => n.leafIndex === leafIndex);
 
@@ -74,9 +89,10 @@ async function runArbiter(sc: any): Promise<void> {
   const abase = `http://127.0.0.1:${aapi.port}`;
   try {
     // recipient #0's disburse-batch note is present, unspent, decrypted from the
-    // authority envelope alone (right value/salt/leafIndex).
-    const n1 = await get(abase, ownerQ(r0.owner));
-    ok(n1.status === 200, "GET /notes (recipient#0) 200 (arbiter)");
+    // authority envelope alone (right value/salt/leafIndex). The request is signed
+    // by recipient #0 (compressed owner + fresh ts + valid sig).
+    const n1 = await get(abase, authedQ(r0.owner, sc.recipient0PrivateKey));
+    ok(n1.status === 200, "GET /notes (recipient#0, signed) 200 (arbiter)");
     const note1 = noteAt(n1.body as unknown[], r0.leafIndex);
     ok(!!note1, `recipient#0 /notes lists its batch note @${r0.leafIndex}`);
     ok(note1.value === r0.value, `note value == disbursed amount (${r0.value})`);
@@ -88,20 +104,38 @@ async function runArbiter(sc: any): Promise<void> {
     await aix.ingest(sc.blockAfterHonestDisburse + 1);
 
     // Same note now reads spent=true — from the transfer's INPUT envelope, no key.
-    const n2 = await get(abase, ownerQ(r0.owner));
+    const n2 = await get(abase, authedQ(r0.owner, sc.recipient0PrivateKey));
     const note2 = noteAt(n2.body as unknown[], r0.leafIndex);
     ok(!!note2 && note2.spent === true, `recipient#0 batch note @${r0.leafIndex} now spent == true (after transfer)`);
 
-    // The payee's transfer output note is present + unspent.
-    const np = await get(abase, ownerQ(pay.owner));
-    ok(np.status === 200, "GET /notes (payee) 200");
+    // The payee's transfer output note is present + unspent (signed by the payee).
+    const np = await get(abase, authedQ(pay.owner, sc.payeePrivateKey));
+    ok(np.status === 200, "GET /notes (payee, signed) 200");
     const notep = noteAt(np.body as unknown[], pay.leafIndex);
     ok(!!notep, `payee /notes lists its transfer note @${pay.leafIndex}`);
     ok(notep.value === pay.value && notep.spent === false, `payee note value == ${pay.value}, spent == false`);
 
-    // /notes header documents the deferred auth (v1 serves unauthenticated).
-    const rawNotes = await fetch(abase + ownerQ(r0.owner));
-    ok(!!rawNotes.headers.get("x-bongtu-auth"), "/notes response carries the deferred-auth header");
+    // /notes header documents that auth is now ENFORCED.
+    const rawNotes = await fetch(abase + authedQ(r0.owner, sc.recipient0PrivateKey));
+    const authHdr = rawNotes.headers.get("x-bongtu-auth");
+    ok(!!authHdr && /ENFORCED/.test(authHdr), "/notes response carries the ENFORCED-auth header");
+
+    // ---- AUTH GATES (SPEC §6b v2): compressed owner + bjj-sig + ts window ----
+    step("ARBITER /notes AUTH — valid 200, wrong-key 401, expired-ts 401, malformed owner 400");
+    const now = Math.floor(Date.now() / 1000);
+    // (a) a correctly-signed, fresh request returns the owner's notes.
+    const authOk = await get(abase, authedQ(r0.owner, sc.recipient0PrivateKey, now));
+    ok(authOk.status === 200, "signed /notes (recipient#0, fresh ts) → 200");
+    ok(!!noteAt(authOk.body as unknown[], r0.leafIndex), "authenticated response contains recipient#0's note");
+    // (b) a signature by the WRONG key over the recipient#0-bound message → 401.
+    const wrongKey = await get(abase, authedQ(r0.owner, sc.payeePrivateKey, now));
+    ok(wrongKey.status === 401, "wrong-key signature over recipient#0's owner → 401");
+    // (c) a valid signature but an EXPIRED ts (outside the 300s window) → 401.
+    const expired = await get(abase, authedQ(r0.owner, sc.recipient0PrivateKey, now - 400));
+    ok(expired.status === 401, "valid sig but ts 400s in the past → 401 (replay window)");
+    // (d) a malformed compressed owner → 400 (before any auth check).
+    const malformed = await get(abase, `/notes?owner=abc&ts=${now}&sig=0x00`);
+    ok(malformed.status === 400, "malformed compressed owner → 400");
 
     // ARBITER /path into the disburse batch now serves a REAL path folding to root.
     step("ARBITER /path — within-batch leaf now servable (ledger filled the batch)");
@@ -119,9 +153,9 @@ async function runArbiter(sc: any): Promise<void> {
     const nfSet = new Set(nf.body as string[]);
     for (const x of sc.spentNullifiers as string[]) ok(nfSet.has(x), `/nullifiers contains ${x.slice(0, 12)}…`);
 
-    // bad /notes params are refused.
-    const bad = await get(abase, "/notes?owner=abc");
-    ok(bad.status === 400, "GET /notes?owner=abc → 400 (needs two field elements)");
+    // Distinct 400 branch from the malformed-owner case: auth params are mandatory.
+    const noAuth = await get(abase, `/notes?owner=${packPubkey([BigInt(r0.owner[0]), BigInt(r0.owner[1])])}`);
+    ok(noAuth.status === 400, "GET /notes with owner but no ts/sig → 400 (auth params required)");
   } finally {
     await aapi.stop();
   }

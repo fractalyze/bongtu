@@ -284,13 +284,17 @@ public app depends on it for UX. Contract:
 **Two modes.** *Public mode* (no key) serves only public chain data. *Arbiter mode* (the indexer holds the
 `AUTHORITY_KEY`) additionally decrypts every op's authority envelope into a per-owner note directory and
 serves:
-- `GET /notes?owner=<x,y>` → that owner's notes `[{value, salt, leafIndex, commitment, txHash, spent}]` —
-  the user reads their own notes directly (no full-feed trial-decrypt). `spent` is derived from envelopes
-  alone (a spending op's input envelope names the consumed note), needing no owner key or nullifier linkage.
-  **Auth: bjj-signature check `sign(ownerPubKey ‖ timestamp)` is SPEC'd but DEFERRED** — v1 serves
-  unauthenticated, so `/notes` is an institution-internal endpoint until it lands (owner pubkeys aren't
-  secret; anyone reaching the indexer could otherwise read any owner). Viewing-key separation (Zcash IVK) is
-  out of bongtu's trust model and not built.
+- `GET /notes?owner=<compressed>&ts=&sig=` → that owner's notes `[{value, salt, leafIndex, commitment,
+  txHash, spent}]` — the user reads their own notes directly (no full-feed trial-decrypt). `spent` is
+  derived from envelopes alone (a spending op's input envelope names the consumed note), needing no owner
+  key or nullifier linkage. `owner` is the **compressed bjj pubkey** — a 32-byte hex string (little-endian
+  y, top bit = LSB of x; `sdk/pubkey.ts` pack/unpack), not a raw `x,y` decimal pair.
+  **Auth: IMPLEMENTED** (`indexer/src/api/routes/notes.ts`). A caller proves control of the queried key with
+  a bjj EdDSA-Poseidon signature (`sdk/eddsa.ts`) over `Poseidon(ownerPub.x, ownerPub.y, ts)`, checked
+  against the queried pubkey; the request is refused unless `|now − ts| ≤ 300s` (replay-bounded) **and** the
+  signature verifies. Malformed owner → 400; wrong key or expired ts → 401. The auditor-key indexer still
+  holds every user's decrypted notes by design (that is the disclosure model) — auth governs *who may query*,
+  not what the arbiter sees. Viewing-key separation (Zcash IVK) is out of bongtu's trust model and not built.
 - within-batch `GET /path/{leafIndex}` — the arbiter recomputes the B batch commitments from the decrypted
   notes, fills them into the mirror, and serves a real path that folds to root.
 
@@ -333,10 +337,13 @@ serves:
 >   B=256 that is `1024 + 1030 = 2054` elements (matching §4's "2,054 Poseidons"). The chain checks **length
 >   only** (gas ≈ free); content stays bound by `disclosureHash` (indexer-verified, §11-6). A length-padded
 >   junk publish still tx-succeeds but yields a provable `mismatch` alarm + undecryptable receiver notes.
-> - **`GET /notes?owner=<bjj-pubkey>` is authenticated by a bjj signature** (`sign(ownerPubKey ‖ timestamp)`;
->   the indexer verifies against the queried pubkey) so only the key owner reads their own notes — the
->   auditor-key indexer sees all users, so an unauthenticated `/notes` would expose everyone's payroll.
->   Auth is SPEC'd here; **implementation deferred** to a follow-up (v1 ships `/notes` without it, documented).
+> - **`GET /notes?owner=<compressed-bjj-pubkey>` is authenticated by a bjj signature** (`sign(ownerPubKey ‖
+>   timestamp)`; the indexer checks it against the queried pubkey) so only the key owner reads their own
+>   notes — the auditor-key indexer sees all users, so an unauthenticated `/notes` would expose everyone's
+>   payroll. **IMPLEMENTED** (2026-07-24): owner is the compressed pubkey (`sdk/pubkey.ts`), the signature is
+>   EdDSA-Poseidon over `Poseidon(ownerPub.x, ownerPub.y, ts)` (`sdk/eddsa.ts`), and the route enforces a
+>   ±300s replay window plus signature verification (wrong key / expired ts → 401, malformed owner → 400).
+>   The arbiter still sees all notes by design; auth governs *who may query*.
 > - Because deposit/withdraw circuits change (envelopes) and every spending base gains the §5.2 zero-leaf
 >   belt, **all four verifiers + the disburse-256 zkey are regenerated** and the pool is redeployed behind a
 >   **UUPS (ERC-1967) proxy** (last forced redeploy; see `docs/zeto-derivation.md`).

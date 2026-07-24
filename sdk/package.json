@@ -9,7 +9,9 @@
     "./poseidon": "./src/poseidon.ts",
     "./imt": "./src/imt.ts",
     "./babyjub": "./src/babyjub.ts",
-    "./note": "./src/note.ts"
+    "./note": "./src/note.ts",
+    "./pubkey": "./src/pubkey.ts",
+    "./eddsa": "./src/eddsa.ts"
   },
   "scripts": {
     "test": "tsx --test test/*.test.ts",

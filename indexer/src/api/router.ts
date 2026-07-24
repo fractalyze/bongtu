@@ -49,7 +49,7 @@ export interface RouteContext {
 export interface RouteResult {
   status: number;
   body: unknown;
-  headers?: Record<string, string>; // merged over the JSON content-type (e.g. /notes deferred-auth notice)
+  headers?: Record<string, string>; // merged over the JSON content-type (e.g. /notes enforced-auth notice)
 }
 /** One endpoint: matched by (method, pattern), served by a pure `handle`. */
 export interface Route {

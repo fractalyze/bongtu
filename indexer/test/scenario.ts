@@ -148,7 +148,9 @@ export interface ScenarioResult {
   arbiterPrivateKey: string; // decimal — the AUTHORITY keypair's private scalar
   blockAfterHonestDisburse: number; // block height after disburse#1, BEFORE the transfer
   recipient0Note: ArbiterNote; // recipient #0's disburse-batch note (spent by the transfer)
+  recipient0PrivateKey: string; // decimal — TEST-ONLY: recipient #0 signs its own /notes auth
   payeeNote: ArbiterNote; // the payee's transfer output note (created by the transfer)
+  payeePrivateKey: string; // decimal — TEST-ONLY: the payee signs its own /notes auth
   spentNullifiers: string[]; // decimal — the real (nonzero) nullifiers this run produces
 }
 
@@ -363,12 +365,14 @@ export async function runScenario(): Promise<ScenarioResult> {
       value: dec(recoveredValue0),
       salt: dec(recoveredSalt0),
     },
+    recipient0PrivateKey: dec(RCPTS[0].formattedPrivateKey),
     payeeNote: {
       owner: [dec(PAYEE.publicKey[0]), dec(PAYEE.publicKey[1])],
       leafIndex: payLeaf, // 32 — created by the transfer
       value: dec(payVal),
       salt: dec(sPay),
     },
+    payeePrivateKey: dec(PAYEE.formattedPrivateKey),
     // Real (nonzero) nullifiers, in spend order: deposit note(V)@0 (disburse#1),
     // recipient0 batch note @16 (transfer), change @33 (withdraw), note(0)@1
     // (tampered disburse#2). Transfer/withdraw pad inputs have nullifier 0 (skipped).

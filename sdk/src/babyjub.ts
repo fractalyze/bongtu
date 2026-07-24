@@ -27,8 +27,10 @@ export type PointInput = readonly [FieldInput, FieldInput];
 export const P =
   21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 
-const A = 168700n;
-const D = 168696n;
+// Twisted-Edwards curve constants (circomlib convention). Exported so the point
+// (de)compression in pubkey.ts recovers x from y off the SAME curve equation.
+export const A = 168700n;
+export const D = 168696n;
 
 // Standard BabyJubJub base point (matches circomlib BabyPbk's BASE8).
 export const Base8: Point = [
