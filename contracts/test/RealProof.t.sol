@@ -52,9 +52,9 @@ contract RealProofTest is Base {
             IWithdrawVerifier(address(new WithdrawVerifier())),
             IDisburseVerifier(address(new DisburseVerifier())),
             ITransferVerifier(address(new TransferVerifier())),
-            IERC20(address(token))
+            IERC20(address(token)),
+            arbiterKey
         );
-        pool.initialize(arbiterKey);
         token.mint(address(pool), 1_000_000);
         token.mint(address(this), 1_000_000);
         token.approve(address(pool), type(uint256).max);
@@ -367,16 +367,11 @@ contract RealProofTest is Base {
     }
 
     /// Operations revert NotInitialized until initialize() seeds arbiter epoch 0.
+    /// The pool sits behind a UUPS proxy deployed with EMPTY init data, so it is
+    /// live-but-uninitialized; `whenInitialized` (which runs before nonReentrant)
+    /// is what rejects the call.
     function testNotInitializedReverts() public {
-        token = new MockERC20();
-        BongtuPool pool = deployPool(
-            poseidon,
-            IDepositVerifier(address(new StubDepositVerifier())),
-            IWithdrawVerifier(address(new WithdrawVerifier())),
-            IDisburseVerifier(address(new DisburseVerifier())),
-            ITransferVerifier(address(new TransferVerifier())),
-            IERC20(address(token))
-        ); // no initialize()
+        BongtuPool pool = deployUninitializedPool();
 
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = dummyABC();
         uint[18] memory pub;

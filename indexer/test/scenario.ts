@@ -85,6 +85,18 @@ async function deploy(wallet: any, sol: string, contract: string, args: unknown[
   return inst;
 }
 
+// Deploy BongtuPool behind a UUPS ERC-1967 proxy (SPEC §5.2), initialized in the
+// proxy constructor with the 8-arg initializer. Returns a contract bound to the
+// BongtuPool ABI at the PROXY address (the canonical, upgrade-stable pool).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function deployPoolProxy(wallet: any, initArgs: unknown[]): Promise<any> {
+  const impl = await deploy(wallet, "BongtuPool", "BongtuPool");
+  const { abi: poolAbi } = artifact("BongtuPool", "BongtuPool");
+  const initData = new ethers.utils.Interface(poolAbi).encodeFunctionData("initialize", initArgs);
+  const proxy = await deploy(wallet, "ERC1967Proxy", "ERC1967Proxy", [impl.address, initData]);
+  return new ethers.Contract(proxy.address, poolAbi, wallet);
+}
+
 /** The disburse authority (non-repudiation) envelope plaintext (SPEC §4). */
 function authorityPlain(
   inPub: readonly [bigint, bigint], inVal: bigint, inSalt: bigint,
@@ -169,10 +181,10 @@ export async function runScenario(): Promise<ScenarioResult> {
   const dsv = await deploy(wallet, "DisburseVerifier", "DisburseVerifier");
   const tv = await deploy(wallet, "TransferVerifier", "TransferVerifier");
   const token = await deploy(wallet, "MockERC20", "MockERC20");
-  const pool = await deploy(wallet, "BongtuPool", "BongtuPool", [
+  const pool = await deployPoolProxy(wallet, [
     poseidon.address, dv.address, wv.address, dsv.address, tv.address, token.address, B,
+    [dec(AUTHORITY.publicKey[0]), dec(AUTHORITY.publicKey[1])],
   ]);
-  await (await pool.initialize([dec(AUTHORITY.publicKey[0]), dec(AUTHORITY.publicKey[1])])).wait();
   await (await token.mint(employerAddr, dec(V * 1000n))).wait();
   await (await token.approve(pool.address, ethers.constants.MaxUint256)).wait();
 

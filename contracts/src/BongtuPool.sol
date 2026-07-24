@@ -5,7 +5,9 @@ import {IPoseidon2} from "./interfaces/IPoseidon2.sol";
 import {IDepositVerifier, IWithdrawVerifier, IDisburseVerifier, ITransferVerifier} from "./interfaces/IVerifiers.sol";
 import {IERC20} from "./utils/IERC20.sol";
 import {SafeERC20} from "./utils/SafeERC20.sol";
-import {Ownable2Step} from "./utils/Ownable2Step.sol";
+import {Ownable2StepUpgradeable} from "./utils/Ownable2StepUpgradeable.sol";
+import {Initializable} from "./utils/proxy/Initializable.sol";
+import {UUPSUpgradeable} from "./utils/proxy/UUPSUpgradeable.sol";
 
 /// @title BongtuPool — unified single-frontier IMT shielded pool (SPEC §5).
 ///
@@ -23,35 +25,45 @@ import {Ownable2Step} from "./utils/Ownable2Step.sol";
 /// `enabled` and the authority key are NEVER read from calldata. A proof made
 /// with `enabled=0` on a value-carrying (nonzero-nullifier) input therefore
 /// fails verification (mint-from-nothing is closed).
-contract BongtuPool is Ownable2Step {
+///
+/// Lifecycle (SPEC §5.2, `docs/zeto-derivation.md` "Upgradeability"): the pool is
+/// deployed behind a **UUPS (ERC-1967) proxy** so a future circuit/verifier change
+/// ships as an `upgradeToAndCall` — preserving the pool address + the whole IMT
+/// tree state — instead of a forced redeploy. Every former immutable/constructor
+/// value is set once in {initialize}; the implementation constructor only calls
+/// `_disableInitializers()` so a bare impl can never be initialized/hijacked.
+contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     using SafeERC20 for IERC20;
 
     // --- IMT (single-frontier, Poseidon-v1) -----------------------------------
+    // Everything below was `immutable` in the pre-proxy pool; behind a proxy the
+    // implementation constructor never runs against the proxy's storage, so these
+    // are now regular storage, set exactly once in {initialize}.
     uint256 public constant H = 32; // tree height (2^32 leaf capacity)
-    uint256 public immutable B; // disburse batch size (M0 = 16, prod = 256)
-    uint256 public immutable LOG_B; // level at which a disburse subtree attaches
+    uint256 public B; // disburse batch size (M0 = 16, prod = 256)
+    uint256 public LOG_B; // level at which a disburse subtree attaches
     // §6b v2 enforced disclosure: the ONLY disburse entry point must publish the
     // FULL ciphertext = 4*B receiver elements ++ the authority envelope. For
-    // B=256 this is 1024 + 1030 = 2054. Precomputed from B in the constructor.
-    uint256 public immutable disburseCiphertextLen;
+    // B=256 this is 1024 + 1030 = 2054. Precomputed from B in {initialize}.
+    uint256 public disburseCiphertextLen;
 
-    IPoseidon2 public immutable poseidon;
+    IPoseidon2 public poseidon;
 
     uint256[33] public zeros; // zeros[0]=0, zeros[k]=H(zeros[k-1],zeros[k-1]); k in 0..H
     uint256[32] public filledSubtrees; // Tornado frontier, level 0..H-1
     uint256 public root;
     uint256 public nextLeafIndex;
 
-    // --- verifiers (immutable per pool; a circuit change ships via new impl) ---
-    IDepositVerifier public immutable depositVerifier;
-    IWithdrawVerifier public immutable withdrawVerifier;
-    IDisburseVerifier public immutable disburseVerifier;
-    ITransferVerifier public immutable transferVerifier;
+    // --- verifiers (fixed per impl; a circuit change ships via a UUPS upgrade) -
+    IDepositVerifier public depositVerifier;
+    IWithdrawVerifier public withdrawVerifier;
+    IDisburseVerifier public disburseVerifier;
+    ITransferVerifier public transferVerifier;
 
     // --- roots / nullifiers / custody -----------------------------------------
     mapping(uint256 => bool) public knownRoots; // §5.3 any-historical-root (no ring)
     mapping(uint256 => bool) public nullifierUsed;
-    IERC20 public immutable token;
+    IERC20 public token;
 
     // --- arbiter epochs (§5.3) -------------------------------------------------
     struct ArbiterEpoch {
@@ -141,7 +153,7 @@ contract BongtuPool is Ownable2Step {
     event DisburseAllowlist(address indexed account, bool allowed);
 
     // --- errors ---------------------------------------------------------------
-    error AlreadyInitialized();
+    // (re-init reverts via Initializable.InvalidInitialization, not a local error)
     error NotInitialized();
     error ZeroArbiterKey();
     error UnknownRoot(uint256 root);
@@ -157,6 +169,9 @@ contract BongtuPool is Ownable2Step {
     error ZeroOutputCommitment();
 
     // --- reentrancy guard -----------------------------------------------------
+    // Behind a proxy the inline default does not reach the proxy's storage, so
+    // {initialize} also arms `_locked = 1`; `whenInitialized` runs before
+    // `nonReentrant` on every op so a pre-init call reverts NotInitialized.
     uint256 private _locked = 1;
 
     modifier nonReentrant() {
@@ -171,16 +186,44 @@ contract BongtuPool is Ownable2Step {
         _;
     }
 
-    constructor(
+    /// @dev The implementation constructor only locks the bare impl (a UUPS impl
+    ///      must never be initializable on its own — that is the classic
+    ///      implementation-takeover footgun). ALL former constructor state now
+    ///      lives in {initialize}, run exactly once through the proxy.
+    constructor() {
+        _disableInitializers();
+    }
+
+    /// @notice One-shot initializer, run through the ERC-1967 proxy (SPEC §5.2).
+    ///         Folds the OLD constructor (Poseidon/verifier/token wiring, the IMT
+    ///         zeros ladder + frontier + empty-tree root, B / LOG_B / the enforced
+    ///         disburse ciphertext length) AND the OLD `initialize(arbiterKey)`
+    ///         (non-zero arbiter key check + arbiter epoch 0) into a single
+    ///         run-once call. The `initializer` modifier (ERC-7201 storage)
+    ///         enforces run-once; the caller (the deployer, via the proxy) becomes
+    ///         owner. REQUIRES a non-zero arbiter key (§5.3, Q9) — kills the (0,0)
+    ///         footgun. Not `onlyOwner`: there is no owner until this call sets one.
+    function initialize(
         IPoseidon2 _poseidon,
         IDepositVerifier _depositVerifier,
         IWithdrawVerifier _withdrawVerifier,
         IDisburseVerifier _disburseVerifier,
         ITransferVerifier _transferVerifier,
         IERC20 _token,
-        uint256 _batchSize
-    ) Ownable2Step(msg.sender) {
+        uint256 _batchSize,
+        uint256[2] calldata arbiterKey
+    ) external initializer {
         if (_batchSize <= 1 || (_batchSize & (_batchSize - 1)) != 0) revert BatchSizeNotPowerOfTwo(_batchSize);
+        if (arbiterKey[0] == 0 || arbiterKey[1] == 0) revert ZeroArbiterKey();
+
+        __Ownable2Step_init(msg.sender);
+        __UUPSUpgradeable_init();
+
+        // Behind a proxy the impl constructor never ran against THIS storage, so
+        // the inline `_locked = 1` default did not take — arm the latch here
+        // (NOT_ENTERED == 1) or the first nonReentrant op would revert Reentrancy.
+        _locked = 1;
+
         poseidon = _poseidon;
         depositVerifier = _depositVerifier;
         withdrawVerifier = _withdrawVerifier;
@@ -189,6 +232,20 @@ contract BongtuPool is Ownable2Step {
         token = _token;
         B = _batchSize;
 
+        // Split out to keep the 8-arg initializer under the stack-depth limit
+        // (all former-constructor tree/param derivation lives here).
+        _initTreeAndParams(_batchSize);
+
+        // Seed arbiter epoch 0 (§5.3, Q9) and mark the pool live.
+        initialized = true;
+        arbiterEpochs.push(ArbiterEpoch({keyX: arbiterKey[0], keyY: arbiterKey[1], activatedBlock: block.number}));
+        emit ArbiterRotated(0, arbiterKey[0], arbiterKey[1], block.number);
+    }
+
+    /// @dev The former-constructor tree + param derivation: LOG_B, the enforced
+    ///      disburse ciphertext length, the zeros ladder, the frontier and the
+    ///      empty-tree root. Reads the just-wired `poseidon` storage.
+    function _initTreeAndParams(uint256 _batchSize) private {
         uint256 logB = 0;
         while ((uint256(1) << logB) < _batchSize) logB++;
         LOG_B = logB;
@@ -212,15 +269,10 @@ contract BongtuPool is Ownable2Step {
         knownRoots[root] = true; // the empty-tree root is a known root
     }
 
-    /// @notice One-shot init that REQUIRES a non-zero arbiter key (§5.3, Q9):
-    ///         kills the (0,0) footgun and seeds epoch 0.
-    function initialize(uint256[2] calldata arbiterKey) external onlyOwner {
-        if (initialized) revert AlreadyInitialized();
-        if (arbiterKey[0] == 0 || arbiterKey[1] == 0) revert ZeroArbiterKey();
-        initialized = true;
-        arbiterEpochs.push(ArbiterEpoch({keyX: arbiterKey[0], keyY: arbiterKey[1], activatedBlock: block.number}));
-        emit ArbiterRotated(0, arbiterKey[0], arbiterKey[1], block.number);
-    }
+    /// @dev UUPS upgrade authorization — only the owner may swap the impl (a
+    ///      circuit/verifier change ships as `upgradeToAndCall`, SPEC §5.2/§5.3).
+    ///      On mainnet the owner is a multisig/timelock (docs/zeto-derivation.md).
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 
     /// @notice Append an epoch and emit its index; the arbiter pubkey is read
     ///         from storage at execution (never calldata) so a sender cannot
@@ -260,8 +312,8 @@ contract BongtuPool is Ownable2Step {
     ///         append the two output notes, then pull `out` tokens (SafeERC20, CEI).
     function deposit(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[18] calldata pub)
         external
-        nonReentrant
         whenInitialized
+        nonReentrant
     {
         uint[18] memory injected = pub;
         (injected[16], injected[17]) = currentArbiterKey();
@@ -299,7 +351,7 @@ contract BongtuPool is Ownable2Step {
         uint[2] calldata c,
         uint[10] calldata pub,
         uint256[] calldata receiverCiphertexts
-    ) external nonReentrant whenInitialized {
+    ) external whenInitialized nonReentrant {
         if (receiverCiphertexts.length != disburseCiphertextLen) {
             revert WrongCiphertextLength(receiverCiphertexts.length, disburseCiphertextLen);
         }
@@ -343,8 +395,8 @@ contract BongtuPool is Ownable2Step {
     ///         spends the real (nonzero) nullifiers, appends the 2 outputs.
     function transfer(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[36] calldata pub)
         external
-        nonReentrant
         whenInitialized
+        nonReentrant
     {
         if (!knownRoots[pub[28]]) revert UnknownRoot(pub[28]);
 
@@ -388,8 +440,8 @@ contract BongtuPool is Ownable2Step {
     ///         change output, pushes `out` tokens.
     function withdraw(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[25] calldata pub)
         external
-        nonReentrant
         whenInitialized
+        nonReentrant
     {
         if (!knownRoots[pub[18]]) revert UnknownRoot(pub[18]);
 
@@ -496,4 +548,8 @@ contract BongtuPool is Ownable2Step {
         root = current;
         nextLeafIndex += stride;
     }
+
+    /// @dev Reserved trailing storage so a future BongtuPoolV2 can add state
+    ///      without colliding with any slot introduced here (upgrade-safety).
+    uint256[50] private __gap;
 }

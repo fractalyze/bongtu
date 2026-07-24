@@ -128,6 +128,17 @@ async function deploy(wallet: any, sol: string, contract: string, args: any[] = 
   return inst;
 }
 
+// Deploy BongtuPool behind a UUPS ERC-1967 proxy (SPEC §5.2), initialized in the
+// proxy constructor with the 8-arg initializer. Returns a contract bound to the
+// BongtuPool ABI at the PROXY address (the canonical, upgrade-stable pool).
+async function deployPoolProxy(wallet: any, initArgs: any[]): Promise<any> {
+  const impl = await deploy(wallet, "BongtuPool", "BongtuPool");
+  const { abi: poolAbi } = artifact("BongtuPool", "BongtuPool");
+  const initData = new ethers.utils.Interface(poolAbi).encodeFunctionData("initialize", initArgs);
+  const proxy = await deploy(wallet, "ERC1967Proxy", "ERC1967Proxy", [impl.address, initData]);
+  return new ethers.Contract(proxy.address, poolAbi, wallet);
+}
+
 // fold a leaf up its merkle path to a root (matches ImtTree / CheckIMTProof:
 // pathIndices[j]==0 => current node is the left child).
 function foldToRoot(leaf: FieldInput, siblings: bigint[], pathIndices: number[]): bigint {
@@ -204,12 +215,12 @@ async function main(): Promise<void> {
   const dsv = await deploy(wallet, "DisburseVerifier", "DisburseVerifier");
   const tv = await deploy(wallet, "TransferVerifier", "TransferVerifier");
   const token = await deploy(wallet, "MockERC20", "MockERC20");
-  const pool = await deploy(wallet, "BongtuPool", "BongtuPool", [
+  const pool = await deployPoolProxy(wallet, [
     poseidon.address, dv.address, wv.address, dsv.address, tv.address, token.address, B,
+    [dec(AUTHORITY.publicKey[0]), dec(AUTHORITY.publicKey[1])],
   ]);
   console.log(`   pool=${pool.address} token=${token.address} poseidon=${poseidon.address}`);
 
-  await (await pool.initialize([dec(AUTHORITY.publicKey[0]), dec(AUTHORITY.publicKey[1])])).wait();
   ok((await pool.root()).toString() === oracle.getRoot().toString(),
     "empty-tree root: contract == ImtTree oracle");
 

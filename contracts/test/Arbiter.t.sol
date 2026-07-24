@@ -3,9 +3,10 @@ pragma solidity ^0.8.20;
 
 import {Base} from "./Base.sol";
 import {IPoseidon2} from "../src/interfaces/IPoseidon2.sol";
+import {IDepositVerifier, IWithdrawVerifier, IDisburseVerifier, ITransferVerifier} from "../src/interfaces/IVerifiers.sol";
 import {IERC20} from "../src/utils/IERC20.sol";
 import {BongtuPool} from "../src/BongtuPool.sol";
-import {Ownable2Step} from "../src/utils/Ownable2Step.sol";
+import {Ownable2StepUpgradeable} from "../src/utils/Ownable2StepUpgradeable.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {
     StubDepositVerifier,
@@ -17,32 +18,46 @@ import {
 /// @notice M0 Done#3-(vi): arbiter epochs (§5.3, Q9). initialize REQUIRES a
 ///         non-zero key (kills the (0,0) footgun); rotateArbiter appends an
 ///         epoch and emits its index.
+///
+/// Post-UUPS the single initializer folds the arbiter-key check into the wiring,
+/// so these tests deploy an UNINITIALIZED proxy and drive `initialize(...)`
+/// themselves (via {_init}) to exercise the key validation + the epoch-0 emit.
 contract ArbiterTest is Base {
     BongtuPool pool;
+
+    // deps captured for the pool-under-test, replayed into every initialize call
+    IPoseidon2 _poseidon;
+    IDepositVerifier _dv;
+    IWithdrawVerifier _wv;
+    IDisburseVerifier _dsv;
+    ITransferVerifier _tv;
+    IERC20 _token;
 
     event ArbiterRotated(uint256 indexed epoch, uint256 keyX, uint256 keyY, uint256 activatedBlock);
 
     function _newPool() internal returns (BongtuPool) {
-        IPoseidon2 poseidon = deployPoseidon();
-        MockERC20 token = new MockERC20();
-        return deployPool(
-            poseidon,
-            new StubDepositVerifier(),
-            new StubWithdrawVerifier(),
-            new StubDisburseVerifier(),
-            new StubTransferVerifier(),
-            IERC20(address(token))
-        );
+        _poseidon = deployPoseidon();
+        _token = IERC20(address(new MockERC20()));
+        _dv = new StubDepositVerifier();
+        _wv = new StubWithdrawVerifier();
+        _dsv = new StubDisburseVerifier();
+        _tv = new StubTransferVerifier();
+        return deployUninitializedPool();
+    }
+
+    /// @dev Drive the 8-arg initializer with the captured deps + a given key.
+    function _init(uint256[2] memory key) internal {
+        pool.initialize(_poseidon, _dv, _wv, _dsv, _tv, _token, B, key);
     }
 
     function testInitializeRejectsZeroKey() public {
         pool = _newPool();
         vm.expectRevert(BongtuPool.ZeroArbiterKey.selector);
-        pool.initialize([uint256(0), uint256(0)]);
+        _init([uint256(0), uint256(0)]);
 
         // a partially-zero key is also rejected
         vm.expectRevert(BongtuPool.ZeroArbiterKey.selector);
-        pool.initialize([uint256(0), uint256(7)]);
+        _init([uint256(0), uint256(7)]);
 
         assertTrue(!pool.initialized(), "must not be initialized after a rejected key");
     }
@@ -51,7 +66,7 @@ contract ArbiterTest is Base {
         pool = _newPool();
         vm.expectEmit(true, false, false, true, address(pool));
         emit ArbiterRotated(0, 101, 202, block.number);
-        pool.initialize([uint256(101), uint256(202)]);
+        _init([uint256(101), uint256(202)]);
 
         assertTrue(pool.initialized(), "initialized");
         assertEq(pool.currentEpoch(), 0, "epoch 0");
@@ -62,7 +77,7 @@ contract ArbiterTest is Base {
 
     function testRotateArbiterAppendsAndEmits() public {
         pool = _newPool();
-        pool.initialize([uint256(101), uint256(202)]);
+        _init([uint256(101), uint256(202)]);
 
         vm.roll(block.number + 5);
         vm.expectEmit(true, false, false, true, address(pool));
@@ -81,10 +96,10 @@ contract ArbiterTest is Base {
 
     function testRotateOnlyOwner() public {
         pool = _newPool();
-        pool.initialize([uint256(101), uint256(202)]);
+        _init([uint256(101), uint256(202)]);
         address stranger = address(0xBEEF);
         vm.prank(stranger);
-        vm.expectRevert(abi.encodeWithSelector(Ownable2Step.OwnableUnauthorized.selector, stranger));
+        vm.expectRevert(abi.encodeWithSelector(Ownable2StepUpgradeable.OwnableUnauthorized.selector, stranger));
         pool.rotateArbiter([uint256(1), uint256(2)]);
     }
 }

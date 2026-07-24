@@ -40,16 +40,16 @@ contract DifferentialTest is Base {
     function setUp() public {
         IPoseidon2 poseidon = deployPoseidon();
         token = new MockERC20();
+        // non-zero arbiter key (§5.3); irrelevant to stub verification.
         pool = deployPool(
             poseidon,
             new StubDepositVerifier(),
             new StubWithdrawVerifier(),
             new StubDisburseVerifier(),
             new StubTransferVerifier(),
-            IERC20(address(token))
+            IERC20(address(token)),
+            [uint256(11), uint256(22)]
         );
-        // non-zero arbiter key (§5.3); irrelevant to stub verification.
-        pool.initialize([uint256(11), uint256(22)]);
 
         token.mint(address(this), 1_000_000 ether);
         token.approve(address(pool), type(uint256).max);

@@ -39,9 +39,9 @@ contract EnforcementTest is Base {
             new StubWithdrawVerifier(),
             new StubDisburseVerifier(),
             new StubTransferVerifier(),
-            IERC20(address(token))
+            IERC20(address(token)),
+            [uint256(101), uint256(202)]
         );
-        p.initialize([uint256(101), uint256(202)]);
     }
 
     /// deposit appends oc0=pub[13], oc1=pub[14]; a zero in either reverts.

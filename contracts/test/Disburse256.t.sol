@@ -91,16 +91,16 @@ contract Disburse256Test is Base {
     // matches the public signals the proof was made for.
     function _freshPool256() internal returns (BongtuPool pool) {
         MockERC20 token = new MockERC20();
-        pool = new BongtuPool(
+        pool = deployPoolWithBatch(
             poseidon,
             IDepositVerifier(address(new StubDepositVerifier())),
             IWithdrawVerifier(address(new StubWithdrawVerifier())),
             IDisburseVerifier(address(new Disburse256Verifier())),
             ITransferVerifier(address(new StubTransferVerifier())),
             IERC20(address(token)),
-            B256
+            B256,
+            arbiterKey
         );
-        pool.initialize(arbiterKey);
     }
 
     /// Seed the input note as leaf 0 via a stub-verified single-leaf insert

@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {Script, console2} from "forge-std/Script.sol";
 
 import {BongtuPool} from "bongtu-src/BongtuPool.sol";
+import {ERC1967Proxy} from "bongtu-src/utils/proxy/ERC1967Proxy.sol";
 import {IPoseidon2} from "bongtu-src/interfaces/IPoseidon2.sol";
 import {
     IDepositVerifier,
@@ -33,7 +34,8 @@ import {MockERC20} from "bongtu-test/mocks/MockERC20.sol";
 ///      (the token is a CONSTRUCTOR arg — the pool has no setERC20, it is
 ///      immutable), then `initialize(arbiterKey)` seeds arbiter epoch 0.
 ///
-/// Owner = the broadcasting deployer (Ownable2Step sets `msg.sender`).
+/// Owner = the broadcasting deployer: `initialize` runs through the proxy's
+/// delegatecall, so `__Ownable2Step_init(msg.sender)` records the deployer.
 ///
 /// Config is env-driven so the SAME script targets anvil or GIWA Sepolia:
 ///   DEPLOYER_KEY  (uint256 privkey)  default = anvil account 0
@@ -56,7 +58,8 @@ contract Deploy is Script {
         address disburseVerifier;
         address transferVerifier;
         address token;
-        address pool;
+        address pool; // the ERC-1967 proxy (the canonical, upgrade-stable address)
+        address poolImpl; // the BongtuPool implementation behind the proxy
         address owner;
         uint256 batchSize;
         uint256 arbiterKeyX;
@@ -99,17 +102,27 @@ contract Deploy is Script {
         address tokenEnv = vm.envOr("TOKEN_ADDRESS", address(0));
         d.token = tokenEnv == address(0) ? address(new MockERC20()) : tokenEnv;
 
-        BongtuPool pool = new BongtuPool(
-            IPoseidon2(d.poseidon),
-            IDepositVerifier(d.depositVerifier),
-            IWithdrawVerifier(d.withdrawVerifier),
-            IDisburseVerifier(d.disburseVerifier),
-            ITransferVerifier(d.transferVerifier),
-            IERC20(d.token),
-            d.batchSize
+        // UUPS (ERC-1967): deploy the implementation, then a proxy that runs
+        // BongtuPool.initialize(...) atomically in its constructor. The PROXY
+        // address is canonical + upgrade-stable (SPEC §5.2); a future
+        // circuit/verifier change ships as `upgradeToAndCall`, not a redeploy.
+        BongtuPool impl = new BongtuPool();
+        bytes memory initData = abi.encodeCall(
+            BongtuPool.initialize,
+            (
+                IPoseidon2(d.poseidon),
+                IDepositVerifier(d.depositVerifier),
+                IWithdrawVerifier(d.withdrawVerifier),
+                IDisburseVerifier(d.disburseVerifier),
+                ITransferVerifier(d.transferVerifier),
+                IERC20(d.token),
+                d.batchSize,
+                [d.arbiterKeyX, d.arbiterKeyY]
+            )
         );
-        pool.initialize([d.arbiterKeyX, d.arbiterKeyY]);
-        d.pool = address(pool);
+        ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
+        d.poolImpl = address(impl);
+        d.pool = address(proxy);
 
         vm.stopBroadcast();
     }
@@ -161,6 +174,7 @@ contract Deploy is Script {
         vm.serializeAddress(o, "disburseVerifier", d.disburseVerifier);
         vm.serializeAddress(o, "transferVerifier", d.transferVerifier);
         vm.serializeAddress(o, "token", d.token);
+        vm.serializeAddress(o, "poolImpl", d.poolImpl);
         string memory js = vm.serializeAddress(o, "pool", d.pool);
         string memory path = string.concat("../deploy/addresses.", vm.toString(block.chainid), ".json");
         vm.writeJson(js, path);
@@ -174,6 +188,7 @@ contract Deploy is Script {
         console2.log("disburseVerifier:", d.disburseVerifier);
         console2.log("transferVerifier:", d.transferVerifier);
         console2.log("token (mock kKRW):", d.token);
-        console2.log("pool (B=256)    :", d.pool);
+        console2.log("poolImpl        :", d.poolImpl);
+        console2.log("pool (proxy,B256):", d.pool);
     }
 }

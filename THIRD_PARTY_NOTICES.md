@@ -17,6 +17,12 @@ depends on the following third-party software.
   ECDH + Poseidon-sponge encryption, non-repudiation envelope).
 - **forge-std** — https://github.com/foundry-rs/forge-std — MIT OR Apache-2.0.
   Vendored under `contracts/lib/forge-std/` with its `LICENSE-MIT` / `LICENSE-APACHE`.
+- **OpenZeppelin Contracts** (v5.0, MIT) — https://github.com/OpenZeppelin/openzeppelin-contracts.
+  The UUPS proxy machinery under `contracts/src/utils/proxy/` (Initializable, ERC1967Utils,
+  UUPSUpgradeable, ERC1967Proxy, Proxy, StorageSlot, Address, IERC1822Proxiable) is vendored
+  byte-faithfully from OZ v5.0 (repo avoids git submodules; see `contracts/src/utils/proxy/README.md`),
+  each file retaining the MIT SPDX header. `Ownable2StepUpgradeable` is an initializer twin of the repo's
+  own `Ownable2Step`, modeled on OZ's.
 
 ## Runtime / SDK dependencies (npm, MIT — not vendored)
 

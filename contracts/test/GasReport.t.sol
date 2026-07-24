@@ -46,9 +46,9 @@ contract GasReportTest is Base {
             IWithdrawVerifier(address(new WithdrawVerifier())),
             IDisburseVerifier(address(new DisburseVerifier())),
             ITransferVerifier(address(new TransferVerifier())),
-            IERC20(address(token))
+            IERC20(address(token)),
+            arbiterKey
         );
-        pool.initialize(arbiterKey);
         token.mint(address(pool), 1_000_000);
         token.mint(address(this), 1_000_000);
         token.approve(address(pool), type(uint256).max);
