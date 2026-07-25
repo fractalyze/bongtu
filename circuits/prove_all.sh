@@ -15,11 +15,15 @@ set -uo pipefail
 
 cd "$(dirname "$0")"
 
-CIRCOM='/lib64/ld-linux-x86-64.so.2 /usr/local/bin/circom'
-SNARKJS="node --max-old-space-size=16000 /home/a41/Workspace/zkx-snap/circuits/node_modules/.bin/snarkjs"
-NODE=/home/a41/.nvm/versions/node/v22.17.1/bin/node
-ZETO=/home/a41/Workspace/research/disclosure-poc/zeto/zkp/circuits
-PTAU=/home/a41/Workspace/zkx-snap/circuits/ptau/pot22_hez.ptau
+# Overridable toolchain (same pattern as deploy/e2e_m0.sh): CI / fresh machines
+# export CIRCOM, SNARKJS, NODE, ZETO, CIRCOMLIB, PTAU; defaults are this dev box
+# (docs/toolchain.md). CIRCOM may be a multi-word command (ld-linux shim).
+CIRCOM="${CIRCOM:-/lib64/ld-linux-x86-64.so.2 /usr/local/bin/circom}"
+SNARKJS="${SNARKJS:-node --max-old-space-size=16000 /home/a41/Workspace/zkx-snap/circuits/node_modules/.bin/snarkjs}"
+NODE="${NODE:-$(command -v node || echo /home/a41/.nvm/versions/node/v22.17.1/bin/node)}"
+ZETO="${ZETO:-/home/a41/Workspace/research/disclosure-poc/zeto/zkp/circuits}"
+CIRCOMLIB="${CIRCOMLIB:-$ZETO/node_modules}"
+PTAU="${PTAU:-/home/a41/Workspace/zkx-snap/circuits/ptau/pot22_hez.ptau}"
 
 mkdir -p out verifiers inputs
 # circom emits CommonJS witness helpers (out/<name>_js/generate_witness.js uses
@@ -45,7 +49,7 @@ run_circuit() {
 
   echo "-- compile"
   $CIRCOM "$name.circom" --r1cs --wasm --sym -o out/ \
-      -l "$ZETO" -l "$ZETO/node_modules" -l lib || { echo "$name: compile FAILED"; return; }
+      -l "$ZETO" -l "$CIRCOMLIB" -l lib || { echo "$name: compile FAILED"; return; }
 
   echo "-- r1cs info"
   $SNARKJS r1cs info "out/$name.r1cs" || { echo "$name: r1cs info FAILED"; return; }

@@ -1,0 +1,196 @@
+# bongtu CI — every gate a GitHub-hosted ubuntu runner can genuinely pass.
+#
+# INCLUDED
+#   node           npm ci + typecheck (root cross-tree tsc + every workspace tsc)
+#                  + unit tests (sdk, indexer tree, admin-web, wallet-web) + the
+#                  two vite builds.
+#   forge          contracts: forge test + deploy/deploy_local.sh (full B=256
+#                  stack deploy + smoke deposit on a self-contained anvil).
+#                  forge-std is vendored under contracts/lib/ and all fixtures
+#                  (poseidon2.hex, committed real Groth16 proofs incl.
+#                  disburse256) are in-tree — no network.
+#   prover-pytest  prover/ CPU-only unit gates (tests import pydantic +
+#                  prover_service.{schema,calldata,config} — no jax / rabbitsnark
+#                  / GPU). Deliberately does NOT run prover/setup.sh (it bridges
+#                  into local GPU venvs).
+#   circuits-e2e   builds the 4 small circuits from scratch (pinned circom
+#                  release binary + pinned zeto checkout + circomlib + the Hermez
+#                  pot22 ptau, sha256-pinned and cached), then runs the two anvil
+#                  gates that consume the artifacts: deploy/e2e_m0.sh and the
+#                  indexer conformance test. The full pot22 ptau is required (not
+#                  a smaller one): the committed contracts/src/verifiers/*.sol
+#                  derive from a pot22 groth16 setup, and `snarkjs groth16 setup`
+#                  is deterministic given (r1cs, ptau), so fresh zkeys produce
+#                  proofs that verify against the committed on-chain verifiers.
+#
+# EXCLUDED — with the reason each cannot genuinely pass on a hosted runner
+#   - disburse256 (1x256) proving and the prover/ service boot (prover/setup.sh
+#     + run.sh): rabbitsnark GPU proving needs a local CUDA GPU and the local
+#     GPU venv bridge; hosted runners have no GPU. The on-chain half of
+#     disburse256 IS still gated here: forge test verifies the committed
+#     real-proof fixtures (contracts/test/fixtures/disburse256.proof.json,
+#     realproofs.json) against the committed Disburse256Verifier.
+#   - disburse256 circuit build: 2.79M constraints -> ~1.24 GB zkey with a
+#     multi-minute setup, and its only consumer is the GPU proving path
+#     excluded above — nothing a hosted runner could run consumes it.
+#   - GIWA live deploy / live-chain smoke (the deploy scripts in GIWA mode,
+#     deploy/giwa_disburse256.ts): both need the funded deployer key from the
+#     gitignored .env; this workflow is deliberately secret-free. (The local-
+#     anvil mode of deploy_local.sh IS included, in the forge job.)
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.17.1
+          cache: npm
+      - run: npm ci
+      - name: typecheck (root cross-tree)
+        run: npm run typecheck
+      - name: typecheck (workspaces)
+        run: npm run typecheck --workspaces
+      - name: sdk tests
+        run: npm test -w @bongtu/sdk
+      - name: indexer tree unit test
+        run: npm run test:tree -w @bongtu/indexer
+      - name: admin-web tests
+        run: npm test -w @bongtu/admin-web
+      - name: wallet-web tests
+        run: npm test -w @bongtu/wallet-web
+      - name: admin-web build
+        run: npm run build -w @bongtu/admin-web
+      - name: wallet-web build
+        run: npm run build -w @bongtu/wallet-web
+
+  forge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1.9.0
+        with:
+          version: v1.7.1
+      - name: forge test
+        run: forge test -vv
+        working-directory: contracts
+      - name: local deploy + smoke gate (deploy_local.sh, self-contained anvil :8550)
+        # The only gate exercising Deploy.s.sol/Smoke.s.sol wiring (proxy init,
+        # verifier wiring, addresses round-trip); deployer = anvil account 0.
+        run: bash deploy/deploy_local.sh
+
+  prover-pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - name: install test deps (dev-venv snapshot as of 2026-07)
+        run: pip install pydantic==2.13.4 pytest==9.0.3
+      - name: pytest
+        run: python -m pytest
+        working-directory: prover
+
+  circuits-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.17.1
+          cache: npm
+      - uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1.9.0
+        with:
+          version: v1.7.1
+      - run: npm ci
+
+      - name: circom v2.2.2 (pinned release binary)
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/circom" \
+            https://github.com/iden3/circom/releases/download/v2.2.2/circom-linux-amd64
+          echo "f3d8d1fdbc123779b80e210c909ee941d7a1e130c70365524646b48b8b0fe9d5  $RUNNER_TEMP/circom" | sha256sum -c
+          chmod +x "$RUNNER_TEMP/circom"
+          echo "CIRCOM=$RUNNER_TEMP/circom" >> "$GITHUB_ENV"
+
+      - name: external node deps (ethers v5 + snarkjs + circomlib, pinned — not repo deps)
+        # ethers/snarkjs load via createRequire from BONGTU_NODE_MODULES;
+        # circomlib serves the circom include roots (symlinked into the zeto
+        # checkout below). Versions match the dev box: ethers 5.8.0,
+        # snarkjs 0.7.6, circomlib 2.0.5.
+        run: |
+          mkdir -p "$RUNNER_TEMP/extdeps"
+          cd "$RUNNER_TEMP/extdeps"
+          printf '{}' > package.json
+          npm install --no-audit --no-fund --ignore-scripts ethers@5.8.0 snarkjs@0.7.6 circomlib@2.0.5
+          echo "BONGTU_NODE_MODULES=$RUNNER_TEMP/extdeps/node_modules" >> "$GITHUB_ENV"
+
+      - name: pinned zeto checkout (upstream circuit sub-checks, resolved via -l)
+        # Upstream zeto circuits include circomlib as "node_modules/circomlib/…",
+        # so circomlib must sit at $ZETO/node_modules — symlink the pinned
+        # extdeps install there (must run after the extdeps step above).
+        run: |
+          git init -q "$RUNNER_TEMP/zeto"
+          git -C "$RUNNER_TEMP/zeto" fetch -q --depth 1 \
+            https://github.com/hyperledger-labs/zeto.git 2c8ce6b7d01289e31fe09b718a5fed8f058ff585
+          git -C "$RUNNER_TEMP/zeto" checkout -q FETCH_HEAD
+          ln -s "$RUNNER_TEMP/extdeps/node_modules" "$RUNNER_TEMP/zeto/zkp/circuits/node_modules"
+          echo "ZETO=$RUNNER_TEMP/zeto/zkp/circuits" >> "$GITHUB_ENV"
+
+      - name: restore pot22 ptau cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bongtu-ptau
+          key: ptau-powersOfTau28_hez_final_22-68a21bef
+
+      - name: fetch + verify pot22 ptau (Hermez ceremony, 4.8 GB, sha256-pinned)
+        run: |
+          PTAU_FILE="$HOME/.cache/bongtu-ptau/powersOfTau28_hez_final_22.ptau"
+          mkdir -p "$(dirname "$PTAU_FILE")"
+          PTAU_URL=https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_22.ptau
+          PTAU_SHA=68a21bef870d5d4a9de39c8f35ebcf04e18ef97e14b2cd3f4c3e39876821d362
+          [ -f "$PTAU_FILE" ] || curl -fL --retry 3 -o "$PTAU_FILE" "$PTAU_URL"
+          # self-heal a truncated/corrupt cache entry: re-download once, then fail
+          if ! echo "$PTAU_SHA  $PTAU_FILE" | sha256sum -c; then
+            rm -f "$PTAU_FILE"
+            curl -fL --retry 3 -o "$PTAU_FILE" "$PTAU_URL"
+            echo "$PTAU_SHA  $PTAU_FILE" | sha256sum -c
+          fi
+          echo "PTAU=$PTAU_FILE" >> "$GITHUB_ENV"
+
+      - name: build + CPU-prove the 4 small circuits (prove_all.sh)
+        # CIRCOM/ZETO/PTAU come from GITHUB_ENV above; CIRCOMLIB defaults to
+        # $ZETO/node_modules (the symlinked pinned circomlib).
+        run: |
+          export SNARKJS="node --max-old-space-size=6144 $BONGTU_NODE_MODULES/.bin/snarkjs"
+          cd circuits && bash prove_all.sh
+
+      - name: committed verifiers match the rebuilt ones (drift gate)
+        # prove_all.sh copies fresh solidity verifiers into circuits/verifiers/;
+        # a diff here means someone updated circuits without recommitting them.
+        run: git diff --exit-code circuits/verifiers
+
+      - name: M0 e2e gate (anvil deposit -> disburse16 -> transfer -> withdraw)
+        run: bash deploy/e2e_m0.sh
+
+      - name: indexer conformance gate (anvil scenario incl. arbiter mode)
+        run: npm test -w @bongtu/indexer
