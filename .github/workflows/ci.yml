@@ -1,27 +1,44 @@
 # bongtu CI — every gate a GitHub-hosted ubuntu runner can genuinely pass.
 #
 # INCLUDED
-#   node           npm ci + typecheck (root cross-tree tsc + every workspace tsc)
-#                  + unit tests (sdk, indexer tree, admin-web, wallet-web) + the
-#                  two vite builds.
-#   forge          contracts: forge test + deploy/deploy_local.sh (full B=256
-#                  stack deploy + smoke deposit on a self-contained anvil).
-#                  forge-std is vendored under contracts/lib/ and all fixtures
-#                  (poseidon2.hex, committed real Groth16 proofs incl.
-#                  disburse256) are in-tree — no network.
-#   prover-pytest  prover/ CPU-only unit gates (tests import pydantic +
-#                  prover_service.{schema,calldata,config} — no jax / rabbitsnark
-#                  / GPU). Deliberately does NOT run prover/setup.sh (it bridges
-#                  into local GPU venvs).
-#   circuits-e2e   builds the 4 small circuits from scratch (pinned circom
-#                  release binary + pinned zeto checkout + circomlib + the Hermez
-#                  pot22 ptau, sha256-pinned and cached), then runs the two anvil
-#                  gates that consume the artifacts: deploy/e2e_m0.sh and the
-#                  indexer conformance test. The full pot22 ptau is required (not
-#                  a smaller one): the committed contracts/src/verifiers/*.sol
-#                  derive from a pot22 groth16 setup, and `snarkjs groth16 setup`
-#                  is deterministic given (r1cs, ptau), so fresh zkeys produce
-#                  proofs that verify against the committed on-chain verifiers.
+#   node                 npm ci + typecheck (root cross-tree tsc + every workspace
+#                        tsc) + unit tests (sdk, indexer tree, admin-web,
+#                        wallet-web) + the two vite builds.
+#   forge                contracts: forge test + deploy/deploy_local.sh (full
+#                        B=256 stack deploy + smoke deposit on a self-contained
+#                        anvil). forge-std is vendored under contracts/lib/ and
+#                        all fixtures (poseidon2.hex, committed real Groth16
+#                        proofs incl. disburse256) are in-tree — no network.
+#   prover-pytest        prover/ CPU-only unit gates (tests import pydantic +
+#                        prover_service.{schema,calldata,config} — no jax /
+#                        rabbitsnark / GPU). Deliberately does NOT run
+#                        prover/setup.sh (it bridges into local GPU venvs).
+#   circuits             artifact cache builder: on a cache HIT (circuit sources
+#                        + pins unchanged — the typical push) it only verifies
+#                        the cache exists (~20s, lookup-only). On a MISS it does
+#                        the full from-scratch build: pinned circom release
+#                        binary + pinned zeto checkout + circomlib + the Hermez
+#                        pot22 ptau (sha256-pinned, 4.8 GB, cached, touched ONLY
+#                        on this path), runs prove_all.sh, gates
+#                        `git diff --exit-code circuits/verifiers` (drift can
+#                        only appear when circuits change = exactly the miss
+#                        path), and saves circuits/out (~266 MB). The full pot22
+#                        ptau is required (not a smaller one): the committed
+#                        contracts/src/verifiers/*.sol derive from a pot22
+#                        groth16 setup, and `snarkjs groth16 setup` is
+#                        deterministic given (r1cs, ptau), so fresh zkeys
+#                        produce proofs that verify against the committed
+#                        on-chain verifiers — which is also why caching the
+#                        built artifacts is sound.
+#   e2e-m0               restores circuits/out and runs deploy/e2e_m0.sh
+#                        (anvil deposit -> disburse16 -> transfer -> withdraw).
+#   indexer-conformance  restores circuits/out and runs the indexer anvil
+#                        scenario incl. arbiter mode.
+#
+# WALL-TIME BUDGET: a typical push (circuits unchanged, caches warm) targets
+# <= ~3 min wall — the circuits job is lookup-only and e2e-m0 / conformance run
+# in parallel off the artifact cache. A circuits/pins change pays the full
+# rebuild (~10-12 min) once, then re-warms the cache.
 #
 # EXCLUDED — with the reason each cannot genuinely pass on a hosted runner
 #   - disburse256 (1x256) proving and the prover/ service boot (prover/setup.sh
@@ -44,6 +61,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -62,7 +80,16 @@ jobs:
         with:
           node-version: 22.17.1
           cache: npm
-      - run: npm ci
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: nm
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node-modules-v1-${{ hashFiles('package-lock.json') }}
+      - if: steps.nm.outputs.cache-hit != 'true'
+        run: npm ci
       - name: typecheck (root cross-tree)
         run: npm run typecheck
       - name: typecheck (workspaces)
@@ -110,76 +137,107 @@ jobs:
         run: python -m pytest
         working-directory: prover
 
-  circuits-e2e:
+  circuits:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    outputs:
+      key: ${{ steps.key.outputs.key }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: load toolchain pins
+        run: grep -E '^[A-Z_]+=' .github/ci-pins.env >> "$GITHUB_ENV"
+      - name: compute artifact cache key
+        id: key
+        run: echo "key=circuits-out-v1-${{ hashFiles('.github/ci-pins.env', 'circuits/**/*.circom', 'circuits/lib/**', 'circuits/prove_all.sh') }}" >> "$GITHUB_OUTPUT"
+      - name: check for cached circuits/out (lookup only — dependents restore it)
+        id: outcache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: circuits/out
+          key: ${{ steps.key.outputs.key }}
+          lookup-only: true
+
+      # ---- everything below runs ONLY when the artifact cache is missing ----
+
+      - if: steps.outcache.outputs.cache-hit != 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22.17.1
           cache: npm
-      - uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1.9.0
+      - if: steps.outcache.outputs.cache-hit != 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: nm
         with:
-          version: v1.7.1
-      - run: npm ci
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node-modules-v1-${{ hashFiles('package-lock.json') }}
+      - if: steps.outcache.outputs.cache-hit != 'true' && steps.nm.outputs.cache-hit != 'true'
+        run: npm ci
 
-      - name: circom v2.2.2 (pinned release binary)
+      - name: circom (pinned release binary)
+        if: steps.outcache.outputs.cache-hit != 'true'
         run: |
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/circom" \
-            https://github.com/iden3/circom/releases/download/v2.2.2/circom-linux-amd64
-          echo "f3d8d1fdbc123779b80e210c909ee941d7a1e130c70365524646b48b8b0fe9d5  $RUNNER_TEMP/circom" | sha256sum -c
+            "https://github.com/iden3/circom/releases/download/${CIRCOM_VERSION}/circom-linux-amd64"
+          echo "${CIRCOM_SHA256}  $RUNNER_TEMP/circom" | sha256sum -c
           chmod +x "$RUNNER_TEMP/circom"
           echo "CIRCOM=$RUNNER_TEMP/circom" >> "$GITHUB_ENV"
 
       - name: external node deps (ethers v5 + snarkjs + circomlib, pinned — not repo deps)
-        # ethers/snarkjs load via createRequire from BONGTU_NODE_MODULES;
-        # circomlib serves the circom include roots (symlinked into the zeto
-        # checkout below). Versions match the dev box: ethers 5.8.0,
-        # snarkjs 0.7.6, circomlib 2.0.5.
+        if: steps.outcache.outputs.cache-hit != 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: extdeps
+        with:
+          path: ~/.cache/bongtu-extdeps
+          key: extdeps-v1-${{ hashFiles('.github/ci-pins.env') }}
+      - if: steps.outcache.outputs.cache-hit != 'true' && steps.extdeps.outputs.cache-hit != 'true'
         run: |
-          mkdir -p "$RUNNER_TEMP/extdeps"
-          cd "$RUNNER_TEMP/extdeps"
+          mkdir -p "$HOME/.cache/bongtu-extdeps"
+          cd "$HOME/.cache/bongtu-extdeps"
           printf '{}' > package.json
-          npm install --no-audit --no-fund --ignore-scripts ethers@5.8.0 snarkjs@0.7.6 circomlib@2.0.5
-          echo "BONGTU_NODE_MODULES=$RUNNER_TEMP/extdeps/node_modules" >> "$GITHUB_ENV"
+          npm install --no-audit --no-fund --ignore-scripts \
+            "ethers@${ETHERS_VERSION}" "snarkjs@${SNARKJS_VERSION}" "circomlib@${CIRCOMLIB_VERSION}"
+      - if: steps.outcache.outputs.cache-hit != 'true'
+        run: echo "BONGTU_NODE_MODULES=$HOME/.cache/bongtu-extdeps/node_modules" >> "$GITHUB_ENV"
 
       - name: pinned zeto checkout (upstream circuit sub-checks, resolved via -l)
         # Upstream zeto circuits include circomlib as "node_modules/circomlib/…",
         # so circomlib must sit at $ZETO/node_modules — symlink the pinned
         # extdeps install there (must run after the extdeps step above).
+        if: steps.outcache.outputs.cache-hit != 'true'
         run: |
           git init -q "$RUNNER_TEMP/zeto"
           git -C "$RUNNER_TEMP/zeto" fetch -q --depth 1 \
-            https://github.com/hyperledger-labs/zeto.git 2c8ce6b7d01289e31fe09b718a5fed8f058ff585
+            https://github.com/hyperledger-labs/zeto.git "$ZETO_SHA"
           git -C "$RUNNER_TEMP/zeto" checkout -q FETCH_HEAD
-          ln -s "$RUNNER_TEMP/extdeps/node_modules" "$RUNNER_TEMP/zeto/zkp/circuits/node_modules"
+          ln -s "$HOME/.cache/bongtu-extdeps/node_modules" "$RUNNER_TEMP/zeto/zkp/circuits/node_modules"
           echo "ZETO=$RUNNER_TEMP/zeto/zkp/circuits" >> "$GITHUB_ENV"
 
       - name: restore pot22 ptau cache
+        if: steps.outcache.outputs.cache-hit != 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/bongtu-ptau
           key: ptau-powersOfTau28_hez_final_22-68a21bef
 
       - name: fetch + verify pot22 ptau (Hermez ceremony, 4.8 GB, sha256-pinned)
+        if: steps.outcache.outputs.cache-hit != 'true'
         run: |
           PTAU_FILE="$HOME/.cache/bongtu-ptau/powersOfTau28_hez_final_22.ptau"
           mkdir -p "$(dirname "$PTAU_FILE")"
-          PTAU_URL=https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_22.ptau
-          PTAU_SHA=68a21bef870d5d4a9de39c8f35ebcf04e18ef97e14b2cd3f4c3e39876821d362
           [ -f "$PTAU_FILE" ] || curl -fL --retry 3 -o "$PTAU_FILE" "$PTAU_URL"
           # self-heal a truncated/corrupt cache entry: re-download once, then fail
-          if ! echo "$PTAU_SHA  $PTAU_FILE" | sha256sum -c; then
+          if ! echo "$PTAU_SHA256  $PTAU_FILE" | sha256sum -c; then
             rm -f "$PTAU_FILE"
             curl -fL --retry 3 -o "$PTAU_FILE" "$PTAU_URL"
-            echo "$PTAU_SHA  $PTAU_FILE" | sha256sum -c
+            echo "$PTAU_SHA256  $PTAU_FILE" | sha256sum -c
           fi
           echo "PTAU=$PTAU_FILE" >> "$GITHUB_ENV"
 
       - name: build + CPU-prove the 4 small circuits (prove_all.sh)
-        # CIRCOM/ZETO/PTAU come from GITHUB_ENV above; CIRCOMLIB defaults to
-        # $ZETO/node_modules (the symlinked pinned circomlib).
+        if: steps.outcache.outputs.cache-hit != 'true'
         run: |
           export SNARKJS="node --max-old-space-size=6144 $BONGTU_NODE_MODULES/.bin/snarkjs"
           cd circuits && bash prove_all.sh
@@ -187,10 +245,106 @@ jobs:
       - name: committed verifiers match the rebuilt ones (drift gate)
         # prove_all.sh copies fresh solidity verifiers into circuits/verifiers/;
         # a diff here means someone updated circuits without recommitting them.
+        if: steps.outcache.outputs.cache-hit != 'true'
         run: git diff --exit-code circuits/verifiers
 
+      - name: save circuits/out artifact cache
+        if: steps.outcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: circuits/out
+          key: ${{ steps.key.outputs.key }}
+
+  e2e-m0:
+    needs: circuits
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: load toolchain pins
+        run: grep -E '^[A-Z_]+=' .github/ci-pins.env >> "$GITHUB_ENV"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.17.1
+          cache: npm
+      - uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1.9.0
+        with:
+          version: v1.7.1
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: nm
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node-modules-v1-${{ hashFiles('package-lock.json') }}
+      - if: steps.nm.outputs.cache-hit != 'true'
+        run: npm ci
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: extdeps
+        with:
+          path: ~/.cache/bongtu-extdeps
+          key: extdeps-v1-${{ hashFiles('.github/ci-pins.env') }}
+      - if: steps.extdeps.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$HOME/.cache/bongtu-extdeps"
+          cd "$HOME/.cache/bongtu-extdeps"
+          printf '{}' > package.json
+          npm install --no-audit --no-fund --ignore-scripts \
+            "ethers@${ETHERS_VERSION}" "snarkjs@${SNARKJS_VERSION}" "circomlib@${CIRCOMLIB_VERSION}"
+      - run: echo "BONGTU_NODE_MODULES=$HOME/.cache/bongtu-extdeps/node_modules" >> "$GITHUB_ENV"
+      - name: restore circuits/out artifacts
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: circuits/out
+          key: ${{ needs.circuits.outputs.key }}
+          fail-on-cache-miss: true
       - name: M0 e2e gate (anvil deposit -> disburse16 -> transfer -> withdraw)
         run: bash deploy/e2e_m0.sh
 
+  indexer-conformance:
+    needs: circuits
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: load toolchain pins
+        run: grep -E '^[A-Z_]+=' .github/ci-pins.env >> "$GITHUB_ENV"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.17.1
+          cache: npm
+      - uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1.9.0
+        with:
+          version: v1.7.1
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: nm
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node-modules-v1-${{ hashFiles('package-lock.json') }}
+      - if: steps.nm.outputs.cache-hit != 'true'
+        run: npm ci
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: extdeps
+        with:
+          path: ~/.cache/bongtu-extdeps
+          key: extdeps-v1-${{ hashFiles('.github/ci-pins.env') }}
+      - if: steps.extdeps.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$HOME/.cache/bongtu-extdeps"
+          cd "$HOME/.cache/bongtu-extdeps"
+          printf '{}' > package.json
+          npm install --no-audit --no-fund --ignore-scripts \
+            "ethers@${ETHERS_VERSION}" "snarkjs@${SNARKJS_VERSION}" "circomlib@${CIRCOMLIB_VERSION}"
+      - run: echo "BONGTU_NODE_MODULES=$HOME/.cache/bongtu-extdeps/node_modules" >> "$GITHUB_ENV"
+      - name: restore circuits/out artifacts
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: circuits/out
+          key: ${{ needs.circuits.outputs.key }}
+          fail-on-cache-miss: true
       - name: indexer conformance gate (anvil scenario incl. arbiter mode)
         run: npm test -w @bongtu/indexer
