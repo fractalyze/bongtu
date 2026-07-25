@@ -237,9 +237,14 @@ value still counts → **mint-from-nothing**. Fix, applied to **every** verifier
 
 ---
 
-## 6. SDK / Prover / Indexer
+## 6. Core / Prover / Indexer
 
-- **SDK (TS, Apache/MIT deps only):** port `zeto-js` crypto to typed TS — `poseidonEncrypt/Decrypt` (Poseidon
+> **Naming (2026-07-25):** the shared TS library is the npm package **`@bongtu/core`** (`packages/core/`).
+> It was renamed from `@bongtu/sdk` — it is private (v0.0.0), has no external consumers, and is the protocol +
+> crypto core every app and the contract differential tests import, not a published SDK ([milestone-m2.md](milestone-m2.md)).
+> "SDK" where it survives below reads as this package.
+
+- **Core (TS, Apache/MIT deps only):** port `zeto-js` crypto to typed TS — `poseidonEncrypt/Decrypt` (Poseidon
   sponge symmetric, **not ElGamal**), salt/nonce, `encodeProof`, note/nullifier builders, event scanner +
   **trial-decrypt**. **Key derivation:** bjj key from `eth_signTypedData_v4` over a **domain-separated struct**
   (`chainId`, pool address, version) — *not* a raw `personal_sign` string (which is wallet-nondeterministic
@@ -313,6 +318,12 @@ serves:
   signature verifies. Malformed owner → 400; wrong key or expired ts → 401. The auditor-key indexer still
   holds every user's decrypted notes by design (that is the disclosure model) — auth governs *who may query*,
   not what the arbiter sees. Viewing-key separation (Zcash IVK) is out of bongtu's trust model and not built.
+- `GET /history?owner=<compressed>&ts=&sig=` → that owner's transaction feed, newest-first
+  (`[{kind: received|sent|withdraw|deposit, counterparty, amount, txHash, blockTimestamp, seq}]`). Same bjj
+  EdDSA read-auth as `/notes` (same principal, same ±300s replay window; public mode 404s). The arbiter
+  decrypts every op's envelope, so it knows both a transfer's **input** owner (sender) and **output** owner
+  (receiver) — a 2-output split payment yields one `sent` per non-self output. Requires the block timestamp
+  captured at ingest. **IMPLEMENTED** (2026-07-25, `apps/indexer/src/api/routes/history.ts`).
 - within-batch `GET /path/{leafIndex}` — the arbiter recomputes the B batch commitments from the decrypted
   notes, fills them into the mirror, and serves a real path that folds to root.
 

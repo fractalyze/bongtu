@@ -93,6 +93,9 @@ Copy `.env.example` → `.env` (gitignored) for a funded GIWA deployer key. Tool
   critical risks (mixed-mode tree spend, enabled-forgery mint).
 - [Milestone M1](docs/milestone-m1.md) — how 1×256 GPU disburse + the GIWA deploy landed: gas numbers, the
   O(log B) partial-block fix, deploy pipeline evidence.
+- [Milestone M2](docs/milestone-m2.md) — the product-surface round: the home-centric React wallet with
+  in-browser proving, the indexer's `GET /history` + durable Postgres store + docker-compose, and the
+  `@bongtu/sdk`→`@bongtu/core` rename. Locked design decisions + per-unit evidence.
 - [Toolchain](docs/toolchain.md) — the exact circom/snarkjs/ptau/forge invocations and paths that build and
   prove everything.
 - [Zeto derivation](docs/zeto-derivation.md) — which Zeto flavor bongtu uses, per-file circuit provenance, the

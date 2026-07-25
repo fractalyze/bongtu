@@ -10,7 +10,7 @@ layouts were rejected.
 One question decides where npm code lives: is it **deployed/run** (`apps/`) or
 **imported** by other workspace code (`packages/`)? So `apps/` holds the indexer (a
 deployed service, not a library — it moved out of the top level for exactly that
-reason) plus the two web apps, and `packages/` holds the sdk. Renames rode along:
+reason) plus the two web apps, and `packages/` holds the core library (`@bongtu/core`). Renames rode along:
 `admin` → `admin-web` and `public` → `wallet-web`, because "public" said nothing about
 being the recipient wallet.
 
