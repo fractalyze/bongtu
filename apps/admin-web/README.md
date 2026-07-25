@@ -44,7 +44,7 @@ private key** (never leaves the browser), then **Load ledger**:
 
 - Fetches the public `GET /events` feed + `GET /alarms`.
 - Decrypts each **transfer / disburse** authority envelope **locally** with the arbiter
-  key (`src/lib/ledger.ts`, reusing `@bongtu/indexer/envelope`) into "who received what /
+  key (`src/lib/ledger.ts`, via the `@bongtu/sdk/envelope` codec) into "who received what /
   spent status" — grouped by owner, with unspent balances, plus a per-op feed and the
   disclosure alarms.
 - **Coverage boundary:** the public `/events` feed carries an authority tail only for

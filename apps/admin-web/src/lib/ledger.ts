@@ -5,8 +5,8 @@
 // envelope with the arbiter key and reconstructs "who received what / spent status"
 // — the independent regulator view, needing no user private key.
 //
-// Reuses the indexer's own envelope decrypt/parse (@bongtu/indexer/envelope) so the
-// auditor app and the indexer agree byte-for-byte. It does NOT modify the indexer.
+// Uses the owning envelope codec (@bongtu/sdk/envelope) — the same module the
+// indexer's arbiter ledger decodes with, so the two agree byte-for-byte.
 //
 // Coverage boundary (honest): the public /events feed carries an authority tail
 // only for `transfer` and `disburse` (deposit/withdraw emit their authority
@@ -17,7 +17,7 @@
 // surfaced as "no authority envelope in the public feed" — for those an arbiter-mode
 // indexer's own /notes directory is the source.
 
-import { parseEnvelope, envelopePlaintextLen, type OpKind } from "@bongtu/indexer/envelope";
+import { parseEnvelope, authorityCiphertextLen, type OpKind } from "@bongtu/sdk/envelope";
 import { commitment as noteCommitment } from "@bongtu/sdk/note";
 import { packPubkey } from "@bongtu/sdk/pubkey";
 import type { FeedEvent } from "@bongtu/sdk/indexerApi";
@@ -62,14 +62,9 @@ export interface AuditorLedger {
   ops: OpSummary[];
 }
 
-// Poseidon-sponge ciphertext length for an op's authority plaintext: pad the
-// plaintext to a multiple of 3, then +1 (the sponge's final squeeze). The authority
-// envelope is always the TAIL of the on-chain ciphertext.
-function authorityCtLen(kind: OpKind, B: number): number {
-  const plain = envelopePlaintextLen(kind, B);
-  const pad = (3 - (plain % 3)) % 3;
-  return plain + pad + 1;
-}
+// The authority envelope is always the TAIL of the on-chain ciphertext; its
+// length law (plaintext padded to a multiple of 3, +1 squeeze) is owned by
+// @bongtu/sdk/envelope::authorityCiphertextLen.
 
 /**
  * Decrypt the transfer/disburse authority envelopes in `events` with the arbiter
@@ -107,7 +102,7 @@ export function buildAuditorLedger(events: FeedEvent[], arbiterPriv: string, B: 
       continue;
     }
     const ct = e.ciphertext.map((x) => BigInt(x));
-    const need = authorityCtLen(e.kind, B);
+    const need = authorityCiphertextLen(e.kind, B);
     if (ct.length < need) {
       ops.push({ ...base, reason: `ciphertext (${ct.length}) shorter than the ${e.kind} authority envelope (${need})` });
       continue;

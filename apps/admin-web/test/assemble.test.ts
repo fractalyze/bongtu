@@ -6,6 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 
 import {
   deriveKeypair,
@@ -114,6 +115,21 @@ test("value conserved: sum(outputs) == input value; change + padding fill B", ()
   assert.equal(meta.changeCount, 1); // disbursed (100+101+102) < 100000 -> a change note
   assert.equal(meta.padCount, B - 3 - 1);
   assert.equal(BigInt(meta.disbursed) + BigInt(meta.changeValue), f.value);
+});
+
+test("envelope bytes are pinned (U-N1: unchanged across the @bongtu/sdk/envelope migration)", () => {
+  // sha256 of the decimal-string JSON of the full 2054-element ciphertext on
+  // fixture(3), recorded from the pre-migration assembly at main 875c179 (the
+  // same ground truth as packages/sdk/test/envelope.test.ts p1.A). A change
+  // here is a WIRE-BYTE change: auditor decryption of live envelopes breaks.
+  const f = fixture(3);
+  const { ciphertext, meta } = buildDisburseRequest(f.inputNote, f.membership, f.recipients, f.crypto);
+  const sha = createHash("sha256").update(JSON.stringify(ciphertext)).digest("hex");
+  assert.equal(sha, "6a967498e139ed952a4632a9f366c1c6ef0a9a1cdbbadb828d15d7dbcf9ff2a8");
+  assert.equal(
+    meta.disclosureHash,
+    "10410754105375865441329948274228936976154835740787208180438963577568607987646",
+  );
 });
 
 test("ciphertext accounts for the 2054 rule (1024 receiver ++ 1030 authority)", () => {

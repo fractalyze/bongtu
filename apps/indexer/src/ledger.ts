@@ -2,7 +2,7 @@
 //
 // Built ONLY when the indexer holds the arbiter PRIVATE key (AUTHORITY_KEY set).
 // For every op, in chain order, it decrypts the op's authority envelope
-// (envelope.ts) and:
+// (@bongtu/sdk/envelope — the owning codec) and:
 //
 //   - OUTPUT notes become ledger entries keyed by owner pubkey (value, salt,
 //     leafIndex, txHash, commitment, spent=false), AFTER cross-checking each
@@ -29,7 +29,7 @@
 import { commitment as noteCommitment } from "@bongtu/sdk/note";
 import { ImtTree } from "@bongtu/sdk/imt";
 import type { MirrorTree } from "./tree.js";
-import { parseEnvelope, type EnvNote, type OpKind } from "./envelope.js";
+import { parseEnvelope, type EnvNote, type OpKind } from "@bongtu/sdk/envelope";
 
 const dec = (x: bigint): string => x.toString();
 

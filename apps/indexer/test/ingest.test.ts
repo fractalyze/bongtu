@@ -25,7 +25,7 @@ import { ImtTree } from "@bongtu/sdk/imt";
 import { MirrorTree } from "../src/tree.js";
 import { NoteLedger, type OpEnvelope } from "../src/ledger.js";
 import { Indexer, type ParsedLog } from "../src/ingest.js";
-import { disclosureChain } from "../src/disclosure.js";
+import { disclosureChain } from "@bongtu/sdk/envelope";
 import { health } from "../src/api/routes/health.js";
 
 let failures = 0;
@@ -68,7 +68,9 @@ const commitOf = (n: NoteSpec): bigint => commitment(n.v, n.s, n.owner.publicKey
  * A synthetic chain: owns the reference ImtTree (source of every event's
  * carried root), block/logIndex counters, and the per-op log builders. Each
  * builder emits the exact event shapes ingest consumes, with envelope bytes
- * encrypted to ARB the way the circuits lay them out (envelope.ts layout table).
+ * encrypted to ARB the way the circuits lay them out (the @bongtu/sdk/envelope
+ * layout table — hand-assembled HERE on purpose, as an independent check of
+ * the shared codec).
  */
 function makeSim() {
   const oracle = new ImtTree(H, B);

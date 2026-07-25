@@ -36,6 +36,7 @@ import { fileURLToPath } from "node:url";
 
 import { ImtTree, foldToRoot } from "@bongtu/sdk/imt";
 import { poseidon2, poseidonN } from "@bongtu/sdk/poseidon";
+import { buildAuthorityPlaintext, disclosureChain } from "@bongtu/sdk/envelope";
 import {
   deriveKeypair,
   commitment,
@@ -123,17 +124,6 @@ async function deployPoolProxy(wallet: any, initArgs: any[]): Promise<any> {
   const initData = new ethers.utils.Interface(poolAbi).encodeFunctionData("initialize", initArgs);
   const proxy = await deploy(wallet, "ERC1967Proxy", "ERC1967Proxy", [impl.address, initData]);
   return new ethers.Contract(proxy.address, poolAbi, wallet);
-}
-
-// The circuit's disburse disclosureHash: Poseidon(2) chain over the flattened
-// receiver ciphertexts (16*4) followed by the authority ciphertext. Recomputing
-// it off-chain and matching pub[2] PROVES the ciphertext we publish on-chain is
-// byte-identical to the one the circuit committed to (SPEC §6b indexer duty).
-function disclosureHash(receiverCtFlat: bigint[], authorityCt: bigint[]): bigint {
-  let dh = 0n;
-  for (const x of receiverCtFlat) dh = poseidon2(dh, x);
-  for (const x of authorityCt) dh = poseidon2(dh, x);
-  return dh;
 }
 
 // ---------------------------------------------------------------------------
@@ -282,16 +272,14 @@ async function main(): Promise<void> {
       return poseidonEncrypt([v, sR(i)], ss, NONCE_DISBURSE); // 4 elements each
     });
     const ctFlat = rcptCts.flat();
-    // authority (non-repudiation) envelope: [inOwnerPub, inVal,inSalt, 16*(ownerPub), 16*(val,salt)]
-    const authPlain = [
-      EMPLOYER.publicKey[0], EMPLOYER.publicKey[1],
-      V, sD0,
-      ...rcptPubs.flatMap((p) => [p[0], p[1]]),
-      ...amounts.flatMap((v, i) => [v, sR(i)]),
-    ];
+    // authority (non-repudiation) envelope, laid out by the owning codec
+    const authPlain = buildAuthorityPlaintext("disburse", {
+      inputs: [{ owner: EMPLOYER.publicKey, value: V, salt: sD0 }],
+      outputs: amounts.map((v, i) => ({ owner: RCPTS[i].publicKey, value: v, salt: sR(i) })),
+    });
     const authSs = ecdhSharedSecret(ECDH_DISBURSE, AUTHORITY.publicKey);
     const authCt = poseidonEncrypt(authPlain, authSs, NONCE_DISBURSE);
-    ok(disclosureHash(ctFlat, authCt) === BigInt(pub[2]),
+    ok(disclosureChain([...ctFlat, ...authCt]) === BigInt(pub[2]),
       "recomputed disclosureHash == proof pub[2] (published ciphertext is the circuit's)");
 
     oracle.attachSubtree(subtreeRoot, outCommits); // pad 2->16 (dead 2..15) + attach 16..31

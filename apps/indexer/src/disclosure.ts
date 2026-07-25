@@ -11,11 +11,12 @@
 // (§11-6): a sender who publishes junk (or tampered) ciphertext produces a
 // mismatch the indexer flags as a first-class alarm.
 //
-// The exact chain matches deploy/e2e_orchestrator.ts::disclosureHash and the
-// in-circuit gadget: fold every receiver element then every authority element,
-// starting from 0.
+// The chain itself (fold every receiver element then every authority element,
+// starting from 0) is owned by @bongtu/sdk/envelope::disclosureChain — one
+// implementation shared with every producer, pinned byte-identical to the
+// in-circuit gadget by the sdk pin suite (packages/sdk/test/envelope.test.ts p2).
 
-import { poseidon2 } from "@bongtu/sdk/poseidon";
+import { disclosureChain } from "@bongtu/sdk/envelope";
 
 export type DisclosureStatus =
   | "verified" // published ciphertext (receiver ++ authority) hashes to disclosureHash
@@ -37,13 +38,6 @@ export interface DisclosureResult {
   receiverCount: number; // B * 4 (the receiver-only portion)
   recomputed: string; // decimal; Poseidon-chain over the emitted ciphertext
   expected: string; // decimal; the on-chain disclosureHash public signal
-}
-
-/** Poseidon(2) fold of a ciphertext element list, seeded at 0 (the disburse chain). */
-export function disclosureChain(elements: bigint[]): bigint {
-  let dh = 0n;
-  for (const x of elements) dh = poseidon2(dh, x);
-  return dh;
 }
 
 // Classify a disburse's published ciphertext against its committed disclosureHash.

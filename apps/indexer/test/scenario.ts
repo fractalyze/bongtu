@@ -27,6 +27,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ImtTree } from "@bongtu/sdk/imt";
+import { buildAuthorityPlaintext } from "@bongtu/sdk/envelope";
 import {
   deriveKeypair, commitment, nullifier,
   poseidonEncrypt, ecdhSharedSecret, assertDistinctOwnerPubkeys,
@@ -90,16 +91,16 @@ async function deployPoolProxy(wallet: any, initArgs: unknown[]): Promise<any> {
   return new ethers.Contract(proxy.address, poolAbi, wallet);
 }
 
-/** The disburse authority (non-repudiation) envelope plaintext (SPEC §4). */
+/** The disburse authority (non-repudiation) envelope plaintext (SPEC §4),
+ *  laid out by the owning codec (@bongtu/sdk/envelope). */
 function authorityPlain(
   inPub: readonly [bigint, bigint], inVal: bigint, inSalt: bigint,
   outPubs: [bigint, bigint][], amounts: bigint[], salts: bigint[],
 ): bigint[] {
-  return [
-    inPub[0], inPub[1], inVal, inSalt,
-    ...outPubs.flatMap((p) => [p[0], p[1]]),
-    ...amounts.flatMap((v, i) => [v, salts[i]]),
-  ];
+  return buildAuthorityPlaintext("disburse", {
+    inputs: [{ owner: [inPub[0], inPub[1]], value: inVal, salt: inSalt }],
+    outputs: outPubs.map((p, i) => ({ owner: p, value: amounts[i], salt: salts[i] })),
+  });
 }
 
 export interface SingleLeaf {

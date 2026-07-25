@@ -22,7 +22,7 @@ import {
 } from "@bongtu/sdk/note";
 import { unpackPubkey } from "@bongtu/sdk/pubkey";
 import { ImtTree, foldToRoot } from "@bongtu/sdk/imt";
-import { poseidon2 } from "@bongtu/sdk/poseidon";
+import { buildAuthorityPlaintext, disclosureChain } from "@bongtu/sdk/envelope";
 import type { Point } from "@bongtu/sdk/babyjub";
 import { toWire } from "@bongtu/sdk/proving";
 import type { DisburseInput, ProvingRequest } from "@bongtu/sdk/proving";
@@ -93,18 +93,6 @@ export interface AssembleResult {
   meta: AssembleMeta;
   /** The employer's OWN ledger (no arbiter key) — its authored recipients + change. */
   ledger: LedgerRow[];
-}
-
-// --- helpers -------------------------------------------------------------------
-
-// disclosureHash: Poseidon(2) chain over the receiver ciphertext then the authority
-// ciphertext, seeded at 0 — byte-identical to the in-circuit gadget and to
-// deploy/giwa_disburse256.ts. Equals the proof's pub[2] once proven.
-function computeDisclosureHash(receiverFlat: bigint[], authorityCt: bigint[]): bigint {
-  let dh = 0n;
-  for (const x of receiverFlat) dh = poseidon2(dh, x);
-  for (const x of authorityCt) dh = poseidon2(dh, x);
-  return dh;
 }
 
 // --- the assembly --------------------------------------------------------------
@@ -220,26 +208,22 @@ export function buildDisburseRequest(
   };
 
   // Ciphertext: per-output receiver envelope [value, salt] (256 * 4 = 1024) ++ the
-  // single authority envelope over [inOwn, inValue, inSalt, all output owners, all
-  // output (value,salt)] (1030). Total 2054 = disburseCiphertextLen(B=256). Same
-  // construction as deploy/giwa_disburse256.ts.
+  // single authority envelope (1030), laid out by the owning codec
+  // (@bongtu/sdk/envelope). Total 2054 = disburseCiphertextLen(B=256).
   const ecdh = BigInt(crypto.ecdhPrivateKey);
   const nonce = BigInt(crypto.encryptionNonce);
   const authorityPub: Point = [BigInt(crypto.authorityPubKey[0]), BigInt(crypto.authorityPubKey[1])];
   const receiverFlat: bigint[] = outs.flatMap((o, i) =>
     poseidonEncrypt([o.value, outputSalts[i]], ecdhSharedSecret(ecdh, o.owner), nonce),
   );
-  const authPlain: bigint[] = [
-    employer.publicKey[0],
-    employer.publicKey[1],
-    V,
-    inSalt,
-    ...outs.flatMap((o) => [o.owner[0], o.owner[1]]),
-    ...outs.flatMap((o, i) => [o.value, outputSalts[i]]),
-  ];
+  const authPlain = buildAuthorityPlaintext("disburse", {
+    inputs: [{ owner: employer.publicKey, value: V, salt: inSalt }],
+    outputs: outs.map((o, i) => ({ owner: o.owner, value: o.value, salt: outputSalts[i] })),
+  });
   const authorityCt = poseidonEncrypt(authPlain, ecdhSharedSecret(ecdh, authorityPub), nonce);
   const ciphertext = [...receiverFlat, ...authorityCt];
-  const disclosureHash = computeDisclosureHash(receiverFlat, authorityCt);
+  // Poseidon(2) fold over receiver ++ authority — equals the proof's pub[2] once proven.
+  const disclosureHash = disclosureChain(ciphertext);
   if (ciphertext.length !== 2054) {
     throw new Error(`ciphertext length ${ciphertext.length} != 2054 (disburseCiphertextLen for B=${B})`);
   }

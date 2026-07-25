@@ -19,7 +19,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ImtTree } from "@bongtu/sdk/imt";
-import { poseidon2, poseidonN } from "@bongtu/sdk/poseidon";
+import { poseidonN } from "@bongtu/sdk/poseidon";
+import { buildAuthorityPlaintext, disclosureChain } from "@bongtu/sdk/envelope";
 import {
   deriveKeypair, commitment, nullifier,
   poseidonEncrypt, ecdhSharedSecret, assertDistinctOwnerPubkeys,
@@ -85,13 +86,6 @@ async function proveDisburse256(input: DisburseInput): Promise<Calldata> {
   console.log(`   proved disburse-256 via the service in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   return cd;
 }
-function disclosureHash(rcptFlat: bigint[], authCt: bigint[]): bigint {
-  let dh = 0n;
-  for (const x of rcptFlat) dh = poseidon2(dh, x);
-  for (const x of authCt) dh = poseidon2(dh, x);
-  return dh;
-}
-
 async function main(): Promise<void> {
   const provider = new ethers.providers.JsonRpcProvider(RPC);
   const wallet = new ethers.Wallet(PK, provider);
@@ -166,10 +160,12 @@ async function main(): Promise<void> {
   // rebuild + prove the on-chain ciphertext via disclosureHash
   const rcptCts = amounts.map((v, i) => poseidonEncrypt([v, sR(i)], ecdhSharedSecret(ECDH, RCPTS[i].publicKey), NONCE));
   const ctFlat = rcptCts.flat(); // 256*4 = 1024 field elements
-  const authPlain = [EMPLOYER.publicKey[0], EMPLOYER.publicKey[1], V, sD0,
-    ...RCPTS.flatMap((r) => [r.publicKey[0], r.publicKey[1]]), ...amounts.flatMap((v, i) => [v, sR(i)])];
+  const authPlain = buildAuthorityPlaintext("disburse", {
+    inputs: [{ owner: EMPLOYER.publicKey, value: V, salt: sD0 }],
+    outputs: amounts.map((v, i) => ({ owner: RCPTS[i].publicKey, value: v, salt: sR(i) })),
+  });
   const authCt = poseidonEncrypt(authPlain, ecdhSharedSecret(ECDH, ARBITER), NONCE);
-  ok(disclosureHash(ctFlat, authCt) === BigInt(pub[2]), "recomputed disclosureHash == pub[2] (on-chain ciphertext is the circuit's)");
+  ok(disclosureChain([...ctFlat, ...authCt]) === BigInt(pub[2]), "recomputed disclosureHash == pub[2] (on-chain ciphertext is the circuit's)");
 
   oracle.attachSubtree(subtreeRoot, outCommits); // pad leaves 4..255 dead, attach 256..511
   // §6b v2: the enforced-length disburse publishes the FULL ciphertext

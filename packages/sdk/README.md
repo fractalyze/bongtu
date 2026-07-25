@@ -23,16 +23,18 @@ import `@bongtu/sdk/<module>` and tsc (NodeNext), tsx, and Vite all resolve the 
 | `note` | note machinery: `commitment`, `nullifier`, `deriveKeypair`, `ecdhSharedSecret`, `poseidonEncrypt` / `poseidonDecrypt` (Poseidon-sponge symmetric), `assertDistinctOwnerPubkeys` (the two-time-pad guard) |
 | `eddsa` | bjj EdDSA-Poseidon sign/verify for the indexer `/notes` read-auth: `notesAuthMessage`, `signNotesAuth`, `verifyNotesAuth`, `packSignature` / `parseSignature` |
 | `pubkey` | compressed bjj pubkey codec (`packPubkey` / `unpackPubkey`) — the 32-byte note-owner identifier on every wire |
+| `envelope` | the authority (non-repudiation) envelope codec — per-op plaintext layouts as inverse `buildAuthorityPlaintext` / `parseEnvelope`, `envelopePlaintextLen` / `authorityCiphertextLen`, and the `disclosureChain` Poseidon(2) fold; the disburse layout + fold are byte-pinned to the committed disburse256 proof's publics by `test/envelope.test.ts`; circuit parity for the other three ops is held by the hand-decoded `circuits/auditor_decrypt_check.ts` gate |
 | `proving` | the shared proving wire types: `ProvingRequest` (a complete, already-resolved circom witness input + circuit tag), `Calldata` (`{a,b,c,pub}`), the per-circuit input shapes, and `toWire` (deep bigint → decimal-string conversion for JSON) |
 | `indexerApi` | the spec-normative indexer read-API wire shapes (`FeedEvent`, `OwnerNote`, `Head`, `PathResult`, `Alarm`, …) plus the typed fetch client (`getHead`, `getPath`, `getEvents`, `getNullifiers`, `getAlarms`, `buildNotesUrl`, `fetchNotes`) |
 | `extern` | node-only `createRequire` loader for the deliberately repo-external heavy deps (ethers v5, snarkjs, circomlibjs) via `BONGTU_NODE_MODULES` — never import it from browser code |
 
 ## Who consumes it
 
-- `apps/indexer` — `ImtTree` for the mirror, `note` for envelope decrypt, `indexerApi`
-  for the route response types.
-- `apps/admin-web` / `apps/wallet-web` — commitments/ciphertext, `proving` request
-  assembly, the `indexerApi` client, `pubkey` + `eddsa` for the signed `/notes` read.
+- `apps/indexer` — `ImtTree` for the mirror, `envelope` for the arbiter ledger's
+  decrypt + the disclosure chain, `indexerApi` for the route response types.
+- `apps/admin-web` / `apps/wallet-web` — commitments/ciphertext, `envelope` for the
+  disburse assembly + auditor ledger (admin), `proving` request assembly, the
+  `indexerApi` client, `pubkey` + `eddsa` for the signed `/notes` read.
 - `circuits/` generators and `contracts/test/fixtures/` generators — witness inputs and
   the differential/real-proof oracles.
 - `deploy/` — the M0 e2e orchestrator and the live GIWA 256-disburse runner.
@@ -69,7 +71,7 @@ ships no local install of them; see the repo [`CLAUDE.md`](../../CLAUDE.md) and
 ## Testing
 
 ```sh
-npm test              # 42 tests (tsx + node --test over test/*.test.ts)
+npm test              # 52 tests (tsx + node --test over test/*.test.ts)
 npm run typecheck     # tsc --noEmit
 ```
 

@@ -6,7 +6,7 @@ import type { Plugin } from "vite";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..", "..");
 
-// The bongtu sdk / indexer sources use NodeNext ".js" import
+// The bongtu sdk sources use NodeNext ".js" import
 // specifiers that actually point at sibling ".ts" files (e.g. `./poseidon.js`).
 // Vite/rollup resolves the literal ".js" first and would miss the ".ts", so
 // rewrite a relative ".js" import to ".ts" whenever only the ".ts" exists. This
@@ -28,9 +28,9 @@ function tsJsResolve(): Plugin {
 export default {
   plugins: [tsJsResolve()],
   server: {
-    // The app imports unbuilt @bongtu/* workspace source (packages/sdk, apps/indexer
-    // via root node_modules symlinks) — allow
-    // the Vite dev server to read the whole monorepo, not just apps/admin-web.
+    // The app imports unbuilt @bongtu/sdk source via the root node_modules
+    // symlink — allow the Vite dev server to read the whole monorepo, not
+    // just apps/admin-web.
     fs: { allow: [REPO_ROOT] },
   },
   build: {

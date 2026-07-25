@@ -103,9 +103,8 @@ src/
   ingest.ts       Indexer: event ingest, correlation, poll/retry state
   tree.ts         MirrorTree: ImtTree mirror + per-leaf records + batch subtrees + path builder
   store.ts        ingested events / alarms / nullifiers store
-  disclosure.ts   disclosureHash recompute + alarm classification
-  envelope.ts     arbiter-mode authority-envelope decrypt + per-op plaintext layouts
-  ledger.ts       arbiter-mode per-owner note ledger (spent from envelopes alone)
+  disclosure.ts   disclosureHash verify + alarm classification (chain fold from @bongtu/sdk/envelope)
+  ledger.ts       arbiter-mode per-owner note ledger (spent from envelopes alone; decode via @bongtu/sdk/envelope)
   api/            router + one file per route (see Endpoints above)
 test/             unit tests + the anvil conformance scenario (run.sh)
 ```
