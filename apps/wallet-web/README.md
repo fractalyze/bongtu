@@ -47,21 +47,22 @@ your MetaMask account, so it is stable across sessions and devices.
 
 ### 2 · Balance — sum unspent notes (SPEC §7)
 
-Two paths, both resolving to `sum(value)` over unspent notes (`src/lib/balance.ts`):
+One path (`src/lib/balance.ts`): **signed `GET /notes`** against an arbiter-mode
+indexer that has already decrypted every op's authority envelope into a per-owner
+directory. The wallet proves control of its own key with an EdDSA-Poseidon read-auth
+signature (`@bongtu/sdk/eddsa`, bound to `Poseidon(ownerPub.x, ownerPub.y, ts)`), so
+only it can read its row even though the arbiter holds everyone's. Balance =
+`sum(value)` over `!spent` notes. **A reachable arbiter indexer is required** — if
+`/notes` fails, the wallet shows an error; there is no fallback path.
 
-- **Primary — signed `GET /notes`.** Against an arbiter-mode indexer that has already
-  decrypted every op's authority envelope into a per-owner directory. The wallet proves
-  control of its own key with an EdDSA-Poseidon read-auth signature (`@bongtu/sdk/eddsa`,
-  bound to `Poseidon(ownerPub.x, ownerPub.y, ts)`), so only it can read its row even
-  though the arbiter holds everyone's. Sums `!spent` notes.
-- **Fallback — key-only `/events` trial-decrypt.** For every receiver ciphertext slice
-  the wallet ECDH-decrypts `[value, salt]` with its bjj key, rebuilds the commitment,
-  and keeps the note **only if** that commitment equals the real on-chain leaf at the
-  slice's `leafIndex` (the Poseidon sponge has no MAC, so this leaf-match is the "is
-  this mine" test). It then recomputes the nullifier and marks the note spent against
-  `GET /nullifiers`. Needs no arbiter key — only the user's. `leafIndex → on-chain leaf`
-  comes from `Appended` events (the `eth_getLogs` / indexer-mirror boundary, SPEC §11-7;
-  funds never depend on it, only discovery liveness).
+> **2026-07-25 decision (architecture-review #17, option b):** the key-only `/events`
+> trial-decrypt *fallback wrapper* was removed as unwired dead code — no adapter ever
+> built its `leafCommitments` map, and the product scenario depends on the indexer.
+> The pure `trialDecryptEvents` core **stays** (and stays tested): it proves the SPEC
+> §7/§11-7 protocol property that every receiver ciphertext slice is key-only
+> recoverable — ECDH-decrypt `[value, salt]`, rebuild the commitment, accept iff it
+> equals the on-chain leaf (the Poseidon sponge has no MAC, so the leaf-match is the
+> "is this mine" test) — and is the seed for future recovery tooling.
 
 ### 3 · Transfer (2-in / 2-out) · 4 · Withdraw (2-in / 1-out)
 

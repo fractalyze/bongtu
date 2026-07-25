@@ -377,9 +377,16 @@ serves:
   storage = encrypted file/env keyed per `rotateArbiter` epoch); decrypts the event stream into a ledger view
   and runs the disclosureHash alarm. This is the **independent** regulator seat — the beat that actually
   sells compliance.
-- **apps/wallet-web/ — self-custody wallet:** MetaMask login → derive bjj key (§6) → pull ciphertext feed + merkle
-  paths from indexer → **trial-decrypt in the browser** → balance = sum(unspent notes); receive
-  (auto-discovered), `transfer`, `withdraw`. Indexer never sees user keys or balances.
+- **apps/wallet-web/ — self-custody wallet:** MetaMask login → derive bjj key (§6) → balance =
+  sum(unspent notes); receive, `transfer`, `withdraw`. **Balance path updated 2026-07-25**
+  (architecture-review #17, option b): balance reads the **arbiter-mode indexer's signed
+  `GET /notes`** (bjj EdDSA read-auth, §6b) — the product scenario depends on the indexer, and the
+  originally-specced "trial-decrypt in the browser" *balance* path was removed as unwired dead code.
+  The key-only trial-decrypt **primitive** (`trialDecryptEvents`) remains implemented + tested as the
+  §11-7 recovery property (every receiver slice is recoverable from `/events` with only the user key);
+  it is just not a wallet balance path. The indexer never sees user *spending* keys, but the
+  arbiter-mode instance does hold every owner's decrypted notes (§6b) — `/notes` auth governs who may
+  query.
 - Recipient gas: PoC uses faucet; GIWA's pre-installed ERC-4337 EntryPoint + paymaster → gasless spend is
   v1.1.
 

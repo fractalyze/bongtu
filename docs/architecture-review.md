@@ -63,8 +63,19 @@ advertises the fallback — the wallet's only live balance path is the arbiter-m
 because** it needs a product decision, not a refactor: (a) expose leaf commitments
 from the indexer (`/leaves` or per-slice on `/events`) and wire the fallback —
 restores key-only recovery but grows the normative API; or (b) delete the wrapper and
-fix the UI copy — a 20-line honesty fix. **Revive** by putting (a)-vs-(b) to the user;
-do not pick autonomously.
+fix the UI copy — a 20-line honesty fix. ~~**Revive** by putting (a)-vs-(b) to the
+user; do not pick autonomously.~~ **DECIDED (b) 2026-07-25 + APPLIED.** User
+rationale: the current product scenario depends on the indexer ("우리는 지금 indexer에
+의존하는 시나리오"), so the key-only fallback is not a path the product needs live.
+**Removed:** the unwired `balanceViaTrialDecrypt` wrapper + `FallbackBalanceResult`
+(and the now-unused `getEvents`/`getNullifiers` imports) from
+`apps/wallet-web/src/lib/balance.ts`; the "falls back to /events trial-decrypt" UI
+copy in `main.ts` (the /notes failure path now renders an honest
+indexer-required error). **Kept:** the pure `trialDecryptEvents` + `sumUnspent` cores
+and their headless tests — the tested SPEC §7/§11-7 discovery primitive (key-only
+recoverability of every receiver slice) and the seed for future recovery tooling.
+Docs aligned: wallet README balance section + spec §7 wallet bullet (dated
+annotations).
 
 **#18 — shared e2e harness for `e2e_orchestrator.ts` / `scenario.ts`.**
 `scenario.ts` is a ~250-line fork (actor fixtures, deploy helpers, a second-language

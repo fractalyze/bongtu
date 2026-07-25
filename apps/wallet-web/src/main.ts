@@ -127,7 +127,7 @@ function renderBalance(): void {
   const st = el("div");
   const list = el("div", { class: "note-list" });
   balanceBox.append(
-    field("Arbiter indexer URL", indexerInput, "Signed GET /notes (falls back to /events trial-decrypt if unavailable)."),
+    field("Arbiter indexer URL", indexerInput, "Signed GET /notes — balance requires a reachable arbiter-mode indexer."),
     button("Load balance", async () => {
       try {
         statusLine(st, "Fetching your notes (signed /notes)…");
@@ -137,7 +137,7 @@ function renderBalance(): void {
         renderNoteList(list, notes);
         renderSpend();
       } catch (e) {
-        statusLine(st, `notes path failed: ${(e as Error).message}. For the key-only fallback, run a public indexer and use trial-decrypt (see README).`, "err");
+        statusLine(st, `Could not load notes: ${(e as Error).message}. Balance needs the arbiter indexer's /notes route — check the URL and that the indexer is running in arbiter mode.`, "err");
       }
     }),
     st,

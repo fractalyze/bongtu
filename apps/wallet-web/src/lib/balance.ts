@@ -1,18 +1,17 @@
-// Balance: sum the wallet's UNSPENT notes (SPEC §7 public app). Two paths, both
-// resolving to the same "sum(value) over unspent notes":
+// Balance: sum the wallet's UNSPENT notes (SPEC §7 public app). ONE path:
+// signed `GET /notes` against an arbiter-mode indexer. The arbiter has already
+// decrypted every op's authority envelope into a per-owner note directory with a
+// `spent` flag; the wallet proves control of its key (EdDSA-Poseidon read-auth)
+// and reads its own row. O(own notes). Balance requires that indexer to be
+// reachable — there is no fallback (decision 2026-07-25, architecture-review #17b:
+// the product scenario depends on the indexer).
 //
-//   PRIMARY  — signed `GET /notes` against an arbiter-mode indexer. The arbiter has
-//              already decrypted every op's authority envelope into a per-owner note
-//              directory with a `spent` flag; the wallet proves control of its key
-//              (EdDSA-Poseidon read-auth) and reads its own row. O(own notes).
-//
-//   FALLBACK — key-only trial-decrypt of the public `GET /events` feed. For every
-//              receiver ciphertext slice the wallet ECDH-decrypts [value, salt] with
-//              its bjj key, rebuilds the commitment, and keeps the note ONLY if that
-//              commitment equals the real on-chain leaf at the slice's leafIndex
-//              (the Poseidon sponge has no MAC, so this leaf-match IS the "is this
-//              mine" test). It then recomputes the nullifier and marks the note spent
-//              against `GET /nullifiers`. Needs no arbiter key — only the user's.
+// `trialDecryptEvents` + `sumUnspent` below are NOT called by any wallet balance
+// path. They remain here as the tested discovery primitive for the SPEC §7/§11-7
+// protocol property — every receiver ciphertext slice on the public /events feed
+// is key-only recoverable (ECDH-decrypt [value, salt], rebuild the commitment,
+// accept iff it equals the on-chain leaf; the Poseidon sponge has no MAC, so the
+// leaf-match IS the "is this mine" test) — and for future recovery tooling.
 //
 // The pure cores (`sumUnspent`, `trialDecryptEvents`) are framework- and
 // network-free so the headless balance gate exercises them directly on mock data.
@@ -27,8 +26,6 @@ import type { WalletIdentity } from "./derive.js";
 import {
   buildNotesUrl,
   fetchNotes,
-  getEvents,
-  getNullifiers,
   type OwnerNote,
   type FeedEvent,
 } from "./indexerClient.js";
@@ -124,34 +121,9 @@ export interface BalanceResult {
   source: "notes";
 }
 
-/** PRIMARY path: signed /notes against an arbiter-mode indexer. */
+/** The wallet's balance path: signed /notes against an arbiter-mode indexer. */
 export async function balanceViaNotes(indexerUrl: string, identity: WalletIdentity): Promise<BalanceResult> {
   const url = buildNotesUrl(indexerUrl, identity.compressedPubkey, identity.keypair.formattedPrivateKey);
   const notes = await fetchNotes(url);
   return { balance: sumUnspent(notes), notes, source: "notes" };
-}
-
-export interface FallbackBalanceResult {
-  balance: bigint;
-  notes: DiscoveredNote[];
-  source: "trial-decrypt";
-}
-
-/**
- * FALLBACK path: fetch the public /events feed + /nullifiers set and trial-decrypt.
- * `leafCommitments` (leafIndex -> on-chain leaf) is supplied by the caller from
- * Appended events — the one boundary that needs an L2 archive/getLogs or the indexer
- * mirror (SPEC §11-7); the wallet never trusts it for funds, only for discovery.
- */
-export async function balanceViaTrialDecrypt(
-  indexerUrl: string,
-  identity: WalletIdentity,
-  leafCommitments: Map<number, string>,
-): Promise<FallbackBalanceResult> {
-  const [events, nullifiers] = await Promise.all([getEvents(indexerUrl), getNullifiers(indexerUrl)]);
-  const notes = trialDecryptEvents(events, identity, {
-    leafCommitments,
-    spentNullifiers: new Set(nullifiers),
-  });
-  return { balance: sumUnspent(notes), notes, source: "trial-decrypt" };
 }

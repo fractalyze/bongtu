@@ -34,8 +34,8 @@ export const DEFAULTS = {
   // KDF domain version (SPEC §6): part of the EIP-712 domain, so bumping it rotates
   // every derived key. Pinned per deployment; never silently changed.
   keyVersion: "1",
-  // The arbiter-mode indexer for the signed `GET /notes` balance path; public-mode
-  // indexers additionally serve `/events` + `/nullifiers` for the trial-decrypt fallback.
+  // The arbiter-mode indexer for the signed `GET /notes` balance path (required —
+  // the wallet has no fallback balance path; decision 2026-07-25, review #17b).
   indexerUrl: "http://localhost:8600",
   // Where the transfer/withdraw circuit assets (wasm + zkey) are served for browser
   // snarkjs proving. Static assets under the app, or a configured CDN/helper URL.

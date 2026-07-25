@@ -2,11 +2,12 @@
 // fetch wrappers are owned by @bongtu/sdk/indexerApi — one owner for both apps,
 // server-adapter-typed on the indexer side. This file only keeps the wallet's
 // import path stable. The wallet uses:
-//   - signed `GET /notes` (arbiter mode) for the primary balance path — the
+//   - signed `GET /notes` (arbiter mode) for the balance path — the
 //     sdk `buildNotesUrl` signs with the wallet's OWN key (byte-identical to the
 //     indexer's verifier, tested headlessly in the sdk suite), so only the owner
 //     can read its own notes even though the arbiter indexer holds everyone's;
-//   - `GET /events` + `GET /nullifiers` for the key-only trial-decrypt fallback;
+//   - `GET /events` + `GET /nullifiers` for the key-only trial-decrypt discovery
+//     primitive (`trialDecryptEvents` — tested, not a wallet balance path);
 //   - `GET /head` + `GET /path/{leafIndex}` to build a spend's membership witness.
 
 export {
