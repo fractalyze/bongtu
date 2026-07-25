@@ -87,6 +87,23 @@ export interface Head {
   nextLeafIndex: number;
 }
 
+/** `GET /health` — the indexer's honest liveness signal (SPEC §6b). `ok` folds
+ *  "mirror exists AND the tail poll is not persistently failing"; the raw poll
+ *  state (lastBlock / lastError / consecutiveFailures) is surfaced so a caller
+ *  can render "wedged since when". `alarms` is the total disclosure+envelope
+ *  alarm count. Public and arbiter mode both serve it (key-free). */
+export interface Health {
+  ok: boolean;
+  lastBlock: number;
+  nextLeafIndex: number;
+  batchSize: number;
+  alarms: number;
+  lastSuccessAt?: number | null;
+  lastError?: string | null;
+  lastErrorAt?: number | null;
+  consecutiveFailures: number;
+}
+
 /** `GET /path/:leafIndex` — merkle path against the current root. */
 export interface PathResult {
   leafIndex: number;
@@ -135,6 +152,11 @@ const trim = (u: string): string => u.replace(/\/$/, "");
 
 export function getHead(indexerUrl: string): Promise<Head> {
   return getJson<Head>(`${trim(indexerUrl)}/head`);
+}
+
+/** The indexer's `GET /health` liveness signal (key-free; served in both modes). */
+export function fetchHealth(indexerUrl: string): Promise<Health> {
+  return getJson<Health>(`${trim(indexerUrl)}/health`);
 }
 
 /** Merkle path of a leaf against the current root. A within-batch (disburse) leaf
