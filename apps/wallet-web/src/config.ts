@@ -36,7 +36,15 @@ export const DEFAULTS = {
   keyVersion: "1",
   // The arbiter-mode indexer for the signed `GET /notes` balance path (required —
   // the wallet has no fallback balance path; decision 2026-07-25, review #17b).
-  indexerUrl: "http://localhost:8600",
+  // Default is the RELATIVE base `/indexer`, which the Vite proxy (vite.config
+  // server+preview) forwards to the real indexer server-side. The relative base makes
+  // every /notes,/history,/head,... call SAME-ORIGIN, so there is no CORS wall and a
+  // port-forwarded remote dev box reaches the indexer with ONE tunnel (just the wallet
+  // port). Set VITE_INDEXER_URL to an absolute URL to bypass the proxy and hit an
+  // indexer directly. Runtime-overridable per session in the Settings screen too.
+  // `import.meta.env` is a Vite build-time inject — undefined under the plain
+  // node:test runner, so read it defensively (falls back to the relative default).
+  indexerUrl: import.meta.env?.VITE_INDEXER_URL || "/indexer",
   // Where the transfer/withdraw circuit assets (wasm + zkey) are served for browser
   // snarkjs proving. Static assets under the app, or a configured CDN/helper URL.
   // Files: `${circuitBaseUrl}/{transfer,withdraw}.wasm` and `.zkey`.

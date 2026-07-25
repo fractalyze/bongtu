@@ -87,6 +87,16 @@ test("a different signature derives a different key", () => {
   assert.notEqual(a.compressedPubkey, b.compressedPubkey);
 });
 
+test("the default indexer base is same-origin relative (Vite proxy contract)", () => {
+  // Guards the remote-dev contract: the wallet must call the indexer SAME-ORIGIN by
+  // default so one SSH tunnel (the wallet port) suffices and no CORS wall appears — the
+  // Vite server+preview proxy forwards `/indexer/*` to the real indexer. A revert to an
+  // absolute `http://localhost:8600` would silently reintroduce cross-origin + a 2nd
+  // tunnel, so pin the default to a root-relative path.
+  assert.ok(DEFAULTS.indexerUrl.startsWith("/"), `indexerUrl must be root-relative, got ${DEFAULTS.indexerUrl}`);
+  assert.ok(!/^https?:/i.test(DEFAULTS.indexerUrl), "indexerUrl default must not be an absolute origin");
+});
+
 test("the key-derivation struct is domain-separated (chainId, pool, version)", () => {
   const t = keyDerivationTypedData(DEFAULTS.chainId, DEFAULTS.pool, DEFAULTS.keyVersion);
   assert.equal(t.domain.chainId, 91342);

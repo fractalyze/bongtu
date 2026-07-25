@@ -33,6 +33,22 @@ function tsJsResolve(): Plugin {
   };
 }
 
+// Same-origin indexer proxy. The wallet's DEFAULT indexer base is the relative path
+// `/indexer` (src/config.ts), so the browser only ever talks to the Vite origin and
+// Vite forwards to the real indexer server-side — no cross-origin CORS wall and no
+// second port to expose. This is what makes remote development work: SSH-forward ONLY
+// the wallet port and `/indexer/*` still reaches an indexer bound to the dev box's
+// localhost:8600. Wired into BOTH `server` (vite dev) and `preview` (vite preview) so
+// the relative default works in every mode the app is served. Target overridable for a
+// non-default indexer host/port.
+const indexerProxy = {
+  "/indexer": {
+    target: process.env.VITE_INDEXER_PROXY_TARGET || "http://localhost:8600",
+    changeOrigin: true,
+    rewrite: (p: string) => p.replace(/^\/indexer/, ""),
+  },
+};
+
 export default {
   // react() transpiles JSX + wires Fast Refresh; tsJsResolve is enforce:"pre" so the
   // NodeNext ".js" -> ".ts"/".tsx" rewrite resolves before React's own hooks run.
@@ -42,7 +58,9 @@ export default {
     // via root node_modules symlinks) — allow
     // the Vite dev server to read the whole monorepo, not just apps/wallet-web.
     fs: { allow: [REPO_ROOT] },
+    proxy: indexerProxy,
   },
+  preview: { proxy: indexerProxy },
   build: {
     target: "es2022",
     // A single-page PoC; a larger bundle (ethers + snarkjs + poseidon constants) is
