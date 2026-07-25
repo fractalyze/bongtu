@@ -8,19 +8,15 @@
 import { ethers } from "ethers";
 import type { KeyDerivationTypedData } from "./derive.js";
 import type { Calldata } from "@bongtu/sdk/proving";
+import { GIWA_GAS_FLOOR_GWEI, POOL_ABI_FRAGMENTS, explorerTxUrl } from "@bongtu/sdk/network";
 
-// GIWA wants ~0.001 gwei; ethers' auto-estimate overpays ~1500x. 0.005 gwei is a safe
-// floor (matches deploy/giwa_disburse256.ts and apps/admin-web/src/lib/chain.ts).
-const GAS_PRICE = ethers.utils.parseUnits("0.005", "gwei");
+// The GIWA gas floor lives in @bongtu/sdk/network (ethers' auto-estimate
+// overpays ~1500x); the sdk is data-only, so parseUnits happens here.
+const GAS_PRICE = ethers.utils.parseUnits(GIWA_GAS_FLOOR_GWEI, "gwei");
 
-// The pool functions the wallet touches. transfer/withdraw take (a,b,c,pub) only —
-// their ciphertext rides in `pub` as circuit outputs, so there is no ciphertext arg.
-const POOL_ABI = [
-  "function transfer(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[36] pub)",
-  "function withdraw(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[25] pub)",
-  "function root() view returns (uint256)",
-  "function nextLeafIndex() view returns (uint256)",
-];
+// The shared per-function ABI fragments (@bongtu/sdk/network) — only the pool
+// functions the wallet touches.
+const POOL_ABI = [POOL_ABI_FRAGMENTS.transfer, POOL_ABI_FRAGMENTS.withdraw, POOL_ABI_FRAGMENTS.root, POOL_ABI_FRAGMENTS.nextLeafIndex];
 
 interface Eip1193 {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;
@@ -77,7 +73,7 @@ async function submit(
   const pool = new ethers.Contract(poolAddr, POOL_ABI, connection.signer);
   const tx = await pool[fn](calldata.a, calldata.b, calldata.c, calldata.pub, { gasPrice: GAS_PRICE });
   await tx.wait();
-  return { txHash: tx.hash, explorerUrl: `${explorerBase.replace(/\/$/, "")}/tx/${tx.hash}` };
+  return { txHash: tx.hash, explorerUrl: explorerTxUrl(tx.hash, explorerBase) };
 }
 
 /** Submit a proven transfer (calldata from browser snarkjs, SPEC §7). */

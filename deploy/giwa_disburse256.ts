@@ -3,7 +3,7 @@
 // spend it to 256 recipients with a rabbitsnark-GPU Groth16 proof, publishing
 // the receiver ciphertext on-chain. Measures the real L2 gas + L1 data fee.
 //
-//   GIWA_RPC (default sepolia-rpc.giwa.io) + DEPLOYER_KEY (env) required.
+//   GIWA_RPC (default: the sdk network RPC_URL) + DEPLOYER_KEY (env) required.
 //   BONGTU_PROVER_URL (default http://127.0.0.1:8700) must point at a READY
 //   bongtu prover service (top-level prover/ — boot it first, see prover/README.md).
 //   Reuses the deployed addresses in deploy/addresses.91342.json.
@@ -30,6 +30,7 @@ import type { FieldInput } from "@bongtu/sdk/babyjub";
 import { toWire } from "@bongtu/sdk/proving";
 import type { Calldata, DisburseInput } from "@bongtu/sdk/proving";
 import { loadEthers, loadSnarkjs } from "@bongtu/sdk/extern";
+import { B, GIWA_GAS_FLOOR_GWEI, H, RPC_URL, explorerTxUrl } from "@bongtu/sdk/network";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -37,11 +38,11 @@ const ROOT = join(HERE, "..");
 const snarkjs = loadSnarkjs();
 const ethers = loadEthers();
 
-const RPC = process.env.GIWA_RPC || "https://sepolia-rpc.giwa.io";
+const RPC = process.env.GIWA_RPC || RPC_URL;
 const PK = process.env.DEPLOYER_KEY;
 if (!PK) throw new Error("DEPLOYER_KEY env required");
 
-const H = 32, B = 256;
+// H=32 / B=256 come from @bongtu/sdk/network — the live pool's parameters.
 const CIRC_OUT = join(ROOT, "circuits", "out");
 const CONTRACTS_OUT = join(ROOT, "contracts", "out");
 // The bongtu prover service (top-level prover/) holds the belted disburse256
@@ -92,9 +93,9 @@ async function main(): Promise<void> {
   const pool = new ethers.Contract(addr.pool, artifact("BongtuPool", "BongtuPool"), wallet);
   const token = new ethers.Contract(addr.token, artifact("MockERC20", "MockERC20"), wallet);
   const ARBITER: [bigint, bigint] = [BigInt(addr.arbiterKeyX), BigInt(addr.arbiterKeyY)]; // pool's stored authority key
-  // Explicit gas price: GIWA needs ~0.001 gwei but ethers' auto-estimate overpays
-  // ~1500x (drains the faucet grant). 0.005 gwei is a safe 5x floor.
-  const TX = { gasPrice: ethers.utils.parseUnits("0.005", "gwei") };
+  // Explicit gas price: the GIWA gas floor lives in @bongtu/sdk/network
+  // (ethers' auto-estimate overpays ~1500x and drains the faucet grant).
+  const TX = { gasPrice: ethers.utils.parseUnits(GIWA_GAS_FLOOR_GWEI, "gwei") };
 
   const EMPLOYER = deriveKeypair(313131313131313131313131n);
   const recipient = (i: number): Keypair => deriveKeypair(4000000019n + BigInt(i) * 1000003n);
@@ -189,7 +190,7 @@ async function main(): Promise<void> {
   console.log(`   L1 data fee  : ${l1Fee} wei`);
   console.log(`   TOTAL cost   : ${total} wei = ${ethers.utils.formatEther(total.toString())} ETH`);
   console.log(`   per recipient: ${gasUsed / BigInt(B)} gas`);
-  console.log(`   explorer     : https://sepolia-explorer.giwa.io/tx/${tx.hash}`);
+  console.log(`   explorer     : ${explorerTxUrl(tx.hash)}`);
   console.log(`\n${failures === 0 ? "GIWA 256-DISBURSE PASS" : `FAIL ${failures}`}`);
   process.exit(failures === 0 ? 0 : 1);
 }

@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadEthers } from "@bongtu/sdk/extern";
+import { CHAIN_ID } from "@bongtu/sdk/network";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = join(HERE, "..", "..", ".."); // apps/indexer/src -> repo root
@@ -56,7 +57,7 @@ export function resolveConfig(): ChainConfig {
   const startBlock = process.env.START_BLOCK ? Number(process.env.START_BLOCK) : 0;
   let pool = process.env.POOL || "";
   if (!pool) {
-    const chainId = process.env.CHAIN_ID || "91342";
+    const chainId = process.env.CHAIN_ID || String(CHAIN_ID);
     const addrPath = join(REPO_ROOT, "deploy", `addresses.${chainId}.json`);
     pool = JSON.parse(readFileSync(addrPath, "utf8")).pool;
   }

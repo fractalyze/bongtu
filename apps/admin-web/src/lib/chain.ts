@@ -5,19 +5,15 @@
 
 import { ethers } from "ethers";
 import type { Calldata } from "@bongtu/sdk/proving";
+import { GIWA_GAS_FLOOR_GWEI, POOL_ABI_FRAGMENTS, explorerTxUrl } from "@bongtu/sdk/network";
 
-// A minimal hand-written ABI (avoids importing the Foundry artifact JSON). Only the
-// four functions the admin app touches.
-const POOL_ABI = [
-  "function disburseWithCiphertexts(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[10] pub, uint256[] receiverCiphertexts)",
-  "function root() view returns (uint256)",
-  "function nextLeafIndex() view returns (uint256)",
-  "function B() view returns (uint256)",
-];
+// The shared per-function ABI fragments (@bongtu/sdk/network) — only the four
+// functions the admin app touches.
+const POOL_ABI = [POOL_ABI_FRAGMENTS.disburseWithCiphertexts, POOL_ABI_FRAGMENTS.root, POOL_ABI_FRAGMENTS.nextLeafIndex, POOL_ABI_FRAGMENTS.B];
 
-// GIWA wants ~0.001 gwei; ethers' auto-estimate overpays ~1500x. 0.005 gwei is a
-// safe floor (matches deploy/giwa_disburse256.ts).
-const GAS_PRICE = ethers.utils.parseUnits("0.005", "gwei");
+// The GIWA gas floor lives in @bongtu/sdk/network (ethers' auto-estimate
+// overpays ~1500x); the sdk is data-only, so parseUnits happens here.
+const GAS_PRICE = ethers.utils.parseUnits(GIWA_GAS_FLOOR_GWEI, "gwei");
 
 interface Eip1193 {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;
@@ -56,7 +52,7 @@ export async function submitDisburse(
     { gasPrice: GAS_PRICE },
   );
   await tx.wait();
-  return { txHash: tx.hash, explorerUrl: `${explorerBase}/tx/${tx.hash}` };
+  return { txHash: tx.hash, explorerUrl: explorerTxUrl(tx.hash, explorerBase) };
 }
 
 /** Read the live pool head (root + nextLeafIndex) over an RPC — no wallet needed. */
