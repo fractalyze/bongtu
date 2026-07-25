@@ -27,16 +27,16 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
-import { ImtTree } from "../sdk/src/imt.js";
+import { ImtTree } from "@bongtu/sdk/imt";
 import {
   deriveKeypair,
   commitment,
   nullifier,
   ecdhSharedSecret,
   poseidonDecrypt,
-} from "../sdk/src/note.js";
-import type { Keypair } from "../sdk/src/note.js";
-import type { FieldInput } from "../sdk/src/babyjub.js";
+} from "@bongtu/sdk/note";
+import type { Keypair } from "@bongtu/sdk/note";
+import type { FieldInput } from "@bongtu/sdk/babyjub";
 
 const require = createRequire(import.meta.url);
 const HERE = dirname(fileURLToPath(import.meta.url));

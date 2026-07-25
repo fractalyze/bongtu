@@ -20,7 +20,7 @@ import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ImtTree } from "../../../sdk/src/imt.js";
+import { ImtTree } from "@bongtu/sdk/imt";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const H = 32;

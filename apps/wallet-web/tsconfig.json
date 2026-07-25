@@ -1,0 +1,17 @@
+{
+  "// note": "The public wallet is its own TS package (NOT in the root tsconfig include). NodeNext resolution matches the unbuilt @bongtu/* workspace source it imports (exports map to raw src/*.ts); third-party libs (ethers v5, snarkjs) type-check loosely. `DOM` lib for the browser views.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "vite.config.ts"]
+}

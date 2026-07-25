@@ -26,9 +26,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ImtTree } from "../sdk/src/imt.js";
-import { deriveKeypair, commitment, nullifier } from "../sdk/src/note.js";
-import type { Keypair } from "../sdk/src/note.js";
+import { ImtTree } from "@bongtu/sdk/imt";
+import { deriveKeypair, commitment, nullifier } from "@bongtu/sdk/note";
+import type { Keypair } from "@bongtu/sdk/note";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = join(HERE, "inputs");

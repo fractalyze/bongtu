@@ -28,24 +28,31 @@ this v2 pool needs the 256 proof re-proven against its arbiter key — see `docs
 
 ## Layout
 
+npm workspaces monorepo: `packages/*` (libraries) + `apps/*` (services and web apps); workspace packages
+export **raw `src/*.ts`** (no build step) as `@bongtu/*` specifiers. `circuits/`, `contracts/`, `deploy/`
+stay top-level (non-npm toolchains).
+
 - `circuits/` — circom (transfer 2×2, disburse 1×16 dev / 1×256 prod, withdraw 2×1, deposit; IMT depth-32, Poseidon-v1)
 - `contracts/` — Foundry: `BongtuPool` (unified single-frontier IMT + contract-derived enabled + arbiter epochs) + verifiers
-- `sdk/` — TS: single-frontier IMT, Poseidon, BabyJubjub keys, note/encrypt, trial-decrypt
+- `packages/sdk/` — `@bongtu/sdk`: single-frontier IMT, Poseidon, BabyJubjub keys, note/encrypt, trial-decrypt
+- `packages/prover-cli/` — `@bongtu/prover-cli`: pure prover, a typed `ProvingRequest` → Groth16 calldata (snarkjs CPU / rabbitsnark GPU); no CSV/addr-resolve/tx
+- `apps/indexer/` — `@bongtu/indexer`: event ingest → MirrorTree mirror (root == on-chain root), merkle-path + ciphertext-feed API, disclosure alarms; **arbiter mode** (`AUTHORITY_KEY`) decrypts every envelope to serve `/notes?owner=` + within-batch paths
+- `apps/admin-web/` — `@bongtu/admin-web`: role-moded console — employer-mode (recipients → request → prover-cli → tx) + auditor-mode (arbiter `/notes` ledger)
+- `apps/wallet-web/` — `@bongtu/wallet-web`: MetaMask wallet — sign → bjj key, balance from `/notes`, transfer/withdraw with browser snarkjs proving
 - `deploy/` — Foundry deploy script (local anvil + GIWA), the live 256-disburse runner, the M0 cross-circuit e2e
-- `indexer/` — event ingest → MirrorTree mirror (root == on-chain root), merkle-path + ciphertext-feed API, disclosure alarms; **arbiter mode** (`AUTHORITY_KEY`) decrypts every envelope to serve `/notes?owner=` + within-batch paths
-- `prover-cli/` — pure prover: a typed `ProvingRequest` → Groth16 calldata (snarkjs CPU / rabbitsnark GPU); no CSV/addr-resolve/tx
-- `apps/admin/` — role-moded console: employer-mode (recipients → request → prover-cli → tx) + auditor-mode (arbiter `/notes` ledger)
-- `apps/public/` — MetaMask wallet: sign → bjj key, balance from `/notes`, transfer/withdraw with browser snarkjs proving
 - `docs/` — specification, milestone records, toolchain (see the index below)
 
 ## Run
 
 ```sh
+# install the whole workspace (root node_modules + @bongtu/* symlinks)
+npm install
+
 # sdk (TypeScript oracle: IMT / Poseidon / babyjub / note crypto)
-cd sdk && npm install && npm test     # 21 tests (tsx + node --test)
+cd packages/sdk && npm test           # 34 tests (tsx + node --test)
 
 # contracts
-cd contracts && forge test            # 27 tests
+cd contracts && forge test            # 37 tests
 
 # circuits (CPU proofs) — generators run through tsx
 cd circuits && bash prove_all.sh      # 4× snarkjs OK
@@ -54,18 +61,19 @@ cd circuits && bash prove_all.sh      # 4× snarkjs OK
 bash deploy/e2e_m0.sh
 
 # indexer conformance (anvil scenario: ingest, mirror==contract, paths, alarms)
-cd indexer && npm test
+cd apps/indexer && npm test
 
 # deploy the full B=256 stack to a local node (or GIWA via env — see deploy/README.md)
 bash deploy/deploy_local.sh
 
 # run the indexer against the live GIWA pool (read-only)
-cd indexer && RPC=https://sepolia-rpc.giwa.io npm start
+cd apps/indexer && RPC=https://sepolia-rpc.giwa.io npm start
 ```
 
-The `.ts` scripts under `sdk/`, `deploy/`, `circuits/`, and `contracts/test/fixtures/` run on [`tsx`](https://github.com/privatenumber/tsx)
-(ESM / NodeNext, `strict`); `npm install` at the repo root installs the shared TS toolchain. Type-check everything with
-`npx tsc --noEmit -p tsconfig.json` (scripts) and `cd sdk && npx tsc --noEmit` (the sdk package).
+The `.ts` scripts under `packages/sdk/`, `deploy/`, `circuits/`, and `contracts/test/fixtures/` run on [`tsx`](https://github.com/privatenumber/tsx)
+(ESM / NodeNext, `strict`); `npm install` at the repo root installs the shared TS toolchain and links the
+`@bongtu/*` workspace packages. Type-check everything with `npx tsc --noEmit -p tsconfig.json` (scripts) and
+`cd packages/sdk && npx tsc --noEmit` (the sdk package).
 
 Copy `.env.example` → `.env` (gitignored) for a funded GIWA deployer key. Toolchain paths are in
 [`docs/toolchain.md`](docs/toolchain.md).

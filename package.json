@@ -1,9 +1,13 @@
 {
-  "name": "bongtu-scripts",
+  "name": "bongtu",
   "version": "0.0.0",
-  "description": "TS tooling for the bongtu deploy/circuits/fixtures scripts \u2014 run via tsx, type-checked via the root tsconfig.",
+  "description": "bongtu monorepo root \u2014 npm workspaces (apps/*, packages/*) + the TS toolchain for the deploy/circuits/fixtures scripts, type-checked via the root tsconfig.",
   "type": "module",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
@@ -12,5 +16,8 @@
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@bongtu/sdk": "*"
+  }
 }

@@ -2,13 +2,13 @@
   "extends": "./tsconfig.base.json",
   "// note": "Type-checks the runnable scripts (deploy/, circuits/, contracts/test/fixtures/) plus the sdk sources they import directly via NodeNext .js specifiers. The sdk has its own tsconfig for `npm test`; this one is the cross-tree gate.",
   "include": [
-    "sdk/src/**/*.ts",
+    "packages/sdk/src/**/*.ts",
     "deploy/**/*.ts",
     "circuits/**/*.ts",
     "contracts/test/fixtures/**/*.ts",
-    "indexer/src/**/*.ts",
-    "indexer/test/**/*.ts",
-    "prover-cli/src/**/*.ts",
-    "prover-cli/test/**/*.ts"
+    "apps/indexer/src/**/*.ts",
+    "apps/indexer/test/**/*.ts",
+    "packages/prover-cli/src/**/*.ts",
+    "packages/prover-cli/test/**/*.ts"
   ]
 }

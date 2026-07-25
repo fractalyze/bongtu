@@ -16,14 +16,14 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { execSync } from "node:child_process";
 
-import { ImtTree } from "../sdk/src/imt.js";
-import { poseidon2, poseidonN } from "../sdk/src/poseidon.js";
+import { ImtTree } from "@bongtu/sdk/imt";
+import { poseidon2, poseidonN } from "@bongtu/sdk/poseidon";
 import {
   deriveKeypair, commitment, nullifier,
   poseidonEncrypt, ecdhSharedSecret, assertDistinctOwnerPubkeys,
-} from "../sdk/src/note.js";
-import type { Keypair } from "../sdk/src/note.js";
-import type { FieldInput } from "../sdk/src/babyjub.js";
+} from "@bongtu/sdk/note";
+import type { Keypair } from "@bongtu/sdk/note";
+import type { FieldInput } from "@bongtu/sdk/babyjub";
 
 const require = createRequire(import.meta.url);
 const HERE = dirname(fileURLToPath(import.meta.url));

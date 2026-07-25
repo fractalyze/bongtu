@@ -68,12 +68,12 @@ wallet onboards — the GASOK user-KPI bridge).
 │            ERC20 custody + 4 verifiers + contract-derived enabled) · Poseidon    │
 │      │ events carry ALL ciphertext + ecdhPublicKey + nonce (from verified sigs)  │
 │      ▼                                                                          │
-│ sdk/ keys(signTypedData→bjj) · notes · encrypt · scan/trial-decrypt+nullifier   │
-│   proving/  snarkjs(GPL) isolated · rabbitsnark(GPU, repo-external)             │
-│ prover-cli/ (employer self-host: CSV→witness→proof→tx)                          │
-│ indexer/ event ingest · IMT mirror(==contract root) · path API · disclosureHash │
-│          verify · (auditor-mode) arbiter-decrypt ledger                          │
-│ apps/ admin(employer-mode | auditor-mode) · public(MetaMask wallet)             │
+│ packages/sdk/ keys(signTypedData→bjj) · notes · encrypt · trial-decrypt+nullif  │
+│   snarkjs(GPL) + rabbitsnark(GPU) stay repo-external (createRequire / venv)     │
+│ packages/prover-cli/ (employer self-host: ProvingRequest→Groth16 calldata)      │
+│ apps/indexer/ event ingest · IMT mirror(==contract root) · path API ·           │
+│          disclosureHash verify · (auditor-mode) arbiter-decrypt ledger           │
+│ apps/ admin-web(employer-mode | auditor-mode) · wallet-web(MetaMask wallet)     │
 └──────────────────────────────────────────────────────────────────────────────┘
                     deploy → GIWA Sepolia (Blockscout verify)
 ```
@@ -252,15 +252,15 @@ value still counts → **mint-from-nothing**. Fix, applied to **every** verifier
   recovered balance is inflated and produced proofs revert. (Works because Q4 puts all ciphertext on-chain;
   stock Zeto's random off-chain salts made this impossible.) DoD test: `balance_after == balance_before`
   across a spend.
-> **§6 as-built (2026-07-25): prover-cli is a PURE prover.** Decision (user): `prover-cli/` takes a typed,
+> **§6 as-built (2026-07-25): prover-cli is a PURE prover.** Decision (user): `packages/prover-cli/` takes a typed,
 > already-resolved `ProvingRequest` (complete circom witness input per circuit) and returns Groth16 calldata —
 > nothing more. CSV parsing, ETH→bjj address resolution, membership-witness building, and tx submission are the
-> **admin app's** job (`apps/admin/`), not the prover's. CPU (snarkjs) for deposit/transfer/withdraw, GPU
-> (rabbitsnark) for disburse, selected by a `backend` field. The `apps/public/` wallet proves its own small
+> **admin app's** job (`apps/admin-web/`), not the prover's. CPU (snarkjs) for deposit/transfer/withdraw, GPU
+> (rabbitsnark) for disburse, selected by a `backend` field. The `apps/wallet-web/` wallet proves its own small
 > transfer/withdraw in the browser (GPL decision (a)); the note-owner identifier everywhere is the **compressed
-> bjj pubkey** (`sdk/pubkey.ts`). Original sketch (below) is superseded on the CSV/tx-in-prover point.
+> bjj pubkey** (`packages/sdk/src/pubkey.ts`). Original sketch (below) is superseded on the CSV/tx-in-prover point.
 
-- **Prover (`prover-cli/`, employer self-host):** CSV(addr,amount) → witness (circom `witness_calculator`,
+- **Prover (`packages/prover-cli/`, employer self-host):** CSV(addr,amount) → witness (circom `witness_calculator`,
   ~89MB witness for disburse) → **rabbitsnark GPU** Groth16 → calldata → tx. Prover-host block: state the GPU
   VRAM floor (measure rabbitsnark high-water), CUDA version, and that **for the PoC "we prove in the demo" is
   the distribution model** (the 1.24GB zkey + private GPU binary aren't shipped to employers yet). snarkjs /
@@ -276,7 +276,7 @@ value still counts → **mint-from-nothing**. Fix, applied to **every** verifier
 Post-Q4 the indexer is a **convenience/availability layer, not trust-critical** for funds (see §11-7), but the
 public app depends on it for UX. Contract:
 
-**Implemented endpoints (`indexer/`, built 2026-07-24):**
+**Implemented endpoints (`apps/indexer/`, built 2026-07-24):**
 - `GET /events?cursor=&limit=` → the ciphertext feed a wallet trial-decrypts (`{ seq, txHash, blockNumber,
   kind, epoch, ecdhPublicKey, encryptionNonce, slices:[{offset, elts, leafIndex}], ciphertext[], disclosure? }`);
   `leafIndex` per slice drives later merkle paths.
@@ -296,9 +296,9 @@ serves:
   txHash, spent}]` — the user reads their own notes directly (no full-feed trial-decrypt). `spent` is
   derived from envelopes alone (a spending op's input envelope names the consumed note), needing no owner
   key or nullifier linkage. `owner` is the **compressed bjj pubkey** — a 32-byte hex string (little-endian
-  y, top bit = LSB of x; `sdk/pubkey.ts` pack/unpack), not a raw `x,y` decimal pair.
-  **Auth: IMPLEMENTED** (`indexer/src/api/routes/notes.ts`). A caller proves control of the queried key with
-  a bjj EdDSA-Poseidon signature (`sdk/eddsa.ts`) over `Poseidon(ownerPub.x, ownerPub.y, ts)`, checked
+  y, top bit = LSB of x; `packages/sdk/src/pubkey.ts` pack/unpack), not a raw `x,y` decimal pair.
+  **Auth: IMPLEMENTED** (`apps/indexer/src/api/routes/notes.ts`). A caller proves control of the queried key with
+  a bjj EdDSA-Poseidon signature (`packages/sdk/src/eddsa.ts`) over `Poseidon(ownerPub.x, ownerPub.y, ts)`, checked
   against the queried pubkey; the request is refused unless `|now − ts| ≤ 300s` (replay-bounded) **and** the
   signature verifies. Malformed owner → 400; wrong key or expired ts → 401. The auditor-key indexer still
   holds every user's decrypted notes by design (that is the disclosure model) — auth governs *who may query*,
@@ -348,8 +348,8 @@ serves:
 > - **`GET /notes?owner=<compressed-bjj-pubkey>` is authenticated by a bjj signature** (`sign(ownerPubKey ‖
 >   timestamp)`; the indexer checks it against the queried pubkey) so only the key owner reads their own
 >   notes — the auditor-key indexer sees all users, so an unauthenticated `/notes` would expose everyone's
->   payroll. **IMPLEMENTED** (2026-07-24): owner is the compressed pubkey (`sdk/pubkey.ts`), the signature is
->   EdDSA-Poseidon over `Poseidon(ownerPub.x, ownerPub.y, ts)` (`sdk/eddsa.ts`), and the route enforces a
+>   payroll. **IMPLEMENTED** (2026-07-24): owner is the compressed pubkey (`packages/sdk/src/pubkey.ts`), the signature is
+>   EdDSA-Poseidon over `Poseidon(ownerPub.x, ownerPub.y, ts)` (`packages/sdk/src/eddsa.ts`), and the route enforces a
 >   ±300s replay window plus signature verification (wrong key / expired ts → 401, malformed owner → 400).
 >   The arbiter still sees all notes by design; auth governs *who may query*.
 > - Because deposit/withdraw circuits change (envelopes) and every spending base gains the §5.2 zero-leaf
@@ -360,14 +360,14 @@ serves:
 
 ## 7. Apps (2, admin is role-moded)
 
-- **admin/ — employer-mode:** CSV upload → local prove → `deposit`+`disburse`; ledger view from **its own CSV
+- **apps/admin-web/ — employer-mode:** CSV upload → local prove → `deposit`+`disburse`; ledger view from **its own CSV
   + receipts** (it authored the batch — no arbiter key needed). Shows the ~0.5s proof + 1-tx 256-payout as
   the demo centerpiece. **Holds no arbiter key**, so it **cannot** decrypt employees' later p2p transfers.
-- **admin/ — auditor-mode:** holds the arbiter key (separate browser profile / host in the demo, PoC key
+- **apps/admin-web/ — auditor-mode:** holds the arbiter key (separate browser profile / host in the demo, PoC key
   storage = encrypted file/env keyed per `rotateArbiter` epoch); decrypts the event stream into a ledger view
   and runs the disclosureHash alarm. This is the **independent** regulator seat — the beat that actually
   sells compliance.
-- **public/ — self-custody wallet:** MetaMask login → derive bjj key (§6) → pull ciphertext feed + merkle
+- **apps/wallet-web/ — self-custody wallet:** MetaMask login → derive bjj key (§6) → pull ciphertext feed + merkle
   paths from indexer → **trial-decrypt in the browser** → balance = sum(unspent notes); receive
   (auto-discovered), `transfer`, `withdraw`. Indexer never sees user keys or balances.
 - Recipient gas: PoC uses faucet; GIWA's pre-installed ERC-4337 EntryPoint + paymaster → gasless spend is
@@ -378,16 +378,22 @@ serves:
 ## 8. Repo layout
 
 ```
-bongtu/                       # one monorepo, Apache-2.0
-  circuits/                   # circom + vendored zeto lib/basetokens + our IMT bases
+bongtu/                       # one monorepo, Apache-2.0; npm workspaces = apps/* + packages/*
+  circuits/                   # circom + vendored zeto lib/basetokens + our IMT bases (non-npm, top-level)
   contracts/                  # Foundry: BongtuPool, 4 verifiers, Poseidon, differential + gas tests
-  sdk/  proving/              # TS SDK (Apache/MIT); snarkjs(GPL)+rabbitsnark isolated under proving/
-  prover-cli/                 # employer self-host prover
-  indexer/                    # event ingest, IMT mirror, path API, disclosureHash verify, arbiter ledger
-  apps/ admin/  public/       # role-moded admin; MetaMask wallet
+  packages/
+    sdk/                      # @bongtu/sdk — TS SDK (Apache/MIT); snarkjs(GPL)+rabbitsnark stay repo-external
+    prover-cli/               # @bongtu/prover-cli — employer self-host prover
+  apps/
+    indexer/                  # @bongtu/indexer — event ingest, IMT mirror, path API, disclosureHash, arbiter ledger
+    admin-web/                # @bongtu/admin-web — role-moded admin console
+    wallet-web/               # @bongtu/wallet-web — MetaMask wallet
   deploy/                     # Foundry scripts → GIWA Sepolia (Blockscout verify)
   docs/                       # spec (this file), milestone records, toolchain
 ```
+
+Workspace packages export **raw `src/*.ts`** (`"exports": { "./*": "./src/*.ts" }`) — consumers import
+`@bongtu/sdk/note` etc. with no build step; tsc (NodeNext), tsx, and Vite all resolve the same source.
 
 ---
 

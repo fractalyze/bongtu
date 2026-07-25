@@ -16,7 +16,7 @@ import {UUPSUpgradeable} from "./utils/proxy/UUPSUpgradeable.sol";
 /// subtrees (disburse), sharing one `nextLeafIndex` and one `filledSubtrees`
 /// frontier, so a batch-inserted note is spendable by transfer/withdraw against
 /// the same root (§5.1). The tree is byte-identical to the JS reference
-/// `sdk/src/imt.ts` — the Foundry differential test asserts `root() ==
+/// `packages/sdk/src/imt.ts` — the Foundry differential test asserts `root() ==
 /// ImtTree.getRoot()` after every insert.
 ///
 /// The load-bearing soundness fix (§5.2): for every verifier call the contract

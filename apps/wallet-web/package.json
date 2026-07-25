@@ -1,0 +1,28 @@
+{
+  "name": "@bongtu/wallet-web",
+  "version": "0.0.0",
+  "description": "bongtu public wallet PoC — a self-custody MetaMask wallet (SPEC §7 public app): derive a BabyJubJub spending key from an eth_signTypedData_v4 signature over a domain-separated struct (deterministic), show balance from the arbiter indexer (signed /notes) or a /events trial-decrypt fallback, and assemble + prove + submit transfer / withdraw. Imports unbuilt @bongtu/* workspace source directly so the crypto is byte-identical.",
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --import tsx --test --test-force-exit test/*.test.ts"
+  },
+  "dependencies": {
+    "@bongtu/prover-cli": "*",
+    "@bongtu/sdk": "*",
+    "ethers": "^5.8.0",
+    "poseidon-lite": "^0.3.0",
+    "snarkjs": "^0.7.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vite": "^5.4.0"
+  }
+}

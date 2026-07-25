@@ -15,7 +15,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
-import { ImtTree } from "../../../sdk/src/imt.js";
+import { ImtTree } from "@bongtu/sdk/imt";
 
 const require = createRequire(import.meta.url);
 // Single toolchain-node_modules constant (see docs/toolchain.md `SNARKJS`/`CIRCOMLIB`);

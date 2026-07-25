@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "// note": "Extends the shared bongtu base (NodeNext ESM, strict). Third-party libs (ethers v5) load via createRequire and come back as `any` by design — real typing is on OUR code (ingest/store/disclosure/api). The cross-tree gate lives in ../tsconfig.json (root), which also includes these globs.",
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}
