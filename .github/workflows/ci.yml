@@ -90,6 +90,23 @@ jobs:
           key: node-modules-v1-${{ hashFiles('package-lock.json') }}
       - if: steps.nm.outputs.cache-hit != 'true'
         run: npm ci
+      - name: load toolchain pins
+        run: grep -E '^[A-Z0-9_]+=' .github/ci-pins.env >> "$GITHUB_ENV"
+      # The indexer ingest unit test loads modules that require ethers via the
+      # BONGTU_NODE_MODULES external-require seam — provide the pinned extdeps.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: extdeps
+        with:
+          path: ~/.cache/bongtu-extdeps
+          key: extdeps-v1-${{ hashFiles('.github/ci-pins.env') }}
+      - if: steps.extdeps.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$HOME/.cache/bongtu-extdeps"
+          cd "$HOME/.cache/bongtu-extdeps"
+          printf '{}' > package.json
+          npm install --no-audit --no-fund --ignore-scripts \
+            "ethers@${ETHERS_VERSION}" "snarkjs@${SNARKJS_VERSION}" "circomlib@${CIRCOMLIB_VERSION}"
+      - run: echo "BONGTU_NODE_MODULES=$HOME/.cache/bongtu-extdeps/node_modules" >> "$GITHUB_ENV"
       - name: typecheck (root cross-tree)
         run: npm run typecheck
       - name: typecheck (workspaces)
