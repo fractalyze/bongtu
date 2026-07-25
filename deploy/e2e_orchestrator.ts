@@ -30,9 +30,9 @@
 // committed verifiers, checked in the shell wrapper) so new proofs verify
 // against the on-chain verifiers.
 
-import { ImtTree, foldToRoot } from "@bongtu/sdk/imt";
-import { poseidon2, poseidonN } from "@bongtu/sdk/poseidon";
-import { buildAuthorityPlaintext, disclosureChain } from "@bongtu/sdk/envelope";
+import { ImtTree, foldToRoot } from "@bongtu/core/imt";
+import { poseidon2, poseidonN } from "@bongtu/core/poseidon";
+import { buildAuthorityPlaintext, disclosureChain } from "@bongtu/core/envelope";
 import {
   commitment,
   nullifier,
@@ -40,8 +40,8 @@ import {
   poseidonDecrypt,
   ecdhSharedSecret,
   assertDistinctOwnerPubkeys,
-} from "@bongtu/sdk/note";
-import { loadEthers } from "@bongtu/sdk/extern";
+} from "@bongtu/core/note";
+import { loadEthers } from "@bongtu/core/extern";
 
 // The deploy-and-drive skeleton (anvil connection, forge-artifact deploys, the
 // UUPS pool proxy, the CPU prove() wrapper, shared actor/salt/amount fixtures)

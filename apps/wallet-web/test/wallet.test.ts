@@ -27,10 +27,10 @@ import {
   nullifier,
   poseidonEncrypt,
   ecdhSharedSecret,
-} from "@bongtu/sdk/note";
-import { packPubkey } from "@bongtu/sdk/pubkey";
-import { ImtTree } from "@bongtu/sdk/imt";
-import type { Point } from "@bongtu/sdk/babyjub";
+} from "@bongtu/core/note";
+import { packPubkey } from "@bongtu/core/pubkey";
+import { ImtTree } from "@bongtu/core/imt";
+import type { Point } from "@bongtu/core/babyjub";
 
 import {
   deriveIdentityFromSignature,

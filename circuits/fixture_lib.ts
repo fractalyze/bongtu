@@ -24,10 +24,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ImtTree } from "@bongtu/sdk/imt";
-import { deriveKeypair } from "@bongtu/sdk/note";
-import type { Keypair } from "@bongtu/sdk/note";
-import { toWire } from "@bongtu/sdk/proving";
+import { ImtTree } from "@bongtu/core/imt";
+import { deriveKeypair } from "@bongtu/core/note";
+import type { Keypair } from "@bongtu/core/note";
+import { toWire } from "@bongtu/core/proving";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const OUT_DIR = join(HERE, "inputs");

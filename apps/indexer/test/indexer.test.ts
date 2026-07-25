@@ -28,11 +28,11 @@
 //
 // Anvil is started + trap-killed by run.sh; this file only talks to E2E_RPC.
 
-import { poseidon2, poseidonN } from "@bongtu/sdk/poseidon";
-import { ecdhSharedSecret, poseidonDecrypt } from "@bongtu/sdk/note";
-import { packPubkey } from "@bongtu/sdk/pubkey";
-import { signNotesAuth, notesAuthMessage, packSignature } from "@bongtu/sdk/eddsa";
-import { ImtTree } from "@bongtu/sdk/imt";
+import { poseidon2, poseidonN } from "@bongtu/core/poseidon";
+import { ecdhSharedSecret, poseidonDecrypt } from "@bongtu/core/note";
+import { packPubkey } from "@bongtu/core/pubkey";
+import { signNotesAuth, notesAuthMessage, packSignature } from "@bongtu/core/eddsa";
+import { ImtTree } from "@bongtu/core/imt";
 import { Indexer } from "../src/ingest.js";
 import { startApi } from "../src/api/router.js";
 import { runScenario } from "./scenario.js";

@@ -9,7 +9,7 @@
 //
 // NODE-ONLY: this module touches node:module. Browser bundles (wallet-web proves
 // in-page with its own bundled snarkjs) must never import it — the sdk's per-file
-// "./*" exports mean it is only pulled in by files that ask for `@bongtu/sdk/extern`.
+// "./*" exports mean it is only pulled in by files that ask for `@bongtu/core/extern`.
 
 import { createRequire } from "node:module";
 import { join } from "node:path";

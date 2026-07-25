@@ -57,7 +57,7 @@ built wallet bundle must comply with GPL-3.0 for that code. The decision and its
 alternatives are recorded in
 [`apps/wallet-web/README.md`](apps/wallet-web/README.md) ("GPL decision"). The
 sdk contains no snarkjs code — only the node-only runtime loader
-(`packages/sdk/src/extern.ts`), which the web bundles never import. No other
+(`packages/core/src/extern.ts`), which the web bundles never import. No other
 distributed artifact bundles GPL code.
 
 ## Proving system parameters

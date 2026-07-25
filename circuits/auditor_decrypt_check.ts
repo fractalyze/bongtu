@@ -26,17 +26,17 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ImtTree } from "@bongtu/sdk/imt";
+import { ImtTree } from "@bongtu/core/imt";
 import {
   deriveKeypair,
   commitment,
   nullifier,
   ecdhSharedSecret,
   poseidonDecrypt,
-} from "@bongtu/sdk/note";
-import type { Keypair } from "@bongtu/sdk/note";
-import type { FieldInput } from "@bongtu/sdk/babyjub";
-import { loadSnarkjs } from "@bongtu/sdk/extern";
+} from "@bongtu/core/note";
+import type { Keypair } from "@bongtu/core/note";
+import type { FieldInput } from "@bongtu/core/babyjub";
+import { loadSnarkjs } from "@bongtu/core/extern";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = join(HERE, "out");

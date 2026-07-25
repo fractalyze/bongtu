@@ -7,14 +7,14 @@
 
 import { ethers } from "ethers";
 import type { KeyDerivationTypedData } from "./derive.js";
-import type { Calldata } from "@bongtu/sdk/proving";
-import { GIWA_GAS_FLOOR_GWEI, POOL_ABI_FRAGMENTS, explorerTxUrl } from "@bongtu/sdk/network";
+import type { Calldata } from "@bongtu/core/proving";
+import { GIWA_GAS_FLOOR_GWEI, POOL_ABI_FRAGMENTS, explorerTxUrl } from "@bongtu/core/network";
 
-// The GIWA gas floor lives in @bongtu/sdk/network (ethers' auto-estimate
+// The GIWA gas floor lives in @bongtu/core/network (ethers' auto-estimate
 // overpays ~1500x); the sdk is data-only, so parseUnits happens here.
 const GAS_PRICE = ethers.utils.parseUnits(GIWA_GAS_FLOOR_GWEI, "gwei");
 
-// The shared per-function ABI fragments (@bongtu/sdk/network) — only the pool
+// The shared per-function ABI fragments (@bongtu/core/network) — only the pool
 // functions the wallet touches.
 const POOL_ABI = [POOL_ABI_FRAGMENTS.transfer, POOL_ABI_FRAGMENTS.withdraw, POOL_ABI_FRAGMENTS.root, POOL_ABI_FRAGMENTS.nextLeafIndex];
 

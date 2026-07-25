@@ -2,7 +2,7 @@
 #
 # INCLUDED
 #   node                 npm ci + typecheck (root cross-tree tsc + every workspace
-#                        tsc) + unit tests (sdk, admin-web, wallet-web) + the
+#                        tsc) + unit tests (core, admin-web, wallet-web) + the
 #                        two vite builds.
 #   indexer-units        the anvil-free indexer unit suite (tree + disclosure +
 #                        ingest) in its own parallel job: it needs extdeps +
@@ -106,8 +106,8 @@ jobs:
         run: npm run typecheck
       - name: typecheck (workspaces)
         run: npm run typecheck --workspaces
-      - name: sdk tests
-        run: npm test -w @bongtu/sdk
+      - name: core tests
+        run: npm test -w @bongtu/core
       - name: admin-web tests
         run: npm test -w @bongtu/admin-web
       - name: wallet-web tests

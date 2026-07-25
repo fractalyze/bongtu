@@ -1,6 +1,6 @@
 # Python mirror of the shared proving wire types.
 #
-# SOURCE OF TRUTH: packages/sdk/src/proving.ts (TS). This module mirrors it 1:1
+# SOURCE OF TRUTH: packages/core/src/proving.ts (TS). This module mirrors it 1:1
 # — same circuit tags, same per-circuit input field names, same Calldata shape —
 # so a ProvingRequest assembled by the TS apps deserializes here unchanged. Keep
 # the two files in sync; a field added there must be added here.
@@ -9,7 +9,7 @@
 # stringifies) or small ints; points are [x, y] pairs. The §11-8 two-time-pad
 # guard (transfer/disburse output owners must be DISTINCT because every output
 # of a tx shares one ephemeral key + nonce) is enforced at validation time,
-# mirroring @bongtu/sdk assertDistinctOwnerPubkeys — the prover MUST reject
+# mirroring @bongtu/core assertDistinctOwnerPubkeys — the prover MUST reject
 # such a request before any proving work (SPEC §4).
 
 from __future__ import annotations
@@ -81,7 +81,7 @@ class _SpendInput(_StrictModel):
 
 
 def _assert_distinct_owner_pubkeys(pubkeys: list[list[str]]) -> None:
-    """Mirror of @bongtu/sdk assertDistinctOwnerPubkeys (§11-8)."""
+    """Mirror of @bongtu/core assertDistinctOwnerPubkeys (§11-8)."""
     seen: set[tuple[str, str]] = set()
     for pk in pubkeys:
         key = (pk[0], pk[1])

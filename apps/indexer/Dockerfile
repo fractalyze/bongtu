@@ -2,17 +2,17 @@
 
 # bongtu indexer image (U-I3) — read-only BongtuPool event ingest + IMT mirror +
 # API, run via `node --import tsx` over the raw workspace .ts (the repo ships no
-# build step; NodeNext + tsx resolve @bongtu/sdk's per-file ./src/*.ts exports).
+# build step; NodeNext + tsx resolve @bongtu/core's per-file ./src/*.ts exports).
 #
 # Multi-stage:
-#   deps    trims the npm workspace to root + packages/sdk + apps/indexer ONLY
+#   deps    trims the npm workspace to root + packages/core + apps/indexer ONLY
 #           (a lockfile-pinned `npm ci --workspace ...` — no react/vite from the
 #           web apps) and installs ethers into an external node_modules (the
-#           BONGTU_NODE_MODULES seam @bongtu/sdk/extern loads ethers from).
+#           BONGTU_NODE_MODULES seam @bongtu/core/extern loads ethers from).
 #   runtime slim non-root image: installed trees + raw source + the committed
 #           pool ABI + the addresses file; serves GET /health.
 #
-# The build context MUST be the repo root (the image needs packages/sdk, the
+# The build context MUST be the repo root (the image needs packages/core, the
 # deploy/ addresses file, and the committed ABI — not just apps/indexer):
 #   docker build -f apps/indexer/Dockerfile -t bongtu-indexer .
 
@@ -31,18 +31,18 @@ WORKDIR /app
 
 # Only the manifests the trimmed workspace needs. The committed root
 # package-lock.json pins every transitive version; `npm ci --workspace` installs
-# ONLY the indexer + sdk subtree (pg, poseidon-lite, tsx + esbuild) and creates
-# the node_modules/@bongtu/{sdk,indexer} workspace symlinks. The web workspaces
+# ONLY the indexer + core subtree (pg, poseidon-lite, tsx + esbuild) and creates
+# the node_modules/@bongtu/{core,indexer} workspace symlinks. The web workspaces
 # are absent from the context, so npm never resolves their react/vite deps.
 COPY package.json package-lock.json ./
-COPY packages/sdk/package.json packages/sdk/package.json
+COPY packages/core/package.json packages/core/package.json
 COPY apps/indexer/package.json apps/indexer/package.json
 RUN npm ci \
       --workspace @bongtu/indexer \
-      --workspace @bongtu/sdk \
+      --workspace @bongtu/core \
       --include-workspace-root
 
-# ethers is NOT a repo dependency: @bongtu/sdk/extern loads it at runtime via
+# ethers is NOT a repo dependency: @bongtu/core/extern loads it at runtime via
 # createRequire from BONGTU_NODE_MODULES. Install it into a dedicated dir the
 # runtime stage points BONGTU_NODE_MODULES at. (The indexer never loads snarkjs.)
 RUN mkdir -p /opt/extern \
@@ -66,8 +66,8 @@ COPY --from=deps /opt/extern /opt/extern
 # Workspace manifests + tsconfig so tsx/NodeNext resolution matches the repo and
 # the node_modules/@bongtu/* symlinks point at real source.
 COPY package.json package-lock.json tsconfig.base.json tsconfig.json ./
-COPY packages/sdk/package.json packages/sdk/tsconfig.json packages/sdk/
-COPY packages/sdk/src packages/sdk/src
+COPY packages/core/package.json packages/core/tsconfig.json packages/core/
+COPY packages/core/src packages/core/src
 COPY apps/indexer/package.json apps/indexer/tsconfig.json apps/indexer/
 COPY apps/indexer/src apps/indexer/src
 

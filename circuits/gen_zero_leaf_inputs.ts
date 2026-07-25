@@ -23,9 +23,9 @@
 //
 //   npx tsx gen_zero_leaf_inputs.ts   # writes inputs/{transfer,withdraw}_zero_leaf.json
 
-import { commitment, nullifier } from "@bongtu/sdk/note";
-import type { Point } from "@bongtu/sdk/babyjub";
-import type { TransferInput, WithdrawInput } from "@bongtu/sdk/proving";
+import { commitment, nullifier } from "@bongtu/core/note";
+import type { Point } from "@bongtu/core/babyjub";
+import type { TransferInput, WithdrawInput } from "@bongtu/core/proving";
 
 import {
   AUTHORITY,

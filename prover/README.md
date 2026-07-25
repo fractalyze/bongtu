@@ -17,7 +17,7 @@ here, and only for `disburse`.
 
 ## Wire contract
 
-The request/response types live in **`packages/sdk/src/proving.ts`** (TS source
+The request/response types live in **`packages/core/src/proving.ts`** (TS source
 of truth); `prover_service/schema.py` mirrors them 1:1 and must be kept in sync.
 
 | endpoint | behaviour |
@@ -114,7 +114,7 @@ run.sh                   foreground uvicorn (GPU0, single-process)
 prover_service/
   app.py                 FastAPI app: /healthz /ready /prove, init thread, prove lock
   engine.py              Disburse256Prover: boot compile + per-request prove
-  schema.py              pydantic mirror of @bongtu/sdk/proving (keep in sync!)
+  schema.py              pydantic mirror of @bongtu/core/proving (keep in sync!)
   calldata.py            snarkjs exportSolidityCallData-compatible formatting
   config.py              env-resolved paths/ports (pins CUDA_VISIBLE_DEVICES=0)
 tests/                   CPU-only unit gates: .venv/bin/python -m pytest  (no GPU)

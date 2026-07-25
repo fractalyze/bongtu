@@ -15,8 +15,8 @@
 //
 //   node --import tsx test/tree.test.ts        # (== npm run test:tree)
 
-import { poseidon2 } from "@bongtu/sdk/poseidon";
-import { ImtTree } from "@bongtu/sdk/imt";
+import { poseidon2 } from "@bongtu/core/poseidon";
+import { ImtTree } from "@bongtu/core/imt";
 import { MirrorTree } from "../src/tree.js";
 
 let failures = 0;

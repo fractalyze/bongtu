@@ -5,7 +5,7 @@
 // envelope with the arbiter key and reconstructs "who received what / spent status"
 // — the independent regulator view, needing no user private key.
 //
-// Uses the owning envelope codec (@bongtu/sdk/envelope) — the same module the
+// Uses the owning envelope codec (@bongtu/core/envelope) — the same module the
 // indexer's arbiter ledger decodes with, so the two agree byte-for-byte.
 //
 // Coverage boundary (honest): the public /events feed carries an authority tail
@@ -17,14 +17,14 @@
 // surfaced as "no authority envelope in the public feed" — for those an arbiter-mode
 // indexer's own /notes directory is the source.
 
-import { parseEnvelope, authorityCiphertextLen, type OpKind } from "@bongtu/sdk/envelope";
-import { commitment as noteCommitment } from "@bongtu/sdk/note";
-import { packPubkey } from "@bongtu/sdk/pubkey";
-import type { FeedEvent } from "@bongtu/sdk/indexerApi";
+import { parseEnvelope, authorityCiphertextLen, type OpKind } from "@bongtu/core/envelope";
+import { commitment as noteCommitment } from "@bongtu/core/note";
+import { packPubkey } from "@bongtu/core/pubkey";
+import type { FeedEvent } from "@bongtu/core/indexerApi";
 
-// The /events wire shape is owned by @bongtu/sdk/indexerApi (consumer-adapter
+// The /events wire shape is owned by @bongtu/core/indexerApi (consumer-adapter
 // side of the contract); re-exported for existing `./ledger.js` importers.
-export type { FeedEvent } from "@bongtu/sdk/indexerApi";
+export type { FeedEvent } from "@bongtu/core/indexerApi";
 
 /** A decrypted note in the auditor ledger. */
 export interface LedgerNote {
@@ -64,7 +64,7 @@ export interface AuditorLedger {
 
 // The authority envelope is always the TAIL of the on-chain ciphertext; its
 // length law (plaintext padded to a multiple of 3, +1 squeeze) is owned by
-// @bongtu/sdk/envelope::authorityCiphertextLen.
+// @bongtu/core/envelope::authorityCiphertextLen.
 
 /**
  * Decrypt the transfer/disburse authority envelopes in `events` with the arbiter

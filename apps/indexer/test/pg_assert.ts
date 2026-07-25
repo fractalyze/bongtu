@@ -6,8 +6,8 @@
 //   node --import tsx test/pg_assert.ts <baseUrl> <fixtures.json>
 
 import { readFileSync } from "node:fs";
-import { packPubkey } from "@bongtu/sdk/pubkey";
-import { signNotesAuth, notesAuthMessage, packSignature } from "@bongtu/sdk/eddsa";
+import { packPubkey } from "@bongtu/core/pubkey";
+import { signNotesAuth, notesAuthMessage, packSignature } from "@bongtu/core/eddsa";
 
 const base = process.argv[2];
 const fixturesPath = process.argv[3];

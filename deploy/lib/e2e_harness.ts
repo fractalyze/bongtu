@@ -33,11 +33,11 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { deriveKeypair } from "@bongtu/sdk/note";
-import type { Keypair } from "@bongtu/sdk/note";
-import type { FieldInput, PointInput } from "@bongtu/sdk/babyjub";
-import { toWire } from "@bongtu/sdk/proving";
-import { loadEthers, loadSnarkjs } from "@bongtu/sdk/extern";
+import { deriveKeypair } from "@bongtu/core/note";
+import type { Keypair } from "@bongtu/core/note";
+import type { FieldInput, PointInput } from "@bongtu/core/babyjub";
+import { toWire } from "@bongtu/core/proving";
+import { loadEthers, loadSnarkjs } from "@bongtu/core/extern";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", ".."); // deploy/lib -> repo root
@@ -54,8 +54,8 @@ export const RPC = process.env.E2E_RPC || "http://127.0.0.1:8545";
 // anvil default account #0 (deterministic dev key — testnet fake money only).
 const PK = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
-export { H } from "@bongtu/sdk/network"; // IMT depth — protocol constant, one home
-// The GATE stack's batch size. Deliberately NOT named B: @bongtu/sdk/network
+export { H } from "@bongtu/core/network"; // IMT depth — protocol constant, one home
+// The GATE stack's batch size. Deliberately NOT named B: @bongtu/core/network
 // exports the LIVE pool's B=256, and a same-name different-value export pair
 // invites the wrong import.
 export const GATE_B = 16;

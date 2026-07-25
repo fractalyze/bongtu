@@ -6,11 +6,11 @@ import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { requireExtern } from "@bongtu/sdk/extern";
+import { requireExtern } from "@bongtu/core/extern";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-// circomlibjs comes back `any` from the shared external loader (@bongtu/sdk/extern).
+// circomlibjs comes back `any` from the shared external loader (@bongtu/core/extern).
 const { poseidonContract, buildPoseidon } = requireExtern("circomlibjs");
 
 const OUT_DIR = HERE;

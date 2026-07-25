@@ -1,9 +1,9 @@
 import type { Route } from "../router.js";
-import type { FeedEvent } from "@bongtu/sdk/indexerApi";
+import type { FeedEvent } from "@bongtu/core/indexerApi";
 
 // SPEC §6b `/events`: the cursor-paged ciphertext feed. `disclosure` is projected
 // down to its status string; the full DisclosureResult is served only on /alarms.
-// The wire shape is owned by @bongtu/sdk/indexerApi — typing `out` against it is
+// The wire shape is owned by @bongtu/core/indexerApi — typing `out` against it is
 // the server-adapter half of that contract.
 export const events: Route = {
   method: "GET",

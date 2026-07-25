@@ -2,7 +2,7 @@
 
 A minimal, functional self-custody MetaMask wallet (SPEC §7 public app). No seed to
 store: the wallet **derives** a BabyJubJub spending key from a MetaMask signature, so
-the same account regenerates the same key every session. It imports the `@bongtu/sdk`
+the same account regenerates the same key every session. It imports the `@bongtu/core`
 **source directly** (the indexer is reached over HTTP only), so every commitment /
 nullifier / Poseidon-sponge ciphertext it builds is byte-identical to what the
 provers prove and the contract verifies. All proving happens **in the browser** —
@@ -40,7 +40,7 @@ key = deriveKeypair(s)  ->  { formattedPrivateKey: s, publicKey: s·Base8 }
 
 ### Receive address (the receive-key UX)
 
-The wallet shows the user's **compressed bjj pubkey** (`@bongtu/sdk/pubkey` — a 32-byte hex
+The wallet shows the user's **compressed bjj pubkey** (`@bongtu/core/pubkey` — a 32-byte hex
 string, e.g. `0x05c818db…3c1f96`) as the **receive address**. Share it so others can
 pay you: an employer disburses to it, a peer transfers to it. It is deterministic from
 your MetaMask account, so it is stable across sessions and devices.
@@ -50,7 +50,7 @@ your MetaMask account, so it is stable across sessions and devices.
 One path (`src/lib/balance.ts`): **signed `GET /notes`** against an arbiter-mode
 indexer that has already decrypted every op's authority envelope into a per-owner
 directory. The wallet proves control of its own key with an EdDSA-Poseidon read-auth
-signature (`@bongtu/sdk/eddsa`, bound to `Poseidon(ownerPub.x, ownerPub.y, ts)`), so
+signature (`@bongtu/core/eddsa`, bound to `Poseidon(ownerPub.x, ownerPub.y, ts)`), so
 only it can read its row even though the arbiter holds everyone's. Balance =
 `sum(value)` over `!spent` notes. **A reachable arbiter indexer is required** — if
 `/notes` fails, the wallet shows an error; there is no fallback path.
@@ -68,7 +68,7 @@ only it can read its row even though the arbiter holds everyone's. Balance =
 
 The small CPU circuits, provable in-browser (SPEC §6). `src/lib/spend.ts` (pure)
 assembles the witness the same way `deploy/e2e_orchestrator.ts` does by hand, in
-`ProvingRequest` form (`@bongtu/sdk/proving`):
+`ProvingRequest` form (`@bongtu/core/proving`):
 
 - Spend 1–2 of the wallet's notes (a single note pads input[1] to `{nullifier:0,
   value:0, enabled:0}` — the §5.2 value belt forces the disabled input's value to 0).
@@ -153,7 +153,7 @@ src/
     derive.ts          PURE: EIP-712 struct + keccak256(sig) mod L -> bjj identity
     balance.ts         PURE: sumUnspent + /events trial-decrypt; signed /notes orchestration
     spend.ts           PURE: input notes + recipient + membership -> transfer/withdraw ProvingRequest
-    indexerClient.ts   /head /path /events /nullifiers + signed /notes URL (@bongtu/sdk/eddsa)
+    indexerClient.ts   /head /path /events /nullifiers + signed /notes URL (@bongtu/core/eddsa)
     metamask.ts        connect + eth_signTypedData_v4 + pool.transfer/withdraw (ethers v5)
     prove.ts           browser snarkjs.groth16.fullProve over fetched wasm/zkey
     dom.ts             tiny framework-free DOM helpers

@@ -13,10 +13,10 @@ import {
   commitment,
   nullifier,
   assertDistinctOwnerPubkeys,
-} from "@bongtu/sdk/note";
-import { packPubkey } from "@bongtu/sdk/pubkey";
-import { ImtTree } from "@bongtu/sdk/imt";
-import type { Point } from "@bongtu/sdk/babyjub";
+} from "@bongtu/core/note";
+import { packPubkey } from "@bongtu/core/pubkey";
+import { ImtTree } from "@bongtu/core/imt";
+import type { Point } from "@bongtu/core/babyjub";
 import { buildDisburseRequest, type RecipientRow } from "../src/lib/disburse.js";
 import { DEFAULTS, H, B } from "../src/config.js";
 
@@ -117,10 +117,10 @@ test("value conserved: sum(outputs) == input value; change + padding fill B", ()
   assert.equal(BigInt(meta.disbursed) + BigInt(meta.changeValue), f.value);
 });
 
-test("envelope bytes are pinned (U-N1: unchanged across the @bongtu/sdk/envelope migration)", () => {
+test("envelope bytes are pinned (U-N1: unchanged across the @bongtu/core/envelope migration)", () => {
   // sha256 of the decimal-string JSON of the full 2054-element ciphertext on
   // fixture(3), recorded from the pre-migration assembly at main 875c179 (the
-  // same ground truth as packages/sdk/test/envelope.test.ts p1.A). A change
+  // same ground truth as packages/core/test/envelope.test.ts p1.A). A change
   // here is a WIRE-BYTE change: auditor decryption of live envelopes breaks.
   const f = fixture(3);
   const { ciphertext, meta } = buildDisburseRequest(f.inputNote, f.membership, f.recipients, f.crypto);

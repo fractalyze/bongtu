@@ -1,7 +1,7 @@
 {
-  "name": "@bongtu/sdk",
+  "name": "@bongtu/core",
   "version": "0.0.0",
-  "description": "bongtu SDK — reference single-frontier IMT + Poseidon-v1 (the oracle for contract differential tests)",
+  "description": "bongtu core — shared protocol + crypto (single-frontier IMT + Poseidon-v1; the oracle for contract differential tests)",
   "type": "module",
   "license": "Apache-2.0",
   "private": true,

@@ -44,7 +44,7 @@ same `src/*.ts` file.
 ## Why the Vite `.js`→`.ts` shim survives the refactor
 
 The refactor moved **cross-package** imports from deep-relative `../sdk/src/x.js` to
-`@bongtu/sdk/x`, resolved through the exports map — those no longer need any shim. But
+`@bongtu/core/x`, resolved through the exports map — those no longer need any shim. But
 **intra-package** imports still use NodeNext-style `./poseidon.js` specifiers pointing
 at sibling `.ts` files, and rollup resolves the literal `.js` first. The
 `tsJsResolve()` plugin (byte-identical in both app vite configs — see

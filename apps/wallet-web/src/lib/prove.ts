@@ -20,7 +20,7 @@
 // This module is the un-tested browser edge; the witness it proves is built and
 // unit-tested in spend.ts, and the asset caching is unit-tested in assets.test.ts.
 
-import type { ProvingRequest, Calldata } from "@bongtu/sdk/proving";
+import type { ProvingRequest, Calldata } from "@bongtu/core/proving";
 import { CIRCUITS_VERSION } from "../config.js";
 import { prefetchCircuitAssets, type CircuitAssets, type PrefetchDeps } from "./assets.js";
 

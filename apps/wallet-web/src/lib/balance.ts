@@ -21,7 +21,7 @@ import {
   nullifier,
   poseidonDecrypt,
   ecdhSharedSecret,
-} from "@bongtu/sdk/note";
+} from "@bongtu/core/note";
 import type { WalletIdentity } from "./derive.js";
 import {
   buildNotesUrl,

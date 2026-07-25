@@ -7,7 +7,7 @@
 // The service URL is env-configurable at build time (VITE_PROVER_URL) with the
 // config.ts default; the running page can still edit it in the employer view.
 
-import type { Calldata, ProvingRequest } from "@bongtu/sdk/proving";
+import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
 
 export async function proveViaService(proverUrl: string, request: ProvingRequest): Promise<Calldata> {
   const res = await fetch(proverUrl, {

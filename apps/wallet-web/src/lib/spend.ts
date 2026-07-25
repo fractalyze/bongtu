@@ -4,7 +4,7 @@
 // AND the headless spend-witness gate. It imports the sdk crypto DIRECTLY, so every
 // commitment / nullifier is byte-identical to what snarkjs proves and the contract
 // verifies — the witness objects produced here are EXACTLY the circom `main` inputs
-// deploy/e2e_orchestrator.ts assembles by hand, in ProvingRequest form (@bongtu/sdk/proving).
+// deploy/e2e_orchestrator.ts assembles by hand, in ProvingRequest form (@bongtu/core/proving).
 //
 // What it does NOT do (SPEC §6 boundary): it does not prove (browser snarkjs, see
 // prove.ts) and does not send the tx (MetaMask, see metamask.ts). It stops at "a
@@ -22,16 +22,16 @@ import {
   commitment,
   nullifier,
   assertDistinctOwnerPubkeys,
-} from "@bongtu/sdk/note";
-import { unpackPubkey } from "@bongtu/sdk/pubkey";
-import { foldToRoot } from "@bongtu/sdk/imt";
-import type { Point } from "@bongtu/sdk/babyjub";
-import { toWire } from "@bongtu/sdk/proving";
+} from "@bongtu/core/note";
+import { unpackPubkey } from "@bongtu/core/pubkey";
+import { foldToRoot } from "@bongtu/core/imt";
+import type { Point } from "@bongtu/core/babyjub";
+import { toWire } from "@bongtu/core/proving";
 import type {
   TransferInput,
   WithdrawInput,
   ProvingRequest,
-} from "@bongtu/sdk/proving";
+} from "@bongtu/core/proving";
 import type { WalletIdentity } from "./derive.js";
 import { DEFAULTS, H } from "../config.js";
 

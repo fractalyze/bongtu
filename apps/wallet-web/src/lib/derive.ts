@@ -25,10 +25,10 @@
 // derivation (v1.1).
 
 import { ethers } from "ethers";
-import { deriveKeypair } from "@bongtu/sdk/note";
-import type { Keypair } from "@bongtu/sdk/note";
-import { packPubkey } from "@bongtu/sdk/pubkey";
-import { SUBGROUP_ORDER } from "@bongtu/sdk/babyjub";
+import { deriveKeypair } from "@bongtu/core/note";
+import type { Keypair } from "@bongtu/core/note";
+import { packPubkey } from "@bongtu/core/pubkey";
+import { SUBGROUP_ORDER } from "@bongtu/core/babyjub";
 
 /** The derived wallet identity: the bjj keypair plus its compressed public key —
  *  the RECEIVE identifier a payer types into their wallet to pay this user. */

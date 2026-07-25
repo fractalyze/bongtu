@@ -1,4 +1,4 @@
-# @bongtu/sdk
+# @bongtu/core
 
 The TypeScript crypto oracle and shared wire types for the whole bongtu stack. Every
 commitment, nullifier, Merkle root, and Poseidon-sponge ciphertext in the system is
@@ -12,7 +12,7 @@ this README covers only what the package contains and how to run it.
 ## Modules
 
 Raw-source package: `"exports": { "./*": "./src/*.ts" }`, no build step — consumers
-import `@bongtu/sdk/<module>` and tsc (NodeNext), tsx, and Vite all resolve the same
+import `@bongtu/core/<module>` and tsc (NodeNext), tsx, and Vite all resolve the same
 `.ts` source.
 
 | module | owns |
@@ -50,8 +50,8 @@ root [`README.md`](../../README.md) Run block). The only runtime dependency is
 ## Usage
 
 ```ts
-import { ImtTree, foldToRoot } from "@bongtu/sdk/imt";
-import { commitment, nullifier, deriveKeypair } from "@bongtu/sdk/note";
+import { ImtTree, foldToRoot } from "@bongtu/core/imt";
+import { commitment, nullifier, deriveKeypair } from "@bongtu/core/note";
 
 const key = deriveKeypair(12345n);              // bjj keypair from a scalar
 const c = commitment(100n, 7n, key.publicKey);  // poseidon4([value, salt, pubX, pubY])

@@ -23,7 +23,7 @@
 import { poseidon2 } from "./poseidon.js";
 
 // A field element in a form the tree accepts as leaf input (coerced via BigInt).
-// Declared once in babyjub.ts; re-exported so `@bongtu/sdk/imt` importers keep working.
+// Declared once in babyjub.ts; re-exported so `@bongtu/core/imt` importers keep working.
 import type { FieldInput } from "./babyjub.js";
 export type { FieldInput } from "./babyjub.js";
 

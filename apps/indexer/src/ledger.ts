@@ -2,7 +2,7 @@
 //
 // Built ONLY when the indexer holds the arbiter PRIVATE key (AUTHORITY_KEY set).
 // For every op, in chain order, it decrypts the op's authority envelope
-// (@bongtu/sdk/envelope — the owning codec) and:
+// (@bongtu/core/envelope — the owning codec) and:
 //
 //   - OUTPUT notes become ledger entries keyed by owner pubkey (value, salt,
 //     leafIndex, txHash, commitment, spent=false), AFTER cross-checking each
@@ -40,12 +40,12 @@
 // what the auditor is entitled to see) ever leave here.
 
 import type { PoolClient } from "pg";
-import { commitment as noteCommitment } from "@bongtu/sdk/note";
-import { ImtTree } from "@bongtu/sdk/imt";
-import { packPubkey } from "@bongtu/sdk/pubkey";
-import type { Point } from "@bongtu/sdk/babyjub";
+import { commitment as noteCommitment } from "@bongtu/core/note";
+import { ImtTree } from "@bongtu/core/imt";
+import { packPubkey } from "@bongtu/core/pubkey";
+import type { Point } from "@bongtu/core/babyjub";
 import type { MirrorTree } from "./tree.js";
-import { parseEnvelope, type OpKind, type ParsedEnvelope } from "@bongtu/sdk/envelope";
+import { parseEnvelope, type OpKind, type ParsedEnvelope } from "@bongtu/core/envelope";
 
 const dec = (x: bigint): string => x.toString();
 
@@ -83,7 +83,7 @@ export type HistoryKind = "received" | "sent" | "withdraw" | "deposit";
  *   - "withdraw": the owner unshielded (counterparty null, amount = unshielded);
  *   - "deposit":  the owner's own deposit output (counterparty null).
  * `counterparty` is a COMPRESSED bjj pubkey hex (never a raw x,y pair). Wire shape
- * owned by @bongtu/sdk/indexerApi (HistoryItem) — this stays structurally equal.
+ * owned by @bongtu/core/indexerApi (HistoryItem) — this stays structurally equal.
  */
 export interface LedgerHistoryItem {
   kind: HistoryKind;

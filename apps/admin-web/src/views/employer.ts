@@ -17,10 +17,10 @@ import { parseRecipientsCsv } from "../lib/csv.js";
 import { getHead, getPath } from "../lib/indexerClient.js";
 import { proveViaService } from "../lib/proverClient.js";
 import { submitDisburse } from "../lib/chain.js";
-import type { Calldata } from "@bongtu/sdk/proving";
-import { deriveKeypair, commitment } from "@bongtu/sdk/note";
-import { packPubkey } from "@bongtu/sdk/pubkey";
-import { ImtTree } from "@bongtu/sdk/imt";
+import type { Calldata } from "@bongtu/core/proving";
+import { deriveKeypair, commitment } from "@bongtu/core/note";
+import { packPubkey } from "@bongtu/core/pubkey";
+import { ImtTree } from "@bongtu/core/imt";
 
 export function employerView(): HTMLElement {
   const root = el("div", { class: "view" });

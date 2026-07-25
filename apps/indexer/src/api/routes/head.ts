@@ -1,7 +1,7 @@
 import type { Route } from "../router.js";
-import type { Head } from "@bongtu/sdk/indexerApi";
+import type { Head } from "@bongtu/core/indexerApi";
 
-// SPEC §6b `/head` (wire shape owned by @bongtu/sdk/indexerApi).
+// SPEC §6b `/head` (wire shape owned by @bongtu/core/indexerApi).
 export const head: Route = {
   method: "GET",
   pattern: "/head",

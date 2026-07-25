@@ -36,7 +36,7 @@ import {
   explorerTxUrl,
 } from "../src/network.js";
 
-// packages/sdk/test -> repo root (tests run under tsx/node, not the browser).
+// packages/core/test -> repo root (tests run under tsx/node, not the browser).
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 interface Addresses {

@@ -1,8 +1,8 @@
 import type { Route, RouteResult } from "../router.js";
-import type { HistoryItem } from "@bongtu/sdk/indexerApi";
-import { unpackPubkey } from "@bongtu/sdk/pubkey";
-import { notesAuthMessage, parseSignature, verifyNotesAuth } from "@bongtu/sdk/eddsa";
-import type { Point } from "@bongtu/sdk/babyjub";
+import type { HistoryItem } from "@bongtu/core/indexerApi";
+import { unpackPubkey } from "@bongtu/core/pubkey";
+import { notesAuthMessage, parseSignature, verifyNotesAuth } from "@bongtu/core/eddsa";
+import type { Point } from "@bongtu/core/babyjub";
 
 // SPEC §6b `/history?owner=<compressed>&ts=<unix>&sig=<hex>` — ARBITER MODE ONLY
 // (registered by the router only when the indexer holds the arbiter key). Serves
@@ -76,7 +76,7 @@ export const history: Route = {
       // Arbiter mode but ingest has not built the ledger yet (pre first ingest).
       return { status: 503, body: { error: "arbiter ledger not built yet" } };
     }
-    // Wire shape owned by @bongtu/sdk/indexerApi (server-adapter typing).
+    // Wire shape owned by @bongtu/core/indexerApi (server-adapter typing).
     const body: HistoryItem[] = ix.ledger.historyOf(pub[0], pub[1]);
     return { status: 200, body, headers: AUTH_HEADER };
   },

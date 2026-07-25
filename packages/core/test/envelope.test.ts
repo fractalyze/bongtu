@@ -25,7 +25,7 @@
 //         (arbiter key = the fixture AUTHORITY scalar) + one deterministic
 //         synthetic envelope per op kind, pinning the decrypt + slice result.
 //
-// This final form runs every pin against @bongtu/sdk/envelope — the module
+// This final form runs every pin against @bongtu/core/envelope — the module
 // that now owns the codec — so any layout/chain drift from the recorded bytes
 // fails here, in the fast sdk suite, not at the anvil gate.
 

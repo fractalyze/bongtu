@@ -23,12 +23,12 @@
 // Proving is CPU snarkjs against circuits/out (same as e2e_orchestrator); no
 // rabbitsnark / GPU. Runs against E2E_RPC (an anvil the harness started).
 
-import { ImtTree } from "@bongtu/sdk/imt";
-import { buildAuthorityPlaintext } from "@bongtu/sdk/envelope";
+import { ImtTree } from "@bongtu/core/imt";
+import { buildAuthorityPlaintext } from "@bongtu/core/envelope";
 import {
   deriveKeypair, commitment, nullifier,
   poseidonEncrypt, ecdhSharedSecret, assertDistinctOwnerPubkeys,
-} from "@bongtu/sdk/note";
+} from "@bongtu/core/note";
 
 // The deploy-and-drive skeleton (anvil connection, forge-artifact deploys, the
 // UUPS pool proxy, the CPU prove() wrapper, shared actor/salt/amount fixtures)
@@ -43,7 +43,7 @@ import {
 } from "../../../deploy/lib/e2e_harness.js";
 
 /** The disburse authority (non-repudiation) envelope plaintext (SPEC §4),
- *  laid out by the owning codec (@bongtu/sdk/envelope). */
+ *  laid out by the owning codec (@bongtu/core/envelope). */
 function authorityPlain(
   inPub: readonly [bigint, bigint], inVal: bigint, inSalt: bigint,
   outPubs: [bigint, bigint][], amounts: bigint[], salts: bigint[],

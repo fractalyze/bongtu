@@ -28,7 +28,7 @@ function tsJsResolve(): Plugin {
 export default {
   plugins: [tsJsResolve()],
   server: {
-    // The app imports unbuilt @bongtu/sdk source via the root node_modules
+    // The app imports unbuilt @bongtu/core source via the root node_modules
     // symlink — allow the Vite dev server to read the whole monorepo, not
     // just apps/admin-web.
     fs: { allow: [REPO_ROOT] },

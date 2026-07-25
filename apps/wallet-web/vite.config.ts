@@ -38,7 +38,7 @@ export default {
   // NodeNext ".js" -> ".ts"/".tsx" rewrite resolves before React's own hooks run.
   plugins: [react(), tsJsResolve()],
   server: {
-    // The wallet imports unbuilt @bongtu/* workspace source (packages/sdk, apps/indexer
+    // The wallet imports unbuilt @bongtu/* workspace source (packages/core, apps/indexer
     // via root node_modules symlinks) — allow
     // the Vite dev server to read the whole monorepo, not just apps/wallet-web.
     fs: { allow: [REPO_ROOT] },

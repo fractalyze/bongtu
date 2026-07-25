@@ -18,19 +18,19 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ImtTree } from "@bongtu/sdk/imt";
-import { poseidonN } from "@bongtu/sdk/poseidon";
-import { buildAuthorityPlaintext, disclosureChain } from "@bongtu/sdk/envelope";
+import { ImtTree } from "@bongtu/core/imt";
+import { poseidonN } from "@bongtu/core/poseidon";
+import { buildAuthorityPlaintext, disclosureChain } from "@bongtu/core/envelope";
 import {
   deriveKeypair, commitment, nullifier,
   poseidonEncrypt, ecdhSharedSecret, assertDistinctOwnerPubkeys,
-} from "@bongtu/sdk/note";
-import type { Keypair } from "@bongtu/sdk/note";
-import type { FieldInput } from "@bongtu/sdk/babyjub";
-import { toWire } from "@bongtu/sdk/proving";
-import type { Calldata, DisburseInput } from "@bongtu/sdk/proving";
-import { loadEthers, loadSnarkjs } from "@bongtu/sdk/extern";
-import { B, GIWA_GAS_FLOOR_GWEI, H, RPC_URL, explorerTxUrl } from "@bongtu/sdk/network";
+} from "@bongtu/core/note";
+import type { Keypair } from "@bongtu/core/note";
+import type { FieldInput } from "@bongtu/core/babyjub";
+import { toWire } from "@bongtu/core/proving";
+import type { Calldata, DisburseInput } from "@bongtu/core/proving";
+import { loadEthers, loadSnarkjs } from "@bongtu/core/extern";
+import { B, GIWA_GAS_FLOOR_GWEI, H, RPC_URL, explorerTxUrl } from "@bongtu/core/network";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -42,7 +42,7 @@ const RPC = process.env.GIWA_RPC || RPC_URL;
 const PK = process.env.DEPLOYER_KEY;
 if (!PK) throw new Error("DEPLOYER_KEY env required");
 
-// H=32 / B=256 come from @bongtu/sdk/network — the live pool's parameters.
+// H=32 / B=256 come from @bongtu/core/network — the live pool's parameters.
 const CIRC_OUT = join(ROOT, "circuits", "out");
 const CONTRACTS_OUT = join(ROOT, "contracts", "out");
 // The bongtu prover service (top-level prover/) holds the belted disburse256
@@ -93,7 +93,7 @@ async function main(): Promise<void> {
   const pool = new ethers.Contract(addr.pool, artifact("BongtuPool", "BongtuPool"), wallet);
   const token = new ethers.Contract(addr.token, artifact("MockERC20", "MockERC20"), wallet);
   const ARBITER: [bigint, bigint] = [BigInt(addr.arbiterKeyX), BigInt(addr.arbiterKeyY)]; // pool's stored authority key
-  // Explicit gas price: the GIWA gas floor lives in @bongtu/sdk/network
+  // Explicit gas price: the GIWA gas floor lives in @bongtu/core/network
   // (ethers' auto-estimate overpays ~1500x and drains the faucet grant).
   const TX = { gasPrice: ethers.utils.parseUnits(GIWA_GAS_FLOOR_GWEI, "gwei") };
 

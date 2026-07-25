@@ -1,4 +1,4 @@
-# schema.py gate — the Python mirror of packages/sdk/src/proving.ts.
+# schema.py gate — the Python mirror of packages/core/src/proving.ts.
 #
 # CPU-only (no GPU / rabbitsnark import): validates that (1) the repo's real
 # disburse256 fixture input parses as a DisburseRequest unchanged, (2) every

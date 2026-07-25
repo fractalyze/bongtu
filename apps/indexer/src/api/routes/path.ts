@@ -1,7 +1,7 @@
 import type { Route } from "../router.js";
-import type { PathResult } from "@bongtu/sdk/indexerApi";
+import type { PathResult } from "@bongtu/core/indexerApi";
 
-// SPEC §6b `/path/:leafIndex` (wire shape owned by @bongtu/sdk/indexerApi).
+// SPEC §6b `/path/:leafIndex` (wire shape owned by @bongtu/core/indexerApi).
 // 404 out-of-range, 422 batch-interior leaf (siblings
 // not chain-recoverable, §11-7). No root-agreement guard here: MirrorTree.path
 // asserts the reconstructed root against the mirror internally (→ 500 via the

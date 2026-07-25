@@ -9,9 +9,9 @@
 //
 //   npx tsx gen_disburse_zero_leaf.ts   # writes inputs/disburse_zero_leaf.json
 
-import { commitment, nullifier } from "@bongtu/sdk/note";
-import type { Point } from "@bongtu/sdk/babyjub";
-import type { DisburseInput } from "@bongtu/sdk/proving";
+import { commitment, nullifier } from "@bongtu/core/note";
+import type { Point } from "@bongtu/core/babyjub";
+import type { DisburseInput } from "@bongtu/core/proving";
 
 import {
   AUTHORITY,

@@ -29,7 +29,7 @@ import type { FieldInput, Point, PointInput } from "./babyjub.js";
 import { poseidonN } from "./poseidon.js";
 
 // The subgroup order L lives with the curve (babyjub.ts); re-exported here so
-// existing `@bongtu/sdk/eddsa` importers keep working.
+// existing `@bongtu/core/eddsa` importers keep working.
 export { SUBGROUP_ORDER } from "./babyjub.js";
 
 const isIdentity = ([x, y]: Point): boolean => x === IDENTITY[0] && y === IDENTITY[1];

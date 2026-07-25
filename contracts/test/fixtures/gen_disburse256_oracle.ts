@@ -29,7 +29,7 @@ import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ImtTree } from "@bongtu/sdk/imt";
+import { ImtTree } from "@bongtu/core/imt";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const H = 32;

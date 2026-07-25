@@ -8,19 +8,19 @@
 //
 //   npx tsx gen_inputs.ts        # writes inputs/{deposit,disburse,transfer,withdraw}.json
 //
-// Each generator's return value is typed with the @bongtu/sdk/proving input
+// Each generator's return value is typed with the @bongtu/core/proving input
 // interface its circuit consumes, so the root tsc gate enforces that the
 // committed fixtures agree with the shared ProvingRequest wire types
 // (prover/prover_service/schema.py round-trips the same files from Python).
 
-import { commitment, nullifier, assertDistinctOwnerPubkeys } from "@bongtu/sdk/note";
-import type { Point } from "@bongtu/sdk/babyjub";
+import { commitment, nullifier, assertDistinctOwnerPubkeys } from "@bongtu/core/note";
+import type { Point } from "@bongtu/core/babyjub";
 import type {
   DepositInput,
   DisburseInput,
   TransferInput,
   WithdrawInput,
-} from "@bongtu/sdk/proving";
+} from "@bongtu/core/proving";
 
 import {
   AUTHORITY,

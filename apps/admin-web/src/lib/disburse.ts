@@ -19,13 +19,13 @@ import {
   poseidonEncrypt,
   ecdhSharedSecret,
   assertDistinctOwnerPubkeys,
-} from "@bongtu/sdk/note";
-import { unpackPubkey } from "@bongtu/sdk/pubkey";
-import { ImtTree, foldToRoot } from "@bongtu/sdk/imt";
-import { buildAuthorityPlaintext, disclosureChain } from "@bongtu/sdk/envelope";
-import type { Point } from "@bongtu/sdk/babyjub";
-import { toWire } from "@bongtu/sdk/proving";
-import type { DisburseInput, ProvingRequest } from "@bongtu/sdk/proving";
+} from "@bongtu/core/note";
+import { unpackPubkey } from "@bongtu/core/pubkey";
+import { ImtTree, foldToRoot } from "@bongtu/core/imt";
+import { buildAuthorityPlaintext, disclosureChain } from "@bongtu/core/envelope";
+import type { Point } from "@bongtu/core/babyjub";
+import { toWire } from "@bongtu/core/proving";
+import type { DisburseInput, ProvingRequest } from "@bongtu/core/proving";
 import { H, B } from "../config.js";
 
 // --- app-facing input shapes (all field elements as decimal strings) ------------
@@ -209,7 +209,7 @@ export function buildDisburseRequest(
 
   // Ciphertext: per-output receiver envelope [value, salt] (256 * 4 = 1024) ++ the
   // single authority envelope (1030), laid out by the owning codec
-  // (@bongtu/sdk/envelope). Total 2054 = disburseCiphertextLen(B=256).
+  // (@bongtu/core/envelope). Total 2054 = disburseCiphertextLen(B=256).
   const ecdh = BigInt(crypto.ecdhPrivateKey);
   const nonce = BigInt(crypto.encryptionNonce);
   const authorityPub: Point = [BigInt(crypto.authorityPubKey[0]), BigInt(crypto.authorityPubKey[1])];

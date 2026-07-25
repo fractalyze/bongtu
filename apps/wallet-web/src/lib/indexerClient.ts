@@ -1,5 +1,5 @@
 // Consumer adapter over the indexer read API (SPEC §6b): the wire shapes AND the
-// fetch wrappers are owned by @bongtu/sdk/indexerApi — one owner for both apps,
+// fetch wrappers are owned by @bongtu/core/indexerApi — one owner for both apps,
 // server-adapter-typed on the indexer side. This file only keeps the wallet's
 // import path stable. The wallet uses:
 //   - signed `GET /notes` (arbiter mode) for the balance path — the
@@ -27,4 +27,4 @@ export {
   type HistoryItem,
   type HistoryKind,
   type Health,
-} from "@bongtu/sdk/indexerApi";
+} from "@bongtu/core/indexerApi";

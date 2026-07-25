@@ -1,5 +1,5 @@
 // Signed GET /notes URL construction (SPEC §6b v2 read-auth). The ONE
-// implementation lives in @bongtu/sdk/indexerApi (`buildNotesUrl`), tested
+// implementation lives in @bongtu/core/indexerApi (`buildNotesUrl`), tested
 // headlessly against the sdk `verifyNotesAuth` the indexer route checks with;
 // this file only keeps the admin app's import path stable.
 //
@@ -10,4 +10,4 @@
 // key). The auditor's general "who received what" view comes from the /events
 // decrypt (ledger.ts), which needs only the arbiter key.
 
-export { buildNotesUrl, fetchNotes } from "@bongtu/sdk/indexerApi";
+export { buildNotesUrl, fetchNotes } from "@bongtu/core/indexerApi";

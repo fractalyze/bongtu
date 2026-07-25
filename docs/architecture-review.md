@@ -46,7 +46,7 @@ deleted.
 > scalars made genuinely disjoint). The entries below keep the original deferral
 > reasoning as the record of *why* the ordering and safeguards were what they were.
 
-**#1 — sdk envelope codec module (`packages/sdk/src/envelope.ts`).** The
+**#1 — sdk envelope codec module (`packages/core/src/envelope.ts`).** The
 highest-value candidate: the byte-exact authority-envelope plaintext layout + the
 disclosureHash fold exist as 4 encoder sites, an indexer-side decoder that admin-web
 imports (the workspace's only app-to-app dependency), and 4 hash-chain copies; three

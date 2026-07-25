@@ -20,7 +20,7 @@ Read `README.md` once at session start; for anything deeper, follow its
   returns to idle (~15 MiB) and kill stray prover PIDs.
 - **Live pool is canonical**: the deployed GIWA pool (`deploy/addresses.91342.json`) is
   reused going forward — do not redeploy for new work; UUPS upgrade only if circuits change.
-- **Heavy gates**: iterate on `packages/sdk` tests + `tsc`; run `deploy/e2e_m0.sh` and the indexer
+- **Heavy gates**: iterate on `packages/core` tests + `tsc`; run `deploy/e2e_m0.sh` and the indexer
   conformance test (`cd apps/indexer && npm test`) as the final gate, not per iteration (each spins
   an anvil + CPU proofs).
 - **Indexer arbiter mode**: `AUTHORITY_KEY` (the arbiter bjj private key) flips the indexer

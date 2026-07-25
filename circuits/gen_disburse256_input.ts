@@ -14,10 +14,10 @@
 //
 //   npx tsx gen_disburse256_input.ts     # writes inputs/disburse256.json
 
-import { ImtTree } from "@bongtu/sdk/imt";
-import { deriveKeypair, commitment, nullifier, assertDistinctOwnerPubkeys } from "@bongtu/sdk/note";
-import type { Keypair } from "@bongtu/sdk/note";
-import type { DisburseInput } from "@bongtu/sdk/proving";
+import { ImtTree } from "@bongtu/core/imt";
+import { deriveKeypair, commitment, nullifier, assertDistinctOwnerPubkeys } from "@bongtu/core/note";
+import type { Keypair } from "@bongtu/core/note";
+import type { DisburseInput } from "@bongtu/core/proving";
 
 import { AUTHORITY, H, write } from "./fixture_lib.js";
 

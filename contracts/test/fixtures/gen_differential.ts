@@ -16,9 +16,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ImtTree } from "@bongtu/sdk/imt";
-import { commitment, deriveKeypair } from "@bongtu/sdk/note";
-import type { Point } from "@bongtu/sdk/babyjub";
+import { ImtTree } from "@bongtu/core/imt";
+import { commitment, deriveKeypair } from "@bongtu/core/note";
+import type { Point } from "@bongtu/core/babyjub";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const H = 32;

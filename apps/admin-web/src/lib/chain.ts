@@ -4,14 +4,14 @@
 // itself happens on the prover service (proverClient.ts), not the browser.
 
 import { ethers } from "ethers";
-import type { Calldata } from "@bongtu/sdk/proving";
-import { GIWA_GAS_FLOOR_GWEI, POOL_ABI_FRAGMENTS, explorerTxUrl } from "@bongtu/sdk/network";
+import type { Calldata } from "@bongtu/core/proving";
+import { GIWA_GAS_FLOOR_GWEI, POOL_ABI_FRAGMENTS, explorerTxUrl } from "@bongtu/core/network";
 
-// The shared per-function ABI fragments (@bongtu/sdk/network) — only the four
+// The shared per-function ABI fragments (@bongtu/core/network) — only the four
 // functions the admin app touches.
 const POOL_ABI = [POOL_ABI_FRAGMENTS.disburseWithCiphertexts, POOL_ABI_FRAGMENTS.root, POOL_ABI_FRAGMENTS.nextLeafIndex, POOL_ABI_FRAGMENTS.B];
 
-// The GIWA gas floor lives in @bongtu/sdk/network (ethers' auto-estimate
+// The GIWA gas floor lives in @bongtu/core/network (ethers' auto-estimate
 // overpays ~1500x); the sdk is data-only, so parseUnits happens here.
 const GAS_PRICE = ethers.utils.parseUnits(GIWA_GAS_FLOOR_GWEI, "gwei");
 

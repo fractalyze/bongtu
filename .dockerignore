@@ -1,5 +1,5 @@
 # Build context for apps/indexer/Dockerfile (context = repo root). The Dockerfile
-# COPYs only: root manifests + tsconfig, packages/sdk (pkg/tsconfig/src),
+# COPYs only: root manifests + tsconfig, packages/core (pkg/tsconfig/src),
 # apps/indexer (pkg/tsconfig/src + abi/BongtuPool.abi.json), deploy/addresses.*.json.
 # Everything else is excluded to keep the context small and secret-free.
 

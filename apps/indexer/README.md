@@ -6,7 +6,7 @@ alarm API that the wallet and admin apps depend on. It is read-only on-chain (op
 wallet, sends no transactions) and — post-Q4 — a convenience/availability layer, not
 trust-critical for funds. The normative API contract and the security model live in
 [`docs/spec.md`](../../docs/spec.md) §6b; the wire shapes are owned by
-[`@bongtu/sdk/indexerApi`](../../packages/sdk/README.md) and the routes type their
+[`@bongtu/core/indexerApi`](../../packages/core/README.md) and the routes type their
 response bodies against them.
 
 ## Two modes
@@ -34,11 +34,11 @@ response bodies against them.
 | `GET /history?owner=&ts=&sig=` | **arbiter mode only** (else 404): one owner's activity feed `[{ kind, counterparty, amount, txHash, blockTimestamp, seq }]`, newest-first. `kind` ∈ `received`/`sent`/`withdraw`/`deposit`; `counterparty` is a compressed pubkey (or null); derived from the same decrypted envelopes as `/notes` — same bjj read-auth |
 
 `/notes` and `/history` share the same enforced read-auth: `owner` is the
-compressed bjj pubkey (`@bongtu/sdk/pubkey`), `sig` a bjj EdDSA-Poseidon signature
+compressed bjj pubkey (`@bongtu/core/pubkey`), `sig` a bjj EdDSA-Poseidon signature
 over `Poseidon(ownerPub.x, ownerPub.y, ts)` checked against the queried key
-(`@bongtu/sdk/eddsa`), and `|now − ts| ≤ 300s` bounds replay. Malformed owner → 400;
+(`@bongtu/core/eddsa`), and `|now − ts| ≤ 300s` bounds replay. Malformed owner → 400;
 missing ts/sig → 400; wrong key or expired ts → 401. `buildNotesUrl` /
-`buildHistoryUrl` (`@bongtu/sdk/indexerApi`) are the one client-side implementation,
+`buildHistoryUrl` (`@bongtu/core/indexerApi`) are the one client-side implementation,
 headless-tested against the same verifier the routes use.
 
 Routing is a plain ordered table (`src/api/router.ts`): each route is a pure function
@@ -132,7 +132,7 @@ defaults (`.env.compose.example`); leave `POOL` empty to fall back to the baked-
 (institution-internal — see [`CLAUDE.md`](../../CLAUDE.md)).
 
 The image ([`apps/indexer/Dockerfile`](Dockerfile), context = repo root) is multi-stage:
-a builder trims the npm workspace to `packages/sdk` + `apps/indexer` (a lockfile-pinned
+a builder trims the npm workspace to `packages/core` + `apps/indexer` (a lockfile-pinned
 `npm ci --workspace …`, no react/vite) and installs ethers into the
 `BONGTU_NODE_MODULES` seam; the slim non-root runtime copies the installed tree, the raw
 `.ts` source (run via `node --import tsx`), the addresses file, and the **committed pool
@@ -178,7 +178,7 @@ src/
   ingest.ts       Indexer: event ingest, correlation, poll/retry state
   tree.ts         MirrorTree: ImtTree mirror + per-leaf records + batch subtrees + path builder + snapshot/rebuild (resume)
   store.ts        StorePort + InMemoryStore: ingested events / alarms / nullifiers / cursor
-  disclosure.ts   disclosureHash verify + alarm classification (chain fold from @bongtu/sdk/envelope)
+  disclosure.ts   disclosureHash verify + alarm classification (chain fold from @bongtu/core/envelope)
   ledger.ts       LedgerPort + shared pure deriveOp (all crypto) + InMemoryLedger (arbiter note ledger + history)
   postgres.ts     PostgresStore + PostgresLedger: persist derived state + boot-reconstruct + resume (raw pg, no ORM)
   schema.sql      idempotent Postgres schema (events / nullifiers / leaves / cursor / notes / history / alarms)

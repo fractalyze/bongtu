@@ -1,6 +1,6 @@
 // App-specific knobs only. The deployment-coupled chain facts (pool, token,
 // chainId, RPC/explorer, arbiter public key, H/B, gas floor, ABI fragments)
-// live in @bongtu/sdk/network — ONE home, equality-tested against
+// live in @bongtu/core/network — ONE home, equality-tested against
 // deploy/addresses.91342.json — and are re-exposed here in the DEFAULTS shape
 // the views consume. Everything is PUBLIC: the arbiter *public* key is the
 // pool's stored authority pubkey, safe to ship in employer-mode. The arbiter
@@ -15,7 +15,7 @@ import {
   POOL_ADDRESS,
   RPC_URL,
   TOKEN_ADDRESS,
-} from "@bongtu/sdk/network";
+} from "@bongtu/core/network";
 
 export const DEFAULTS = {
   chainId: CHAIN_ID,
@@ -38,4 +38,4 @@ export const DEFAULTS = {
   indexerUrl: "http://localhost:8600",
 } as const;
 
-export { H, B } from "@bongtu/sdk/network";
+export { H, B } from "@bongtu/core/network";

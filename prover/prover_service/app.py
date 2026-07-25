@@ -1,6 +1,6 @@
 # The bongtu prover service — FastAPI over the resident Disburse256Prover.
 #
-# Serves the shared ProvingRequest wire contract (packages/sdk/src/proving.ts is
+# Serves the shared ProvingRequest wire contract (packages/core/src/proving.ts is
 # the TS source of truth; schema.py mirrors it):
 #
 #   GET  /healthz  -> 200 {"ok": true}                    liveness (process up)

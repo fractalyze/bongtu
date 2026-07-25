@@ -1,15 +1,15 @@
 // Chain plumbing: load ethers v5 + the BongtuPool ABI without adding a repo dep.
 //
 // ethers v5 loads from the external node_modules via the sdk's shared loader
-// (@bongtu/sdk/extern — the locked no-repo-local-install decision), so it comes
+// (@bongtu/core/extern — the locked no-repo-local-install decision), so it comes
 // back as `any` — we type OUR code, not ethers.
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { loadEthers } from "@bongtu/sdk/extern";
-import { CHAIN_ID } from "@bongtu/sdk/network";
+import { loadEthers } from "@bongtu/core/extern";
+import { CHAIN_ID } from "@bongtu/core/network";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = join(HERE, "..", "..", ".."); // apps/indexer/src -> repo root

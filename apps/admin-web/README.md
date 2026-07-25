@@ -14,7 +14,7 @@ Assembles and submits a 256-recipient private disbursement:
 
 1. **Recipients** — a form (add rows `{compressed pubkey, amount}`) and/or an optional
    CSV upload/paste (`pubkey,amount` per line). A recipient is identified by a
-   **compressed bjj pubkey** (`@bongtu/sdk/pubkey` — a 32-byte hex string). Full ETH→bjj
+   **compressed bjj pubkey** (`@bongtu/core/pubkey` — a 32-byte hex string). Full ETH→bjj
    onboarding is out of scope for this PoC; recipients paste their compressed key.
 2. **Input note** — the employer's note to spend (value, salt, bjj spending scalar).
 3. **Membership witness** — the input note's `root` + 32-sibling path + leaf index,
@@ -25,7 +25,7 @@ Assembles and submits a 256-recipient private disbursement:
    exactly 256 outputs (so `sum(outputs) == inputValue`), computes the output
    commitments (`sdk`), enforces **distinct owner pubkeys** (§11-8 two-time-pad guard),
    builds the `subtreeRoot`, verifies the membership path folds to `root`, and emits a
-   complete **disburse `ProvingRequest`** (`@bongtu/sdk/proving`) plus the **2054-element** ciphertext
+   complete **disburse `ProvingRequest`** (`@bongtu/core/proving`) plus the **2054-element** ciphertext
    (1024 receiver ++ 1030 authority = `disburseCiphertextLen` for B=256).
 5. **Prove** — POST the request to the bongtu prover service (top-level `prover/`;
    browser GPU proving is infeasible: 1.24 GB zkey + rabbitsnark) → get calldata.
@@ -44,7 +44,7 @@ private key** (never leaves the browser), then **Load ledger**:
 
 - Fetches the public `GET /events` feed + `GET /alarms`.
 - Decrypts each **transfer / disburse** authority envelope **locally** with the arbiter
-  key (`src/lib/ledger.ts`, via the `@bongtu/sdk/envelope` codec) into "who received what /
+  key (`src/lib/ledger.ts`, via the `@bongtu/core/envelope` codec) into "who received what /
   spent status" — grouped by owner, with unspent balances, plus a per-op feed and the
   disclosure alarms.
 - **Coverage boundary:** the public `/events` feed carries an authority tail only for
@@ -54,7 +54,7 @@ private key** (never leaves the browser), then **Load ledger**:
   beat: the auditor reads employees' p2p transfers AND the 256-batch). Deposit/withdraw
   notes come from an arbiter indexer's own `/notes` directory.
 
-A secondary **`GET /notes` lookup** exercises the signed read-auth flow (`@bongtu/sdk/eddsa`).
+A secondary **`GET /notes` lookup** exercises the signed read-auth flow (`@bongtu/core/eddsa`).
 Its auth binds to the **owner** key (the signature must verify against the queried
 pubkey), so it needs the owner's private scalar — it is a recipient's own-notes lookup
 via the arbiter indexer, not a general auditor browse.
@@ -110,7 +110,7 @@ src/
     chain.ts           MetaMask disburseWithCiphertexts + pool reads (ethers v5)
     proverClient.ts    POST a request to the prover/ service
     indexerClient.ts   /head /path /events /alarms fetch wrappers
-    notesAuth.ts       signed GET /notes URL builder (@bongtu/sdk/eddsa)
+    notesAuth.ts       signed GET /notes URL builder (@bongtu/core/eddsa)
     dom.ts             tiny framework-free DOM helpers
   views/
     employer.ts        employer-mode UI

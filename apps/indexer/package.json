@@ -9,7 +9,7 @@
     "./*": "./src/*.ts"
   },
   "dependencies": {
-    "@bongtu/sdk": "*",
+    "@bongtu/core": "*",
     "pg": "^8.22.0"
   },
   "scripts": {

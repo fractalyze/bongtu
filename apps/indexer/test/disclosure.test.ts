@@ -8,7 +8,7 @@
 //
 //   node --import tsx test/disclosure.test.ts   # (== npm run test:disclosure)
 
-import { disclosureChain } from "@bongtu/sdk/envelope";
+import { disclosureChain } from "@bongtu/core/envelope";
 import { verifyDisclosure } from "../src/disclosure.js";
 
 let failures = 0;

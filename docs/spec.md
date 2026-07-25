@@ -68,7 +68,7 @@ wallet onboards — the GASOK user-KPI bridge).
 │            ERC20 custody + 4 verifiers + contract-derived enabled) · Poseidon    │
 │      │ events carry ALL ciphertext + ecdhPublicKey + nonce (from verified sigs)  │
 │      ▼                                                                          │
-│ packages/sdk/ keys(signTypedData→bjj) · notes · encrypt · trial-decrypt+nullif  │
+│ packages/core/ keys(signTypedData→bjj) · notes · encrypt · trial-decrypt+nullif  │
 │   snarkjs(GPL) + rabbitsnark(GPU) stay repo-external (createRequire / venv)     │
 │ prover/ (Python FastAPI on the employer GPU box: ProvingRequest→calldata)       │
 │ apps/indexer/ event ingest · IMT mirror(==contract root) · path API ·           │
@@ -257,13 +257,13 @@ value still counts → **mint-from-nothing**. Fix, applied to **every** verifier
 > zkey **resident** (parse+compile once at eager boot, warm proofs ~0.5s GPU) and serves `POST /prove`:
 > a typed, already-resolved `ProvingRequest` (complete circom witness input) → Groth16 calldata — nothing more.
 > The earlier prover-cli npm package + admin-web `prover-helper.ts` shell-out pair are RETIRED by it. The shared
-> `ProvingRequest`/`Calldata` types live in `packages/sdk/src/proving.ts` (TS source of truth; the service's
+> `ProvingRequest`/`Calldata` types live in `packages/core/src/proving.ts` (TS source of truth; the service's
 > `schema.py` mirrors them). CSV parsing, ETH→bjj address resolution, membership-witness building, and tx
 > submission remain the **admin app's** job (`apps/admin-web/`), not the prover's. The service proves only
 > `disburse` (the one GPU circuit); the `apps/wallet-web/` wallet proves its own small transfer/withdraw
 > **in-browser** (GPL decision (a)) — a self-custody wallet never sends spending-key witnesses to a server;
 > deposit proves CPU-side where assembled (deploy scripts). The note-owner identifier everywhere is the
-> **compressed bjj pubkey** (`packages/sdk/src/pubkey.ts`). Original sketch (below) is superseded on the
+> **compressed bjj pubkey** (`packages/core/src/pubkey.ts`). Original sketch (below) is superseded on the
 > CSV/tx-in-prover point.
 
 - **Prover (now `prover/`, employer self-host):** CSV(addr,amount) → witness (circom `witness_calculator`,
@@ -306,9 +306,9 @@ serves:
   txHash, spent}]` — the user reads their own notes directly (no full-feed trial-decrypt). `spent` is
   derived from envelopes alone (a spending op's input envelope names the consumed note), needing no owner
   key or nullifier linkage. `owner` is the **compressed bjj pubkey** — a 32-byte hex string (little-endian
-  y, top bit = LSB of x; `packages/sdk/src/pubkey.ts` pack/unpack), not a raw `x,y` decimal pair.
+  y, top bit = LSB of x; `packages/core/src/pubkey.ts` pack/unpack), not a raw `x,y` decimal pair.
   **Auth: IMPLEMENTED** (`apps/indexer/src/api/routes/notes.ts`). A caller proves control of the queried key with
-  a bjj EdDSA-Poseidon signature (`packages/sdk/src/eddsa.ts`) over `Poseidon(ownerPub.x, ownerPub.y, ts)`, checked
+  a bjj EdDSA-Poseidon signature (`packages/core/src/eddsa.ts`) over `Poseidon(ownerPub.x, ownerPub.y, ts)`, checked
   against the queried pubkey; the request is refused unless `|now − ts| ≤ 300s` (replay-bounded) **and** the
   signature verifies. Malformed owner → 400; wrong key or expired ts → 401. The auditor-key indexer still
   holds every user's decrypted notes by design (that is the disclosure model) — auth governs *who may query*,
@@ -358,8 +358,8 @@ serves:
 > - **`GET /notes?owner=<compressed-bjj-pubkey>` is authenticated by a bjj signature** (`sign(ownerPubKey ‖
 >   timestamp)`; the indexer checks it against the queried pubkey) so only the key owner reads their own
 >   notes — the auditor-key indexer sees all users, so an unauthenticated `/notes` would expose everyone's
->   payroll. **IMPLEMENTED** (2026-07-24): owner is the compressed pubkey (`packages/sdk/src/pubkey.ts`), the signature is
->   EdDSA-Poseidon over `Poseidon(ownerPub.x, ownerPub.y, ts)` (`packages/sdk/src/eddsa.ts`), and the route enforces a
+>   payroll. **IMPLEMENTED** (2026-07-24): owner is the compressed pubkey (`packages/core/src/pubkey.ts`), the signature is
+>   EdDSA-Poseidon over `Poseidon(ownerPub.x, ownerPub.y, ts)` (`packages/core/src/eddsa.ts`), and the route enforces a
 >   ±300s replay window plus signature verification (wrong key / expired ts → 401, malformed owner → 400).
 >   The arbiter still sees all notes by design; auth governs *who may query*.
 > - Because deposit/withdraw circuits change (envelopes) and every spending base gains the §5.2 zero-leaf
@@ -399,7 +399,7 @@ bongtu/                       # one monorepo, Apache-2.0; npm workspaces = apps/
   circuits/                   # circom + vendored zeto lib/basetokens + our IMT bases (non-npm, top-level)
   contracts/                  # Foundry: BongtuPool, 4 verifiers, Poseidon, differential + gas tests
   packages/
-    sdk/                      # @bongtu/sdk — TS SDK incl. the shared ProvingRequest wire types (src/proving.ts)
+    sdk/                      # @bongtu/core — TS SDK incl. the shared ProvingRequest wire types (src/proving.ts)
   prover/                     # Python FastAPI GPU prover service (not an npm package; employer GPU box only)
   apps/
     indexer/                  # @bongtu/indexer — event ingest, IMT mirror, path API, disclosureHash, arbiter ledger
@@ -410,7 +410,7 @@ bongtu/                       # one monorepo, Apache-2.0; npm workspaces = apps/
 ```
 
 Workspace packages export **raw `src/*.ts`** (`"exports": { "./*": "./src/*.ts" }`) — consumers import
-`@bongtu/sdk/note` etc. with no build step; tsc (NodeNext), tsx, and Vite all resolve the same source.
+`@bongtu/core/note` etc. with no build step; tsc (NodeNext), tsx, and Vite all resolve the same source.
 
 ---
 

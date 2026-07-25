@@ -1,5 +1,5 @@
 import type { Route } from "../router.js";
-import type { Alarm } from "@bongtu/sdk/indexerApi";
+import type { Alarm } from "@bongtu/core/indexerApi";
 
 /**
  * The single discriminated alarm feed served by GET /alarms — one wire shape
@@ -12,12 +12,12 @@ import type { Alarm } from "@bongtu/sdk/indexerApi";
  *     ALARM, never silently kept). Public mode has no ledger, so its feed only
  *     ever carries "disclosure" entries.
  *
- * The union itself is owned by @bongtu/sdk/indexerApi (the normative wire
+ * The union itself is owned by @bongtu/core/indexerApi (the normative wire
  * shapes); typing `body` against it here is the server-adapter half of that
  * contract — internal DisclosureResult / EnvelopeAlarm drift breaks THIS line,
  * not the apps at runtime.
  */
-export type { Alarm } from "@bongtu/sdk/indexerApi";
+export type { Alarm } from "@bongtu/core/indexerApi";
 
 export const alarms: Route = {
   method: "GET",

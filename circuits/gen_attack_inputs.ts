@@ -22,8 +22,8 @@
 //
 //   npx tsx gen_attack_inputs.ts
 
-import { commitment, nullifier } from "@bongtu/sdk/note";
-import type { WithdrawInput } from "@bongtu/sdk/proving";
+import { commitment, nullifier } from "@bongtu/core/note";
+import type { WithdrawInput } from "@bongtu/core/proving";
 
 import {
   AUTHORITY,

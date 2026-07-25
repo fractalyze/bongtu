@@ -14,10 +14,10 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ImtTree } from "@bongtu/sdk/imt";
-import { loadSnarkjs } from "@bongtu/sdk/extern";
+import { ImtTree } from "@bongtu/core/imt";
+import { loadSnarkjs } from "@bongtu/core/extern";
 
-// snarkjs comes back `any` from the shared external loader (@bongtu/sdk/extern).
+// snarkjs comes back `any` from the shared external loader (@bongtu/core/extern).
 const snarkjs = loadSnarkjs();
 
 const HERE = dirname(fileURLToPath(import.meta.url));

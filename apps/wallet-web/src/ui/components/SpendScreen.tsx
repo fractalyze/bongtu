@@ -8,7 +8,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { unpackPubkey } from "@bongtu/sdk/pubkey";
+import { unpackPubkey } from "@bongtu/core/pubkey";
 import { DEFAULTS } from "../../config.js";
 import { ensureCircuitAssets, prewarmProver } from "../../lib/prove.js";
 import { runSpend, type SpendStage, type SpendOutcome } from "../../lib/spendFlow.js";

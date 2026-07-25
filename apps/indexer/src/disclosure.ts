@@ -12,11 +12,11 @@
 // mismatch the indexer flags as a first-class alarm.
 //
 // The chain itself (fold every receiver element then every authority element,
-// starting from 0) is owned by @bongtu/sdk/envelope::disclosureChain — one
+// starting from 0) is owned by @bongtu/core/envelope::disclosureChain — one
 // implementation shared with every producer, pinned byte-identical to the
-// in-circuit gadget by the sdk pin suite (packages/sdk/test/envelope.test.ts p2).
+// in-circuit gadget by the sdk pin suite (packages/core/test/envelope.test.ts p2).
 
-import { disclosureChain } from "@bongtu/sdk/envelope";
+import { disclosureChain } from "@bongtu/core/envelope";
 
 export type DisclosureStatus =
   | "verified" // published ciphertext (receiver ++ authority) hashes to disclosureHash

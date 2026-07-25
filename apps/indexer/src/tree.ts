@@ -23,8 +23,8 @@
 // an earlier (partially failed) ingest call and is skipped, so the poll loop can
 // retry the same log range without double-applying.
 
-import { ImtTree } from "@bongtu/sdk/imt";
-import { poseidon2 } from "@bongtu/sdk/poseidon";
+import { ImtTree } from "@bongtu/core/imt";
+import { poseidon2 } from "@bongtu/core/poseidon";
 
 /** A merkle authentication path against the current root. */
 export interface PathResult {

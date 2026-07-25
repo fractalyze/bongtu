@@ -19,14 +19,14 @@
 //
 //   node --import tsx test/ingest.test.ts       # (== npm run test:ingest)
 
-import { deriveKeypair, commitment, poseidonEncrypt, ecdhSharedSecret } from "@bongtu/sdk/note";
-import type { Keypair } from "@bongtu/sdk/note";
-import { packPubkey } from "@bongtu/sdk/pubkey";
-import { ImtTree } from "@bongtu/sdk/imt";
+import { deriveKeypair, commitment, poseidonEncrypt, ecdhSharedSecret } from "@bongtu/core/note";
+import type { Keypair } from "@bongtu/core/note";
+import { packPubkey } from "@bongtu/core/pubkey";
+import { ImtTree } from "@bongtu/core/imt";
 import { MirrorTree } from "../src/tree.js";
 import { NoteLedger, type OpEnvelope } from "../src/ledger.js";
 import { Indexer, type ParsedLog } from "../src/ingest.js";
-import { disclosureChain } from "@bongtu/sdk/envelope";
+import { disclosureChain } from "@bongtu/core/envelope";
 import { health } from "../src/api/routes/health.js";
 
 let failures = 0;
@@ -69,7 +69,7 @@ const commitOf = (n: NoteSpec): bigint => commitment(n.v, n.s, n.owner.publicKey
  * A synthetic chain: owns the reference ImtTree (source of every event's
  * carried root), block/logIndex counters, and the per-op log builders. Each
  * builder emits the exact event shapes ingest consumes, with envelope bytes
- * encrypted to ARB the way the circuits lay them out (the @bongtu/sdk/envelope
+ * encrypted to ARB the way the circuits lay them out (the @bongtu/core/envelope
  * layout table — hand-assembled HERE on purpose, as an independent check of
  * the shared codec).
  */

@@ -29,7 +29,7 @@ import {
 } from "poseidon-lite";
 
 // A field element in a form the hash accepts (coerced to BigInt before hashing).
-// Declared once in babyjub.ts; re-exported so `@bongtu/sdk/poseidon` importers keep working.
+// Declared once in babyjub.ts; re-exported so `@bongtu/core/poseidon` importers keep working.
 import type { FieldInput } from "./babyjub.js";
 export type { FieldInput } from "./babyjub.js";
 
