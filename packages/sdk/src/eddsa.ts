@@ -24,16 +24,15 @@
 // in-circuit gadget; it only gates an HTTP read. Threat model: signature ==
 // spending key (SPEC §5.1), which is exactly the disclosure boundary we want.
 
-import { Base8, addPoint, mulPointEscalar, isOnCurve, P, IDENTITY } from "./babyjub.js";
+import { Base8, addPoint, mulPointEscalar, isOnCurve, P, IDENTITY, SUBGROUP_ORDER } from "./babyjub.js";
 import type { FieldInput, Point, PointInput } from "./babyjub.js";
 import { poseidonN } from "./poseidon.js";
 
-const isIdentity = ([x, y]: Point): boolean => x === IDENTITY[0] && y === IDENTITY[1];
+// The subgroup order L lives with the curve (babyjub.ts); re-exported here so
+// existing `@bongtu/sdk/eddsa` importers keep working.
+export { SUBGROUP_ORDER } from "./babyjub.js";
 
-// BabyJubJub prime-order subgroup order = curve order >> 3 (circomlib `subOrder`).
-// Base8·L == identity (self-checked in the SDK test suite).
-export const SUBGROUP_ORDER =
-  2736030358979909402780800718157159386076813972158567259200215660948447373041n;
+const isIdentity = ([x, y]: Point): boolean => x === IDENTITY[0] && y === IDENTITY[1];
 
 /** An EdDSA-Poseidon signature: the nonce point R8 and the scalar S (< L). */
 export interface Signature {

@@ -32,7 +32,22 @@ from .schema import Calldata, DisburseInput
 
 
 class WitnessGenerationError(Exception):
-    """The circom witness calculator rejected the input (unsatisfiable request)."""
+    """The circom witness calculator rejected the input (unsatisfiable request).
+
+    Client fault: the request was well-formed but violates a circuit constraint
+    (bad membership witness, sums, keys). app.py maps this to HTTP 400.
+    """
+
+
+class WitnessInfraError(Exception):
+    """Witness generation failed for a reason that is NOT the client's input.
+
+    Server fault: missing/stale wasm or generate_witness.js, a broken node
+    binary, a wedged subprocess (timeout) — the circom calculator only reaches
+    its 'Assert Failed' message when the INPUT is unsatisfiable, so anything
+    else is the service's environment. app.py maps this to HTTP 500 so the
+    employer app doesn't tell the user their batch is unprovable.
+    """
 
 
 class Disburse256Prover:
@@ -87,24 +102,51 @@ class Disburse256Prover:
         return to_solidity_calldata(proof_json, publics)
 
     def _generate_witness(self, input_json: dict, input_path: Path, wtns_path: Path) -> None:
-        """Run the circom witness calculator (node subprocess, CPU)."""
+        """Run the circom witness calculator (node subprocess, CPU).
+
+        Classifies failures at this seam, where the evidence is: circom's
+        calculator prints 'Assert Failed' on stderr iff a circuit constraint is
+        unsatisfied by the input => WitnessGenerationError (client, 400).
+        Everything else — unlaunchable node, timeout, a crash that never
+        produced the .wtns — is WitnessInfraError (service, 500).
+        """
         input_path.write_text(json.dumps(input_json))
-        res = subprocess.run(
-            [
-                config.NODE_BIN,
-                str(config.DISBURSE_GEN_WITNESS),
-                str(config.DISBURSE_WASM),
-                str(input_path),
-                str(wtns_path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=300,
+        infra_hint = (
+            "check BONGTU_DISBURSE_WASM / BONGTU_DISBURSE_GEN_WITNESS / BONGTU_NODE_BIN "
+            "(prover_service/config.py) and the circuits/out artifacts"
         )
+        try:
+            res = subprocess.run(
+                [
+                    config.NODE_BIN,
+                    str(config.DISBURSE_GEN_WITNESS),
+                    str(config.DISBURSE_WASM),
+                    str(input_path),
+                    str(wtns_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=config.WITNESS_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired as e:
+            raise WitnessInfraError(
+                f"witness generation timed out after {config.WITNESS_TIMEOUT}s "
+                f"(healthy disburse256 witness-gen is ~5s); {infra_hint}"
+            ) from e
+        except OSError as e:
+            raise WitnessInfraError(
+                f"could not launch the witness calculator ({e}); {infra_hint}"
+            ) from e
         if res.returncode != 0 or not wtns_path.exists():
             detail = (res.stderr or res.stdout or "").strip()[-2000:]
-            raise WitnessGenerationError(
-                f"witness generation failed (rc={res.returncode}): {detail}"
+            if "Assert Failed" in (res.stderr or ""):
+                raise WitnessGenerationError(
+                    f"witness generation failed (rc={res.returncode}): {detail}"
+                )
+            raise WitnessInfraError(
+                f"witness calculator failed without a circuit assert "
+                f"(rc={res.returncode}, wtns_exists={wtns_path.exists()}): "
+                f"{detail or '<no output>'}; {infra_hint}"
             )
 
     def _prove_wtns(self, wtns_path: Path) -> tuple[dict, list[str]]:

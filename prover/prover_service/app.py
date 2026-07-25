@@ -8,7 +8,10 @@
 #                     503 {"status": "initializing"|"failed", ...} otherwise
 #   POST /prove    -> 200 Calldata {a, b, c, pub}         prove a ProvingRequest
 #                     400 non-disburse circuit / cpu backend (not served here)
+#                         / unsatisfiable witness input (client fault)
 #                     422 schema violation (incl. the §11-8 two-time-pad guard)
+#                     500 witness infra failure (bad wasm/node/timeout — the
+#                         service's environment, never the client's batch)
 #                     503 engine not ready yet
 #
 # Only `disburse` is served: it is the one circuit that NEEDS the GPU (1×256,
@@ -34,7 +37,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from .engine import Disburse256Prover, WitnessGenerationError
+from .engine import Disburse256Prover, WitnessGenerationError, WitnessInfraError
 from .schema import Calldata, ProvingRequest
 
 engine = Disburse256Prover()
@@ -124,3 +127,7 @@ def prove(request: ProvingRequest) -> Calldata:
     except WitnessGenerationError as e:
         # The request was well-formed but unsatisfiable (bad membership/sums/keys).
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except WitnessInfraError as e:
+        # The service's own environment failed (wasm/node/timeout) — a 400 here
+        # would tell the employer app their batch is unprovable when it isn't.
+        raise HTTPException(status_code=500, detail=str(e)) from e

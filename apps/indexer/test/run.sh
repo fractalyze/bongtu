@@ -2,12 +2,12 @@
 # bongtu indexer conformance gate (SPEC §6b DoD-4).
 #
 # Starts a local anvil, deploys a fresh B=16 pool + runs the full scenario
-# (deposit -> disburse(16) -> transfer -> withdraw -> tampered disburse),
-# ingests it with the indexer, and asserts: mirror.root == contract.root +
-# nextLeafIndex match at head; /path/:i folds to the head root; /events feed
-# trial-decrypts to real leaves with correct leafIndex annotations;
-# disclosureHash passes for the honest disburse and ALARMS "mismatch" on the
-# tampered one. (§6b v2 removes plain disburse(), so "withheld" is unreachable.)
+# (deposit -> disburse(16) -> transfer -> withdraw -> receiver-tampered
+# disburse -> authority-tampered disburse), ingests it with the indexer, and
+# asserts: mirror.root == contract.root at head; /path folds; /events
+# trial-decrypts to real leaves; /alarms carries "mismatch" for the
+# receiver-tampered disburse and (arbiter mode) the envelope cross-check
+# alarm for the authority-tampered one, whose batch stays unopened.
 # Also runs the ARBITER-mode path (§6b v2): a second indexer holding the arbiter
 # private key decrypts the authority envelopes into a note ledger (spent status
 # from envelopes alone), serves /notes + within-batch /path, and /nullifiers.

@@ -5,10 +5,14 @@
 //                                    encryptionNonce, epoch, slices:[{offset,elts,
 //                                    leafIndex}], kind, ciphertext[], disclosure? }]
 //   GET /path/:leafIndex     -> { leafIndex, siblings[], pathIndices[], root }
-//   GET /alarms              -> [DisclosureResult]  (every non-passing disclosure:
-//                               mismatch = proven tamper, unverifiable/withheld =
-//                               publication gap for the auditor to judge)
-//   GET /health              -> { ok, lastBlock, nextLeafIndex, batchSize }
+//   GET /alarms              -> [Alarm]  (single discriminated feed: every
+//                               non-passing disclosure as { type: "disclosure" },
+//                               plus — arbiter mode only — every envelope
+//                               cross-check failure as { type: "envelope" })
+//   GET /health              -> { ok (tree exists AND tail not persistently
+//                                failing), lastBlock, nextLeafIndex, batchSize,
+//                                alarms (disclosure+envelope count), lastSuccessAt,
+//                                lastError, lastErrorAt, consecutiveFailures }
 //   GET /nullifiers          -> string[]  (spent nullifier set; PUBLIC, key-free)
 //   GET /notes?owner=x,y     -> [{ value, salt, leafIndex, commitment, txHash,
 //                               spent }]  (ARBITER MODE ONLY — registered only when

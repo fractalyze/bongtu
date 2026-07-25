@@ -1,7 +1,10 @@
 import type { Route } from "../router.js";
+import type { FeedEvent } from "@bongtu/sdk/indexerApi";
 
 // SPEC §6b `/events`: the cursor-paged ciphertext feed. `disclosure` is projected
 // down to its status string; the full DisclosureResult is served only on /alarms.
+// The wire shape is owned by @bongtu/sdk/indexerApi — typing `out` against it is
+// the server-adapter half of that contract.
 export const events: Route = {
   method: "GET",
   pattern: "/events",
@@ -14,7 +17,7 @@ export const events: Route = {
     if (!Number.isInteger(limit) || limit < 1) {
       return { status: 400, body: { error: "limit must be an integer >= 1", limit: query.get("limit") } };
     }
-    const out = ix.store.events(cursor, limit).map((e) => ({
+    const out: FeedEvent[] = ix.store.events(cursor, limit).map((e) => ({
       seq: e.seq,
       txHash: e.txHash,
       blockNumber: e.blockNumber,

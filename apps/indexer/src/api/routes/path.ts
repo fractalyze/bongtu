@@ -1,6 +1,8 @@
 import type { Route } from "../router.js";
+import type { PathResult } from "@bongtu/sdk/indexerApi";
 
-// SPEC §6b `/path/:leafIndex`. 404 out-of-range, 422 batch-interior leaf (siblings
+// SPEC §6b `/path/:leafIndex` (wire shape owned by @bongtu/sdk/indexerApi).
+// 404 out-of-range, 422 batch-interior leaf (siblings
 // not chain-recoverable, §11-7). No root-agreement guard here: MirrorTree.path
 // asserts the reconstructed root against the mirror internally (→ 500 via the
 // router catch if it ever diverges, which the per-insert asserts make unreachable).
@@ -24,14 +26,12 @@ export const path: Route = {
         },
       };
     }
-    return {
-      status: 200,
-      body: {
-        leafIndex,
-        siblings: p.siblings.map((x) => x.toString()),
-        pathIndices: p.pathIndices,
-        root: p.root.toString(),
-      },
+    const body: PathResult = {
+      leafIndex,
+      siblings: p.siblings.map((x) => x.toString()),
+      pathIndices: p.pathIndices,
+      root: p.root.toString(),
     };
+    return { status: 200, body };
   },
 };

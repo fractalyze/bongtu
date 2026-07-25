@@ -45,6 +45,11 @@ NODE_BIN = os.environ.get(
     shutil.which("node") or str(Path.home() / ".nvm/versions/node/v22.17.1/bin/node"),
 )
 
+# Wall-clock cap on one witness-calculator subprocess (a healthy disburse256
+# witness-gen is ~5s; 300s means "wedged", an infra fault). Overridable so the
+# CPU-only seam tests can exercise the timeout leg in seconds.
+WITNESS_TIMEOUT = float(os.environ.get("BONGTU_WITNESS_TIMEOUT", "300"))
+
 # The bind address/port (PROVER_HOST/PROVER_PORT, loopback:8700 default) are
 # owned by run.sh, which passes them to uvicorn directly — not duplicated here.
 

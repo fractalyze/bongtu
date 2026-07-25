@@ -36,19 +36,9 @@ async function main(): Promise<void> {
   const arbiterEndpoints = ix.arbiterMode ? " /notes?owner=" : "";
   console.log(`API listening on :${api.port} (GET /head /events /path/:i /alarms /health /nullifiers${arbiterEndpoints})`);
 
-  if (pollMs > 0) {
-    let busy = false;
-    setInterval(() => {
-      if (busy) return;
-      busy = true;
-      void ix
-        .ingest(ix.store.lastBlock + 1)
-        .catch((e) => console.error("tail ingest error:", (e as Error).message))
-        .finally(() => {
-          busy = false;
-        });
-    }, pollMs);
-  }
+  // Incremental tail: the scheduler + retry/cursor policy live in Indexer
+  // (pollOnce/startTailPolling); /health projects the recorded poll state.
+  if (pollMs > 0) ix.startTailPolling(pollMs);
 }
 
 main().catch((e) => {

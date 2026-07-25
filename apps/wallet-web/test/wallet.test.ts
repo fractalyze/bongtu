@@ -12,6 +12,11 @@
 //       ProvingRequest whose output commitments == sdk commitment(), whose
 //       value is conserved, whose owners are distinct, and whose membership folds to
 //       root; plus the padded single-input path (enabled=[1,0]).
+//   (4) SELECTION + PER-TX CRYPTO — amount-aware largest-first note selection
+//       (incl. the [10,20,5000]/4000 regression the old amount-blind slice(0,2)
+//       failed on) with its distinct insufficient-balance vs needs-more-than-2
+//       errors, and the freshSpendCrypto factory drawing every field from the
+//       injected randomness.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -35,7 +40,15 @@ import {
 } from "../src/lib/derive.js";
 import { sumUnspent, trialDecryptEvents } from "../src/lib/balance.js";
 import type { FeedEvent } from "../src/lib/indexerClient.js";
-import { buildTransferRequest, buildWithdrawRequest, type WalletInputNote, type MembershipWitness } from "../src/lib/spend.js";
+import {
+  buildTransferRequest,
+  buildWithdrawRequest,
+  selectInputNotes,
+  freshSpendCrypto,
+  type SelectableNote,
+  type WalletInputNote,
+  type MembershipWitness,
+} from "../src/lib/spend.js";
 import { DEFAULTS, H, B } from "../src/config.js";
 
 // A fixed stand-in for what eth_signTypedData_v4 returns (65-byte ECDSA sig). MetaMask
@@ -272,4 +285,77 @@ test("withdraw: full withdrawal leaves a value-0 (non-zero commitment) change no
   const inp = request.input;
   assert.equal(inp.outputValues[0], "0"); // full withdrawal
   assert.notEqual(inp.outputCommitments[0], "0"); // commitment(0,salt,self) != 0 -> contract accepts
+});
+
+// ==================== (4) SELECTION + PER-TX CRYPTO ==========================
+
+// Selection fixtures: only value/spent/leafIndex matter; salts are arbitrary.
+function note(value: string, leafIndex: number, spent = false): SelectableNote {
+  return { value, salt: `9${leafIndex}`, leafIndex, spent };
+}
+
+test("selection is amount-aware: [10,20,5000]/4000 spends the 5000 note (regression)", () => {
+  // The old amount-blind slice(0,2) picked 10+20 here and the builder rejected a
+  // perfectly fundable payment ("amount exceeds spendable input total").
+  const notes = [note("10", 1), note("20", 2), note("5000", 3)];
+  const picked = selectInputNotes(notes, "4000");
+  assert.equal(picked.length, 1);
+  assert.deepEqual(picked[0], { value: "5000", salt: "93", leafIndex: 3 });
+});
+
+test("selection repro end-to-end: the [10,20,5000]/4000 transfer now assembles", () => {
+  const f = fixture([10n, 20n, 5000n]);
+  const selectable: SelectableNote[] = f.inputs.map((n) => ({ ...n, spent: false }));
+  const picked = selectInputNotes(selectable, "4000");
+  const memberships = picked.map((n) => f.memberships[f.inputs.findIndex((i) => i.leafIndex === n.leafIndex)]);
+  const { request, meta } = buildTransferRequest(f.wallet, picked, memberships, f.recipient, "4000", f.crypto);
+  assert.equal(request.input.outputValues[0], "4000"); // paid
+  assert.equal(meta.changeValue, "1000"); // 5000 - 4000
+  assert.equal(meta.membershipOk, true);
+});
+
+test("selection covers with one note when the largest suffices, two otherwise (largest-first)", () => {
+  const notes = [note("10", 1), note("30", 2), note("20", 3)];
+  // largest alone covers
+  assert.deepEqual(selectInputNotes(notes, "30").map((n) => n.leafIndex), [2]);
+  // largest alone does not cover -> the two largest, largest first
+  assert.deepEqual(selectInputNotes(notes, "45").map((n) => n.leafIndex), [2, 3]);
+  // pair covers exactly
+  assert.deepEqual(selectInputNotes(notes, "50").map((n) => n.leafIndex), [2, 3]);
+});
+
+test("selection skips spent notes", () => {
+  const notes = [note("5000", 1, true), note("20", 2), note("10", 3)];
+  assert.deepEqual(selectInputNotes(notes, "25").map((n) => n.leafIndex), [2, 3]);
+  assert.throws(() => selectInputNotes(notes, "4000"), /insufficient balance/);
+});
+
+test("selection errors are distinct: insufficient balance vs needs-more-than-2-notes", () => {
+  // total 30 < 1000 — the balance genuinely cannot fund it
+  assert.throws(() => selectInputNotes([note("10", 1), note("20", 2)], "1000"), /insufficient balance/);
+  // total 90 >= 80 but the best pair is 60 — needs consolidation, NOT more funds
+  const thirds = [note("30", 1), note("30", 2), note("30", 3)];
+  assert.throws(() => selectInputNotes(thirds, "80"), /more than 2 notes/);
+  assert.doesNotThrow(() => selectInputNotes(thirds, "60")); // pair covers
+});
+
+test("selection rejects empty/all-spent wallets and malformed amounts", () => {
+  assert.throws(() => selectInputNotes([], "10"), /no spendable notes/);
+  assert.throws(() => selectInputNotes([note("10", 1, true)], "10"), /no spendable notes/);
+  assert.throws(() => selectInputNotes([note("10", 1)], "0"), /positive/);
+  assert.throws(() => selectInputNotes([note("10", 1)], "-5"), /positive/);
+  assert.throws(() => selectInputNotes([note("10", 1)], "abc"), /positive/);
+});
+
+test("freshSpendCrypto draws every field from the injected randomness", () => {
+  let i = 0;
+  const rand = (): string => String(++i * 1111);
+  const c = freshSpendCrypto(rand);
+  assert.equal(i, 5); // ecdh key, nonce, change/pad/payee salts — one fresh draw each
+  const drawn = [c.ecdhPrivateKey, c.encryptionNonce, c.changeSalt, c.padSalt, c.payeeSalt];
+  assert.equal(new Set(drawn).size, 5, "no two fields share a draw (two-time-pad guard)");
+  assert.deepEqual([...c.authorityPubKey], [...DEFAULTS.arbiterPubKey]); // pool's stored arbiter key
+  // and the material is accepted by the builders
+  const f = fixture([1000n]);
+  assert.doesNotThrow(() => buildTransferRequest(f.wallet, f.inputs, f.memberships, f.recipient, "100", freshSpendCrypto(rand)));
 });

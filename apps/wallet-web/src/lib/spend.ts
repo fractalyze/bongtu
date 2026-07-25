@@ -24,15 +24,16 @@ import {
   assertDistinctOwnerPubkeys,
 } from "@bongtu/sdk/note";
 import { unpackPubkey } from "@bongtu/sdk/pubkey";
-import { poseidon2 } from "@bongtu/sdk/poseidon";
+import { foldToRoot } from "@bongtu/sdk/imt";
 import type { Point } from "@bongtu/sdk/babyjub";
+import { toWire } from "@bongtu/sdk/proving";
 import type {
   TransferInput,
   WithdrawInput,
   ProvingRequest,
 } from "@bongtu/sdk/proving";
 import type { WalletIdentity } from "./derive.js";
-import { H } from "../config.js";
+import { DEFAULTS, H } from "../config.js";
 
 // --- app-facing input shapes (all field elements as decimal strings) ------------
 
@@ -42,6 +43,15 @@ export interface WalletInputNote {
   value: string;
   salt: string;
   leafIndex: number;
+}
+
+/** What note selection picks from: the balance view's notes (a structural subset
+ *  of the indexer's OwnerNote, so `/notes` results feed in directly). */
+export interface SelectableNote {
+  value: string;
+  salt: string;
+  leafIndex: number;
+  spent: boolean;
 }
 
 /** Membership of one input note against the live root (from GET /path/{leafIndex}). */
@@ -89,25 +99,79 @@ export interface SpendResult<C extends "transfer" | "withdraw"> {
   meta: SpendMeta;
 }
 
-// --- helpers -------------------------------------------------------------------
+// --- note selection + per-tx crypto ---------------------------------------------
 
-// Fold a leaf up an IMT auth path, taking left/right from the bits of leafIndex —
-// bit j == 1 means the sibling is the LEFT child at level j. Mirrors ImtTree.
-function foldToRoot(leaf: bigint, siblings: bigint[], leafIndex: number): bigint {
-  let cur = leaf;
-  let idx = leafIndex;
-  for (let j = 0; j < siblings.length; j++) {
-    cur = idx % 2 === 1 ? poseidon2(siblings[j], cur) : poseidon2(cur, siblings[j]);
-    idx = Math.floor(idx / 2);
+/**
+ * Pick which unspent notes fund a payment of `amount` — the wallet's coin
+ * selection, PURE. Amount-aware largest-first cover with at most 2 notes (the
+ * transfer/withdraw circuits take exactly 2 inputs, padding the second): if the
+ * largest unspent note covers the amount it is spent alone; otherwise the two
+ * largest are tried. Largest-first is optimal here — if ANY single note covers,
+ * the largest does, and if ANY pair covers, the two largest do.
+ *
+ * Distinct failures so the UI can say the right thing:
+ *   - no spendable notes at all (balance not loaded / everything spent);
+ *   - "insufficient balance": the whole unspent total is below the amount;
+ *   - "more than 2 notes": the balance suffices but no 1- or 2-note cover
+ *     exists — the user must consolidate (e.g. two smaller spends) first.
+ */
+export function selectInputNotes(notes: readonly SelectableNote[], amount: string): WalletInputNote[] {
+  let amt: bigint;
+  try {
+    amt = BigInt(amount);
+  } catch {
+    throw new Error(`amount must be a positive integer, got ${JSON.stringify(amount)}`);
   }
-  return cur;
+  if (amt <= 0n) throw new Error(`amount must be a positive integer, got ${amt}`);
+
+  const unspent = [...notes]
+    .filter((n) => !n.spent)
+    .sort((a, b) => {
+      const d = BigInt(b.value) - BigInt(a.value); // value descending…
+      return d > 0n ? 1 : d < 0n ? -1 : a.leafIndex - b.leafIndex; // …then leafIndex for determinism
+    });
+  if (unspent.length === 0) throw new Error("no spendable notes — load your balance first");
+
+  const pick = (n: SelectableNote): WalletInputNote => ({ value: n.value, salt: n.salt, leafIndex: n.leafIndex });
+  const [first, second] = unspent;
+  if (BigInt(first.value) >= amt) return [pick(first)];
+  if (second && BigInt(first.value) + BigInt(second.value) >= amt) return [pick(first), pick(second)];
+
+  const total = unspent.reduce((s, n) => s + BigInt(n.value), 0n);
+  if (total < amt) {
+    throw new Error(`insufficient balance: amount ${amt} exceeds unspent total ${total}`);
+  }
+  const pairTotal = BigInt(first.value) + BigInt(second!.value);
+  throw new Error(
+    `amount ${amt} needs more than 2 notes (largest two cover ${pairTotal}); ` +
+      `a spend takes at most 2 input notes — consolidate or split the payment first`,
+  );
 }
 
-const dec = (x: bigint | number | string): string => BigInt(x).toString();
-const decPoint = (p: readonly [bigint | number | string, bigint | number | string]): [string, string] => [
-  dec(p[0]),
-  dec(p[1]),
-];
+/** A fresh field element (decimal string) per call — the injectable randomness
+ *  behind `freshSpendCrypto` (browser CSPRNG in main.ts; deterministic in tests). */
+export type RandField = () => string;
+
+/**
+ * Draw the fresh per-tx crypto material for one spend. Every draw is a NEW field
+ * element from `rand`: sharing the ephemeral ECDH key + nonce across outputs of
+ * ONE tx is fine, but reuse ACROSS txs is a two-time pad — so callers draw a
+ * whole fresh SpendCrypto per spend. The authority target is the pool's stored
+ * arbiter PUBLIC key (§6b v2): the contract injects the same key from storage
+ * before verifying, so a different target fails the proof.
+ */
+export function freshSpendCrypto(rand: RandField): SpendCrypto {
+  return {
+    ecdhPrivateKey: rand(),
+    encryptionNonce: rand(),
+    authorityPubKey: DEFAULTS.arbiterPubKey,
+    changeSalt: rand(),
+    padSalt: rand(),
+    payeeSalt: rand(),
+  };
+}
+
+// --- helpers -------------------------------------------------------------------
 
 // The 2-input membership witness shared by transfer + withdraw: recompute each real
 // input's commitment + nullifier from the wallet key, pad input[1] to a value-0 note
@@ -270,7 +334,7 @@ export function buildTransferRequest(
     authorityPublicKey: [BigInt(crypto.authorityPubKey[0]), BigInt(crypto.authorityPubKey[1])],
   };
 
-  const request = { circuit: "transfer", input: toDecimalTransfer(inputBig), backend: "cpu" } as const;
+  const request = { circuit: "transfer", input: toWire(inputBig), backend: "cpu" } as const;
   return {
     request,
     meta: spendMeta(ins, payVal.toString(), changeVal.toString(), outputCommitments, outputValues),
@@ -329,14 +393,16 @@ export function buildWithdrawRequest(
     authorityPublicKey: [BigInt(crypto.authorityPubKey[0]), BigInt(crypto.authorityPubKey[1])],
   };
 
-  const request = { circuit: "withdraw", input: toDecimalWithdraw(inputBig), backend: "cpu" } as const;
+  const request = { circuit: "withdraw", input: toWire(inputBig), backend: "cpu" } as const;
   return {
     request,
     meta: spendMeta(ins, out.toString(), changeVal.toString(), outputCommitments, outputValues),
   };
 }
 
-// --- shared meta + decimalisation ----------------------------------------------
+// --- shared meta ----------------------------------------------------------------
+// (wire decimalisation is sdk toWire — byte-equality with the old per-field
+// serializers pinned on the committed fixtures before the swap)
 
 function spendMeta(
   ins: TwoInputs,
@@ -356,50 +422,5 @@ function spendMeta(
     membershipOk: ins.membershipOk,
     outputCommitments: outputCommitments.map((x) => x.toString()),
     outputValues: outputValues.map((x) => x.toString()),
-  };
-}
-
-// Convert bigint-typed inputs to the decimal-string form that survives JSON.stringify
-// (a serialized ProvingRequest has no bigints). Provers accept decimal strings as
-// FieldInput as-is.
-function toDecimalTransfer(input: TransferInput): TransferInput {
-  return {
-    nullifiers: input.nullifiers.map(dec),
-    inputCommitments: input.inputCommitments.map(dec),
-    inputValues: input.inputValues.map(dec),
-    inputSalts: input.inputSalts.map(dec),
-    inputOwnerPrivateKey: dec(input.inputOwnerPrivateKey),
-    ecdhPrivateKey: dec(input.ecdhPrivateKey),
-    root: dec(input.root),
-    pathElements: (input.pathElements as (bigint | number | string)[][]).map((row) => row.map(dec)),
-    leafIndices: input.leafIndices.map(dec),
-    enabled: input.enabled.map(dec),
-    outputCommitments: input.outputCommitments.map(dec),
-    outputValues: input.outputValues.map(dec),
-    outputSalts: input.outputSalts.map(dec),
-    outputOwnerPublicKeys: input.outputOwnerPublicKeys.map(decPoint),
-    encryptionNonce: dec(input.encryptionNonce),
-    authorityPublicKey: decPoint(input.authorityPublicKey),
-  };
-}
-
-function toDecimalWithdraw(input: WithdrawInput): WithdrawInput {
-  return {
-    nullifiers: input.nullifiers.map(dec),
-    inputCommitments: input.inputCommitments.map(dec),
-    inputValues: input.inputValues.map(dec),
-    inputSalts: input.inputSalts.map(dec),
-    inputOwnerPrivateKey: dec(input.inputOwnerPrivateKey),
-    root: dec(input.root),
-    pathElements: (input.pathElements as (bigint | number | string)[][]).map((row) => row.map(dec)),
-    leafIndices: input.leafIndices.map(dec),
-    enabled: input.enabled.map(dec),
-    outputCommitments: input.outputCommitments.map(dec),
-    outputValues: input.outputValues.map(dec),
-    outputSalts: input.outputSalts.map(dec),
-    outputOwnerPublicKeys: input.outputOwnerPublicKeys.map(decPoint),
-    ecdhPrivateKey: dec(input.ecdhPrivateKey),
-    encryptionNonce: dec(input.encryptionNonce),
-    authorityPublicKey: decPoint(input.authorityPublicKey),
   };
 }

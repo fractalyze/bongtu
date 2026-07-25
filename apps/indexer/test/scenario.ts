@@ -7,12 +7,17 @@
 // Differences from e2e_orchestrator that matter to the indexer:
 //   - the HONEST disburse publishes the FULL ciphertext (receiver ++ authority)
 //     so the whole disclosureHash chain recomputes off-chain (→ status pass);
-//   - a SECOND disburse (spending the value-0 deposit note) publishes a TAMPERED
-//     ciphertext (one element flipped) → the indexer must raise a first-class
-//     disclosureHash alarm (status "mismatch");
-//   - a THIRD, PLAIN disburse() (spending the payee's transfer note) publishes
-//     no ciphertext at all → the indexer must still surface the operation in
-//     the feed with disclosure status "withheld" on the alarm channel.
+//   - a SECOND disburse (spending the value-0 deposit note) publishes a
+//     ciphertext with one RECEIVER element flipped → the indexer must raise a
+//     first-class disclosureHash alarm (status "mismatch"); its authority tail
+//     is intact, so the arbiter ledger still opens that batch;
+//   - a THIRD disburse (spending the value-0 withdraw-residue note) publishes a
+//     ciphertext with one AUTHORITY-TAIL element flipped → the disclosureHash
+//     alarm (status "mismatch") AND, in arbiter mode, the envelope cross-check
+//     alarm (the recovered leaves no longer fold to the on-chain subtreeRoot);
+//     the batch stays unopened.
+// (§6b v2 removed the plain disburse() entry point, so a "withheld"
+// nothing-published disburse is not producible on-chain.)
 //
 // Proving is CPU snarkjs against circuits/out (same as e2e_orchestrator); no
 // rabbitsnark / GPU. Runs against E2E_RPC (an anvil the harness started).
@@ -20,7 +25,6 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
 
 import { ImtTree } from "@bongtu/sdk/imt";
 import {
@@ -29,20 +33,19 @@ import {
 } from "@bongtu/sdk/note";
 import type { Keypair } from "@bongtu/sdk/note";
 import type { FieldInput } from "@bongtu/sdk/babyjub";
+import { toWire } from "@bongtu/sdk/proving";
+import { loadEthers, loadSnarkjs } from "@bongtu/sdk/extern";
 
-const require = createRequire(import.meta.url);
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..", ".."); // repo root (apps/indexer/test -> repo)
 const CIRC_OUT = join(ROOT, "circuits", "out");
 const CONTRACTS_OUT = join(ROOT, "contracts", "out");
 const POSEIDON_HEX = join(ROOT, "contracts", "test", "fixtures", "poseidon2.hex");
 
-const NODE_MODULES =
-  process.env.BONGTU_NODE_MODULES || "/home/a41/Workspace/zkx-snap/circuits/node_modules";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const snarkjs: any = require(join(NODE_MODULES, "snarkjs/build/main.cjs"));
+const snarkjs: any = loadSnarkjs();
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const ethers: any = require(join(NODE_MODULES, "ethers"));
+const ethers: any = loadEthers();
 
 const RPC = process.env.E2E_RPC || "http://127.0.0.1:8545";
 const PK = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"; // anvil #0
@@ -51,21 +54,11 @@ const H = 32;
 const B = 16;
 
 const dec = (x: FieldInput): string => BigInt(x).toString();
-function strify(v: unknown): unknown {
-  if (typeof v === "bigint") return v.toString();
-  if (Array.isArray(v)) return v.map(strify);
-  if (v && typeof v === "object") {
-    const o: Record<string, unknown> = {};
-    for (const k of Object.keys(v)) o[k] = strify((v as Record<string, unknown>)[k]);
-    return o;
-  }
-  return v;
-}
 
 async function prove(name: string, input: unknown) {
   const wasm = join(CIRC_OUT, `${name}_js`, `${name}.wasm`);
   const zkey = join(CIRC_OUT, `${name}.zkey`);
-  const { proof, publicSignals } = await snarkjs.groth16.fullProve(strify(input), wasm, zkey);
+  const { proof, publicSignals } = await snarkjs.groth16.fullProve(toWire(input), wasm, zkey);
   const cd = await snarkjs.groth16.exportSolidityCallData(proof, publicSignals);
   const [a, b, c, pub] = JSON.parse("[" + cd + "]");
   return { a, b, c, pub, publicSignals };
@@ -142,7 +135,8 @@ export interface ScenarioResult {
   headRoot: string; // decimal, at end of scenario
   nextLeafIndex: number;
   disburseHonest: DisburseInfo;
-  tamperedStartLeafIndex: number; // second (tampered) disburse batch start
+  tamperedStartLeafIndex: number; // receiver-element flip: disclosure alarm only
+  tamperedAuthorityStartLeafIndex: number; // authority-tail flip: + arbiter envelope alarm
   singleLeaves: SingleLeaf[]; // real single-append leaves for the /path test
   // ---- arbiter-mode fixtures (SPEC §6b v2) ---------------------------------
   arbiterPrivateKey: string; // decimal — the AUTHORITY keypair's private scalar
@@ -170,15 +164,18 @@ export async function runScenario(): Promise<ScenarioResult> {
   const ECDH_TRANSFER = 800000000000000000003n;
   const ECDH_D2 = 900000000000000000009n;
   const ECDH_W = 950000000000000000021n;
+  const ECDH_D3 = 970000000000000000011n;
   const NONCE_DEP = 555555555555n;
   const NONCE_D1 = 111111111111n;
   const NONCE_TRANSFER = 222222222222n;
   const NONCE_D2 = 333333333333n;
   const NONCE_W = 666666666666n;
+  const NONCE_D3 = 777777777777n;
 
   const sD0 = 5000001n, sD1 = 5000002n;
   const sR = (i: number): bigint => 6000000n + BigInt(i);
   const sR2 = (i: number): bigint => 6100000n + BigInt(i);
+  const sR3 = (i: number): bigint => 6200000n + BigInt(i);
   const sPay = 7000001n, sChg = 7000002n;
   const sPadT = 7100001n, sPadW = 7100002n, sRes = 7200001n;
 
@@ -321,15 +318,52 @@ export async function runScenario(): Promise<ScenarioResult> {
       ecdhSharedSecret(ECDH_D2, AUTHORITY.publicKey), NONCE_D2,
     );
     const full = [...ctFlat2, ...authCt2];
-    full[0] = BigInt(full[0]) + 1n; // TAMPER one element → disclosureHash must break
+    // Flip a RECEIVER element: disclosureHash must break, but the authority
+    // tail stays intact so the arbiter ledger can still open this batch.
+    full[0] = BigInt(full[0]) + 1n;
     oracle.attachSubtree(subtreeRoot2, outCommits2);
     await (await pool.disburseWithCiphertexts(a, b, c, pub, full.map(dec))).wait();
   }
 
+  // ---- disburse #3 (AUTHORITY-TAMPERED): residue note(0)@34 -> 16 zero-value
+  // recipients; emit receiver ++ authority with one AUTHORITY-TAIL element
+  // flipped. poseidonDecrypt reseeds its sponge from the ciphertext itself, so
+  // the flip garbles every recovered note from that chunk on — the arbiter's
+  // fold of the recovered leaves cannot match the on-chain subtreeRoot, which
+  // must surface as the envelope cross-check ALARM (and the batch stays
+  // unopened). The disclosureHash chain covers the tail too, so the public
+  // "mismatch" alarm fires as well.
+  const resLeaf = chgLeaf + 1; // 34
+  const nfRes = nullifier(0n, sRes, RCPTS[0].formattedPrivateKey);
+  const amounts3 = new Array(B).fill(0n) as bigint[];
+  const outCommits3 = amounts3.map((v, i) => commitment(v, sR3(i), RCPTS[i].publicKey));
+  const subtreeRoot3 = oracle.computeSubtreeRoot(outCommits3);
+  const tamperedAuthorityStart = 64; // nextLeafIndex is 64 after batch #2 (aligned, no pad)
+  {
+    const { siblings } = oracle.merklePath(resLeaf);
+    const { a, b, c, pub } = await prove("disburse", {
+      nullifiers: [nfRes], inputCommitments: [resCommit], inputValues: [0n], inputSalts: [sRes],
+      inputOwnerPrivateKey: RCPTS[0].formattedPrivateKey, ecdhPrivateKey: ECDH_D3,
+      root: oracle.getRoot(), pathElements: [siblings], leafIndices: [BigInt(resLeaf)], enabled: [1n],
+      outputCommitments: outCommits3, outputValues: amounts3, outputSalts: amounts3.map((_, i) => sR3(i)),
+      outputOwnerPublicKeys: rcptPubs, encryptionNonce: NONCE_D3, authorityPublicKey: AUTHORITY.publicKey,
+    });
+    const rcptCts3 = amounts3.map((v, i) =>
+      poseidonEncrypt([v, sR3(i)], ecdhSharedSecret(ECDH_D3, RCPTS[i].publicKey), NONCE_D3));
+    const ctFlat3 = rcptCts3.flat();
+    const authCt3 = poseidonEncrypt(
+      authorityPlain(RCPTS[0].publicKey, 0n, sRes, rcptPubs, amounts3, amounts3.map((_, i) => sR3(i))),
+      ecdhSharedSecret(ECDH_D3, AUTHORITY.publicKey), NONCE_D3,
+    );
+    const full3 = [...ctFlat3, ...authCt3];
+    full3[ctFlat3.length] = BigInt(full3[ctFlat3.length]) + 1n; // flip the FIRST AUTHORITY element
+    oracle.attachSubtree(subtreeRoot3, outCommits3);
+    await (await pool.disburseWithCiphertexts(a, b, c, pub, full3.map(dec))).wait();
+  }
+
   // NOTE: §6b v2 removes the plain disburse() entry point, so a "withheld"
   // (nothing-published) disburse is no longer producible on-chain — publication
-  // is enforced. The scenario therefore ends after the honest + tampered
-  // batches; the payee note @32 stays an unspent single-append leaf for /path.
+  // is enforced. The payee note @32 stays an unspent single-append leaf for /path.
 
   return {
     rpc: RPC,
@@ -349,6 +383,7 @@ export async function runScenario(): Promise<ScenarioResult> {
       nonce: dec(NONCE_D1),
     },
     tamperedStartLeafIndex: tamperedStart,
+    tamperedAuthorityStartLeafIndex: tamperedAuthorityStart,
     singleLeaves: [
       { leafIndex: 0, commitment: dec(dNoteV) },
       { leafIndex: payLeaf, commitment: dec(payCommit) },
@@ -375,12 +410,14 @@ export async function runScenario(): Promise<ScenarioResult> {
     payeePrivateKey: dec(PAYEE.formattedPrivateKey),
     // Real (nonzero) nullifiers, in spend order: deposit note(V)@0 (disburse#1),
     // recipient0 batch note @16 (transfer), change @33 (withdraw), note(0)@1
-    // (tampered disburse#2). Transfer/withdraw pad inputs have nullifier 0 (skipped).
+    // (disburse#2), residue note(0)@34 (disburse#3). Transfer/withdraw pad
+    // inputs have nullifier 0 (skipped).
     spentNullifiers: [
       dec(nfDepositV),
       dec(nfBatch0),
       dec(nfChange),
       dec(nf0),
+      dec(nfRes),
     ],
   };
 }

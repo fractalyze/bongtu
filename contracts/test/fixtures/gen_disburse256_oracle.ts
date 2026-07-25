@@ -10,8 +10,17 @@
 //   attachSubtree(pub[3])         -> oracleRoot (root after the 256-subtree
 //                                     attaches; the contract must match this)
 //
-// The input commitment + proof publics come from the REAL rabbitsnark proof
-// (artifacts/{aux,input}.json + fixtures/disburse256.public.json). Emits
+// Proof calldata comes from disburse256.calldata.json — the output of
+// `snarkjs groth16.exportSolidityCallData(disburse256.proof.json,
+// disburse256.public.json)`, committed so snarkjs itself (not a hand-copied
+// G2-swap rule) is the source of the verifier-call encoding; the Python
+// prover_service/calldata.py is pinned against the same file
+// (prover/tests/test_calldata.py). Regenerate it with that one snarkjs call if
+// the proof fixture is ever re-proven.
+//
+// The spent input note is read from disburse256.input.json (the witness input
+// the committed proof was generated from — NOT circuits/inputs/disburse256.json,
+// whose local tree differs); override with BONGTU_DISBURSE256_INPUT. Emits
 // disburse256.oracle.json for Disburse256.t.sol.
 //
 //   npx tsx gen_disburse256_oracle.ts   # writes disburse256.oracle.json
@@ -28,21 +37,26 @@ const B = 256;
 
 // Real proof publics (10) — the rabbitsnark-GPU disburse256 proof.
 const pub = JSON.parse(readFileSync(join(HERE, "disburse256.public.json"), "utf8"));
-// Raw snarkjs proof (pi_a/pi_b/pi_c, decimal). The Solidity Groth16 verifier
-// expects each G2 (pi_b) coordinate PAIR reversed — the swap snarkjs's
-// exportSolidityCallData applies. a/c pass through.
-const proof = JSON.parse(readFileSync(join(HERE, "disburse256.proof.json"), "utf8"));
+// Solidity-ready Groth16 calldata (snarkjs applied the G2 inner swap on b).
+const cd = JSON.parse(readFileSync(join(HERE, "disburse256.calldata.json"), "utf8"));
 // The input note that was spent (its commitment is the sole leaf of the
 // membership tree the proof proves against).
-const input = JSON.parse(
-  readFileSync("/home/a41/Workspace/research/disclosure-poc/artifacts/input.json", "utf8"),
-);
+const INPUT_PATH = process.env.BONGTU_DISBURSE256_INPUT ?? join(HERE, "disburse256.input.json");
+const input = JSON.parse(readFileSync(INPUT_PATH, "utf8"));
 
 const inputCommitment = BigInt(input.inputCommitments[0]);
 const membershipRoot = BigInt(pub[5]); // proof's asserted root
 const subtreeRoot = BigInt(pub[3]); // in-circuit 256-leaf subtree root
 const nullifier = BigInt(pub[4]);
 const arbiterKey = [BigInt(pub[8]), BigInt(pub[9])];
+
+const s = (x: bigint | number | string): string => "0x" + BigInt(x).toString(16).padStart(64, "0");
+
+// The calldata fixture must be the same proof run: its publics are the hex form
+// of public.json, or the a/b/c we emit belong to a different proof.
+if (JSON.stringify(cd.pub) !== JSON.stringify(pub.map(s))) {
+  throw new Error("disburse256.calldata.json pub != disburse256.public.json — stale fixture?");
+}
 
 const tree = new ImtTree(H, B);
 
@@ -63,17 +77,6 @@ tree.attachSubtree(subtreeRoot);
 const oracleRoot = tree.getRoot();
 const finalNextLeafIndex = tree.getNextLeafIndex();
 
-const s = (x: bigint | number | string): string => "0x" + BigInt(x).toString(16).padStart(64, "0");
-
-// Solidity-ready Groth16 calldata (the pi_b G2 swap that exportSolidityCallData
-// performs; a/c pass through).
-const a = [s(proof.pi_a[0]), s(proof.pi_a[1])];
-const b = [
-  [s(proof.pi_b[0][1]), s(proof.pi_b[0][0])],
-  [s(proof.pi_b[1][1]), s(proof.pi_b[1][0])],
-];
-const c = [s(proof.pi_c[0]), s(proof.pi_c[1])];
-
 const out = {
   height: H,
   batchSize: B,
@@ -85,11 +88,11 @@ const out = {
   oracleRoot: s(oracleRoot), // root after appendLeaf + attachSubtree
   nextLeafIndexBeforeAttach, // 1
   finalNextLeafIndex, // pad(1->256) + attach(256) = 512
-  // Real GPU proof, Solidity calldata form (pi_b swapped) + publics (hex).
-  a,
-  b,
-  c,
-  pub: pub.map(s),
+  // Real GPU proof in snarkjs exportSolidityCallData form + publics (hex).
+  a: cd.a,
+  b: cd.b,
+  c: cd.c,
+  pub: cd.pub,
 };
 
 mkdirSync(HERE, { recursive: true });

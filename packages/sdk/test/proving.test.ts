@@ -11,6 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { toWire } from "../src/proving.js";
 import type {
   Calldata,
   DepositInput,
@@ -18,19 +19,6 @@ import type {
   ProvingRequest,
 } from "../src/proving.js";
 import { deriveKeypair, commitment } from "../src/note.js";
-
-// The same recursive bigint -> decimal-string strify every producer applies
-// before POSTing (disburse.ts / spend.ts toDecimal*, deploy strify).
-function strify(v: unknown): unknown {
-  if (typeof v === "bigint") return v.toString();
-  if (Array.isArray(v)) return v.map(strify);
-  if (v && typeof v === "object") {
-    const o: Record<string, unknown> = {};
-    for (const k of Object.keys(v)) o[k] = strify((v as Record<string, unknown>)[k]);
-    return o;
-  }
-  return v;
-}
 
 test("a bigint-built deposit ProvingRequest JSON round-trips to the same decimal shape", () => {
   const kp = deriveKeypair(313131313131313131313131n);
@@ -45,7 +33,7 @@ test("a bigint-built deposit ProvingRequest JSON round-trips to the same decimal
   };
   const req: ProvingRequest = { circuit: "deposit", input, backend: "cpu" };
 
-  const wire = JSON.parse(JSON.stringify(strify(req))) as ProvingRequest;
+  const wire = JSON.parse(JSON.stringify(toWire(req))) as ProvingRequest;
   assert.equal(wire.circuit, "deposit");
   assert.equal(wire.backend, "cpu");
   if (wire.circuit !== "deposit") throw new Error("unreachable"); // narrows the union
@@ -80,7 +68,7 @@ test("a disburse ProvingRequest keeps its [1][H] membership arrays through JSON"
     authorityPublicKey: [13n, 14n],
   };
   const req: ProvingRequest = { circuit: "disburse", input, backend: "gpu" };
-  const wire = JSON.parse(JSON.stringify(strify(req))) as ProvingRequest;
+  const wire = JSON.parse(JSON.stringify(toWire(req))) as ProvingRequest;
   assert.equal(wire.circuit, "disburse");
   if (wire.circuit !== "disburse") throw new Error("unreachable");
   assert.equal(wire.input.pathElements.length, 1);

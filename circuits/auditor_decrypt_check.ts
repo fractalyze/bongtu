@@ -25,7 +25,6 @@
 
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
 
 import { ImtTree } from "@bongtu/sdk/imt";
 import {
@@ -37,14 +36,12 @@ import {
 } from "@bongtu/sdk/note";
 import type { Keypair } from "@bongtu/sdk/note";
 import type { FieldInput } from "@bongtu/sdk/babyjub";
+import { loadSnarkjs } from "@bongtu/sdk/extern";
 
-const require = createRequire(import.meta.url);
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = join(HERE, "out");
-const NODE_MODULES =
-  process.env.BONGTU_NODE_MODULES || "/home/a41/Workspace/zkx-snap/circuits/node_modules";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const snarkjs: any = require(join(NODE_MODULES, "snarkjs/build/main.cjs"));
+const snarkjs: any = loadSnarkjs();
 
 const H = 32;
 

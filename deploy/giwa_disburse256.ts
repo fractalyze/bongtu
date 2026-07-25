@@ -17,7 +17,6 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
 
 import { ImtTree } from "@bongtu/sdk/imt";
 import { poseidon2, poseidonN } from "@bongtu/sdk/poseidon";
@@ -27,15 +26,15 @@ import {
 } from "@bongtu/sdk/note";
 import type { Keypair } from "@bongtu/sdk/note";
 import type { FieldInput } from "@bongtu/sdk/babyjub";
+import { toWire } from "@bongtu/sdk/proving";
 import type { Calldata, DisburseInput } from "@bongtu/sdk/proving";
+import { loadEthers, loadSnarkjs } from "@bongtu/sdk/extern";
 
-const require = createRequire(import.meta.url);
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
-const NODE_MODULES = process.env.BONGTU_NODE_MODULES || "/home/a41/Workspace/zkx-snap/circuits/node_modules";
-// snarkjs + ethers v5 are loaded via createRequire (no usable types here) => `any`.
-const snarkjs = require(join(NODE_MODULES, "snarkjs/build/main.cjs"));
-const ethers = require(join(NODE_MODULES, "ethers"));
+// snarkjs + ethers v5 come back `any` from the shared external loader.
+const snarkjs = loadSnarkjs();
+const ethers = loadEthers();
 
 const RPC = process.env.GIWA_RPC || "https://sepolia-rpc.giwa.io";
 const PK = process.env.DEPLOYER_KEY;
@@ -55,14 +54,6 @@ let failures = 0;
 const ok = (c: unknown, m: string): void => { const p = !!c; if (!p) failures++; console.log(`   ${p ? "PASS" : "FAIL"}  ${m}`); if (!p) throw new Error("assert: " + m); };
 const step = (t: string): void => console.log(`\n=== ${t} ===`);
 const dec = (x: FieldInput): string => BigInt(x).toString();
-const strify = (v: unknown): unknown =>
-  typeof v === "bigint"
-    ? v.toString()
-    : Array.isArray(v)
-      ? v.map(strify)
-      : (v && typeof v === "object"
-          ? Object.fromEntries(Object.keys(v).map((k) => [k, strify((v as Record<string, unknown>)[k])]))
-          : v);
 
 function artifact(sol: string, contract: string): any {
   const j = JSON.parse(readFileSync(join(CONTRACTS_OUT, `${sol}.sol`, `${contract}.json`), "utf8"));
@@ -71,7 +62,7 @@ function artifact(sol: string, contract: string): any {
 async function proveSnark(name: string, input: unknown) {
   const wasm = join(CIRC_OUT, `${name}_js`, `${name}.wasm`);
   const zkey = join(CIRC_OUT, `${name}.zkey`);
-  const { proof, publicSignals } = await snarkjs.groth16.fullProve(strify(input), wasm, zkey);
+  const { proof, publicSignals } = await snarkjs.groth16.fullProve(toWire(input), wasm, zkey);
   const cd = await snarkjs.groth16.exportSolidityCallData(proof, publicSignals);
   const [a, b, c, pub] = JSON.parse("[" + cd + "]");
   return { a, b, c, pub };
@@ -85,7 +76,7 @@ async function proveDisburse256(input: DisburseInput): Promise<Calldata> {
   const res = await fetch(`${PROVER_URL}/prove`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ circuit: "disburse", input: strify(input), backend: "gpu" }),
+    body: JSON.stringify({ circuit: "disburse", input: toWire(input), backend: "gpu" }),
   });
   const text = await res.text();
   if (!res.ok) throw new Error(`prover service ${res.status}: ${text.slice(0, 400)}`);
@@ -93,11 +84,6 @@ async function proveDisburse256(input: DisburseInput): Promise<Calldata> {
   if (!cd.a || !cd.b || !cd.c || !cd.pub) throw new Error("prover service response missing a/b/c/pub");
   console.log(`   proved disburse-256 via the service in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   return cd;
-}
-function foldToRoot(leaf: FieldInput, siblings: bigint[], pathIndices: number[]): bigint {
-  let cur = BigInt(leaf);
-  for (let j = 0; j < siblings.length; j++) cur = pathIndices[j] === 1 ? poseidon2(siblings[j], cur) : poseidon2(cur, siblings[j]);
-  return cur;
 }
 function disclosureHash(rcptFlat: bigint[], authCt: bigint[]): bigint {
   let dh = 0n;

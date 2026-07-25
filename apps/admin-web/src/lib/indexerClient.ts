@@ -1,43 +1,17 @@
-// Thin fetch wrappers over the indexer read API (SPEC §6b). Employer-mode uses
-// /head + /path to build the input-note membership witness from chain state;
-// auditor-mode uses /events + /alarms.
+// Consumer adapter over the indexer read API (SPEC §6b): the wire shapes AND the
+// fetch wrappers are owned by @bongtu/sdk/indexerApi — one owner for both apps,
+// server-adapter-typed on the indexer side. This file only keeps the admin app's
+// import path stable. Employer-mode uses /head + /path to build the input-note
+// membership witness from chain state; auditor-mode uses /events + /alarms (the
+// Alarm union gives the auditor console the DisclosureStatus vocabulary).
 
-import type { FeedEvent } from "./ledger.js";
-
-async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  const text = await res.text();
-  if (!res.ok) throw new Error(`${url} -> ${res.status}: ${text.slice(0, 300)}`);
-  return JSON.parse(text) as T;
-}
-
-export interface Head {
-  root: string;
-  nextLeafIndex: number;
-}
-export interface PathResult {
-  leafIndex: number;
-  siblings: string[];
-  pathIndices: number[];
-  root: string;
-}
-
-export function getHead(indexerUrl: string): Promise<Head> {
-  return getJson<Head>(`${indexerUrl.replace(/\/$/, "")}/head`);
-}
-
-/** Merkle path of a leaf against the current root (422 for a within-batch leaf in
- *  public mode — the caller surfaces that to the user). */
-export function getPath(indexerUrl: string, leafIndex: number): Promise<PathResult> {
-  return getJson<PathResult>(`${indexerUrl.replace(/\/$/, "")}/path/${leafIndex}`);
-}
-
-export function getEvents(indexerUrl: string, limit = 5000): Promise<FeedEvent[]> {
-  return getJson<FeedEvent[]>(`${indexerUrl.replace(/\/$/, "")}/events?limit=${limit}`);
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function getAlarms(indexerUrl: string): Promise<any[]> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return getJson<any[]>(`${indexerUrl.replace(/\/$/, "")}/alarms`);
-}
+export {
+  getHead,
+  getPath,
+  getEvents,
+  getAlarms,
+  type Head,
+  type PathResult,
+  type FeedEvent,
+  type Alarm,
+} from "@bongtu/sdk/indexerApi";

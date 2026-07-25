@@ -146,3 +146,31 @@ export interface Calldata {
   c: [string, string];
   pub: string[];
 }
+
+// ---------------------------------------------------------------------------
+// The wire encoding.
+// ---------------------------------------------------------------------------
+
+/**
+ * THE producer-side wire encoding: recursively replace every bigint leaf with its
+ * decimal-string form, so the value survives JSON.stringify (JSON has no bigints)
+ * and every consumer — snarkjs' witness calculator, the prover service
+ * (schema.py), a written inputs/*.json fixture — accepts it as-is. FieldInput
+ * admits `string`, so the result still satisfies the same declared shape: apply
+ * it to a ProvingRequest (or a bare circuit input object) right before
+ * stringifying. Non-bigint leaves (numbers, strings, null) pass through
+ * untouched; wire bytes are pinned in proving.test.ts.
+ */
+// Leaves are expected to be bigint: only bigint converts to a decimal string;
+// number/string leaves pass through untouched (producers build all-bigint
+// inputs — a non-canonical string here would reach the wire as-is).
+export function toWire<T>(v: T): T {
+  if (typeof v === "bigint") return v.toString() as unknown as T;
+  if (Array.isArray(v)) return v.map(toWire) as unknown as T;
+  if (v && typeof v === "object") {
+    const o: Record<string, unknown> = {};
+    for (const k of Object.keys(v)) o[k] = toWire((v as Record<string, unknown>)[k]);
+    return o as unknown as T;
+  }
+  return v;
+}

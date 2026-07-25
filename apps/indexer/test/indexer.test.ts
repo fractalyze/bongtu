@@ -7,9 +7,11 @@
 //   3. GET /events carries the disburse ciphertext feed with correct leafIndex
 //      annotations; a recipient key trial-decrypts a slice → commitment == the
 //      tree leaf, and all B recovered commitments fold to the batch subtreeRoot
-//   4. disclosureHash passes for the honest disburse; the tampered one ALARMS
-//      ("mismatch"). §6b v2 removes the plain disburse() path, so a "withheld"
-//      (nothing-published) disburse is no longer producible on-chain.
+//   4. disclosureHash passes for the honest disburse; the receiver-tampered and
+//      authority-tampered ones ALARM ("mismatch") on the single discriminated
+//      /alarms feed ({ type: "disclosure" } entries). §6b v2 removes the plain
+//      disburse() path, so a "withheld" (nothing-published) disburse is no
+//      longer producible on-chain.
 //   5. GET /path/:i for a disburse-batch leaf is refused (siblings not
 //      chain-recoverable, SPEC §11-7); bad /events params are refused (400)
 //   6. PUBLIC mode: /nullifiers is served (key-free) and carries the spent set;
@@ -19,7 +21,10 @@
 //      spent=false); after the transfer spends it, the note reads spent=true (from
 //      the input envelope alone) and the payee's new note is present; GET /path for
 //      that batch leaf now folds to root() (the ledger filled the batch); the
-//      arbiter /nullifiers carries the spent set; bad /notes params 400.
+//      arbiter /nullifiers carries the spent set; bad /notes params 400; the
+//      authority-tampered disburse surfaces a { type: "envelope" } cross-check
+//      alarm on /alarms (the recovered leaves cannot fold to the on-chain
+//      subtreeRoot) and its batch stays unopened.
 //
 // Anvil is started + trap-killed by run.sh; this file only talks to E2E_RPC.
 
@@ -153,6 +158,24 @@ async function runArbiter(sc: any): Promise<void> {
     const nfSet = new Set(nf.body as string[]);
     for (const x of sc.spentNullifiers as string[]) ok(nfSet.has(x), `/nullifiers contains ${x.slice(0, 12)}…`);
 
+    // The envelope cross-check is the arbiter's independent tamper proof: the
+    // authority-tampered disburse decrypts to garbage notes whose fold cannot
+    // reproduce the on-chain subtreeRoot, so it must surface as a first-class
+    // { type: "envelope" } alarm on the SAME /alarms feed the auditor console
+    // already reads — and its batch must stay unopened (no /path into it).
+    step("ARBITER /alarms — discriminated feed carries the envelope cross-check alarm");
+    const aal = await get(abase, "/alarms");
+    ok(aal.status === 200, "GET /alarms 200 (arbiter)");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const afeed = aal.body as any[];
+    ok(afeed.filter((a) => a.type === "disclosure").length === 2, "both tampered disburses alarm disclosure-mismatch");
+    const envAlarms = afeed.filter((a) => a.type === "envelope");
+    ok(envAlarms.length === 1, "exactly one envelope alarm (the authority-tampered disburse)");
+    ok(envAlarms[0].kind === "disburse" && envAlarms[0].detail.includes(`@${sc.tamperedAuthorityStartLeafIndex}`),
+      "envelope alarm pinpoints the authority-tampered batch");
+    const unopened = await get(abase, `/path/${sc.tamperedAuthorityStartLeafIndex}`);
+    ok(unopened.status === 422, "authority-tampered batch stays unopened (/path 422 even in arbiter mode)");
+
     // Distinct 400 branch from the malformed-owner case: auth params are mandatory.
     const noAuth = await get(abase, `/notes?owner=${packPubkey([BigInt(r0.owner[0]), BigInt(r0.owner[1])])}`);
     ok(noAuth.status === 400, "GET /notes with owner but no ts/sig → 400 (auth params required)");
@@ -205,7 +228,7 @@ async function main(): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const feed = evRes.body as any[];
     const kinds = feed.map((e) => e.kind).join(",");
-    ok(kinds === "deposit,disburse,transfer,withdraw,disburse", `feed kinds in chain order: ${kinds}`);
+    ok(kinds === "deposit,disburse,transfer,withdraw,disburse,disburse", `feed kinds in chain order: ${kinds}`);
 
     const honest = feed.find((e) => e.kind === "disburse" && e.slices[0]?.leafIndex === sc.disburseHonest.startLeafIndex);
     ok(!!honest, "honest disburse present in feed");
@@ -241,20 +264,24 @@ async function main(): Promise<void> {
     const subRoot = new ImtTree(sc.H, sc.B).computeSubtreeRoot(recovered);
     ok(subRoot.toString() === sc.disburseHonest.subtreeRoot, `all ${sc.B} recovered commitments fold to the batch subtreeRoot`);
 
-    // (4) disclosure: honest passes; tampered alarms "mismatch". §6b v2 removes
-    // the plain disburse() path, so "withheld" is no longer producible on-chain.
-    step("disclosure: honest PASS + tampered MISMATCH alarm (enforced disclosure)");
+    // (4) disclosure: honest passes; both tampered disburses alarm "mismatch" on
+    // the single discriminated /alarms feed. §6b v2 removes the plain disburse()
+    // path, so "withheld" is no longer producible on-chain.
+    step("disclosure: honest PASS + tampered MISMATCH alarms (enforced disclosure)");
     ok(honest.disclosure === "verified", "honest disburse disclosureHash status == verified");
     const tampered = feed.find((e) => e.kind === "disburse" && e.slices[0]?.leafIndex === sc.tamperedStartLeafIndex);
-    ok(!!tampered, "tampered disburse present in feed");
-    ok(tampered.disclosure === "mismatch", "tampered disburse disclosureHash status == mismatch (ALARM)");
+    ok(!!tampered, "receiver-tampered disburse present in feed");
+    ok(tampered.disclosure === "mismatch", "receiver-tampered disburse disclosureHash status == mismatch (ALARM)");
     const alarmRes = await get(base, "/alarms");
     ok(alarmRes.status === 200, "GET /alarms 200");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const alarms = alarmRes.body as any[];
-    ok(alarms.length === 1, "one disclosure alarm surfaced (tampered mismatch)");
-    ok(alarms[0].status === "mismatch" && alarms[0].startLeafIndex === sc.tamperedStartLeafIndex,
-      "alarm[0] == mismatch at the tampered batch");
+    ok(alarms.length === 2, "two alarms surfaced (receiver-tampered + authority-tampered)");
+    ok(alarms.every((a) => a.type === "disclosure"), "public /alarms carries only disclosure entries (no ledger)");
+    const recvAlarm = alarms.find((a) => a.startLeafIndex === sc.tamperedStartLeafIndex);
+    ok(!!recvAlarm && recvAlarm.status === "mismatch", "receiver-tampered batch alarm == mismatch");
+    const authAlarm = alarms.find((a) => a.startLeafIndex === sc.tamperedAuthorityStartLeafIndex);
+    ok(!!authAlarm && authAlarm.status === "mismatch", "authority-tampered batch alarm == mismatch");
 
     // (5) /path into a disburse batch leaf is refused; bad /events params are 400
     step("API /path — disburse-batch leaf refused (siblings not chain-recoverable)");

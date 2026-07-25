@@ -28,7 +28,9 @@ import { NoteLedger } from "./ledger.js";
 const H = 32; // IMT height — a system-wide constant (SPEC §4)
 
 // A parsed pool log with its chain position, ordered globally by (block, logIndex).
-interface ParsedLog {
+// Exported so the anvil-free unit test (test/ingest.test.ts) can drive
+// `applyLogs` with synthetic sequences.
+export interface ParsedLog {
   name: string;
   blockNumber: number;
   logIndex: number;
@@ -56,6 +58,15 @@ export class Indexer {
   readonly arbiterPriv: bigint | null;
   readonly arbiterMode: boolean;
   ledger: NoteLedger | null = null;
+
+  // ---- tail-poll operational state (projected by GET /health) --------------
+  // Recorded by pollOnce so "wedged since block N" vs "healthy" is machine-
+  // visible instead of a swallow-and-log line on a headless service.
+  lastError: string | null = null;
+  lastErrorAt: number | null = null; // ms epoch
+  consecutiveFailures = 0;
+  lastSuccessAt: number | null = null; // ms epoch
+  private polling = false; // one in-flight tail attempt at a time
 
   constructor(cfg: ChainConfig) {
     this.cfg = cfg;
@@ -123,6 +134,9 @@ export class Indexer {
    * Replay from `fromBlock` to the current head, driving the mirror and building
    * the feed. Safe to call repeatedly for incremental tails (the mirror + store
    * persist across calls). Asserts mirror == contract per insert and at head.
+   *
+   * This is the I/O shell: fetch the log range, hand it to the pure-in-memory
+   * `applyLogs`, then pin the head invariant and advance the cursor.
    */
   async ingest(fromBlock = this.cfg.startBlock, toBlock?: number): Promise<void> {
     if (!this.tree) {
@@ -138,6 +152,63 @@ export class Indexer {
     if (fromBlock > head) return;
     const logs = await this.getLogsChunked(fromBlock, head);
 
+    this.applyLogs(logs);
+
+    // Head invariant (SPEC §6b): mirror == contract root + nextLeafIndex,
+    // pinned to the scanned block — a pool tx landing during the (minutes-long
+    // on a fresh sync) log replay must not read as a divergence. The cursor
+    // advances only after the invariant holds, so a failed pass is retried
+    // over the same range (pass 1/pass 2 are replay-idempotent).
+    const at = await this.headAt(head);
+    if (this.tree.root() !== at.root) {
+      throw new Error(`ingest: mirror root ${this.tree.root()} != contract root ${at.root} @block ${head}`);
+    }
+    if (this.tree.nextLeafIndex() !== at.nextLeafIndex) {
+      throw new Error(`ingest: mirror nextLeafIndex ${this.tree.nextLeafIndex()} != contract ${at.nextLeafIndex} @block ${head}`);
+    }
+    this.store.lastBlock = head;
+  }
+
+  /**
+   * One guarded tail attempt: re-ingest from the cursor, recording success /
+   * failure state for GET /health. Never throws — a failing RPC or a genuine
+   * mirror-root divergence lands in `lastError` + `consecutiveFailures` instead
+   * of only a log line, and the cursor stays unadvanced so the next attempt
+   * retries the same range. Concurrent calls coalesce (one in-flight attempt).
+   */
+  async pollOnce(): Promise<void> {
+    if (this.polling) return;
+    this.polling = true;
+    try {
+      await this.ingest(this.store.lastBlock + 1);
+      this.consecutiveFailures = 0;
+      this.lastSuccessAt = Date.now();
+    } catch (e) {
+      this.consecutiveFailures++;
+      this.lastError = (e as Error).message;
+      this.lastErrorAt = Date.now();
+      console.error("tail ingest error:", this.lastError);
+    } finally {
+      this.polling = false;
+    }
+  }
+
+  /** Start the incremental tail poll (one pollOnce per `pollMs`); returns a stopper. */
+  startTailPolling(pollMs: number): () => void {
+    const timer = setInterval(() => {
+      void this.pollOnce();
+    }, pollMs);
+    return () => clearInterval(timer);
+  }
+
+  /**
+   * Apply an ordered, parsed log range to the in-memory state (mirror + feed +
+   * nullifier set + arbiter ledger). Pure of provider I/O — the anvil-free unit
+   * test drives this directly with synthetic sequences. Replay-idempotent: every
+   * stateful module it feeds (MirrorTree, Store, NoteLedger) guards its own
+   * replay invariant, so the same range can arrive twice and must converge.
+   */
+  applyLogs(logs: ParsedLog[]): void {
     // Pass 1: drive the mirror on the low-level tree events (order-sensitive) and
     // collect the authoritative (leafIndex, leaf) pairs + batch attach points per
     // tx for pass-2 correlation. Replay-safe: an insert already below the mirror
@@ -205,7 +276,8 @@ export class Indexer {
         // Public feed shape is unchanged (deposit envelope bytes are NOT added to
         // the public /events entry). The arbiter ledger reads the raw Deposited
         // authority envelope (ecdhPublicKey/encryptedValuesForAuthority/nonce)
-        // directly, gated on first-sight so a replayed range does not double-record.
+        // directly. The ledger dedups replays on (txHash, logIndex) itself; the
+        // Store first-sight gates here are belt-and-braces.
         const dEntry = this.store.addEvent({
           txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
           kind: "deposit", epoch: null, ecdhPublicKey: null, encryptionNonce: null,
@@ -213,7 +285,7 @@ export class Indexer {
         });
         if (dEntry && this.ledger) {
           this.ledger.apply({
-            kind: "deposit", txHash: l.txHash,
+            kind: "deposit", txHash: l.txHash, logIndex: l.logIndex,
             ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
             nonce: bn(l.args.encryptionNonce),
             authorityCt: (l.args.encryptedValuesForAuthority as unknown[]).map(bn),
@@ -249,7 +321,7 @@ export class Indexer {
           this.store.addNullifiers([bn(l.args.nullifiers[0]), bn(l.args.nullifiers[1])]);
           if (this.ledger) {
             this.ledger.apply({
-              kind: "transfer", txHash: l.txHash,
+              kind: "transfer", txHash: l.txHash, logIndex: l.logIndex,
               ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
               nonce: bn(l.args.encryptionNonce),
               // authority envelope = ct[8..23] (receiver0[4] ++ receiver1[4] ++ authority[16])
@@ -273,7 +345,7 @@ export class Indexer {
           this.store.addNullifiers([bn(l.args.nullifiers[0]), bn(l.args.nullifiers[1])]);
           if (this.ledger) {
             this.ledger.apply({
-              kind: "withdraw", txHash: l.txHash,
+              kind: "withdraw", txHash: l.txHash, logIndex: l.logIndex,
               ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
               nonce: bn(l.args.encryptionNonce),
               authorityCt: (l.args.encryptedValuesForAuthority as unknown[]).map(bn),
@@ -316,7 +388,7 @@ export class Indexer {
           // withheld publish) there is nothing to open — skip.
           if (this.ledger && ct.length > B * 4) {
             this.ledger.apply({
-              kind: "disburse", txHash: l.txHash,
+              kind: "disburse", txHash: l.txHash, logIndex: l.logIndex,
               ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
               nonce: bn(l.args.encryptionNonce),
               authorityCt: ct.slice(B * 4),
@@ -328,18 +400,5 @@ export class Indexer {
       }
     }
 
-    // Head invariant (SPEC §6b): mirror == contract root + nextLeafIndex,
-    // pinned to the scanned block — a pool tx landing during the (minutes-long
-    // on a fresh sync) log replay must not read as a divergence. The cursor
-    // advances only after the invariant holds, so a failed pass is retried
-    // over the same range (pass 1/pass 2 are replay-idempotent).
-    const at = await this.headAt(head);
-    if (this.tree.root() !== at.root) {
-      throw new Error(`ingest: mirror root ${this.tree.root()} != contract root ${at.root} @block ${head}`);
-    }
-    if (this.tree.nextLeafIndex() !== at.nextLeafIndex) {
-      throw new Error(`ingest: mirror nextLeafIndex ${this.tree.nextLeafIndex()} != contract ${at.nextLeafIndex} @block ${head}`);
-    }
-    this.store.lastBlock = head;
   }
 }

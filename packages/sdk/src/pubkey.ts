@@ -17,30 +17,8 @@
 // Field sqrt is Tonelli-Shanks: the base field prime p ≡ 1 (mod 4) (in fact 2^28
 // divides p-1), so the (p+1)/4 shortcut does not apply.
 
-import { P, A, D, isOnCurve } from "./babyjub.js";
+import { P, A, D, isOnCurve, mod, modpow, inv } from "./babyjub.js";
 import type { Point, PointInput } from "./babyjub.js";
-
-function mod(x: bigint): bigint {
-  const r = x % P;
-  return r < 0n ? r + P : r;
-}
-
-function modpow(base: bigint, exp: bigint): bigint {
-  let r = 1n;
-  let b = mod(base);
-  let e = exp;
-  while (e > 0n) {
-    if (e & 1n) r = mod(r * b);
-    b = mod(b * b);
-    e >>= 1n;
-  }
-  return r;
-}
-
-// Modular inverse via Fermat's little theorem (P is prime).
-function inv(x: bigint): bigint {
-  return modpow(mod(x), P - 2n);
-}
 
 // Legendre symbol: 1 if a is a nonzero quadratic residue, P-1 if a non-residue.
 function legendre(a: bigint): bigint {

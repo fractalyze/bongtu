@@ -6,7 +6,7 @@
 
 import { el, field, input, button, clear, statusLine } from "../lib/dom.js";
 import { DEFAULTS } from "../config.js";
-import { getEvents, getAlarms } from "../lib/indexerClient.js";
+import { getEvents, getAlarms, type Alarm } from "../lib/indexerClient.js";
 import { buildAuditorLedger, type AuditorLedger, type LedgerNote } from "../lib/ledger.js";
 import { buildNotesUrl, fetchNotes } from "../lib/notesAuth.js";
 
@@ -62,11 +62,18 @@ export function auditorView(): HTMLElement {
     summaryPane.append(el("h4", { textContent: "auditor ledger summary" }), t);
   }
 
-  function renderAlarms(alarms: unknown[]): void {
+  function renderAlarms(alarms: Alarm[]): void {
     clear(alarmsPane);
-    alarmsPane.append(el("h4", { textContent: `disclosure alarms (${alarms.length})` }));
+    // The /alarms feed is a discriminated union: disclosure alarms (published
+    // hash != recomputed) plus, in arbiter mode, envelope cross-check alarms
+    // (the publisher lied about note contents — SPEC §6b first-class).
+    const nDisclosure = alarms.filter((a) => a.type === "disclosure").length;
+    const nEnvelope = alarms.length - nDisclosure;
+    alarmsPane.append(
+      el("h4", { textContent: `alarms (${alarms.length} — ${nDisclosure} disclosure · ${nEnvelope} envelope)` }),
+    );
     if (alarms.length === 0) {
-      alarmsPane.append(el("p", { class: "note", textContent: "no non-passing disclosures" }));
+      alarmsPane.append(el("p", { class: "note", textContent: "no alarms" }));
       return;
     }
     const pre = el("pre", { class: "json-pane", textContent: JSON.stringify(alarms, null, 2) });

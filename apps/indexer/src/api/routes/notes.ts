@@ -1,4 +1,5 @@
 import type { Route, RouteResult } from "../router.js";
+import type { OwnerNote } from "@bongtu/sdk/indexerApi";
 import { unpackPubkey } from "@bongtu/sdk/pubkey";
 import { notesAuthMessage, parseSignature, verifyNotesAuth } from "@bongtu/sdk/eddsa";
 import type { Point } from "@bongtu/sdk/babyjub";
@@ -83,6 +84,8 @@ export const notes: Route = {
       // Arbiter mode but ingest has not built the ledger yet (pre first ingest).
       return { status: 503, body: { error: "arbiter ledger not built yet" } };
     }
-    return { status: 200, body: ix.ledger.notesOf(pub[0], pub[1]), headers: AUTH_HEADER };
+    // Wire shape owned by @bongtu/sdk/indexerApi (server-adapter typing).
+    const body: OwnerNote[] = ix.ledger.notesOf(pub[0], pub[1]);
+    return { status: 200, body, headers: AUTH_HEADER };
   },
 };

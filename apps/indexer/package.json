@@ -15,6 +15,9 @@
     "start": "node --import tsx src/index.ts",
     "test": "bash test/run.sh",
     "test:tree": "node --import tsx test/tree.test.ts",
+    "test:disclosure": "node --import tsx test/disclosure.test.ts",
+    "test:ingest": "node --import tsx test/ingest.test.ts",
+    "test:unit": "npm run test:tree && npm run test:disclosure && npm run test:ingest",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

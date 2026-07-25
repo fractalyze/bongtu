@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { poseidon2, poseidonN } from "../src/poseidon.js";
-import { ImtTree } from "../src/imt.js";
+import { ImtTree, foldToRoot } from "../src/imt.js";
 
 const H = 32;
 const B = 16;
@@ -193,6 +193,43 @@ test("(e) merklePath(i) verifies against getRoot() for real leaves after mixed i
     const recomputed = foldPath(value.get(leafIndex)!, siblings, pathIndices);
     assert.equal(recomputed, tree.getRoot(), `merkle path for leaf ${leafIndex} != root`);
   }
+});
+
+// --- (e'') the exported produce/verify pair closes: foldToRoot ∘ merklePath == getRoot ---
+
+test("(e'') closure: foldToRoot(leaf, merklePath(i).siblings, i) === getRoot() for every leaf", () => {
+  const tree = new ImtTree(H, B);
+  const value = new Map<number, bigint>();
+
+  // mixed inserts: two singles, a batch (pads 2..15 dead), two more singles.
+  for (let i = 0; i < 2; i++) {
+    const c = commit(1200 + i);
+    value.set(tree.getNextLeafIndex(), c);
+    tree.appendLeaf(c);
+  }
+  const batch = Array.from({ length: B }, (_, i) => commit(1300 + i));
+  tree.attachSubtree(tree.computeSubtreeRoot(batch), batch);
+  for (let i = 0; i < B; i++) value.set(B + i, batch[i]);
+  for (let i = 0; i < 2; i++) {
+    const c = commit(1400 + i);
+    value.set(tree.getNextLeafIndex(), c);
+    tree.appendLeaf(c);
+  }
+
+  // EVERY leaf in [0, nextLeafIndex): real leaves fold their value, padded dead
+  // slots (2..15) fold a zero leaf — all must reproduce the exact current root.
+  for (let i = 0; i < tree.getNextLeafIndex(); i++) {
+    const { siblings } = tree.merklePath(i);
+    assert.equal(
+      foldToRoot(value.get(i) ?? 0n, siblings, i),
+      tree.getRoot(),
+      `foldToRoot(merklePath(${i})) != getRoot()`,
+    );
+  }
+
+  // and the exported fold agrees with the suite's independent foldPath helper.
+  const { siblings, pathIndices } = tree.merklePath(B + 7);
+  assert.equal(foldToRoot(batch[7], siblings, B + 7), foldPath(batch[7], siblings, pathIndices));
 });
 
 test("(e') merklePath into a batch attached WITHOUT its leaves fails loudly", () => {

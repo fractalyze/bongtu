@@ -5,18 +5,13 @@
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
 
-const require = createRequire(import.meta.url);
+import { requireExtern } from "@bongtu/sdk/extern";
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-// Single toolchain-node_modules constant (see docs/toolchain.md); override with
-// BONGTU_NODE_MODULES. Default = the verified docs/toolchain.md path.
-const NODE_MODULES =
-  process.env.BONGTU_NODE_MODULES || "/home/a41/Workspace/zkx-snap/circuits/node_modules";
-const CIRCOMLIBJS = join(NODE_MODULES, "circomlibjs");
-// circomlibjs ships no types and is loaded via createRequire, so it is `any`.
-const { poseidonContract, buildPoseidon } = require(CIRCOMLIBJS);
+// circomlibjs comes back `any` from the shared external loader (@bongtu/sdk/extern).
+const { poseidonContract, buildPoseidon } = requireExtern("circomlibjs");
 
 const OUT_DIR = HERE;
 

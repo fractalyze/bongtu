@@ -41,12 +41,20 @@ export const Base8: Point = [
 // Identity element of the twisted Edwards group.
 export const IDENTITY: Point = [0n, 1n];
 
-function mod(x: bigint): bigint {
+// BabyJubJub prime-order subgroup order = curve order >> 3 (circomlib `subOrder`).
+// Base8·L == identity (self-checked in the SDK test suite). Scalar arithmetic that
+// matters (EdDSA in eddsa.ts, the wallet KDF reduction) is mod this L.
+export const SUBGROUP_ORDER =
+  2736030358979909402780800718157159386076813972158567259200215660948447373041n;
+
+// Base-field arithmetic mod P — exported so curve consumers (pubkey.ts point
+// (de)compression) share ONE implementation instead of private copies.
+export function mod(x: bigint): bigint {
   const r = x % P;
   return r < 0n ? r + P : r;
 }
 
-function modpow(base: bigint, exp: bigint): bigint {
+export function modpow(base: bigint, exp: bigint): bigint {
   let r = 1n;
   let b = mod(base);
   let e = exp;
@@ -59,7 +67,7 @@ function modpow(base: bigint, exp: bigint): bigint {
 }
 
 // Modular inverse via Fermat's little theorem (P is prime).
-function inv(x: bigint): bigint {
+export function inv(x: bigint): bigint {
   return modpow(mod(x), P - 2n);
 }
 

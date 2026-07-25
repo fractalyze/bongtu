@@ -1,26 +1,20 @@
 // Chain plumbing: load ethers v5 + the BongtuPool ABI without adding a repo dep.
 //
-// The deploy scripts (deploy/e2e_orchestrator.ts, deploy/giwa_disburse256.ts)
-// load ethers v5 and snarkjs via `createRequire` from an EXTERNAL node_modules
-// (they ship no usable types and would bloat the repo). The indexer reuses that
-// exact pattern so it type-checks + runs under tsx with zero new dependencies.
-// `ethers` therefore comes back as `any` — we type OUR code, not ethers.
+// ethers v5 loads from the external node_modules via the sdk's shared loader
+// (@bongtu/sdk/extern — the locked no-repo-local-install decision), so it comes
+// back as `any` — we type OUR code, not ethers.
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
 
-const require = createRequire(import.meta.url);
+import { loadEthers } from "@bongtu/sdk/extern";
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = join(HERE, "..", "..", ".."); // apps/indexer/src -> repo root
 
-// Same default as the deploy scripts; override with BONGTU_NODE_MODULES.
-const NODE_MODULES =
-  process.env.BONGTU_NODE_MODULES || "/home/a41/Workspace/zkx-snap/circuits/node_modules";
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const ethers: any = require(join(NODE_MODULES, "ethers"));
+export const ethers: any = loadEthers();
 
 /** Load a Foundry artifact ABI from contracts/out/<sol>.sol/<contract>.json. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

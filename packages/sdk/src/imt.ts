@@ -23,7 +23,9 @@
 import { poseidon2 } from "./poseidon.js";
 
 // A field element in a form the tree accepts as leaf input (coerced via BigInt).
-export type FieldInput = bigint | number | string;
+// Declared once in babyjub.ts; re-exported so `@bongtu/sdk/imt` importers keep working.
+import type { FieldInput } from "./babyjub.js";
+export type { FieldInput } from "./babyjub.js";
 
 // A reconstructed merkle authentication path against the current root.
 export interface MerklePath {
@@ -277,6 +279,25 @@ export class ImtTree {
       this._insertNode(this.zeros[0], 0);
     }
   }
+}
+
+// Verification counterpart of merklePath: fold `leaf` back up an authentication
+// path, taking left/right at level j from bit j of leafIndex — bit == 1 means the
+// sibling is the LEFT child (the header's documented convention, matching
+// circomlib's CheckIMTProof exactly). merklePath's pathIndices[j] IS bit j of the
+// leafIndex it was requested for, so callers pass the leafIndex they already hold
+// — one fold convention, no second pathIndices flavor to flip. Pure; folds over
+// siblings.length levels, so it works at any height.
+// Closure property (pinned in the sdk suite): foldToRoot(leaves[i],
+// merklePath(i).siblings, i) === getRoot() for every recorded leaf.
+export function foldToRoot(leaf: FieldInput, siblings: FieldInput[], leafIndex: number): bigint {
+  let cur = BigInt(leaf);
+  let idx = leafIndex;
+  for (let j = 0; j < siblings.length; j++) {
+    cur = idx % 2 === 1 ? poseidon2(siblings[j], cur) : poseidon2(cur, siblings[j]);
+    idx = Math.floor(idx / 2);
+  }
+  return cur;
 }
 
 function isPowerOfTwo(n: number): boolean {

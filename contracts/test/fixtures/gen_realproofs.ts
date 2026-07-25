@@ -13,17 +13,12 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
 
 import { ImtTree } from "@bongtu/sdk/imt";
+import { loadSnarkjs } from "@bongtu/sdk/extern";
 
-const require = createRequire(import.meta.url);
-// Single toolchain-node_modules constant (see docs/toolchain.md `SNARKJS`/`CIRCOMLIB`);
-// override with BONGTU_NODE_MODULES. Default = the verified docs/toolchain.md path.
-const NODE_MODULES =
-  process.env.BONGTU_NODE_MODULES || "/home/a41/Workspace/zkx-snap/circuits/node_modules";
-// snarkjs ships no usable types here and is loaded via createRequire, so it is `any`.
-const snarkjs = require(join(NODE_MODULES, "snarkjs/build/main.cjs"));
+// snarkjs comes back `any` from the shared external loader (@bongtu/sdk/extern).
+const snarkjs = loadSnarkjs();
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CIRC = join(HERE, "..", "..", "..", "circuits");

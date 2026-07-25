@@ -18,60 +18,31 @@
 //
 // Every OTHER constraint is deliberately satisfied so the witness fails on exactly the
 // new belt `enabled[i] * IsZero(inputCommitments[i]) === 0` and nothing else — the
-// assertion string then names the spending base template. Run through tsx:
+// assertion string then names the spending base template. The shared material
+// (SENDER / AUTHORITY / zeros path) comes from fixture_lib.ts. Run through tsx:
 //
 //   npx tsx gen_zero_leaf_inputs.ts   # writes inputs/{transfer,withdraw}_zero_leaf.json
 
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
-import { ImtTree } from "@bongtu/sdk/imt";
-import { deriveKeypair, commitment, nullifier } from "@bongtu/sdk/note";
-import type { Keypair } from "@bongtu/sdk/note";
+import { commitment, nullifier } from "@bongtu/sdk/note";
 import type { Point } from "@bongtu/sdk/babyjub";
+import type { TransferInput, WithdrawInput } from "@bongtu/sdk/proving";
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const OUT_DIR = join(HERE, "inputs");
-const H = 32; // IMT depth (all circuits)
-
-// Same test material as gen_inputs.ts so these stay consistent with the honest fixtures.
-const SENDER = deriveKeypair(
-  2736030358979909402780800718157159386076813972158567259200215660948447373041n - 12345n,
-);
-const ECDH_SK = 987654321987654321987654321n;
-const AUTHORITY = deriveKeypair(555555555555555555555555n);
-const receiver = (i: number): Keypair => deriveKeypair(1000000007n + BigInt(i) * 1000003n);
-const salt = (i: number): bigint => 1000000n + BigInt(i);
-const ENCRYPTION_NONCE = 424242424242n;
+import {
+  AUTHORITY,
+  ECDH_SK,
+  ENCRYPTION_NONCE,
+  SENDER,
+  ZERO_PATH,
+  ZERO_ROOT,
+  receiver,
+  salt,
+  write,
+} from "./fixture_lib.js";
 
 // The arbitrary value the attacker mints from a padded 0-leaf they never deposited.
 // Well within the stock 100-bit range so CheckPositive/GreaterEqThan witness-gen
 // succeeds and the ONLY unsatisfiable constraint is the new zero-commitment belt.
 const X = 1000000000000n; // 1e12
-
-function jsonify(v: unknown): unknown {
-  if (typeof v === "bigint") return v.toString();
-  if (Array.isArray(v)) return v.map(jsonify);
-  if (v && typeof v === "object") {
-    const o: Record<string, unknown> = {};
-    for (const k of Object.keys(v)) o[k] = jsonify((v as Record<string, unknown>)[k]);
-    return o;
-  }
-  return v;
-}
-function write(name: string, obj: unknown): void {
-  mkdirSync(OUT_DIR, { recursive: true });
-  writeFileSync(join(OUT_DIR, `${name}.json`), JSON.stringify(jsonify(obj), null, 2));
-  console.log(`  wrote inputs/${name}.json`);
-}
-
-// A genuine membership proof of the 0-leaf at index 0 of an EMPTY tree:
-// root = zeros[H], siblings = zeros[0..H-1]. Folding leaf 0 up with these zeros
-// siblings reproduces zeros[H] exactly, so CheckIMTProof holds at enabled=1.
-const emptyTree = new ImtTree(H, 16);
-const ZERO_ROOT = emptyTree.getRoot(); // == zeros[H]
-const ZERO_PATH = emptyTree.zeros.slice(0, H); // zeros[0..H-1], length H
 
 // input0 across both circuits: the exploit (commitment 0, value X, enabled 1, fresh nf).
 const exploitInput0 = {
@@ -96,7 +67,7 @@ const padInput1 = {
 };
 
 // --- transfer (2-in / 2-out): outputs sum to X so CheckSum (equality) passes -------
-function genTransferZeroLeaf() {
+function genTransferZeroLeaf(): TransferInput {
   const outValues = [X, 0n]; // sum == X == sumInputs (X + 0)
   const owners: Point[] = [receiver(0).publicKey, receiver(1).publicKey];
   const outCommits = outValues.map((v, i) => commitment(v, salt(i), owners[i]));
@@ -121,7 +92,7 @@ function genTransferZeroLeaf() {
 }
 
 // --- withdraw (2-in / 1-out): out = sumInputs - sumOutputs = X ---------------------
-function genWithdrawZeroLeaf() {
+function genWithdrawZeroLeaf(): WithdrawInput {
   const outValues = [0n]; // out = (X + 0) - 0 = X paid from nothing
   const owners: Point[] = [receiver(0).publicKey];
   const outCommits = outValues.map((v, i) => commitment(v, salt(i), owners[i]));

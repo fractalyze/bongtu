@@ -33,9 +33,8 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
 
-import { ImtTree } from "@bongtu/sdk/imt";
+import { ImtTree, foldToRoot } from "@bongtu/sdk/imt";
 import { poseidon2, poseidonN } from "@bongtu/sdk/poseidon";
 import {
   deriveKeypair,
@@ -48,20 +47,19 @@ import {
 } from "@bongtu/sdk/note";
 import type { Keypair } from "@bongtu/sdk/note";
 import type { FieldInput } from "@bongtu/sdk/babyjub";
+import { toWire } from "@bongtu/sdk/proving";
+import { loadEthers, loadSnarkjs } from "@bongtu/sdk/extern";
 
-const require = createRequire(import.meta.url);
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
 const CIRC_OUT = join(ROOT, "circuits", "out");
 const CONTRACTS_OUT = join(ROOT, "contracts", "out");
 const POSEIDON_HEX = join(ROOT, "contracts", "test", "fixtures", "poseidon2.hex");
 
-const NODE_MODULES =
-  process.env.BONGTU_NODE_MODULES || "/home/a41/Workspace/zkx-snap/circuits/node_modules";
-// snarkjs + ethers v5 ship no usable types here and are loaded via createRequire,
-// so they come back as `any` — we type OUR code (notes, keys, tree), not theirs.
-const snarkjs = require(join(NODE_MODULES, "snarkjs/build/main.cjs"));
-const ethers = require(join(NODE_MODULES, "ethers"));
+// snarkjs + ethers v5 come back `any` from the shared external loader — we type
+// OUR code (notes, keys, tree), not theirs.
+const snarkjs = loadSnarkjs();
+const ethers = loadEthers();
 
 const RPC = process.env.E2E_RPC || "http://127.0.0.1:8545";
 // anvil default account #0 (deterministic dev key — testnet fake money only).
@@ -87,18 +85,6 @@ function step(title: string): void {
 }
 const dec = (x: FieldInput): string => BigInt(x).toString(); // BigInt -> decimal string for snarkjs / ethers
 
-// Recursively stringify BigInt so snarkjs' witness calculator gets decimals.
-function strify(v: unknown): unknown {
-  if (typeof v === "bigint") return v.toString();
-  if (Array.isArray(v)) return v.map(strify);
-  if (v && typeof v === "object") {
-    const o: Record<string, unknown> = {};
-    for (const k of Object.keys(v)) o[k] = strify((v as Record<string, unknown>)[k]);
-    return o;
-  }
-  return v;
-}
-
 // ---------------------------------------------------------------------------
 // proving: witness + groth16 prove + solidity calldata, all in-process
 // ---------------------------------------------------------------------------
@@ -106,7 +92,7 @@ async function prove(name: string, input: unknown) {
   const wasm = join(CIRC_OUT, `${name}_js`, `${name}.wasm`);
   const zkey = join(CIRC_OUT, `${name}.zkey`);
   const t0 = Date.now();
-  const { proof, publicSignals } = await snarkjs.groth16.fullProve(strify(input), wasm, zkey);
+  const { proof, publicSignals } = await snarkjs.groth16.fullProve(toWire(input), wasm, zkey);
   const cd = await snarkjs.groth16.exportSolidityCallData(proof, publicSignals);
   const [a, b, c, pub] = JSON.parse("[" + cd + "]");
   console.log(`   proved ${name} (${publicSignals.length} publics) in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
@@ -137,16 +123,6 @@ async function deployPoolProxy(wallet: any, initArgs: any[]): Promise<any> {
   const initData = new ethers.utils.Interface(poolAbi).encodeFunctionData("initialize", initArgs);
   const proxy = await deploy(wallet, "ERC1967Proxy", "ERC1967Proxy", [impl.address, initData]);
   return new ethers.Contract(proxy.address, poolAbi, wallet);
-}
-
-// fold a leaf up its merkle path to a root (matches ImtTree / CheckIMTProof:
-// pathIndices[j]==0 => current node is the left child).
-function foldToRoot(leaf: FieldInput, siblings: bigint[], pathIndices: number[]): bigint {
-  let cur = BigInt(leaf);
-  for (let j = 0; j < siblings.length; j++) {
-    cur = pathIndices[j] === 1 ? poseidon2(siblings[j], cur) : poseidon2(cur, siblings[j]);
-  }
-  return cur;
 }
 
 // The circuit's disburse disclosureHash: Poseidon(2) chain over the flattened
@@ -355,8 +331,8 @@ async function main(): Promise<void> {
     // confirm it is the leaf at the expected batch index (16) and folds to the live root
     const idx0 = B; // batch block starts at leaf 16 (after 2 real + 14 dead pads)
     ok(oracle.leaves[idx0] === rebuilt, `rebuilt commitment sits at expected tree index ${idx0}`);
-    const { siblings, pathIndices } = oracle.merklePath(idx0);
-    ok(foldToRoot(rebuilt, siblings, pathIndices).toString() === (await pool.root()).toString(),
+    const { siblings } = oracle.merklePath(idx0);
+    ok(foldToRoot(rebuilt, siblings, idx0).toString() === (await pool.root()).toString(),
       "recovered note's merkle path folds to the LIVE contract root");
     ok(value0 === amounts[0], `recovered value (${value0}) == recipient #0 disbursed amount`);
   }
@@ -475,8 +451,8 @@ async function main(): Promise<void> {
       const ss = ecdhSharedSecret(RCPTS[i].formattedPrivateKey, disbEcdhPub);
       const [v, s] = poseidonDecrypt(ct, ss, disbNonce, 2);
       const c = poseidonN([v, s, RCPTS[i].publicKey[0], RCPTS[i].publicKey[1]]);
-      const { siblings, pathIndices } = oracle.merklePath(B + i);
-      if (c !== outCommits[i] || foldToRoot(c, siblings, pathIndices).toString() !== liveRoot || v !== amounts[i]) {
+      const { siblings } = oracle.merklePath(B + i);
+      if (c !== outCommits[i] || foldToRoot(c, siblings, B + i).toString() !== liveRoot || v !== amounts[i]) {
         allDecrypt = false;
       }
     }

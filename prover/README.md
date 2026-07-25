@@ -34,8 +34,12 @@ one, and the input JSON is what the employer flow already has in hand.
 
 Errors: 422 = schema violation, **including the §11-8 two-time-pad guard**
 (duplicate output owner pubkeys are rejected before any proving work); 400 =
-non-disburse circuit / cpu backend / witness-gen failure (well-formed but
-unsatisfiable input); 503 = still compiling.
+non-disburse circuit / cpu backend / unsatisfiable witness input (circom's
+`Assert Failed` — the client's batch is at fault); 500 = witness **infra**
+failure (missing/stale wasm, broken node, timeout — the service's environment;
+the detail names the config knobs to check); 503 = still compiling. The
+400-vs-500 classification happens at the witness subprocess seam
+(`engine.py`), pinned CPU-only by `tests/test_witness_seam.py`.
 
 ## Run
 
@@ -101,8 +105,8 @@ Env knobs (all optional): `PROVER_HOST`/`PROVER_PORT` (127.0.0.1:8700,
 consumed by `run.sh`); the rest default in `prover_service/config.py` —
 `BONGTU_CIRCUITS_OUT`,
 `BONGTU_DISBURSE_ZKEY`, `BONGTU_DISBURSE_WASM`, `BONGTU_DISBURSE_GEN_WITNESS`,
-`BONGTU_WARMUP_INPUT`, `BONGTU_NODE_BIN`, `PROVER_DETERMINISTIC` (=1 for
-byte-stable test proofs).
+`BONGTU_WARMUP_INPUT`, `BONGTU_NODE_BIN`, `BONGTU_WITNESS_TIMEOUT` (seconds,
+default 300), `PROVER_DETERMINISTIC` (=1 for byte-stable test proofs).
 
 ```
 setup.sh                 one-time .venv + rabbitsnark/jax bridge (.pth)

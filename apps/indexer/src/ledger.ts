@@ -9,7 +9,8 @@
 //     recovered note's commitment == the on-chain output commitment the indexer
 //     already knows: deposit oc0/oc1, transfer outputs, withdraw change, and for
 //     disburse the B leaves folded to the on-chain subtreeRoot. A mismatch is a
-//     first-class ALARM (console + getEnvelopeAlarms), never silently kept.
+//     first-class ALARM (console + the GET /alarms feed, via getEnvelopeAlarms),
+//     never silently kept.
 //
 //   - INPUT notes mark the matching created note spent, matched by commitment.
 //     The input envelope reveals the consumed note's (owner, value, salt), so
@@ -61,6 +62,7 @@ export interface EnvelopeAlarm {
 export interface OpEnvelope {
   kind: OpKind;
   txHash: string;
+  logIndex: number; // chain position of the op's log — the ledger's replay-dedup key
   ecdhPublicKey: [bigint, bigint];
   nonce: bigint;
   authorityCt: bigint[]; // authority envelope ciphertext (disburse: the tail only)
@@ -75,6 +77,11 @@ export class NoteLedger {
   private readonly byOwner = new Map<string, LedgerNote[]>();
   private readonly byCommitment = new Map<string, LedgerNote>();
   private readonly alarms: EnvelopeAlarm[] = [];
+  // (txHash, logIndex) of every op already applied — the ledger guards its OWN
+  // replay invariant (the same self-guarding pattern as MirrorTree / Store), so
+  // a replayed log range cannot double-record notes or re-flip spent flags even
+  // if a future ingest reordering drops the Store-side gating.
+  private readonly applied = new Set<string>();
 
   constructor(arbiterPriv: bigint, B: number, tree: MirrorTree) {
     this.arbiterPriv = arbiterPriv;
@@ -88,11 +95,15 @@ export class NoteLedger {
 
   /**
    * Ingest one op's envelope in chain order: verify + record outputs, mark inputs
-   * spent, and (disburse) fill the batch leaves so /path can serve into it. Call
-   * ONCE per op — ingest gates this on the Store's (txHash, logIndex) dedup, so a
-   * replayed log range does not double-record.
+   * spent, and (disburse) fill the batch leaves so /path can serve into it.
+   * Replay-safe: idempotent on (txHash, logIndex), so it may be called
+   * unconditionally per log — ingest's Store-side gating is belt-and-braces,
+   * not what the ledger's correctness hangs on.
    */
   apply(op: OpEnvelope): void {
+    const key = `${op.txHash}:${op.logIndex}`;
+    if (this.applied.has(key)) return; // replayed op — already recorded
+    this.applied.add(key);
     const env = parseEnvelope(this.arbiterPriv, op.ecdhPublicKey, op.nonce, op.authorityCt, op.kind, this.B);
 
     if (op.kind === "disburse") {

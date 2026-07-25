@@ -6,11 +6,21 @@
 #   c   = [p256(pi_c[0]), p256(pi_c[1])]
 #   pub = [p256(x) for x in publicSignals]
 # where p256(n) = "0x" + hex(n) left-padded to 64 nibbles. The G2 inner swap on
-# `b` is the part a verifier call would silently get wrong — pinned here.
+# `b` is the part a verifier call would silently get wrong — pinned two ways:
+# hand-restated on synthetic proofs below, AND differentially against
+# contracts/test/fixtures/disburse256.calldata.json, which snarkjs ITSELF
+# produced from the committed real proof (so a shared misunderstanding of the
+# rule cannot pass — the reference implementation is in the loop via a
+# committed byte-level artifact).
+
+import json
+from pathlib import Path
 
 import pytest
 
 from prover_service.calldata import to_solidity_calldata
+
+FIXTURES = Path(__file__).resolve().parents[2] / "contracts" / "test" / "fixtures"
 
 
 def snarkjs_proof(a0=11, a1=12, b00=21, b01=22, b10=23, b11=24, c0=31, c1=32) -> dict:
@@ -54,3 +64,16 @@ def test_pub_preserves_order_and_length():
 def test_out_of_range_value_is_rejected():
     with pytest.raises(ValueError, match="uint256"):
         to_solidity_calldata(snarkjs_proof(a0=1 << 256), ["1"])
+
+
+def test_committed_real_proof_matches_snarkjs_calldata_fixture():
+    # True differential: the committed disburse256 proof re-encoded here must
+    # equal, byte for byte, what snarkjs exportSolidityCallData emitted for the
+    # same proof (the committed disburse256.calldata.json). Any padding/order/
+    # G2-swap drift fails naming the first divergent field instead of an
+    # on-chain InvalidProof revert.
+    proof = json.loads((FIXTURES / "disburse256.proof.json").read_text())
+    pub = json.loads((FIXTURES / "disburse256.public.json").read_text())
+    want = json.loads((FIXTURES / "disburse256.calldata.json").read_text())
+    got = to_solidity_calldata(proof, pub).model_dump()
+    assert got == want

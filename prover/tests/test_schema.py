@@ -1,8 +1,12 @@
 # schema.py gate — the Python mirror of packages/sdk/src/proving.ts.
 #
 # CPU-only (no GPU / rabbitsnark import): validates that (1) the repo's real
-# disburse256 fixture input parses as a DisburseRequest unchanged, (2) all four
-# circuit variants of the discriminated union parse, (3) the §11-8 two-time-pad
+# disburse256 fixture input parses as a DisburseRequest unchanged, (2) every
+# committed circuits/inputs/{deposit,transfer,withdraw,disburse}.json — the
+# same files the TS generators type against the proving.ts interfaces —
+# round-trips through the discriminated union unchanged, so all edges of the
+# circom-main / fixture / proving.ts / schema.py triangle are pinned by real
+# artifacts rather than hand-written literals, (3) the §11-8 two-time-pad
 # guard and the field-element/shape validators reject what the TS prover
 # rejected.
 
@@ -20,7 +24,8 @@ from prover_service.schema import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-FIXTURE = REPO_ROOT / "circuits" / "inputs" / "disburse256.json"
+INPUTS = REPO_ROOT / "circuits" / "inputs"
+FIXTURE = INPUTS / "disburse256.json"
 
 request_adapter = TypeAdapter(ProvingRequest)
 
@@ -56,6 +61,26 @@ def test_repo_disburse256_fixture_parses_unchanged():
     assert len(req.input.pathElements) == 1 and len(req.input.pathElements[0]) == 32
     assert req.input.enabled == ["1"]
     # the mirror round-trips the fixture byte-for-byte (canonical decimal strings).
+    assert req.input.model_dump() == raw
+
+
+@pytest.mark.parametrize(
+    "circuit,fixture",
+    [
+        ("deposit", "deposit.json"),
+        ("transfer", "transfer.json"),
+        ("withdraw", "withdraw.json"),
+        ("disburse", "disburse.json"),  # the M0 1x16 dev build (shape guards are B-agnostic)
+    ],
+)
+def test_all_four_committed_fixtures_round_trip(circuit, fixture):
+    # The committed fixture is the executable wire contract: the TS generator
+    # that wrote it is typed against proving.ts, and this mirror must accept and
+    # reproduce it byte-for-byte. A field drifting on either side turns this red
+    # naming the circuit + field.
+    raw = json.loads((INPUTS / fixture).read_text())
+    req = request_adapter.validate_python({"circuit": circuit, "input": raw})
+    assert req.circuit == circuit
     assert req.input.model_dump() == raw
 
 

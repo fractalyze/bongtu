@@ -1,8 +1,8 @@
 // Extra withdraw fixtures for the U3 soundness tests (SPEC §5.2).
 //
 // Writes three withdraw witness inputs that the committed prove_all.sh does NOT
-// produce, all with the SAME SENDER / AUTHORITY / salt derivation as
-// gen_inputs.ts so they are consistent with the real fixtures:
+// produce, all built from the SHARED fixture_lib.ts material (same SENDER /
+// AUTHORITY / salt derivation as gen_inputs.ts by construction):
 //
 //   withdraw_mint.json    -- the TRUE mint-from-nothing vector: a fabricated input
 //       {nullifier=0, commitment=0, value=X, enabled=0} + a zero output => out=X.
@@ -22,75 +22,28 @@
 //
 //   npx tsx gen_attack_inputs.ts
 
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { commitment, nullifier } from "@bongtu/sdk/note";
+import type { WithdrawInput } from "@bongtu/sdk/proving";
 
-import { ImtTree } from "@bongtu/sdk/imt";
-import { deriveKeypair, commitment, nullifier } from "@bongtu/sdk/note";
-import type { Keypair } from "@bongtu/sdk/note";
+import {
+  AUTHORITY,
+  ECDH_SK,
+  ENCRYPTION_NONCE,
+  SENDER,
+  membership,
+  receiver,
+  salt,
+  write,
+} from "./fixture_lib.js";
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const OUT_DIR = join(HERE, "inputs");
-const H = 32;
-
-// Same material as gen_inputs.ts.
-const SENDER = deriveKeypair(
-  2736030358979909402780800718157159386076813972158567259200215660948447373041n - 12345n,
-);
-const receiver = (i: number): Keypair => deriveKeypair(1000000007n + BigInt(i) * 1000003n);
-const salt = (i: number): bigint => 1000000n + BigInt(i);
-// §6b v2 authority-envelope material (matches gen_inputs.ts so withdraw_padded
-// encrypts to the SAME arbiter key the contract injects; the two throwing
-// fixtures still fail on the value-belt, not on a missing-input error).
-const ECDH_SK = 987654321987654321987654321n;
-const AUTHORITY = deriveKeypair(555555555555555555555555n);
-const ENCRYPTION_NONCE = 424242424242n;
+// §6b v2 authority-envelope material (the shared AUTHORITY key, so
+// withdraw_padded encrypts to the SAME arbiter key the contract injects; the two
+// throwing fixtures still fail on the value-belt, not on a missing-input error).
 const authEnvelope = {
   ecdhPrivateKey: BigInt(ECDH_SK),
   encryptionNonce: ENCRYPTION_NONCE,
   authorityPublicKey: AUTHORITY.publicKey,
 };
-
-function jsonify(v: unknown): unknown {
-  if (typeof v === "bigint") return v.toString();
-  if (Array.isArray(v)) return v.map(jsonify);
-  if (v && typeof v === "object") {
-    const o: Record<string, unknown> = {};
-    for (const k of Object.keys(v)) o[k] = jsonify((v as Record<string, unknown>)[k]);
-    return o;
-  }
-  return v;
-}
-function write(name: string, obj: unknown): void {
-  mkdirSync(OUT_DIR, { recursive: true });
-  writeFileSync(join(OUT_DIR, `${name}.json`), JSON.stringify(jsonify(obj), null, 2));
-  console.log(`  wrote inputs/${name}.json`);
-}
-
-interface Membership {
-  root: bigint;
-  pathElements: bigint[][];
-  leafIndices: bigint[];
-}
-
-function membership(commitments: bigint[]): Membership {
-  const tree = new ImtTree(H, 16);
-  const indices = commitments.map((c) => {
-    const idx = tree.getNextLeafIndex();
-    tree.appendLeaf(c);
-    return idx;
-  });
-  const root = tree.getRoot();
-  const pathElements: bigint[][] = [];
-  const leafIndices: bigint[] = [];
-  for (const idx of indices) {
-    const { siblings } = tree.merklePath(idx);
-    pathElements.push(siblings);
-    leafIndices.push(BigInt(idx));
-  }
-  return { root, pathElements, leafIndices };
-}
 
 // --- mint-from-nothing: the TRUE soundness vector (SPEC §5.2) ---------------
 // A fabricated input with nullifier=0, commitment=0, value=X, enabled=0 passes
@@ -101,7 +54,7 @@ function membership(commitments: bigint[]): Membership {
 // this proof, so §5.2 contract-injection does NOT catch it. The circuit value-belt
 // `(1-enabled)*value===0` DOES: this witness is now unsatisfiable at witness-gen.
 // This fixture MUST FAIL `generate_witness` (see assert_attacks_throw.ts).
-function genMint() {
+function genMint(): WithdrawInput {
   const X = 1000n;
   const inValues = [X, 0n]; // input[0] fabricated with value X; input[1] a zero pad
   const inSalts = [salt(30), salt(31)];
@@ -131,7 +84,7 @@ function genMint() {
 }
 
 // --- attack: enabled=[1,0] but input[1] carries value 500 -------------------
-function genAttack() {
+function genAttack(): WithdrawInput {
   const inValues = [600n, 500n];
   const inSalts = [salt(20), salt(21)];
   const inCommits = inValues.map((v, i) => commitment(v, inSalts[i], SENDER.publicKey));
@@ -160,7 +113,7 @@ function genAttack() {
 }
 
 // --- padded: input[1] is a zero note with nullifier 0 -----------------------
-function genPadded() {
+function genPadded(): WithdrawInput {
   const inValues = [600n, 0n];
   const inSalts = [salt(20), salt(21)];
   const inCommits = inValues.map((v, i) => commitment(v, inSalts[i], SENDER.publicKey));

@@ -21,9 +21,10 @@ import {
   assertDistinctOwnerPubkeys,
 } from "@bongtu/sdk/note";
 import { unpackPubkey } from "@bongtu/sdk/pubkey";
-import { ImtTree } from "@bongtu/sdk/imt";
+import { ImtTree, foldToRoot } from "@bongtu/sdk/imt";
 import { poseidon2 } from "@bongtu/sdk/poseidon";
 import type { Point } from "@bongtu/sdk/babyjub";
+import { toWire } from "@bongtu/sdk/proving";
 import type { DisburseInput, ProvingRequest } from "@bongtu/sdk/proving";
 import { H, B } from "../config.js";
 
@@ -96,18 +97,6 @@ export interface AssembleResult {
 
 // --- helpers -------------------------------------------------------------------
 
-// Fold a leaf up an IMT auth path, taking left/right from the bits of leafIndex —
-// bit j == 1 means the sibling is the LEFT child at level j. Mirrors ImtTree.
-function foldToRoot(leaf: bigint, siblings: bigint[], leafIndex: number): bigint {
-  let cur = leaf;
-  let idx = leafIndex;
-  for (let j = 0; j < siblings.length; j++) {
-    cur = idx % 2 === 1 ? poseidon2(siblings[j], cur) : poseidon2(cur, siblings[j]);
-    idx = Math.floor(idx / 2);
-  }
-  return cur;
-}
-
 // disclosureHash: Poseidon(2) chain over the receiver ciphertext then the authority
 // ciphertext, seeded at 0 — byte-identical to the in-circuit gadget and to
 // deploy/giwa_disburse256.ts. Equals the proof's pub[2] once proven.
@@ -116,35 +105,6 @@ function computeDisclosureHash(receiverFlat: bigint[], authorityCt: bigint[]): b
   for (const x of receiverFlat) dh = poseidon2(dh, x);
   for (const x of authorityCt) dh = poseidon2(dh, x);
   return dh;
-}
-
-// Convert a bigint-typed DisburseInput into the decimal-string form that survives
-// JSON.stringify (a ProvingRequest POSTed to the service has no bigints). The prover
-// accepts decimal strings as FieldInput as-is.
-function toDecimalInput(input: DisburseInput): DisburseInput {
-  const s = (x: bigint | number | string): string => BigInt(x).toString();
-  const point = (p: readonly [bigint | number | string, bigint | number | string]): [string, string] => [
-    s(p[0]),
-    s(p[1]),
-  ];
-  return {
-    nullifiers: input.nullifiers.map(s),
-    inputCommitments: input.inputCommitments.map(s),
-    inputValues: input.inputValues.map(s),
-    inputSalts: input.inputSalts.map(s),
-    inputOwnerPrivateKey: s(input.inputOwnerPrivateKey),
-    ecdhPrivateKey: s(input.ecdhPrivateKey),
-    root: s(input.root),
-    pathElements: (input.pathElements as (bigint | number | string)[][]).map((row) => row.map(s)),
-    leafIndices: input.leafIndices.map(s),
-    enabled: input.enabled.map(s),
-    outputCommitments: input.outputCommitments.map(s),
-    outputValues: input.outputValues.map(s),
-    outputSalts: input.outputSalts.map(s),
-    outputOwnerPublicKeys: input.outputOwnerPublicKeys.map(point),
-    encryptionNonce: s(input.encryptionNonce),
-    authorityPublicKey: point(input.authorityPublicKey),
-  };
 }
 
 // --- the assembly --------------------------------------------------------------
@@ -284,7 +244,7 @@ export function buildDisburseRequest(
     throw new Error(`ciphertext length ${ciphertext.length} != 2054 (disburseCiphertextLen for B=${B})`);
   }
 
-  const request: ProvingRequest = { circuit: "disburse", input: toDecimalInput(inputBig), backend: "gpu" };
+  const request: ProvingRequest = { circuit: "disburse", input: toWire(inputBig), backend: "gpu" };
 
   return {
     request,

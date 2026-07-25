@@ -22,7 +22,14 @@ import { connect, signKeyDerivation, submitTransfer, submitWithdraw, type Connec
 import { balanceViaNotes } from "./lib/balance.js";
 import type { OwnerNote } from "./lib/indexerClient.js";
 import { getHead, getPath } from "./lib/indexerClient.js";
-import { buildTransferRequest, buildWithdrawRequest, type WalletInputNote, type MembershipWitness } from "./lib/spend.js";
+import {
+  buildTransferRequest,
+  buildWithdrawRequest,
+  selectInputNotes,
+  freshSpendCrypto,
+  type WalletInputNote,
+  type MembershipWitness,
+} from "./lib/spend.js";
 import { proveInBrowser } from "./lib/prove.js";
 
 // --- runtime state --------------------------------------------------------------
@@ -157,30 +164,17 @@ function renderNoteList(list: HTMLElement, notes: OwnerNote[]): void {
 
 // --- 3. transfer / withdraw -----------------------------------------------------
 
-// Pick the wallet's unspent notes (up to 2) + their live membership witnesses.
-async function selectSpendInputs(indexerUrl: string): Promise<{ inputs: WalletInputNote[]; memberships: MembershipWitness[] }> {
-  const unspent = state.notes.filter((n) => !n.spent).slice(0, 2);
-  if (unspent.length === 0) throw new Error("no spendable notes — load your balance first");
+// Amount-aware note selection is PURE + unit-tested (spend.ts selectInputNotes);
+// this wiring only fetches the live membership witnesses for the selected leaves.
+async function selectSpendInputs(indexerUrl: string, amount: string): Promise<{ inputs: WalletInputNote[]; memberships: MembershipWitness[] }> {
+  const inputs = selectInputNotes(state.notes, amount);
   const head = await getHead(indexerUrl);
-  const inputs: WalletInputNote[] = [];
   const memberships: MembershipWitness[] = [];
-  for (const n of unspent) {
+  for (const n of inputs) {
     const p = await getPath(indexerUrl, n.leafIndex); // 422 for a within-batch leaf in public mode
-    inputs.push({ value: n.value, salt: n.salt, leafIndex: n.leafIndex });
     memberships.push({ root: head.root, pathElements: p.siblings, leafIndex: n.leafIndex });
   }
   return { inputs, memberships };
-}
-
-function freshCrypto() {
-  return {
-    ecdhPrivateKey: randField(),
-    encryptionNonce: randField(),
-    authorityPubKey: DEFAULTS.arbiterPubKey,
-    changeSalt: randField(),
-    padSalt: randField(),
-    payeeSalt: randField(),
-  };
 }
 
 function renderSpend(): void {
@@ -225,8 +219,8 @@ async function runSpend(kind: "transfer" | "withdraw", st: HTMLElement, args: { 
     if (!state.identity || !state.connection) throw new Error("connect + derive first");
     const indexerUrl = indexerInput.value.trim();
     statusLine(st, "Selecting notes + fetching membership paths…");
-    const { inputs, memberships } = await selectSpendInputs(indexerUrl);
-    const crypto = freshCrypto();
+    const { inputs, memberships } = await selectSpendInputs(indexerUrl, args.amount);
+    const crypto = freshSpendCrypto(randField);
 
     statusLine(st, "Assembling witness…");
     const built =
