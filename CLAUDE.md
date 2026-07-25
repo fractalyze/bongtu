@@ -33,7 +33,7 @@ Read `README.md` once at session start; for anything deeper, follow its
   reverts `InvalidProof`.
 - **Local-pass ≠ CI-pass**: hosted runners lack the dev-box defaults (the `BONGTU_NODE_MODULES`
   fallback path, prebuilt `circuits/out` / `contracts/out`, fast spawns). Check any new CI-run
-  test against a clean env before pushing — see `docs/ci.md`.
+  test against a clean env before pushing — see `.dev/ci.md`.
 - **GPU regen recipe** (disburse-256, after a circuit change): compile → `groth16 setup` (CPU,
   ~2.5min, 1.24GB zkey) → export verifier/vkey → witness → `rabbitsnark circom prove` on GPU0
   (cold zkey-compile ~120s + warm proof ~0.47s). Runner: `jolt-zorch/.venv/bin/python -m

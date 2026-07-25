@@ -42,7 +42,8 @@ export **raw `src/*.ts`** (no build step) as `@bongtu/*` specifiers. `circuits/`
 - `apps/admin-web/` — `@bongtu/admin-web`: role-moded console — employer-mode (recipients → request → prover service → tx) + auditor-mode (arbiter `/notes` ledger)
 - `apps/wallet-web/` — `@bongtu/wallet-web`: MetaMask wallet — sign → bjj key, balance from `/notes`, transfer/withdraw with browser snarkjs proving
 - `deploy/` — Foundry deploy script (local anvil + GIWA), the live 256-disburse runner, the M0 cross-circuit e2e
-- `docs/` — specification, milestone records, toolchain (see the index below)
+- `docs/` — current-fact reference docs: specification, toolchain, Zeto provenance (see the index below)
+- `.dev/` — agent-facing working docs: milestone trackers and decision records (see [`.dev/README.md`](.dev/README.md))
 
 ## Run
 
@@ -89,23 +90,10 @@ Copy `.env.example` → `.env` (gitignored) for a funded GIWA deployer key. Tool
 
 - [Specification](docs/spec.md) — what bongtu is and why it is shaped this way: locked product decisions,
   circuits/publics, IMT §5.1, indexer API §6b, apps §7, GIWA facts + live addresses §9, risk register §11.
-- [Milestone M0](docs/milestone-m0.md) — how the core was proven safe: 4 units, gates, and the two retired
-  critical risks (mixed-mode tree spend, enabled-forgery mint).
-- [Milestone M1](docs/milestone-m1.md) — how 1×256 GPU disburse + the GIWA deploy landed: gas numbers, the
-  O(log B) partial-block fix, deploy pipeline evidence.
-- [Milestone M2](docs/milestone-m2.md) — the product-surface round: the home-centric React wallet with
-  in-browser proving, the indexer's `GET /history` + durable Postgres store + docker-compose, and the
-  `@bongtu/sdk`→`@bongtu/core` rename. Locked design decisions + per-unit evidence.
 - [Toolchain](docs/toolchain.md) — the exact circom/snarkjs/ptau/forge invocations and paths that build and
   prove everything.
 - [Zeto derivation](docs/zeto-derivation.md) — which Zeto flavor bongtu uses, per-file circuit provenance, the
-  deliberate modifications, and the SMT→IMT soundness finding (why Unit 0 redeploys).
-- [Monorepo layout](docs/monorepo-layout.md) — why the tree is split `apps/` vs `packages/` vs top-level
-  toolchains, why packages export raw `src/*.ts`, why the Vite shim survives, and the rejected layouts.
-- [Architecture review](docs/architecture-review.md) — the 2026-07-25 depth/seam review: the 14 applied
-  consolidations, 4 deferred with revival criteria, 3 rejected — check here before re-suggesting a refactor.
-- [CI design](docs/ci.md) — why the hosted gates are shaped this way: the artifact-cache soundness argument,
-  the pins-file design, measured wall times, and the local-pass/CI-fail lesson.
+  deliberate modifications, and the SMT→IMT zero-commitment guard.
 - [Deploy](deploy/README.md) — the reusable B=256 stack deploy: env config, local anvil gate, live GIWA runbook.
 - [Prover service](prover/README.md) — the resident-GPU proving service: wire contract, boot lifecycle, ops
   invariants (one instance per GPU), env knobs.
@@ -115,6 +103,9 @@ Copy `.env.example` → `.env` (gitignored) for a funded GIWA deployer key. Tool
   [`packages/core`](packages/core/README.md) · [`apps/indexer`](apps/indexer/README.md) ·
   [`circuits`](circuits/README.md) · [`contracts`](contracts/README.md) ·
   [`apps/admin-web`](apps/admin-web/README.md) · [`apps/wallet-web`](apps/wallet-web/README.md).
+
+Milestone trackers and decision records (applied/deferred/rejected lists, layout and CI rationale) live in
+[`.dev/`](.dev/README.md) — agent-facing working docs, kept out of `docs/`.
 
 ## Notes
 

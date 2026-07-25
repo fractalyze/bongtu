@@ -3,7 +3,7 @@
 **M2 turns the proven protocol (M0) and the live GIWA deploy (M1) into a usable product surface: a
 self-custody wallet that looks like a wallet, an indexer that survives a restart and ships in a container,
 and a per-user transaction history.** No circuits, contracts, or the live pool change — this round is the
-app/indexer/ops layer only. Ref: [spec.md](spec.md) §6b (indexer API), §7 (apps), §8 (layout);
+app/indexer/ops layer only. Ref: [spec.md](../docs/spec.md) §6b (indexer API), §7 (apps), §8 (layout);
 M1 is complete (256 disburse live on GIWA). Prior rounds: [milestone-m0.md](milestone-m0.md),
 [milestone-m1.md](milestone-m1.md).
 
@@ -102,5 +102,5 @@ conformance gate (it is a local docker integration test) — the in-memory adapt
 conformance oracle. The wallet's balance reads the arbiter `/notes` (architecture-review #17); the key-only
 trial-decrypt primitive remains as the §11-7 recovery property, not a balance path.
 
-Status legend: [ ] pending · [~] in-progress · [x] done · [!] blocked. Toolchain: [toolchain.md](toolchain.md).
+Status legend: [ ] pending · [~] in-progress · [x] done · [!] blocked. Toolchain: [toolchain.md](../docs/toolchain.md).
 CI design: [ci.md](ci.md). Layout: [monorepo-layout.md](monorepo-layout.md).

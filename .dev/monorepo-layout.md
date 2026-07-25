@@ -1,7 +1,7 @@
 # Monorepo layout — the deployed-vs-imported decision
 
 Decision record for the 2026-07-25 workspace refactor (`939fbe8`, layout "A1"). The
-as-built tree lives in [`spec.md`](spec.md) §8 and the root [`README.md`](../README.md)
+as-built tree lives in [`spec.md`](../docs/spec.md) §8 and the root [`README.md`](../README.md)
 `## Layout` — this file owns only *why* it is shaped this way and which alternative
 layouts were rejected.
 

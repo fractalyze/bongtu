@@ -19,7 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CIRCUITS_OUT = Path(os.environ.get("BONGTU_CIRCUITS_OUT", REPO_ROOT / "circuits" / "out"))
 
 # The 1.24GB disburse256 Groth16 proving key (gitignored artifact; the GPU regen
-# recipe lives in CLAUDE.md "GPU regen recipe" + docs/milestone-m1.md — the CPU
+# recipe lives in CLAUDE.md "GPU regen recipe" + .dev/milestone-m1.md — the CPU
 # pipeline in docs/toolchain.md builds the wasm/witness pair) and the circom
 # witness-calculator pair.
 DISBURSE_ZKEY = Path(os.environ.get("BONGTU_DISBURSE_ZKEY", CIRCUITS_OUT / "disburse256.zkey"))

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bongtu M0 Unit U4 — the M0 Definition of Done (docs/milestone-m0.md Done#4, spec §5/§10b).
+# bongtu M0 Unit U4 — the M0 Definition of Done (.dev/milestone-m0.md Done#4, spec §5/§10b).
 #
 # Full cross-circuit spend cycle on a LIVE anvil with REAL Groth16 proofs and a
 # GENUINE recipient trial-decrypt:

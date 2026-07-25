@@ -47,7 +47,7 @@ Prerequisite: the **gitignored** circuit artifacts must exist under
 `circuits/out/` — `disburse256.zkey` (1.24GB) plus the `disburse256_js/`
 witness-calculator pair. The CPU build pipeline is in `docs/toolchain.md`; the
 GPU regen recipe (after any circuit change) is the "GPU regen recipe" bullet in
-the repo `CLAUDE.md` (evidence in `docs/milestone-m1.md`).
+the repo `CLAUDE.md` (evidence in `.dev/milestone-m1.md`).
 
 ```sh
 bash prover/setup.sh    # once: create .venv (python 3.11 + rabbitsnark bridge)

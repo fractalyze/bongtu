@@ -241,7 +241,7 @@ value still counts → **mint-from-nothing**. Fix, applied to **every** verifier
 
 > **Naming (2026-07-25):** the shared TS library is the npm package **`@bongtu/core`** (`packages/core/`).
 > It was renamed from `@bongtu/sdk` — it is private (v0.0.0), has no external consumers, and is the protocol +
-> crypto core every app and the contract differential tests import, not a published SDK ([milestone-m2.md](milestone-m2.md)).
+> crypto core every app and the contract differential tests import, not a published SDK ([milestone-m2.md](../.dev/milestone-m2.md)).
 > "SDK" where it survives below reads as this package.
 
 - **Core (TS, Apache/MIT deps only):** port `zeto-js` crypto to typed TS — `poseidonEncrypt/Decrypt` (Poseidon
@@ -351,14 +351,14 @@ serves:
 >   Both capabilities require the authority envelope to actually be published on-chain. The
 >   auditor-free alternative is publishing the B output commitments (~8 KB calldata at B=256).
 
-> **★ §6b v2 — enforced auditor disclosure (2026-07-24, grill-locked; ships in Unit 0 redeploy).** The
+> **★ §6b v2 — enforced auditor disclosure (2026-07-24, grill-locked; shipped in the live v2 pool).** The
 > product name is "enforced auditor disclosure", so **every note's creation and destruction must be
 > auditor-openable from on-chain data alone** — a convention + off-chain alarm is not enough, a malicious
 > employer could still withhold. Decisions:
 > - **All four operations emit an authority envelope**, encrypted to the arbiter key inside the proof
->   (contract injects the stored arbiter key → wrong-key or no encryption ⇒ proof fails). Today only
->   transfer/disburse do. **Add in-circuit authority envelopes to `deposit`** (outputs: `(ownerPub, value,
->   salt)` ×2 → 10 ct elements) **and `withdraw`** (inputs `(ownerPub, value, salt)` + change → 13 ct
+>   (contract injects the stored arbiter key → wrong-key or no encryption ⇒ proof fails): v1 had envelopes
+>   only on transfer/disburse; v2 adds in-circuit authority envelopes to `deposit` (outputs: `(ownerPub,
+>   value, salt)` ×2 → 10 ct elements) and `withdraw` (inputs `(ownerPub, value, salt)` + change → 13 ct
 >   elements), emitted in `Deposited`/`Withdrawn`. This also closes the deposit blind spot where an employer
 >   could hand value to an employee via a deposit output the auditor never sees. Supersedes the §11-1 gap.
 > - **disburse publication is enforced on-chain, not by convention.** `plain disburse()` is **removed**;
