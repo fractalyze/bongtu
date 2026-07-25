@@ -52,6 +52,7 @@ services:
       CHAIN_ID: ${CHAIN_ID:-91342}
       START_BLOCK: ${START_BLOCK:-0}
       POLL_MS: ${POLL_MS:-5000}
+      LOG_CHUNK: ${LOG_CHUNK:-50000}
       # AUTHORITY_KEY set => ARBITER MODE (institution-internal; holds every
       # owner's decrypted notes). Leave empty for a public indexer.
       AUTHORITY_KEY: ${AUTHORITY_KEY:-}

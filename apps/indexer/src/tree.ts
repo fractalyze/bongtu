@@ -166,9 +166,9 @@ export class MirrorTree {
    * filled (ARBITER MODE). Once filled, path()/blockNode fold the block from these
    * leaves — so /path into the batch serves a real path that folds to root()
    * instead of the 422 batch-leaf sentinel. Public mode never calls this, so a
-   * batch leaf there stays opaque. The caller (NoteLedger) folds these leaves to
-   * the on-chain subtreeRoot before filling; the fold-to-root assert in path() is
-   * the internal backstop, so a bad fill surfaces as a 500, not a wrong path.
+   * batch leaf there stays opaque. The caller (PostgresLedger) folds these leaves
+   * to the on-chain subtreeRoot before filling; the fold-to-root assert in path()
+   * is the internal backstop, so a bad fill surfaces as a 500, not a wrong path.
    */
   fillBatch(startLeafIndex: number, leaves: bigint[]): void {
     for (let k = 0; k < leaves.length; k++) this.leaves[startLeafIndex + k] = leaves[k];

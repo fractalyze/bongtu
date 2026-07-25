@@ -97,9 +97,12 @@ The round was scoped by a design grill before any code. The decisions that the d
 
 ## Deliberately out of scope this round
 
-admin-web was not touched (M2 is the wallet + indexer round). The Postgres path is not on the hosted
+admin-web was not touched (M2 is the wallet + indexer round). ~~The Postgres path is not on the hosted
 conformance gate (it is a local docker integration test) — the in-memory adapter keeps CI cheap and is the
-conformance oracle. The wallet's balance reads the arbiter `/notes` (architecture-review #17); the key-only
+conformance oracle.~~ **Superseded by U-I4 (2026-07-26, post-M2): the indexer is Postgres-only — the
+in-memory ledger backend is deleted, the conformance gate ingests real Postgres, and the hosted
+`indexer-conformance` job runs it against a `postgres:16-alpine` service container.** The wallet's balance
+reads the arbiter `/notes` (architecture-review #17); the key-only
 trial-decrypt primitive remains as the §11-7 recovery property, not a balance path.
 
 Status legend: [ ] pending · [~] in-progress · [x] done · [!] blocked. Toolchain: [toolchain.md](../docs/toolchain.md).

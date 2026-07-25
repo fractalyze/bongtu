@@ -69,8 +69,9 @@ cd apps/indexer && npm test
 # deploy the full B=256 stack to a local node (or GIWA via env — see deploy/README.md)
 bash deploy/deploy_local.sh
 
-# run the indexer against the live GIWA pool (read-only)
-cd apps/indexer && RPC=https://sepolia-rpc.giwa.io npm start
+# run the indexer against the live GIWA pool (read-only; Postgres required —
+# DATABASE_URL is mandatory, or use `docker compose up --build` for the full stack)
+cd apps/indexer && DATABASE_URL=postgres://… RPC=https://sepolia-rpc.giwa.io npm start
 
 # GPU prover service (employer GPU box; eager-boots the disburse256 zkey ~2.5min)
 bash prover/setup.sh                  # once: python 3.11 venv + rabbitsnark bridge

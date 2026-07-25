@@ -27,7 +27,15 @@
 //      subtreeRoot) and its batch stays unopened.
 //
 // Anvil is started + trap-killed by run.sh; this file only talks to E2E_RPC.
+//
+// Postgres-only (U-I4): the indexer has no in-memory backend, so this gate runs
+// against REAL Postgres. run.sh provides TEST_DATABASE_URL (an admin connection
+// string — CI's postgres service container, or a throwaway docker container
+// locally); this file drops + recreates one fresh database per indexer instance
+// (public / arbiter) so runs are hermetic and the two instances never share a
+// cursor.
 
+import { Pool } from "pg";
 import { poseidon2, poseidonN } from "@bongtu/core/poseidon";
 import { ecdhSharedSecret, poseidonDecrypt } from "@bongtu/core/note";
 import { packPubkey } from "@bongtu/core/pubkey";
@@ -46,6 +54,29 @@ function ok(cond: unknown, msg: string): void {
 }
 function step(t: string): void {
   console.log(`\n=== ${t} ===`);
+}
+
+// Admin Postgres URL (run.sh guarantees it, spinning a throwaway container when
+// the caller did not export one). A missing URL is a hard FAIL here — the skip
+// decision (docker genuinely unavailable) lives in run.sh, loudly.
+const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
+if (!TEST_DATABASE_URL) {
+  console.error("FATAL: TEST_DATABASE_URL is not set — the conformance gate is Postgres-backed (run via test/run.sh, which provisions a throwaway postgres, or export TEST_DATABASE_URL yourself).");
+  process.exit(1);
+}
+
+/** Drop + recreate `name` on the admin connection; return its connection URL. */
+async function freshDatabase(name: string): Promise<string> {
+  const admin = new Pool({ connectionString: TEST_DATABASE_URL });
+  try {
+    await admin.query(`DROP DATABASE IF EXISTS ${name}`);
+    await admin.query(`CREATE DATABASE ${name}`);
+  } finally {
+    await admin.end();
+  }
+  const u = new URL(TEST_DATABASE_URL!);
+  u.pathname = `/${name}`;
+  return u.toString();
 }
 
 function foldToRoot(leaf: bigint, siblings: bigint[], pathIndices: number[]): bigint {
@@ -85,7 +116,13 @@ async function runArbiter(sc: any): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const noteAt = (list: any[], leafIndex: number) => list.find((n) => n.leafIndex === leafIndex);
 
-  const aix = new Indexer({ rpc: sc.rpc, pool: sc.poolAddr, startBlock: 0, authorityKey: BigInt(sc.arbiterPrivateKey) });
+  const aix = new Indexer({
+    rpc: sc.rpc,
+    pool: sc.poolAddr,
+    startBlock: 0,
+    authorityKey: BigInt(sc.arbiterPrivateKey),
+    databaseUrl: await freshDatabase("bongtu_conf_arbiter"),
+  });
   ok(aix.arbiterMode === true, "second indexer is in ARBITER mode (AUTHORITY key set)");
 
   step("ARBITER phase 1: ingest deposit + honest disburse ONLY (up to the pre-transfer block)");
@@ -234,8 +271,8 @@ async function main(): Promise<void> {
   const sc = await runScenario();
   console.log(`   pool=${sc.poolAddr} headRoot=${sc.headRoot} nextLeafIndex=${sc.nextLeafIndex}`);
 
-  step("INGEST: replay pool events from genesis into the SDK ImtTree mirror");
-  const ix = new Indexer({ rpc: sc.rpc, pool: sc.poolAddr, startBlock: 0 });
+  step("INGEST: replay pool events from genesis into the SDK ImtTree mirror (postgres-backed)");
+  const ix = new Indexer({ rpc: sc.rpc, pool: sc.poolAddr, startBlock: 0, databaseUrl: await freshDatabase("bongtu_conf_public") });
   await ix.ingest(); // throws internally if any per-insert root diverges
 
   // (1) mirror == contract at head

@@ -45,11 +45,23 @@ export interface ChainConfig {
   // and can fold within-batch merkle paths. Undefined/null => PUBLIC MODE (no
   // /notes, batch /path 422s). NEVER logged or returned over HTTP.
   authorityKey?: bigint | null;
-  // Postgres connection string (env DATABASE_URL). Set => the indexer persists its
-  // derived state (events / nullifiers / leaves / notes / history + a block cursor)
-  // to Postgres and boot-RESUMES from the cursor. Undefined => IN-MEMORY (default,
-  // unchanged behavior): state is re-derived from chain on every start.
+  // Postgres connection string (env DATABASE_URL) — REQUIRED at runtime (U-I4
+  // Postgres-only): the indexer persists its derived state (events / nullifiers /
+  // leaves / notes / history + a block cursor) to Postgres and boot-RESUMES from
+  // the cursor. index.ts refuses to boot without it (databaseUrlError below);
+  // Indexer.ingest throws on a missing url as the belt. Optional in the TYPE only
+  // so unit tests can drive applyLogs-level logic without a database.
   databaseUrl?: string | null;
+}
+
+/**
+ * The boot-refusal check (U-I4 Postgres-only, no silent in-memory fallback):
+ * returns the one-line error to print when DATABASE_URL is unset, else null.
+ * Factored out of index.ts so the unit suite can pin the refusal without spawning.
+ */
+export function databaseUrlError(env: Record<string, string | undefined> = process.env): string | null {
+  if (env.DATABASE_URL) return null;
+  return "FATAL: DATABASE_URL is not set — the indexer is Postgres-only. Point DATABASE_URL at a Postgres instance, or run the bundled stack: docker compose up --build (postgres + indexer; see docker-compose.yml and .env.compose.example).";
 }
 
 /** Parse a bjj scalar from decimal ("123…") or hex ("0x…") — BigInt() accepts both. */
@@ -69,7 +81,7 @@ export function resolveConfig(): ChainConfig {
   if (!pool) throw new Error("no pool address (set POOL env or deploy/addresses.<chainId>.json)");
   // Arbiter mode is gated purely on AUTHORITY_KEY presence (the arbiter private key).
   const authorityKey = process.env.AUTHORITY_KEY ? parseScalar(process.env.AUTHORITY_KEY) : null;
-  // Postgres backend is gated purely on DATABASE_URL presence.
+  // Required at runtime (index.ts fail-fasts via databaseUrlError before this).
   const databaseUrl = process.env.DATABASE_URL || null;
   return { rpc, pool, startBlock, authorityKey, databaseUrl };
 }

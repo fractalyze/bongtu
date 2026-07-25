@@ -25,7 +25,7 @@ import { MirrorTree } from "./tree.js";
 import { ethers, poolAbi, type ChainConfig } from "./chain.js";
 import { InMemoryStore, type StorePort, type Slice } from "./store.js";
 import { verifyDisclosure } from "./disclosure.js";
-import { InMemoryLedger, type LedgerPort } from "./ledger.js";
+import { connect, PostgresStore, PostgresLedger } from "./postgres.js";
 
 const H = 32; // IMT height — a system-wide constant (SPEC §4)
 
@@ -54,10 +54,13 @@ export class Indexer {
   readonly provider: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly pool: any;
-  // The store/ledger backend is picked at first ingest by DATABASE_URL presence:
-  // the default in-memory adapters (unchanged behavior), or the Postgres adapters
-  // (persist + boot-resume) swapped in by bootPostgres. Not `readonly` — bootPostgres
-  // replaces it in place, and the API reads `ix.store` live per request.
+  // The runtime store is ALWAYS PostgresStore (Postgres-only, U-I4), swapped in
+  // by bootPostgres at first ingest. The InMemoryStore default is the pre-boot
+  // placeholder (so /health can answer before the first ingest completes) and the
+  // pure applyLogs-level double the anvil-free unit test drives — it is the same
+  // read-model class PostgresStore itself wraps, never a selectable backend.
+  // Not `readonly` — bootPostgres replaces it in place, and the API reads
+  // `ix.store` live per request.
   store: StorePort = new InMemoryStore();
   tree!: MirrorTree;
   batchSize = 0;
@@ -67,9 +70,9 @@ export class Indexer {
   // is NEVER read back out for logging or HTTP.
   readonly arbiterPriv: bigint | null;
   readonly arbiterMode: boolean;
-  ledger: LedgerPort | null = null;
-  // The shared Postgres pool (set by bootPostgres; null in the in-memory default).
-  // BOTH adapters were built on this ONE pool, so `persist` can acquire a single
+  ledger: PostgresLedger | null = null;
+  // The shared Postgres pool (set by bootPostgres; null only before first ingest).
+  // Store and ledger are built on this ONE pool, so `persist` can acquire a single
   // client and commit the store rows, ledger rows, and cursor in ONE transaction.
   private pgPool: Pool | null = null;
 
@@ -173,16 +176,17 @@ export class Indexer {
    */
   async ingest(fromBlock = this.cfg.startBlock, toBlock?: number): Promise<void> {
     if (!this.tree) {
+      // Postgres-only (U-I4): there is no other backend. index.ts fail-fasts on a
+      // missing DATABASE_URL before ever constructing an Indexer; this throw is
+      // the belt for programmatic callers (tests must pass a databaseUrl).
+      if (!this.cfg.databaseUrl) {
+        throw new Error("Indexer.ingest: cfg.databaseUrl is required — the indexer is Postgres-only (no in-memory backend)");
+      }
       this.batchSize = Number(bn(await this.pool.B()));
       this.tree = new MirrorTree(H, this.batchSize);
-      if (this.cfg.databaseUrl) {
-        // bootPostgres returns a fromBlock bumped past the persisted cursor so the
-        // reconstructed state is not re-ingested (the whole point of resume).
-        fromBlock = await this.bootPostgres(fromBlock);
-      } else if (this.arbiterPriv !== null) {
-        // Built once (the arbiter key never leaves the ledger), reused across tails.
-        this.ledger = new InMemoryLedger(this.arbiterPriv, this.batchSize, this.tree);
-      }
+      // bootPostgres returns a fromBlock bumped past the persisted cursor so the
+      // reconstructed state is not re-ingested (the whole point of resume).
+      fromBlock = await this.bootPostgres(fromBlock);
     }
     // `toBlock` bounds the replay (used for phased ingest / conformance); default
     // is the live head. The head invariant below is asserted at exactly this block.
@@ -223,19 +227,14 @@ export class Indexer {
    * frontier disagree with the on-chain state at the cursor. Buffers are cleared
    * and the in-memory cursor advanced ONLY after COMMIT, so a rolled-back batch is
    * retried verbatim by the next poll (applyLogs + every module are replay-idempotent).
-   *
-   * In-memory backend (no pool): nothing is durable, so just advance the cursor.
    */
   private async persist(head: number): Promise<void> {
-    if (!this.pgPool) {
-      this.store.lastBlock = head;
-      return;
-    }
-    const client = await this.pgPool.connect();
+    // ingest() always runs bootPostgres before its first persist, so the pool is set.
+    const client = await this.pgPool!.connect();
     try {
       await client.query("BEGIN");
       await this.store.flushInto!(client);
-      await this.ledger?.flushInto?.(client);
+      await this.ledger?.flushInto(client);
       await this.store.persistCursorInto!(client, head);
       // TEST-ONLY fault injection: crash at the pre-COMMIT point (every row + the
       // cursor staged but not yet durable) so the atomicity window is exercised
@@ -258,11 +257,11 @@ export class Indexer {
     // A COMMIT failure skips this (both untouched), so pollOnce re-ingests the same
     // range from the unadvanced cursor and re-persists.
     this.store.commitFlush?.();
-    this.ledger?.commitFlush?.();
+    this.ledger?.commitFlush();
     this.store.lastBlock = head;
   }
 
-  /** Release the Postgres pool on a graceful shutdown (no-op in the in-memory path). */
+  /** Release the Postgres pool on a graceful shutdown (no-op before first ingest). */
   async close(): Promise<void> {
     if (this.pgPool) {
       await this.pgPool.end();
@@ -271,21 +270,19 @@ export class Indexer {
   }
 
   /**
-   * Swap in the Postgres adapters and reconstruct state from SQL so a restart
+   * Build the Postgres store/ledger and reconstruct state from SQL so a restart
    * RESUMES from the persisted cursor instead of replaying the chain. Returns the
    * effective start block: cursor+1 when a cursor exists (skip what is already
-   * reconstructed), else the requested `fromBlock`. `./postgres` is imported
-   * dynamically, so the in-memory default path never loads `pg`.
+   * reconstructed), else the requested `fromBlock`.
    */
   private async bootPostgres(fromBlock: number): Promise<number> {
-    const pg = await import("./postgres.js");
-    const pool = await pg.connect(this.cfg.databaseUrl!);
-    this.pgPool = pool; // the ONE pool both adapters + `persist` share
-    const store = new pg.PostgresStore(pool);
+    const pool = await connect(this.cfg.databaseUrl!);
+    this.pgPool = pool; // the ONE pool store + ledger + `persist` share
+    const store = new PostgresStore(pool);
     await store.boot(this.tree);
     this.store = store;
     if (this.arbiterPriv !== null) {
-      const ledger = new pg.PostgresLedger(pool, this.arbiterPriv, this.batchSize, this.tree);
+      const ledger = new PostgresLedger(pool, this.arbiterPriv, this.batchSize, this.tree);
       await ledger.boot();
       this.ledger = ledger;
     }
@@ -345,7 +342,7 @@ export class Indexer {
    * Apply an ordered, parsed log range to the in-memory state (mirror + feed +
    * nullifier set + arbiter ledger). Pure of provider I/O — the anvil-free unit
    * test drives this directly with synthetic sequences. Replay-idempotent: every
-   * stateful module it feeds (MirrorTree, Store, NoteLedger) guards its own
+   * stateful module it feeds (MirrorTree, store, ledger) guards its own
    * replay invariant, so the same range can arrive twice and must converge.
    */
   applyLogs(logs: ParsedLog[]): void {

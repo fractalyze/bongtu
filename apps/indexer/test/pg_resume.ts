@@ -11,7 +11,9 @@
 // cursor commit together). This test proves the wedge is now UNREACHABLE by
 // construction, driving the exact atomic boundary deterministically (no racy kill):
 //
-//   ref     : a clean in-memory ingest of the whole scenario = the source of truth.
+//   ref     : a clean one-shot ingest of the whole scenario into its OWN scratch
+//             database (REF_DATABASE_URL; the indexer is Postgres-only) = the
+//             source of truth.
 //   phase 1 : ingest only blocks [0..A] into Postgres, atomic persist → cursor=A.
 //   phase 2 : resume from A+1 but CRASH right before COMMIT (fault injected via
 //             BONGTU_CRASH_BEFORE_COMMIT). Assert the txn ROLLED BACK ATOMICALLY:
@@ -23,7 +25,8 @@
 //             must resume A+1..head, and must converge byte-identically to `ref`.
 //   phase 3.5: re-ingest an already-persisted range — idempotent, no double-count.
 //
-//   node --import tsx test/pg_resume.ts <fixtures.json>   (env: DATABASE_URL, RPC)
+//   node --import tsx test/pg_resume.ts <fixtures.json>
+//   (env: DATABASE_URL = crash-test db, REF_DATABASE_URL = reference scratch db, RPC)
 
 import { readFileSync } from "node:fs";
 import { Pool } from "pg";
@@ -32,8 +35,10 @@ import type { ChainConfig } from "../src/chain.js";
 
 const fixturesPath = process.argv[2];
 const databaseUrl = process.env.DATABASE_URL;
+const refDatabaseUrl = process.env.REF_DATABASE_URL;
 if (!fixturesPath) throw new Error("usage: pg_resume.ts <fixtures.json>");
 if (!databaseUrl) throw new Error("pg_resume.ts requires DATABASE_URL (the crash-test database)");
+if (!refDatabaseUrl) throw new Error("pg_resume.ts requires REF_DATABASE_URL (the clean-reference scratch database)");
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const sc: any = JSON.parse(readFileSync(fixturesPath, "utf8"));
 
@@ -90,12 +95,14 @@ async function main(): Promise<void> {
   const A = Number(sc.blockAfterHonestDisburse); // intermediate block: deposit + honest disburse
   const q = new Pool({ connectionString: databaseUrl });
 
-  // ---- reference: a clean in-memory ingest of the WHOLE scenario ----
-  console.log("== reference: clean in-memory ingest (source of truth) ==");
-  const ixRef = new Indexer(baseCfg); // no databaseUrl → in-memory adapters
+  // ---- reference: a clean one-shot ingest of the WHOLE scenario into its own
+  // scratch database (never the crash-test db — the fault run must not see it) ----
+  console.log("== reference: clean one-shot ingest into the scratch db (source of truth) ==");
+  const ixRef = new Indexer({ ...baseCfg, databaseUrl: refDatabaseUrl });
   await ixRef.ingest();
   const ref = fingerprint(ixRef);
   const headNum = Number(await ixRef.provider.getBlockNumber());
+  await ixRef.close();
   ok(ref.root === sc.headRoot, `reference mirror root == scenario head root (head block ${headNum}, A=${A})`);
   ok(A > 0 && A < headNum, `intermediate block A=${A} is strictly inside (0, ${headNum}]`);
 

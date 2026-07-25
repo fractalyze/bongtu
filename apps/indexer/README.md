@@ -57,37 +57,38 @@ available even when the RPC is not. For every `disburse` it also recomputes the
 Poseidon chain over the emitted ciphertext and compares it to the on-chain
 `disclosureHash` (`src/disclosure.ts`) — any failure surfaces on `/alarms`.
 
-## Storage backends
+## Storage (Postgres-only)
 
-The store (`Store`/`StorePort`) and the arbiter note ledger (`NoteLedger`/`LedgerPort`)
-are interfaces with **two adapters**, picked at first ingest by `DATABASE_URL`:
+The indexer has **one** storage backend: Postgres (`PostgresStore` / `PostgresLedger`,
+`src/postgres.ts`). `DATABASE_URL` is **mandatory** — the service refuses to boot
+without it (one-line error, nonzero exit; no in-memory fallback). The derived state
+(the event feed, nullifier set, the tree leaves, the arbiter notes/history/alarms) is
+persisted to Postgres, and a single-row **block cursor** lets a restart **RESUME**
+ingest from the cursor instead of replaying the whole chain. Each poll batch's rows AND
+the cursor advance in **one transaction** (`Indexer.persist`), so a crash can never
+leave the `leaves` table ahead of the cursor — the state a restart reconstructs is
+always mutually consistent (proved by `test/pg_resume.ts`). Leaf writes are a **delta**
+(only leaves recorded since the last flush), not a full re-snapshot. The `MirrorTree`
+is not stored as nodes — it is boot-**reconstructed** from the `leaves` table (`O(n)`);
+the note ledger is rehydrated from the `notes`/`history` tables. Reads are served from
+an in-process read model (so the API stays synchronous), with Postgres as the durable
+cache; `InMemoryStore` (`src/store.ts`) is that read-model component inside
+`PostgresStore`, not a selectable backend.
 
-- **In-memory** (default, `DATABASE_URL` unset): the original behaviour — everything is
-  re-derived from chain on every start. This is what all the unit + conformance gates
-  and hosted CI run, and it is unchanged.
-- **Postgres** (`DATABASE_URL` set): the derived state (the event feed, nullifier set,
-  the tree leaves, the arbiter notes/history/alarms) is persisted to Postgres, and a
-  single-row **block cursor** lets a restart **RESUME** ingest from the cursor instead
-  of replaying the whole chain. Each poll batch's rows AND the cursor advance in **one
-  transaction** (`Indexer.persist`), so a crash can never leave the `leaves` table ahead
-  of the cursor — the state a restart reconstructs is always mutually consistent (proved
-  by `test/pg_resume.ts`). Leaf writes are a **delta** (only leaves recorded since the
-  last flush), not a full re-snapshot. The `MirrorTree` is not stored as nodes — it is
-  boot-**reconstructed** from the `leaves` table (`O(n)`); the note ledger is rehydrated
-  from the `notes`/`history` tables. Reads are served from the same in-memory read model
-  both adapters keep (so the API stays synchronous), with Postgres as the durable cache.
-
-The decrypt/derive step (envelope → notes/spent-marks/alarms/history) is ONE shared pure
-function (`deriveOp` in `ledger.ts`) both ledger adapters call — the crypto is never
-duplicated; only where rows are recorded/read differs. Schema: [`src/schema.sql`](src/schema.sql)
+The decrypt/derive step (envelope → notes/spent-marks/alarms/history) is ONE pure
+function (`deriveOp` in `ledger.ts`) that `PostgresLedger` calls once per op — crypto
+and recording never mix. Schema: [`src/schema.sql`](src/schema.sql)
 (idempotent `CREATE TABLE IF NOT EXISTS`, applied on every boot).
 
 ## Run
 
+**Postgres is required** (`DATABASE_URL`); the recommended way to run is the compose
+stack below (`docker compose up --build`), which provides it. To run the process
+directly, point `DATABASE_URL` at any reachable Postgres:
+
 ```sh
-npm start                                          # defaults: local anvil RPC, port 8600
-RPC=https://sepolia-rpc.giwa.io npm start          # against the live GIWA pool (read-only)
-DATABASE_URL=postgres://… npm start                # persist + resume (Postgres backend)
+DATABASE_URL=postgres://… npm start                        # defaults: local anvil RPC, port 8600
+DATABASE_URL=postgres://… RPC=https://sepolia-rpc.giwa.io npm start   # live GIWA pool (read-only)
 ```
 
 Env knobs (`src/index.ts`):
@@ -101,7 +102,8 @@ Env knobs (`src/index.ts`):
 | `PORT` | `8600` | HTTP port |
 | `POLL_MS` | `5000` | incremental re-ingest interval (`0` = off) |
 | `AUTHORITY_KEY` | unset | arbiter bjj private key → arbiter mode |
-| `DATABASE_URL` | unset | Postgres connection string → the **Postgres backend** (persist + boot-resume). Unset = **in-memory** (default, unchanged) |
+| `DATABASE_URL` | **required** | Postgres connection string (persist + boot-resume). Unset → the service refuses to boot |
+| `LOG_CHUNK` | `50000` | getLogs chunk size in blocks — the one read-side tuning knob (auto-bisects on RPC range caps; `10000` suits rate-capped public RPC tail scanning) |
 
 Workspace install and shared tooling: root [`README.md`](../../README.md). Loading the
 pool ABI and ethers goes through the external-`node_modules` seam (`BONGTU_NODE_MODULES`,
@@ -144,10 +146,10 @@ job); `docker compose up` and the pg integration test below stay LOCAL gates.
 ## Testing
 
 ```sh
-npm run test:unit    # anvil-free units: tree + disclosure + ingest (fast inner loop)
+npm run test:unit    # anvil-free units: tree + disclosure + ingest + config (fast inner loop)
 npm run typecheck    # tsc --noEmit
-npm test             # the full conformance gate (bash test/run.sh) — heavy, IN-MEMORY
-npm run test:pg      # the Postgres two-adapter gate (bash test/pg_integration.sh) — LOCAL, docker
+npm test             # the full conformance gate (bash test/run.sh) — heavy, POSTGRES-backed
+npm run test:pg      # the Postgres resume/crash gate (bash test/pg_integration.sh) — LOCAL, docker
 ```
 
 `test:pg` is a **local** gate (not wired into hosted CI): it spins a throwaway
@@ -164,10 +166,14 @@ The conformance gate starts its own anvil on port **8552** (override
 `INDEXER_E2E_PORT` if that port is taken), deploys a fresh B=16 pool, drives the full
 scenario (deposit → disburse → transfer → withdraw → tampered disburses), and asserts
 mirror==contract at every step, path folding, trial-decrypt, the alarm classes, and
-the arbiter-mode ledger + `/notes` + within-batch `/path`. It needs the CPU proving
-artifacts under `circuits/out/` (`cd circuits && bash prove_all.sh` first) and runs as
-the `indexer-conformance` job in CI — treat it as a final gate, not a per-iteration
-loop (repo `CLAUDE.md` "Heavy gates").
+the arbiter-mode ledger + `/notes` + within-batch `/path`. Being Postgres-only, it
+ingests into **real Postgres**: `run.sh` honors an exported `TEST_DATABASE_URL`
+(admin connection string; CI provides a postgres **service container**) and otherwise
+spins a throwaway `postgres:16-alpine` docker container (trap-removed). If neither is
+possible it SKIPs with a loud banner — never a silent pass. It also needs the CPU
+proving artifacts under `circuits/out/` (`cd circuits && bash prove_all.sh` first) and
+runs as the `indexer-conformance` job in CI — treat it as a final gate, not a
+per-iteration loop (repo `CLAUDE.md` "Heavy gates").
 
 ## Layout
 
@@ -177,10 +183,10 @@ src/
   chain.ts        config resolution + RPC/ABI plumbing
   ingest.ts       Indexer: event ingest, correlation, poll/retry state
   tree.ts         MirrorTree: ImtTree mirror + per-leaf records + batch subtrees + path builder + snapshot/rebuild (resume)
-  store.ts        StorePort + InMemoryStore: ingested events / alarms / nullifiers / cursor
+  store.ts        StorePort + InMemoryStore (PostgresStore's sync read-model component): events / alarms / nullifiers / cursor
   disclosure.ts   disclosureHash verify + alarm classification (chain fold from @bongtu/core/envelope)
-  ledger.ts       LedgerPort + shared pure deriveOp (all crypto) + InMemoryLedger (arbiter note ledger + history)
-  postgres.ts     PostgresStore + PostgresLedger: persist derived state + boot-reconstruct + resume (raw pg, no ORM)
+  ledger.ts       pure deriveOp (all the ledger crypto) + record helpers + ledger types
+  postgres.ts     PostgresStore + PostgresLedger (the ONE runtime backend): persist derived state + boot-reconstruct + resume (raw pg, no ORM)
   schema.sql      idempotent Postgres schema (events / nullifiers / leaves / cursor / notes / history / alarms)
   api/            router + one file per route (see Endpoints above)
 test/             unit tests + the anvil conformance scenario (run.sh) + the Postgres integration gate (pg_integration.sh)

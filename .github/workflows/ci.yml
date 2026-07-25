@@ -45,7 +45,10 @@
 #   e2e-m0               restores circuits/out and runs deploy/e2e_m0.sh
 #                        (anvil deposit -> disburse16 -> transfer -> withdraw).
 #   indexer-conformance  restores circuits/out and runs the indexer anvil
-#                        scenario incl. arbiter mode.
+#                        scenario incl. arbiter mode, ingesting into a postgres
+#                        service container (the indexer is Postgres-only, U-I4;
+#                        TEST_DATABASE_URL makes run.sh use the service instead
+#                        of spinning docker itself).
 #
 # WALL-TIME BUDGET: a typical push (circuits unchanged, caches warm) targets
 # <= ~3 min wall — the circuits job is lookup-only and e2e-m0 / conformance run
@@ -392,6 +395,24 @@ jobs:
     needs: circuits
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # The indexer is Postgres-only (U-I4): the conformance gate ingests into a
+    # real Postgres. Hosted runners support service containers, so the test RUNS
+    # here (not skips) against this service. The password is a throwaway for the
+    # job-local container, not a secret.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: load toolchain pins

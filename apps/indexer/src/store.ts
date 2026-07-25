@@ -1,8 +1,9 @@
 // Storage for the indexer: the ordered event/ciphertext feed + the ingest cursor.
 //
-// In-memory only, re-derived from chain on every start. That is sufficient for
-// the PoC (SPEC §6b: the indexer is a convenience/availability layer, not
-// trust-critical for funds) and keeps chain the single source of truth.
+// InMemoryStore here is NOT a runtime backend (the indexer is Postgres-only,
+// U-I4): it is the synchronous read model PostgresStore (src/postgres.ts) wraps
+// — seq assignment, first-sight dedup, the feed/alarm/nullifier reads — and the
+// pure double the anvil-free unit test drives at the applyLogs level.
 //
 // Scope: the feed + alarm channel + block cursor ONLY. The tree state (leaf
 // values, batch subtree roots, the merkle-path builder) lives in `MirrorTree`
@@ -47,10 +48,10 @@ export interface FeedEntry {
 }
 
 /**
- * The read/write surface both store adapters expose (U-I2 two-adapter seam). The
- * in-memory adapter serves every method from process memory; the Postgres adapter
- * (src/postgres.ts) serves the same reads from a boot-hydrated read model and
- * additionally persists writes (the two optional hooks — a no-op here).
+ * The store surface the Indexer + API read. Two implementers remain by design:
+ * PostgresStore (src/postgres.ts) — the ONLY runtime store — and InMemoryStore,
+ * the read-model component PostgresStore wraps (also the unit-test double). The
+ * durable hooks are optional because only PostgresStore has them.
  */
 export interface StorePort {
   /** Highest fully-ingested block (exclusive cursor for incremental tails). */

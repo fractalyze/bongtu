@@ -178,8 +178,14 @@ echo "== crash-in-persist-window leg: atomic persist closes the resume wedge =="
 "$DOCKER" exec "$PG_NAME" psql -U postgres -q -c "DROP DATABASE IF EXISTS crashtest" >/dev/null 2>&1
 "$DOCKER" exec "$PG_NAME" psql -U postgres -q -c "CREATE DATABASE crashtest" >/dev/null 2>&1 \
   || fail "could not create the crashtest database"
+# The clean-reference run gets its OWN scratch db (the indexer is Postgres-only;
+# the reference must never share state with the fault-injected crashtest db).
+"$DOCKER" exec "$PG_NAME" psql -U postgres -q -c "DROP DATABASE IF EXISTS crashref" >/dev/null 2>&1
+"$DOCKER" exec "$PG_NAME" psql -U postgres -q -c "CREATE DATABASE crashref" >/dev/null 2>&1 \
+  || fail "could not create the crashref database"
 RESUME_LOG="$(mktemp)"
-DATABASE_URL="postgres://postgres:postgres@127.0.0.1:${PG_PORT}/crashtest" RPC="$E2E_RPC" \
+DATABASE_URL="postgres://postgres:postgres@127.0.0.1:${PG_PORT}/crashtest" \
+  REF_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:${PG_PORT}/crashref" RPC="$E2E_RPC" \
   "$NODE" --import tsx "$INDEXER/test/pg_resume.ts" "$FIXTURES" | tee "$RESUME_LOG"
 grep -q "PG RESUME GATE: PASS" "$RESUME_LOG" || { rm -f "$RESUME_LOG"; fail "crash-in-persist-window resume leg failed"; }
 rm -f "$RESUME_LOG"

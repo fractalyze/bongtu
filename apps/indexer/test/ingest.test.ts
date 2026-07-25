@@ -10,7 +10,7 @@
 //   - a replayed log range (must converge, not double feed/notes/nullifiers);
 //   - Disbursed with and without its DisburseCiphertexts log (withheld feed
 //     entry + alarm; the ledger only opens published batches);
-//   - NoteLedger's own (txHash, logIndex) replay dedup;
+//   - PostgresLedger's own (txHash, logIndex) replay dedup;
 //   - pollOnce failure/success state + the /health projection of it.
 //
 // Preconditions shared with src/chain.ts: ethers loadable from
@@ -23,8 +23,10 @@ import { deriveKeypair, commitment, poseidonEncrypt, ecdhSharedSecret } from "@b
 import type { Keypair } from "@bongtu/core/note";
 import { packPubkey } from "@bongtu/core/pubkey";
 import { ImtTree } from "@bongtu/core/imt";
+import type { Pool } from "pg";
 import { MirrorTree } from "../src/tree.js";
-import { NoteLedger, type OpEnvelope } from "../src/ledger.js";
+import { type OpEnvelope } from "../src/ledger.js";
+import { PostgresLedger } from "../src/postgres.js";
 import { Indexer, type ParsedLog } from "../src/ingest.js";
 import { disclosureChain } from "@bongtu/core/envelope";
 import { health } from "../src/api/routes/health.js";
@@ -193,11 +195,16 @@ function makeSim() {
   return { oracle, deposit, transfer, disburse };
 }
 
+// PostgresLedger is the ONLY ledger (Postgres-only, U-I4); its apply/notesOf/
+// historyOf read model never touches SQL (only boot()/flushInto() do, and this
+// anvil-free test calls neither), so a never-used dummy pool is safe here.
+const DUMMY_PG_POOL = null as unknown as Pool;
+
 function makeIndexer(arbiter: boolean): Indexer {
   const ix = new Indexer({ rpc: DUMMY_RPC, pool: DUMMY_POOL, startBlock: 0, authorityKey: arbiter ? ARB.formattedPrivateKey : null });
   ix.batchSize = B;
   ix.tree = new MirrorTree(H, B);
-  if (arbiter) ix.ledger = new NoteLedger(ARB.formattedPrivateKey, B, ix.tree);
+  if (arbiter) ix.ledger = new PostgresLedger(DUMMY_PG_POOL, ARB.formattedPrivateKey, B, ix.tree);
   return ix;
 }
 
@@ -309,7 +316,7 @@ async function main(): Promise<void> {
 
   step("LEDGER: apply() dedups on (txHash, logIndex) by itself");
   {
-    const led = new NoteLedger(ARB.formattedPrivateKey, B, new MirrorTree(H, B));
+    const led = new PostgresLedger(DUMMY_PG_POOL, ARB.formattedPrivateKey, B, new MirrorTree(H, B));
     const own = deriveKeypair(777777777777777777777777n);
     const [o0, o1] = [note(own, 42n, 4242n), note(own, 0n, 4243n)];
     const eph = 880000000000000000001n;

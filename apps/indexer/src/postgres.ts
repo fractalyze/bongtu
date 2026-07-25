@@ -1,20 +1,18 @@
-// Postgres adapters (U-I2) — the durable half of the two-adapter store/ledger seam.
+// Postgres store + ledger (U-I2, Postgres-only since U-I4) — the indexer's ONE
+// runtime storage backend.
 //
 // Design forced by the sync read surface: the API route handlers and the ingest
-// pipeline are synchronous (StorePort/LedgerPort reads return plain arrays, apply()
-// returns void), and the anvil-free unit suite drives them directly. So these
-// adapters keep the SAME in-memory read model the in-memory adapters use — served
-// synchronously — and add durability as a write-behind: apply()/addEvent() buffer
-// the derived rows, ingest flushes them to SQL, and boot() reconstructs the read
-// model + the MirrorTree frontier from SQL on restart. Reads are therefore never a
+// pipeline are synchronous (store/ledger reads return plain arrays, apply()
+// returns void), and the anvil-free unit suite drives them directly. So both
+// classes keep an in-memory read model — served synchronously — and add
+// durability as a write-behind: apply()/addEvent() buffer the derived rows,
+// ingest flushes them to SQL, and boot() reconstructs the read model + the
+// MirrorTree frontier from SQL on restart. Reads are therefore never a
 // per-request round-trip; Postgres is the crash-durable cache that lets a restart
 // RESUME from the block cursor instead of replaying the whole chain.
 //
-// The crypto is NOT here: PostgresLedger calls the shared pure `deriveOp` exactly
-// once per op (same as InMemoryLedger) and only differs in where it records/reads.
-//
-// The pool is created lazily by `connect` (this module is dynamically imported only
-// when DATABASE_URL is set), so the in-memory default path never loads `pg`.
+// The crypto is NOT here: PostgresLedger calls the shared pure `deriveOp`
+// (src/ledger.ts) exactly once per op — this module only records/reads.
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -33,7 +31,6 @@ import {
   type EnvelopeAlarm,
   type LedgerHistoryItem,
   type LedgerNote,
-  type LedgerPort,
   type OpEnvelope,
 } from "./ledger.js";
 
@@ -189,7 +186,7 @@ export class PostgresStore implements StorePort {
 // Ledger adapter: shared deriveOp + in-memory read model + write-behind + rebuild.
 // ---------------------------------------------------------------------------
 
-export class PostgresLedger implements LedgerPort {
+export class PostgresLedger {
   private readonly byOwner = new Map<string, LedgerNote[]>();
   private readonly byCommitment = new Map<string, LedgerNote>();
   private readonly historyByOwner = new Map<string, LedgerHistoryItem[]>();
@@ -210,6 +207,7 @@ export class PostgresLedger implements LedgerPort {
     private readonly tree: MirrorTree,
   ) {}
 
+  /** Ingest one op's envelope in chain order (idempotent on (txHash, logIndex)). */
   apply(op: OpEnvelope): void {
     const key = `${op.txHash}:${op.logIndex}`;
     if (this.applied.has(key)) return; // replayed op — already recorded
@@ -238,15 +236,18 @@ export class PostgresLedger implements LedgerPort {
     }
   }
 
+  /** Every note owned by (x,y) — the arbiter's authoritative view of that owner. */
   notesOf(ownerX: bigint, ownerY: bigint): LedgerNote[] {
     return this.byOwner.get(ownerKey(ownerX, ownerY)) ?? [];
   }
 
+  /** One owner's activity history, newest-first (seq desc). */
   historyOf(ownerX: bigint, ownerY: bigint): LedgerHistoryItem[] {
     const arr = this.historyByOwner.get(ownerKey(ownerX, ownerY)) ?? [];
     return [...arr].sort((a, b) => b.seq - a.seq);
   }
 
+  /** Envelope cross-check failures surfaced during ingest (auditor-console feed). */
   getEnvelopeAlarms(): EnvelopeAlarm[] {
     return this.alarms;
   }

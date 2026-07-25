@@ -26,25 +26,23 @@
 //     (GET /history): received / sent / withdraw / deposit items with the
 //     counterparty + amount that op meant for each owner.
 //
-// TWO-ADAPTER SEAM (U-I2). The decrypt/derive step — envelope → (output notes,
-// spent-marks, cross-check alarms, batch fill, history) — is ONE shared PURE
-// function `deriveOp`, holding ALL of the crypto (parseEnvelope, commitment fold,
-// subtree cross-check, history derivation). Only the RECORD/READ half differs per
-// backend: `InMemoryLedger` keeps byOwner/byCommitment/historyByOwner/applied maps
-// in process; `PostgresLedger` (src/postgres.ts) keeps the same maps as a boot-
-// hydrated read model AND persists each derived op to SQL. Both call `deriveOp`
-// exactly once per op — the crypto is never duplicated.
+// This module holds the PURE half of the ledger: the decrypt/derive step —
+// envelope → (output notes, spent-marks, cross-check alarms, batch fill,
+// history) — is ONE shared PURE function `deriveOp`, holding ALL of the crypto
+// (parseEnvelope, commitment fold, subtree cross-check, history derivation),
+// plus the small record/map helpers. The RECORD/READ half lives in
+// `PostgresLedger` (src/postgres.ts) — the ONLY runtime ledger (U-I4
+// Postgres-only): it keeps byOwner/byCommitment/historyByOwner/applied maps as
+// a boot-hydrated read model AND persists each derived op to SQL.
 //
-// The arbiter private key lives in the adapter object and is NEVER serialized into
+// The arbiter private key lives in the ledger object and is NEVER serialized into
 // any HTTP response or log line — only recovered note fields (which are exactly
 // what the auditor is entitled to see) ever leave here.
 
-import type { PoolClient } from "pg";
 import { commitment as noteCommitment } from "@bongtu/core/note";
 import { ImtTree } from "@bongtu/core/imt";
 import { packPubkey } from "@bongtu/core/pubkey";
 import type { Point } from "@bongtu/core/babyjub";
-import type { MirrorTree } from "./tree.js";
 import { parseEnvelope, type OpKind, type ParsedEnvelope } from "@bongtu/core/envelope";
 
 const dec = (x: bigint): string => x.toString();
@@ -110,23 +108,6 @@ export interface OpEnvelope {
   authorityCt: bigint[]; // authority envelope ciphertext (disburse: the tail only)
   outputLeaves: { leafIndex: number; commitment: bigint }[];
   batch?: { startLeafIndex: number; subtreeRoot: bigint }; // disburse only
-}
-
-/** The read/write surface both ledger adapters expose (U-I2 two-adapter seam). */
-export interface LedgerPort {
-  /** Ingest one op's envelope in chain order (idempotent on (txHash, logIndex)). */
-  apply(op: OpEnvelope): void;
-  /** Every note owned by (x,y) — the arbiter's authoritative view of that owner. */
-  notesOf(ownerX: bigint, ownerY: bigint): LedgerNote[];
-  /** One owner's activity history, newest-first (seq desc). */
-  historyOf(ownerX: bigint, ownerY: bigint): LedgerHistoryItem[];
-  /** Envelope cross-check failures surfaced during ingest (auditor-console feed). */
-  getEnvelopeAlarms(): EnvelopeAlarm[];
-  /** Stage the notes/history/alarms/applied-ops buffered by apply() into the
-   *  indexer's open txn (Postgres only; in-memory omits it, a no-op). */
-  flushInto?(client: PoolClient): Promise<void>;
-  /** Drop those buffers AFTER the indexer's COMMIT (Postgres only). */
-  commitFlush?(): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -284,9 +265,8 @@ function deriveHistory(op: OpEnvelope, env: ParsedEnvelope, disburseCrossChecks:
 }
 
 // ---------------------------------------------------------------------------
-// Shared RECORD helpers — the small map/console ops both adapters reuse (no
-// crypto). Kept as free functions so InMemoryLedger and PostgresLedger own their
-// OWN maps (the per-adapter difference) without re-implementing the bookkeeping.
+// RECORD helpers — the small map/console ops PostgresLedger's read model uses
+// (no crypto). Free functions so the recording side stays plain bookkeeping.
 // ---------------------------------------------------------------------------
 
 /** The byOwner / historyByOwner map key for an owner pubkey. */
@@ -343,69 +323,3 @@ export function logEnvelopeAlarm(a: EnvelopeAlarm): void {
   console.error(`ALARM envelope ${a.kind} tx=${a.txHash} ${a.detail} recomputed=${a.recomputed} expected=${a.expected}`);
 }
 
-// ---------------------------------------------------------------------------
-// In-memory adapter — the original ledger, re-derived from chain on every start.
-// ---------------------------------------------------------------------------
-
-export class InMemoryLedger implements LedgerPort {
-  private readonly arbiterPriv: bigint; // NEVER leaves this object
-  private readonly B: number;
-  private readonly tree: MirrorTree;
-  private readonly byOwner = new Map<string, LedgerNote[]>();
-  private readonly byCommitment = new Map<string, LedgerNote>();
-  private readonly alarms: EnvelopeAlarm[] = [];
-  private readonly historyByOwner = new Map<string, LedgerHistoryItem[]>();
-  private historySeq = 0;
-  // (txHash, logIndex) of every op already applied — the ledger guards its OWN
-  // replay invariant (the same self-guarding pattern as MirrorTree / Store), so a
-  // replayed log range cannot double-record notes or re-flip spent flags.
-  private readonly applied = new Set<string>();
-
-  constructor(arbiterPriv: bigint, B: number, tree: MirrorTree) {
-    this.arbiterPriv = arbiterPriv;
-    this.B = B;
-    this.tree = tree;
-  }
-
-  /**
-   * Ingest one op's envelope in chain order: verify + record outputs, mark inputs
-   * spent, and (disburse) fill the batch leaves so /path can serve into it.
-   * Replay-safe: idempotent on (txHash, logIndex).
-   */
-  apply(op: OpEnvelope): void {
-    const key = `${op.txHash}:${op.logIndex}`;
-    if (this.applied.has(key)) return; // replayed op — already recorded
-    this.applied.add(key);
-
-    const d = deriveOp(this.arbiterPriv, this.B, this.tree.H, op);
-    for (const o of d.outputs) recordNote(this.byOwner, this.byCommitment, o, op.txHash);
-    for (const a of d.alarms) {
-      this.alarms.push(a);
-      logEnvelopeAlarm(a);
-    }
-    if (d.batchFill) this.tree.fillBatch(d.batchFill.start, d.batchFill.leaves);
-    for (const c of d.spent) {
-      const note = this.byCommitment.get(dec(c));
-      if (note) note.spent = true;
-    }
-    for (const h of d.history) pushHistory(this.historyByOwner, h.owner, makeHistoryItem(h, op, this.historySeq++));
-  }
-
-  notesOf(ownerX: bigint, ownerY: bigint): LedgerNote[] {
-    return this.byOwner.get(ownerKey(ownerX, ownerY)) ?? [];
-  }
-
-  historyOf(ownerX: bigint, ownerY: bigint): LedgerHistoryItem[] {
-    const arr = this.historyByOwner.get(ownerKey(ownerX, ownerY)) ?? [];
-    return [...arr].sort((a, b) => b.seq - a.seq);
-  }
-
-  getEnvelopeAlarms(): EnvelopeAlarm[] {
-    return this.alarms;
-  }
-}
-
-// Back-compat alias: the anvil-free ingest unit test constructs `new NoteLedger(…)`
-// directly (an intentionally-untouched test), and the name still reads true — the
-// in-memory ledger IS the note ledger. Postgres mode uses PostgresLedger.
-export { InMemoryLedger as NoteLedger };
