@@ -1,0 +1,42 @@
+# Build context for apps/indexer/Dockerfile (context = repo root). The Dockerfile
+# COPYs only: root manifests + tsconfig, packages/sdk (pkg/tsconfig/src),
+# apps/indexer (pkg/tsconfig/src + abi/BongtuPool.abi.json), deploy/addresses.*.json.
+# Everything else is excluded to keep the context small and secret-free.
+
+# VCS
+.git
+.gitignore
+
+# installed deps — reinstalled inside the image from the lockfile
+node_modules
+**/node_modules
+
+# secrets — never copy an env file into a build layer
+.env
+.env.compose
+.env.*.local
+
+# heavy artifacts / build caches (none are needed: the pool ABI ships committed
+# under apps/indexer/abi, not from contracts/out)
+circuits
+contracts
+deploy/broadcast
+deploy/cache
+**/dist
+**/.cache
+**/out
+**/cache
+*.zkey
+*.wtns
+*.r1cs
+
+# app trees the indexer image does not use
+prover
+apps/admin-web
+apps/wallet-web
+
+# docs / misc
+docs
+*.md
+Dockerfile
+docker-compose.yml

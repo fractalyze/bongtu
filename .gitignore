@@ -7,3 +7,4 @@ cache/
 *_js/
 build/
 .env
+.env.compose

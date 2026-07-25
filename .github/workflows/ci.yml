@@ -8,6 +8,14 @@
 #                        ingest) in its own parallel job: it needs extdeps +
 #                        a forge build (pool ABI), which would fatten the node
 #                        job past the wall-time budget.
+#   indexer-image        BUILD-ONLY docker build of apps/indexer/Dockerfile (the
+#                        2-service compose image). A hosted runner CAN build the
+#                        image (node base + a trimmed npm ci + external ethers +
+#                        the committed pool ABI — no foundry, no GPU). It does NOT
+#                        run `docker compose up` or the pg integration test: those
+#                        need a live RPC + a deployed pool + CPU proofs and stay a
+#                        LOCAL gate (apps/indexer/test/pg_integration.sh). One
+#                        parallel `docker build` (~1-2 min), off the critical path.
 #   forge                contracts: forge test + deploy/deploy_local.sh (full
 #                        B=256 stack deploy + smoke deposit on a self-contained
 #                        anvil). forge-std is vendored under contracts/lib/ and
@@ -152,8 +160,38 @@ jobs:
       - name: forge build (pool ABI artifact)
         run: forge build
         working-directory: contracts
+      - name: committed indexer ABI matches the rebuilt pool (drift gate)
+        # apps/indexer/abi/BongtuPool.abi.json is the container's committed copy of
+        # the pool ABI (the Docker image ships it, since forge is not in the image
+        # build). Its ONLY runtime consumer is the image, which hosted CI never
+        # runs — so regenerate the slice from the fresh forge artifact here and diff.
+        # A non-empty diff means the pool's events/view fns changed without the
+        # committed ABI being refreshed (recipe: apps/indexer/abi/README.md).
+        run: |
+          node -e 'const fs=require("fs");const a=JSON.parse(fs.readFileSync("contracts/out/BongtuPool.sol/BongtuPool.json","utf8"));fs.writeFileSync("apps/indexer/abi/BongtuPool.abi.json",JSON.stringify({abi:a.abi},null,2)+"\n")'
+          git diff --exit-code apps/indexer/abi/BongtuPool.abi.json
       - name: indexer unit tests (tree + disclosure + ingest, anvil-free)
         run: npm run test:unit -w @bongtu/indexer
+
+  indexer-image:
+    # BUILD-ONLY: prove apps/indexer/Dockerfile builds on a clean hosted runner.
+    # `docker compose up` + the pg integration test (apps/indexer/test/
+    # pg_integration.sh) are LOCAL gates — they need a live RPC, a deployed pool,
+    # and CPU proofs, so they are deliberately NOT run here (see the header note).
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: load toolchain pins
+        # Pin the image's externally-loaded ethers to the single source of truth
+        # (ETHERS_VERSION), the same way every other job resolves extdeps.
+        run: grep -E '^[A-Z0-9_]+=' .github/ci-pins.env >> "$GITHUB_ENV"
+      - name: docker build (indexer image, build-only)
+        run: |
+          docker build \
+            -f apps/indexer/Dockerfile \
+            --build-arg ETHERS_VERSION="$ETHERS_VERSION" \
+            -t bongtu-indexer:ci .
 
   forge:
     runs-on: ubuntu-latest

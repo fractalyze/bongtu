@@ -107,6 +107,40 @@ Workspace install and shared tooling: root [`README.md`](../../README.md). Loadi
 pool ABI and ethers goes through the external-`node_modules` seam (`BONGTU_NODE_MODULES`,
 see [`CLAUDE.md`](../../CLAUDE.md)) and needs a `forge build` artifact for the pool ABI.
 
+## Docker / compose (U-I3)
+
+A 2-service stack — **postgres + indexer** — is defined at the repo root
+([`docker-compose.yml`](../../docker-compose.yml)); the prover (GPU) and the static web
+apps are deliberately out of scope.
+
+```sh
+docker compose up --build                     # postgres (named volume + healthcheck) then
+                                              # the indexer, RPC defaulting to a HOST anvil
+                                              # on :8545 via host.docker.internal
+cp .env.compose.example .env.compose          # edit RPC / POOL / AUTHORITY_KEY / START_BLOCK
+docker compose --env-file .env.compose up --build
+```
+
+Compose starts postgres first (gated on `pg_isready`), then the indexer, which sets
+`DATABASE_URL` at the postgres service, **applies `schema.sql` on boot** (idempotent), and
+ingests. The named `pgdata` volume persists across `up`/`down`, so a restart **RESUMES**
+from the block cursor. Knobs are interpolated from the shell / `--env-file` with sane
+defaults (`.env.compose.example`); leave `POOL` empty to fall back to the baked-in
+`deploy/addresses.<CHAIN_ID>.json` (91342 = the live GIWA pool). The indexer serves
+`GET /health` on **8600**, and the container's `HEALTHCHECK` reports healthy once
+`/health` returns `ok:true`. `AUTHORITY_KEY` flips the container to arbiter mode
+(institution-internal — see [`CLAUDE.md`](../../CLAUDE.md)).
+
+The image ([`apps/indexer/Dockerfile`](Dockerfile), context = repo root) is multi-stage:
+a builder trims the npm workspace to `packages/sdk` + `apps/indexer` (a lockfile-pinned
+`npm ci --workspace …`, no react/vite) and installs ethers into the
+`BONGTU_NODE_MODULES` seam; the slim non-root runtime copies the installed tree, the raw
+`.ts` source (run via `node --import tsx`), the addresses file, and the **committed pool
+ABI** ([`abi/BongtuPool.abi.json`](abi/README.md)) placed at
+`contracts/out/BongtuPool.sol/BongtuPool.json` so the image is self-contained (no foundry
+in the build) and reproducible. CI builds this image **build-only** (`indexer-image`
+job); `docker compose up` and the pg integration test below stay LOCAL gates.
+
 ## Testing
 
 ```sh
@@ -122,7 +156,9 @@ scenario against a fresh anvil, ingests it with a `DATABASE_URL` + arbiter index
 asserts `/head` `/notes` `/history`, then **kills and restarts** the indexer against the
 same postgres and asserts it **resumed from the block cursor** (logs `resume from block
 N`, N>0 — not a block-0 replay) serving byte-identical state. Requires docker + the CPU
-proving artifacts under `circuits/out/`. The containerised CI path is U-I3.
+proving artifacts under `circuits/out/`. It is the **local correctness gate** for the
+containerised stack; hosted CI only build-tests the image (`indexer-image` job, above),
+never `docker compose up` — see the Docker / compose section.
 
 The conformance gate starts its own anvil on port **8552** (override
 `INDEXER_E2E_PORT` if that port is taken), deploys a fresh B=16 pool, drives the full
