@@ -11,6 +11,11 @@ are reusable — **no fresh 150s groth16 setup needed.** GPU proving via rabbits
 warm ~0.5s per the old PoC. **GPU hygiene (memory rule): CUDA_VISIBLE_DEVICES=0, NEVER nsys/command-buffers
 (leaked 30GB/1h41m once), foreground, track+kill any prover PID.**
 
+> **Later note (2026-07-24, post-M1):** the security overhaul added the §5.2 zero-commitment belt to the
+> disburse base, changing its r1cs — the zkey byte-reuse above held for M1 but was then retired (zkey
+> regenerated), and the v1 pool `0x22a2F38a…` below was superseded by the v2 UUPS-proxy pool. Current
+> addresses + the v2 run: [spec.md](spec.md) §9; rationale: [zeto-derivation.md](zeto-derivation.md).
+
 ## Done condition (tick at each unit boundary)
 
 1. **256 disburse proves on GPU + verifies on-chain + gas under cap.** disburse256 circuit (Zeto(1,256,32));
@@ -51,6 +56,7 @@ warm ~0.5s per the old PoC. **GPU hygiene (memory rule): CUDA_VISIBLE_DEVICES=0,
       for script fs-access). Env-parameterized (DEPLOYER_KEY/RPC/BATCH_SIZE/ARBITER_KEY/TOKEN_ADDRESS) →
       **GIWA Sepolia = same two scripts + GIWA RPC + funded key + Blockscout --verify** (deploy/README.md).
       Review fixes applied: GIWA cmds use --skip-simulation (Poseidon via assembly create), TOKEN_ADDRESS env
-      hook, broadcast/cache gitignored. **GIWA deploy deferred pending a funded key from the user.**
+      hook, broadcast/cache gitignored. **GIWA deploy: DONE 2026-07-24 once the funded key arrived (see
+      Done#2 above).**
 
 Status legend: [ ] pending · [~] in-progress · [x] done · [!] blocked. Toolchain: [toolchain.md](toolchain.md). M0: [milestone-m0.md](milestone-m0.md).

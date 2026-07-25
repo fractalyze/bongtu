@@ -17,7 +17,8 @@ src/
                        Deposit, Transfer, Withdraw, Disburse (1x16 dev), Disburse256 (prod)
                        (byte-identical otherwise to the committed circuits/verifiers/*.sol)
   interfaces/          IPoseidon2, IVerifiers
-  utils/               vendored IERC20 / SafeERC20 / Ownable2Step(Upgradeable) / proxy (ERC-1967, UUPS)
+  utils/               vendored IERC20 / SafeERC20 / Ownable2Step(Upgradeable) / proxy (ERC-1967, UUPS —
+                       provenance + faithfulness notes in src/utils/proxy/README.md)
 test/
   Base.sol             shared harness (Poseidon deploy from fixture bytecode, pool wiring)
   Poseidon.t.sol       Poseidon-v1 parity gate (circomlibjs bytecode == reference hash)

@@ -26,11 +26,15 @@ Read `README.md` once at session start; for anything deeper, follow its
 - **Indexer modes**: the indexer runs *public* (no key) by default; setting `AUTHORITY_KEY`
   (the arbiter bjj private key) flips it to *arbiter mode* — it then decrypts every op's
   authority envelope, serves `GET /notes?owner=` and within-batch `/path`, and must be treated
-  as institution-internal (unauthenticated `/notes` exposes every owner until the deferred
-  bjj-sig auth lands). Never log or return the key.
-- **GIWA redeploy arbiter key**: deploy with `ARBITER_KEY_X/Y` matching the smoke proof's key
-  (the committed deposit proof is bound to the realproofs authority key, not the disburse256
-  default) or the smoke deposit reverts `InvalidProof`.
+  as institution-internal (`/notes` requires the bjj EdDSA read-auth, but the arbiter instance
+  still holds every owner's decrypted notes). Never log or return the key.
+- **Arbiter key at deploy**: every committed proof fixture is bound to ONE arbiter key
+  (`realproofs.arbiterKey` == disburse256 `public[8..9]` — the `Deploy.s.sol` default). Only
+  override `ARBITER_KEY_X/Y` alongside freshly re-proven fixtures, or the smoke deposit
+  reverts `InvalidProof`.
+- **Local-pass ≠ CI-pass**: hosted runners lack the dev-box defaults (the `BONGTU_NODE_MODULES`
+  fallback path, prebuilt `circuits/out` / `contracts/out`, fast spawns). Check any new CI-run
+  test against a clean env before pushing — see `docs/ci.md`.
 - **GPU regen recipe** (disburse-256, after a circuit change): compile → `groth16 setup` (CPU,
   ~2.5min, 1.24GB zkey) → export verifier/vkey → witness → `rabbitsnark circom prove` on GPU0
   (cold zkey-compile ~120s + warm proof ~0.47s). Runner: `jolt-zorch/.venv/bin/python -m

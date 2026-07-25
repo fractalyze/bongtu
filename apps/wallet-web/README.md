@@ -109,7 +109,7 @@ npm run build      # vite production build (snarkjs splits into its own dynamic 
 MetaMask and the live circuit assets are not present in the build env, so the
 **connect → sign → prove → submit** I/O edge (`metamask.ts`, `prove.ts`) is wired but
 not exercised here. The **pure, security-critical logic IS covered** headless
-(`test/wallet.test.ts`, 11 tests): (1) a fixed signature hex derives a stable, pinned
+(`test/wallet.test.ts`, 18 tests): (1) a fixed signature hex derives a stable, pinned
 bjj keypair; a different signature a different key; (2) mock notes (some spent) sum to
 the right unspent balance, and the `/events` trial-decrypt discovers exactly the
 wallet's notes (rejecting a stranger's envelope) with correct spent flags; (3) transfer

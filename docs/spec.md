@@ -290,10 +290,14 @@ public app depends on it for UX. Contract:
   disburse-batch interior leaf → **422** in public mode (siblings not chain-recoverable, §11-7), served in
   arbiter mode (below).
 - `GET /head` → current root + `nextLeafIndex` (from the ingested mirror).
-- `GET /alarms` → every non-passing disclosure (`mismatch` proven tamper; `unverifiable`/`withheld`
-  publication gaps) — the auditor console's first-class alarm channel.
+- `GET /alarms` → one discriminated feed (as-built 2026-07-25): every non-passing disclosure
+  (`{type:"disclosure"}` — `mismatch` proven tamper; `unverifiable`/`withheld` publication gaps) plus,
+  arbiter mode only, envelope cross-check failures (`{type:"envelope"}`) — the auditor console's
+  first-class alarm channel.
 - `GET /nullifiers` → the spent nullifier set collected from events (public, key-free).
-- `GET /health` → `{ ok, lastBlock, nextLeafIndex, batchSize }`.
+- `GET /health` → `{ ok, lastBlock, nextLeafIndex, batchSize, alarms }` plus tail-poll state
+  (`lastSuccessAt`, `lastError`, `lastErrorAt`, `consecutiveFailures`; `ok` goes false when the tail poll
+  is persistently failing — as-built 2026-07-25).
 
 **Two modes.** *Public mode* (no key) serves only public chain data. *Arbiter mode* (the indexer holds the
 `AUTHORITY_KEY`) additionally decrypts every op's authority envelope into a per-owner note directory and
@@ -438,8 +442,8 @@ the live root, full receiver++authority ciphertext on-chain): tx
 total 2.34e-5 ETH (warm GPU proof 149.8s incl. one-time zkey compile). **Whole
 v2 deploy + smoke cost 1.66e-5 ETH** (L2 0.001 gwei; L1/blob DA fee negligible — the earlier §11-7 DA worry
 stays refuted at these params). Arbiter key = the realproofs authority key
-(`0x08a72afc…`); a live 256-disburse demo needs the 256 proof re-proven against this key (zkey unchanged,
-one warm GPU prove — tracked follow-up). Blockscout `--verify` optional. Addresses in
+(`0x08a72afc…`) — the live v2 256-disburse above was proven against it (zkey unchanged, one warm GPU
+prove; the earlier "re-prove needed" follow-up is done). Blockscout `--verify` optional. Addresses in
 `deploy/addresses.91342.json`.
 
 **A real 256-recipient private disburse ran live (2026-07-24, `deploy/giwa_disburse256.ts`):** an employer

@@ -25,8 +25,8 @@ enforced four-op auditor disclosure.
 Verified on-chain through the proxy: `B()==256`, `disburseCiphertextLen==2054` (disclosure enforced), a real
 envelope-carrying `deposit`. Measured: warm 256-disburse GPU proof **~0.47s** (2.79M constraints); on-chain
 256-payout ~3M L2 gas (~11.8k/recipient, under the Karst cap); the L1/blob-DA fee is negligible even with all
-ciphertext on-chain. (The headline 256-disburse ran end-to-end on the v1 pool `0x22a2F38a…`; re-demoing it on
-this v2 pool needs the 256 proof re-proven against its arbiter key — see `docs/spec.md` §9.)
+ciphertext on-chain. The headline 256-disburse has run end-to-end on this pool (tx `0xe254240a…`,
+`nextLeafIndex` 4→512) — details and per-run gas in `docs/spec.md` §9.
 
 ## Layout
 
@@ -97,10 +97,17 @@ Copy `.env.example` → `.env` (gitignored) for a funded GIWA deployer key. Tool
   prove everything.
 - [Zeto derivation](docs/zeto-derivation.md) — which Zeto flavor bongtu uses, per-file circuit provenance, the
   deliberate modifications, and the SMT→IMT soundness finding (why Unit 0 redeploys).
+- [Monorepo layout](docs/monorepo-layout.md) — why the tree is split `apps/` vs `packages/` vs top-level
+  toolchains, why packages export raw `src/*.ts`, why the Vite shim survives, and the rejected layouts.
+- [Architecture review](docs/architecture-review.md) — the 2026-07-25 depth/seam review: the 14 applied
+  consolidations, 4 deferred with revival criteria, 3 rejected — check here before re-suggesting a refactor.
+- [CI design](docs/ci.md) — why the hosted gates are shaped this way: the artifact-cache soundness argument,
+  the pins-file design, measured wall times, and the local-pass/CI-fail lesson.
 - [Deploy](deploy/README.md) — the reusable B=256 stack deploy: env config, local anvil gate, live GIWA runbook.
 - [Prover service](prover/README.md) — the resident-GPU proving service: wire contract, boot lifecycle, ops
   invariants (one instance per GPU), env knobs.
-- [Third-party notices](THIRD_PARTY_NOTICES.md) — dependency licenses and how GPL build tools stay un-bundled.
+- [Third-party notices](THIRD_PARTY_NOTICES.md) — dependency licenses, GPL isolation for build tools, and the
+  wallet's deliberate in-browser snarkjs (GPL) shipment.
 - Folder READMEs — each folder's own layout, run/test commands, and API surface:
   [`packages/sdk`](packages/sdk/README.md) · [`apps/indexer`](apps/indexer/README.md) ·
   [`circuits`](circuits/README.md) · [`contracts`](contracts/README.md) ·
@@ -118,5 +125,5 @@ Licensed under the **Apache License, Version 2.0** — see [`LICENSE`](./LICENSE
 bongtu is built on **[Zeto](https://github.com/hyperledger-labs/zeto)** (Apache-2.0, © 2024 Kaleido, Inc.):
 portions of the circom circuits and the on-chain/SDK design are derived from Zeto and modified (each derived
 file keeps its Apache header + Kaleido copyright and notes the change). Full dependency and license breakdown —
-including how GPL build tools (circom, snarkjs, circomlib) are kept external and un-bundled — is in
-[`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md).
+including how GPL build tools (circom, circomlib) are kept external and where the wallet deliberately ships
+snarkjs (GPL) for in-browser proving — is in [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md).
