@@ -9,7 +9,8 @@
     "./*": "./src/*.ts"
   },
   "dependencies": {
-    "@bongtu/sdk": "*"
+    "@bongtu/sdk": "*",
+    "pg": "^8.22.0"
   },
   "scripts": {
     "start": "node --import tsx src/index.ts",
@@ -18,10 +19,12 @@
     "test:disclosure": "node --import tsx test/disclosure.test.ts",
     "test:ingest": "node --import tsx test/ingest.test.ts",
     "test:unit": "npm run test:tree && npm run test:disclosure && npm run test:ingest",
+    "test:pg": "bash test/pg_integration.sh",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/pg": "^8.20.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }

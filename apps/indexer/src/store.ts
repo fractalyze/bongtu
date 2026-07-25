@@ -13,6 +13,7 @@
 // data — ciphertext bytes, commitments, roots, nullifiers. It never holds or
 // derives any user private key. Trial-decrypt happens in the wallet.
 
+import type { PoolClient } from "pg";
 import type { DisclosureResult } from "./disclosure.js";
 
 /** Kind of note-bearing pool operation a feed entry came from. */
@@ -45,7 +46,34 @@ export interface FeedEntry {
   disclosure?: DisclosureResult; // present for `disburse`
 }
 
-export class Store {
+/**
+ * The read/write surface both store adapters expose (U-I2 two-adapter seam). The
+ * in-memory adapter serves every method from process memory; the Postgres adapter
+ * (src/postgres.ts) serves the same reads from a boot-hydrated read model and
+ * additionally persists writes (the two optional hooks — a no-op here).
+ */
+export interface StorePort {
+  /** Highest fully-ingested block (exclusive cursor for incremental tails). */
+  lastBlock: number;
+  addEvent(e: Omit<FeedEntry, "seq">): FeedEntry | null;
+  events(cursor?: number, limit?: number): FeedEntry[];
+  allEvents(): FeedEntry[];
+  getAlarms(): DisclosureResult[];
+  addNullifiers(nfs: bigint[]): void;
+  nullifiers(): string[];
+  // ---- durable-backend hooks (Postgres only; the in-memory adapter omits them,
+  // making persistence a no-op). The indexer wraps the store's flushInto + the
+  // ledger's flushInto + persistCursorInto in ONE caller-owned transaction, so the
+  // cursor advances to block H iff every derived row for blocks <= H is durable.
+  /** Stage buffered event/nullifier/leaf rows into the caller's open txn. */
+  flushInto?(client: PoolClient): Promise<void>;
+  /** Stage the ingest cursor advance into the SAME txn as flushInto. */
+  persistCursorInto?(client: PoolClient, block: number): Promise<void>;
+  /** Drop the write-behind buffers AFTER the indexer's COMMIT (never before). */
+  commitFlush?(): void;
+}
+
+export class InMemoryStore implements StorePort {
   private feed: FeedEntry[] = [];
   private alarms: DisclosureResult[] = [];
   // (txHash, logIndex) of every feed entry — a replayed log range (poll retry

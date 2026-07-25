@@ -45,6 +45,11 @@ export interface ChainConfig {
   // and can fold within-batch merkle paths. Undefined/null => PUBLIC MODE (no
   // /notes, batch /path 422s). NEVER logged or returned over HTTP.
   authorityKey?: bigint | null;
+  // Postgres connection string (env DATABASE_URL). Set => the indexer persists its
+  // derived state (events / nullifiers / leaves / notes / history + a block cursor)
+  // to Postgres and boot-RESUMES from the cursor. Undefined => IN-MEMORY (default,
+  // unchanged behavior): state is re-derived from chain on every start.
+  databaseUrl?: string | null;
 }
 
 /** Parse a bjj scalar from decimal ("123…") or hex ("0x…") — BigInt() accepts both. */
@@ -64,5 +69,7 @@ export function resolveConfig(): ChainConfig {
   if (!pool) throw new Error("no pool address (set POOL env or deploy/addresses.<chainId>.json)");
   // Arbiter mode is gated purely on AUTHORITY_KEY presence (the arbiter private key).
   const authorityKey = process.env.AUTHORITY_KEY ? parseScalar(process.env.AUTHORITY_KEY) : null;
-  return { rpc, pool, startBlock, authorityKey };
+  // Postgres backend is gated purely on DATABASE_URL presence.
+  const databaseUrl = process.env.DATABASE_URL || null;
+  return { rpc, pool, startBlock, authorityKey, databaseUrl };
 }

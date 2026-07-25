@@ -57,11 +57,37 @@ available even when the RPC is not. For every `disburse` it also recomputes the
 Poseidon chain over the emitted ciphertext and compares it to the on-chain
 `disclosureHash` (`src/disclosure.ts`) — any failure surfaces on `/alarms`.
 
+## Storage backends
+
+The store (`Store`/`StorePort`) and the arbiter note ledger (`NoteLedger`/`LedgerPort`)
+are interfaces with **two adapters**, picked at first ingest by `DATABASE_URL`:
+
+- **In-memory** (default, `DATABASE_URL` unset): the original behaviour — everything is
+  re-derived from chain on every start. This is what all the unit + conformance gates
+  and hosted CI run, and it is unchanged.
+- **Postgres** (`DATABASE_URL` set): the derived state (the event feed, nullifier set,
+  the tree leaves, the arbiter notes/history/alarms) is persisted to Postgres, and a
+  single-row **block cursor** lets a restart **RESUME** ingest from the cursor instead
+  of replaying the whole chain. Each poll batch's rows AND the cursor advance in **one
+  transaction** (`Indexer.persist`), so a crash can never leave the `leaves` table ahead
+  of the cursor — the state a restart reconstructs is always mutually consistent (proved
+  by `test/pg_resume.ts`). Leaf writes are a **delta** (only leaves recorded since the
+  last flush), not a full re-snapshot. The `MirrorTree` is not stored as nodes — it is
+  boot-**reconstructed** from the `leaves` table (`O(n)`); the note ledger is rehydrated
+  from the `notes`/`history` tables. Reads are served from the same in-memory read model
+  both adapters keep (so the API stays synchronous), with Postgres as the durable cache.
+
+The decrypt/derive step (envelope → notes/spent-marks/alarms/history) is ONE shared pure
+function (`deriveOp` in `ledger.ts`) both ledger adapters call — the crypto is never
+duplicated; only where rows are recorded/read differs. Schema: [`src/schema.sql`](src/schema.sql)
+(idempotent `CREATE TABLE IF NOT EXISTS`, applied on every boot).
+
 ## Run
 
 ```sh
 npm start                                          # defaults: local anvil RPC, port 8600
 RPC=https://sepolia-rpc.giwa.io npm start          # against the live GIWA pool (read-only)
+DATABASE_URL=postgres://… npm start                # persist + resume (Postgres backend)
 ```
 
 Env knobs (`src/index.ts`):
@@ -75,6 +101,7 @@ Env knobs (`src/index.ts`):
 | `PORT` | `8600` | HTTP port |
 | `POLL_MS` | `5000` | incremental re-ingest interval (`0` = off) |
 | `AUTHORITY_KEY` | unset | arbiter bjj private key → arbiter mode |
+| `DATABASE_URL` | unset | Postgres connection string → the **Postgres backend** (persist + boot-resume). Unset = **in-memory** (default, unchanged) |
 
 Workspace install and shared tooling: root [`README.md`](../../README.md). Loading the
 pool ABI and ethers goes through the external-`node_modules` seam (`BONGTU_NODE_MODULES`,
@@ -85,8 +112,17 @@ see [`CLAUDE.md`](../../CLAUDE.md)) and needs a `forge build` artifact for the p
 ```sh
 npm run test:unit    # anvil-free units: tree + disclosure + ingest (fast inner loop)
 npm run typecheck    # tsc --noEmit
-npm test             # the full conformance gate (bash test/run.sh) — heavy
+npm test             # the full conformance gate (bash test/run.sh) — heavy, IN-MEMORY
+npm run test:pg      # the Postgres two-adapter gate (bash test/pg_integration.sh) — LOCAL, docker
 ```
+
+`test:pg` is a **local** gate (not wired into hosted CI): it spins a throwaway
+`postgres:16-alpine` in docker on a random host port (trap-removed on exit), runs the
+scenario against a fresh anvil, ingests it with a `DATABASE_URL` + arbiter indexer,
+asserts `/head` `/notes` `/history`, then **kills and restarts** the indexer against the
+same postgres and asserts it **resumed from the block cursor** (logs `resume from block
+N`, N>0 — not a block-0 replay) serving byte-identical state. Requires docker + the CPU
+proving artifacts under `circuits/out/`. The containerised CI path is U-I3.
 
 The conformance gate starts its own anvil on port **8552** (override
 `INDEXER_E2E_PORT` if that port is taken), deploys a fresh B=16 pool, drives the full
@@ -104,12 +140,14 @@ src/
   index.ts        runnable service: env → ingest → serve (+ tail polling)
   chain.ts        config resolution + RPC/ABI plumbing
   ingest.ts       Indexer: event ingest, correlation, poll/retry state
-  tree.ts         MirrorTree: ImtTree mirror + per-leaf records + batch subtrees + path builder
-  store.ts        ingested events / alarms / nullifiers store
+  tree.ts         MirrorTree: ImtTree mirror + per-leaf records + batch subtrees + path builder + snapshot/rebuild (resume)
+  store.ts        StorePort + InMemoryStore: ingested events / alarms / nullifiers / cursor
   disclosure.ts   disclosureHash verify + alarm classification (chain fold from @bongtu/sdk/envelope)
-  ledger.ts       arbiter-mode per-owner note ledger + activity history (spent from envelopes alone; decode via @bongtu/sdk/envelope)
+  ledger.ts       LedgerPort + shared pure deriveOp (all crypto) + InMemoryLedger (arbiter note ledger + history)
+  postgres.ts     PostgresStore + PostgresLedger: persist derived state + boot-reconstruct + resume (raw pg, no ORM)
+  schema.sql      idempotent Postgres schema (events / nullifiers / leaves / cursor / notes / history / alarms)
   api/            router + one file per route (see Endpoints above)
-test/             unit tests + the anvil conformance scenario (run.sh)
+test/             unit tests + the anvil conformance scenario (run.sh) + the Postgres integration gate (pg_integration.sh)
 ```
 
 ## License

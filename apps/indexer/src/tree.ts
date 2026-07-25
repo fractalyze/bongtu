@@ -37,6 +37,18 @@ export interface BatchLeaf {
   batchLeaf: true;
 }
 
+/**
+ * The minimal per-leaf-index record a frontier is rebuildable from (U-I2 Postgres
+ * boot). A single-append leaf carries its `commitment`; a disburse block carries
+ * one row at its start with `batchRoot` set (the B interior leaves are re-filled
+ * from the note ledger, not stored here). Exactly one of the two is non-null.
+ */
+export interface LeafRow {
+  leafIndex: number;
+  commitment: bigint | null;
+  batchRoot: bigint | null;
+}
+
 export class MirrorTree {
   // The wrapped SDK frontier tree: the sole authority for root + nextLeafIndex.
   private readonly tree: ImtTree;
@@ -59,6 +71,11 @@ export class MirrorTree {
   // mode never fills, so a batch leaf there always returns the batch-leaf
   // sentinel. Persisted across ingest calls so a poll-retry replay stays correct.
   private readonly filled = new Set<number>();
+  // Leaf rows recorded since the last durable flush — the U-I2 Postgres DELTA.
+  // recordLeaf / applyAttach append here on FIRST sight of a leaf/batch (a replay
+  // finds it already recorded and appends nothing), so a poll persists O(new
+  // leaves), not O(nextLeafIndex). Drained by clearPendingLeaves after COMMIT.
+  private pendingLeaves: LeafRow[] = [];
   // zeros[k] = the value of an all-empty subtree of height k (memoised).
   private readonly zeros: bigint[];
 
@@ -120,6 +137,13 @@ export class MirrorTree {
     // EXCEPT the leaf-wipe is skipped once a block has been arbiter-filled, so a
     // replayed attach never clobbers recovered batch leaves back to holes.
     const block = startLeafIndex / this.B;
+    // First sight of this batch block → buffer its subtree row for the delta
+    // flush. batchRoots is set unconditionally below (a replay re-tags the same
+    // value), so gating the buffer on "not yet tagged" keeps the delta free of
+    // duplicates across a poll-retry.
+    if (this.batchRoots[block] === undefined) {
+      this.pendingLeaves.push({ leafIndex: startLeafIndex, commitment: null, batchRoot: subtreeRoot });
+    }
     if (!this.filled.has(block)) {
       for (let k = 0; k < this.B; k++) this.leaves[startLeafIndex + k] = undefined;
     }
@@ -128,6 +152,12 @@ export class MirrorTree {
 
   /** Record a real single-append leaf value (pass 2), the source a path folds from. */
   recordLeaf(leafIndex: number, leaf: bigint): void {
+    // First sight of this leaf → buffer it for the next delta flush. A replay
+    // (poll-retry) finds the slot already set and buffers nothing, so the
+    // Postgres delta stays duplicate-free like pendingEvents/pendingNullifiers.
+    if (this.leaves[leafIndex] === undefined) {
+      this.pendingLeaves.push({ leafIndex, commitment: leaf, batchRoot: null });
+    }
     this.leaves[leafIndex] = leaf;
   }
 
@@ -143,6 +173,61 @@ export class MirrorTree {
   fillBatch(startLeafIndex: number, leaves: bigint[]): void {
     for (let k = 0; k < leaves.length; k++) this.leaves[startLeafIndex + k] = leaves[k];
     this.filled.add(startLeafIndex / this.B);
+  }
+
+  /** Whether block `k` is an attached disburse batch (opaque unless later filled). */
+  isBatch(k: number): boolean {
+    return this.batchRoots[k] !== undefined;
+  }
+
+  /**
+   * The rebuild-sufficient leaf rows recorded since the last durable flush (U-I2
+   * Postgres DELTA persist): one row per newly single-appended leaf (its
+   * commitment) and one row per newly attached disburse block (its subtree root,
+   * at the block start). Buffered first-sight by recordLeaf / applyAttach, so this
+   * is O(new leaves this poll), NOT O(nextLeafIndex). Pads and batch-interior holes
+   * are omitted (re-created by the append/attach replay; batch interiors come back
+   * from the note ledger). The UNION over all flushes equals the full frontier the
+   * boot path reads back via rebuildFromLeaves. Peek only — cleared separately by
+   * clearPendingLeaves after the indexer's atomic COMMIT.
+   */
+  snapshotPendingLeaves(): LeafRow[] {
+    return this.pendingLeaves;
+  }
+
+  /** Drop the delta buffer after the indexer's atomic COMMIT (Postgres only). */
+  clearPendingLeaves(): void {
+    this.pendingLeaves = [];
+  }
+
+  /**
+   * Rebuild the frontier from a persisted leaf snapshot (U-I2 Postgres boot resume),
+   * replaying the SAME appendLeaf / attachSubtree the live ingest drove — so the
+   * reconstructed root + nextLeafIndex equal the on-chain values at the cursor with
+   * no event re-scan. Single rows append at the frontier; batch rows pad to their
+   * boundary + attach opaque (interior leaves are re-filled from the note ledger).
+   * Rows must arrive already ordered by leafIndex; the row's index is asserted
+   * against the mirror's own so a corrupt snapshot fails loudly, not silently wrong.
+   */
+  rebuildFromLeaves(rows: LeafRow[]): void {
+    for (const r of rows) {
+      if (r.batchRoot !== null) {
+        this.tree.attachSubtree(r.batchRoot, null);
+        const start = this.tree.getNextLeafIndex() - this.B;
+        if (start !== r.leafIndex) {
+          throw new Error(`MirrorTree.rebuildFromLeaves: batch attach @${start} != row leafIndex ${r.leafIndex}`);
+        }
+        for (let k = 0; k < this.B; k++) this.leaves[start + k] = undefined;
+        this.batchRoots[start / this.B] = r.batchRoot;
+      } else {
+        this.tree.appendLeaf(r.commitment!);
+        const idx = this.tree.getNextLeafIndex() - 1;
+        if (idx !== r.leafIndex) {
+          throw new Error(`MirrorTree.rebuildFromLeaves: append @${idx} != row leafIndex ${r.leafIndex}`);
+        }
+        this.leaves[r.leafIndex] = r.commitment!;
+      }
+    }
   }
 
   /**

@@ -19,11 +19,13 @@
 // and the per-slice leafIndex a wallet needs to request a path after it
 // trial-decrypts. Every disburse also runs the disclosureHash check (§6b).
 
+import type { Pool } from "pg";
+
 import { MirrorTree } from "./tree.js";
 import { ethers, poolAbi, type ChainConfig } from "./chain.js";
-import { Store, type Slice } from "./store.js";
+import { InMemoryStore, type StorePort, type Slice } from "./store.js";
 import { verifyDisclosure } from "./disclosure.js";
-import { NoteLedger } from "./ledger.js";
+import { InMemoryLedger, type LedgerPort } from "./ledger.js";
 
 const H = 32; // IMT height — a system-wide constant (SPEC §4)
 
@@ -52,7 +54,11 @@ export class Indexer {
   readonly provider: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly pool: any;
-  readonly store = new Store();
+  // The store/ledger backend is picked at first ingest by DATABASE_URL presence:
+  // the default in-memory adapters (unchanged behavior), or the Postgres adapters
+  // (persist + boot-resume) swapped in by bootPostgres. Not `readonly` — bootPostgres
+  // replaces it in place, and the API reads `ix.store` live per request.
+  store: StorePort = new InMemoryStore();
   tree!: MirrorTree;
   batchSize = 0;
   // Arbiter mode (SPEC §6b v2): set when the config carries the arbiter private
@@ -61,7 +67,11 @@ export class Indexer {
   // is NEVER read back out for logging or HTTP.
   readonly arbiterPriv: bigint | null;
   readonly arbiterMode: boolean;
-  ledger: NoteLedger | null = null;
+  ledger: LedgerPort | null = null;
+  // The shared Postgres pool (set by bootPostgres; null in the in-memory default).
+  // BOTH adapters were built on this ONE pool, so `persist` can acquire a single
+  // client and commit the store rows, ledger rows, and cursor in ONE transaction.
+  private pgPool: Pool | null = null;
 
   // ---- tail-poll operational state (projected by GET /health) --------------
   // Recorded by pollOnce so "wedged since block N" vs "healthy" is machine-
@@ -165,9 +175,14 @@ export class Indexer {
     if (!this.tree) {
       this.batchSize = Number(bn(await this.pool.B()));
       this.tree = new MirrorTree(H, this.batchSize);
-      // Arbiter mode: the ledger holds the arbiter key + owns the note directory
-      // and batch fills. Built once, persists across incremental ingest calls.
-      if (this.arbiterPriv !== null) this.ledger = new NoteLedger(this.arbiterPriv, this.batchSize, this.tree);
+      if (this.cfg.databaseUrl) {
+        // bootPostgres returns a fromBlock bumped past the persisted cursor so the
+        // reconstructed state is not re-ingested (the whole point of resume).
+        fromBlock = await this.bootPostgres(fromBlock);
+      } else if (this.arbiterPriv !== null) {
+        // Built once (the arbiter key never leaves the ledger), reused across tails.
+        this.ledger = new InMemoryLedger(this.arbiterPriv, this.batchSize, this.tree);
+      }
     }
     // `toBlock` bounds the replay (used for phased ingest / conformance); default
     // is the live head. The head invariant below is asserted at exactly this block.
@@ -189,7 +204,109 @@ export class Indexer {
     if (this.tree.nextLeafIndex() !== at.nextLeafIndex) {
       throw new Error(`ingest: mirror nextLeafIndex ${this.tree.nextLeafIndex()} != contract ${at.nextLeafIndex} @block ${head}`);
     }
+    // Persist ALL derived rows for this batch AND advance the block cursor in ONE
+    // transaction (see `persist`). The cursor reaches H iff every row for blocks
+    // <= H is durable, so a crash can never leave the leaves table ahead of the
+    // cursor — the state boot rebuilds is always consistent with the resume point.
+    await this.persist(head);
+  }
+
+  /**
+   * Atomic write-behind persist (Postgres backend) — the crash-safety core.
+   *
+   * Acquires ONE client from the shared pool and, in a single BEGIN/COMMIT, stages
+   * the store rows (events/nullifiers/leaf delta), the ledger rows
+   * (notes/history/alarms/applied-ops), and the block cursor. Because leaves and
+   * cursor commit together, a crash mid-persist ROLLs BACK both: the durable state
+   * is either fully at block H or fully at the previous cursor, never the wedged
+   * in-between (leaves at H, cursor behind) that made bootPostgres's reconstructed
+   * frontier disagree with the on-chain state at the cursor. Buffers are cleared
+   * and the in-memory cursor advanced ONLY after COMMIT, so a rolled-back batch is
+   * retried verbatim by the next poll (applyLogs + every module are replay-idempotent).
+   *
+   * In-memory backend (no pool): nothing is durable, so just advance the cursor.
+   */
+  private async persist(head: number): Promise<void> {
+    if (!this.pgPool) {
+      this.store.lastBlock = head;
+      return;
+    }
+    const client = await this.pgPool.connect();
+    try {
+      await client.query("BEGIN");
+      await this.store.flushInto!(client);
+      await this.ledger?.flushInto?.(client);
+      await this.store.persistCursorInto!(client, head);
+      // TEST-ONLY fault injection: crash at the pre-COMMIT point (every row + the
+      // cursor staged but not yet durable) so the atomicity window is exercised
+      // deterministically. Never set outside test/pg_resume.ts.
+      if (process.env.BONGTU_CRASH_BEFORE_COMMIT === String(head)) {
+        throw new Error(`crash-before-commit fault injection @block ${head}`);
+      }
+      await client.query("COMMIT");
+    } catch (e) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // The connection may already be dead (real crash) — keep the original error.
+      }
+      throw e;
+    } finally {
+      client.release();
+    }
+    // Durable now: drop the write-behind buffers and advance the in-memory cursor.
+    // A COMMIT failure skips this (both untouched), so pollOnce re-ingests the same
+    // range from the unadvanced cursor and re-persists.
+    this.store.commitFlush?.();
+    this.ledger?.commitFlush?.();
     this.store.lastBlock = head;
+  }
+
+  /** Release the Postgres pool on a graceful shutdown (no-op in the in-memory path). */
+  async close(): Promise<void> {
+    if (this.pgPool) {
+      await this.pgPool.end();
+      this.pgPool = null;
+    }
+  }
+
+  /**
+   * Swap in the Postgres adapters and reconstruct state from SQL so a restart
+   * RESUMES from the persisted cursor instead of replaying the chain. Returns the
+   * effective start block: cursor+1 when a cursor exists (skip what is already
+   * reconstructed), else the requested `fromBlock`. `./postgres` is imported
+   * dynamically, so the in-memory default path never loads `pg`.
+   */
+  private async bootPostgres(fromBlock: number): Promise<number> {
+    const pg = await import("./postgres.js");
+    const pool = await pg.connect(this.cfg.databaseUrl!);
+    this.pgPool = pool; // the ONE pool both adapters + `persist` share
+    const store = new pg.PostgresStore(pool);
+    await store.boot(this.tree);
+    this.store = store;
+    if (this.arbiterPriv !== null) {
+      const ledger = new pg.PostgresLedger(pool, this.arbiterPriv, this.batchSize, this.tree);
+      await ledger.boot();
+      this.ledger = ledger;
+    }
+    const cursor = this.store.lastBlock;
+    if (cursor >= 0) {
+      // A rebuild bug must fail the boot loudly, not serve a wrong root/path: the
+      // reconstructed frontier has to equal the on-chain values at the cursor block.
+      const at = await this.headAt(cursor);
+      if (this.tree.root() !== at.root) {
+        throw new Error(`bootPostgres: reconstructed root ${this.tree.root()} != contract root ${at.root} @cursor ${cursor}`);
+      }
+      if (this.tree.nextLeafIndex() !== at.nextLeafIndex) {
+        throw new Error(`bootPostgres: reconstructed nextLeafIndex ${this.tree.nextLeafIndex()} != contract ${at.nextLeafIndex} @cursor ${cursor}`);
+      }
+    }
+    if (cursor >= fromBlock) {
+      console.log(`postgres backend: resume from block ${cursor + 1} (cursor=${cursor} root=${this.tree.root()} nextLeafIndex=${this.tree.nextLeafIndex()})`);
+      return cursor + 1;
+    }
+    console.log(`postgres backend: fresh ingest from block ${fromBlock} (no cursor)`);
+    return fromBlock;
   }
 
   /**

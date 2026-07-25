@@ -24,9 +24,11 @@ async function main(): Promise<void> {
   const port = Number(process.env.PORT || 8600);
   const pollMs = process.env.POLL_MS !== undefined ? Number(process.env.POLL_MS) : 5000;
 
-  // Mode is logged; the key itself is NEVER printed.
+  // Mode + backend are logged; the arbiter key and the DATABASE_URL (may carry a
+  // password) are NEVER printed — only the backend NAME.
   const mode = cfg.authorityKey != null ? "ARBITER" : "public";
-  console.log(`bongtu indexer: rpc=${cfg.rpc} pool=${cfg.pool} startBlock=${cfg.startBlock} mode=${mode}`);
+  const backend = cfg.databaseUrl ? "postgres" : "in-memory";
+  console.log(`bongtu indexer: rpc=${cfg.rpc} pool=${cfg.pool} startBlock=${cfg.startBlock} mode=${mode} backend=${backend}`);
   const ix = new Indexer(cfg);
   await ix.ingest();
   const hd = await ix.head();
@@ -38,7 +40,27 @@ async function main(): Promise<void> {
 
   // Incremental tail: the scheduler + retry/cursor policy live in Indexer
   // (pollOnce/startTailPolling); /health projects the recorded poll state.
-  if (pollMs > 0) ix.startTailPolling(pollMs);
+  const stopTail = pollMs > 0 ? ix.startTailPolling(pollMs) : null;
+
+  // Graceful shutdown: stop the tail, close the HTTP server, and end the Postgres
+  // pool so in-flight clients drain instead of being severed. The unref'd failsafe
+  // force-exits if any close hangs, so a SIGTERM always terminates the process.
+  let closing = false;
+  const shutdown = async (): Promise<void> => {
+    if (closing) return;
+    closing = true;
+    setTimeout(() => process.exit(0), 3000).unref();
+    stopTail?.();
+    try {
+      await api.stop();
+    } catch { /* already closing */ }
+    try {
+      await ix.close();
+    } catch { /* pool already gone */ }
+    process.exit(0);
+  };
+  process.once("SIGINT", () => void shutdown());
+  process.once("SIGTERM", () => void shutdown());
 }
 
 main().catch((e) => {
