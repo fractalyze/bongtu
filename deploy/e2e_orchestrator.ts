@@ -30,15 +30,10 @@
 // committed verifiers, checked in the shell wrapper) so new proofs verify
 // against the on-chain verifiers.
 
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
 import { ImtTree, foldToRoot } from "@bongtu/sdk/imt";
 import { poseidon2, poseidonN } from "@bongtu/sdk/poseidon";
 import { buildAuthorityPlaintext, disclosureChain } from "@bongtu/sdk/envelope";
 import {
-  deriveKeypair,
   commitment,
   nullifier,
   poseidonEncrypt,
@@ -46,28 +41,21 @@ import {
   ecdhSharedSecret,
   assertDistinctOwnerPubkeys,
 } from "@bongtu/sdk/note";
-import type { Keypair } from "@bongtu/sdk/note";
-import type { FieldInput } from "@bongtu/sdk/babyjub";
-import { toWire } from "@bongtu/sdk/proving";
-import { loadEthers, loadSnarkjs } from "@bongtu/sdk/extern";
+import { loadEthers } from "@bongtu/sdk/extern";
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(HERE, "..");
-const CIRC_OUT = join(ROOT, "circuits", "out");
-const CONTRACTS_OUT = join(ROOT, "contracts", "out");
-const POSEIDON_HEX = join(ROOT, "contracts", "test", "fixtures", "poseidon2.hex");
+// The deploy-and-drive skeleton (anvil connection, forge-artifact deploys, the
+// UUPS pool proxy, the CPU prove() wrapper, shared actor/salt/amount fixtures)
+// lives in the harness shared with apps/indexer/test/scenario.ts.
+import {
+  H, GATE_B as B, dec, connectAnvil, deployStack, prove as harnessProve,
+  EMPLOYER, AUTHORITY, PAYEE, RCPTS,
+  sD0, sD1, sR, sPay, sChg, sPadT, sPadW, sRes,
+  amounts, V,
+} from "./lib/e2e_harness.js";
 
-// snarkjs + ethers v5 come back `any` from the shared external loader — we type
-// OUR code (notes, keys, tree), not theirs.
-const snarkjs = loadSnarkjs();
+// ethers v5 comes back `any` from the shared external loader — we type OUR
+// code (notes, keys, tree), not theirs.
 const ethers = loadEthers();
-
-const RPC = process.env.E2E_RPC || "http://127.0.0.1:8545";
-// anvil default account #0 (deterministic dev key — testnet fake money only).
-const PK = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-
-const H = 32; // IMT depth (all circuits)
-const B = 16; // disburse batch size (M0)
 
 // ---------------------------------------------------------------------------
 // tiny assert / logging harness
@@ -84,65 +72,23 @@ function ok(cond: unknown, msg: string): void {
 function step(title: string): void {
   console.log(`\n=== ${title} ===`);
 }
-const dec = (x: FieldInput): string => BigInt(x).toString(); // BigInt -> decimal string for snarkjs / ethers
-
-// ---------------------------------------------------------------------------
-// proving: witness + groth16 prove + solidity calldata, all in-process
-// ---------------------------------------------------------------------------
-async function prove(name: string, input: unknown) {
-  const wasm = join(CIRC_OUT, `${name}_js`, `${name}.wasm`);
-  const zkey = join(CIRC_OUT, `${name}.zkey`);
-  const t0 = Date.now();
-  const { proof, publicSignals } = await snarkjs.groth16.fullProve(toWire(input), wasm, zkey);
-  const cd = await snarkjs.groth16.exportSolidityCallData(proof, publicSignals);
-  const [a, b, c, pub] = JSON.parse("[" + cd + "]");
-  console.log(`   proved ${name} (${publicSignals.length} publics) in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
-  return { a, b, c, pub, publicSignals };
-}
-
-// ---------------------------------------------------------------------------
-// deployment helpers (ethers v5)
-// ---------------------------------------------------------------------------
-function artifact(sol: string, contract: string): { abi: any; bytecode: any } {
-  const j = JSON.parse(readFileSync(join(CONTRACTS_OUT, `${sol}.sol`, `${contract}.json`), "utf8"));
-  return { abi: j.abi, bytecode: j.bytecode.object };
-}
-async function deploy(wallet: any, sol: string, contract: string, args: any[] = []): Promise<any> {
-  const { abi, bytecode } = artifact(sol, contract);
-  const f = new ethers.ContractFactory(abi, bytecode, wallet);
-  const inst = await f.deploy(...args);
-  await inst.deployed();
-  return inst;
-}
-
-// Deploy BongtuPool behind a UUPS ERC-1967 proxy (SPEC §5.2), initialized in the
-// proxy constructor with the 8-arg initializer. Returns a contract bound to the
-// BongtuPool ABI at the PROXY address (the canonical, upgrade-stable pool).
-async function deployPoolProxy(wallet: any, initArgs: any[]): Promise<any> {
-  const impl = await deploy(wallet, "BongtuPool", "BongtuPool");
-  const { abi: poolAbi } = artifact("BongtuPool", "BongtuPool");
-  const initData = new ethers.utils.Interface(poolAbi).encodeFunctionData("initialize", initArgs);
-  const proxy = await deploy(wallet, "ERC1967Proxy", "ERC1967Proxy", [impl.address, initData]);
-  return new ethers.Contract(proxy.address, poolAbi, wallet);
-}
+// verbose: the human-watched DoD gate keeps its per-circuit timing log (the
+// scenario sibling runs the same harness prove() silent).
+const prove = (name: string, input: unknown) => harnessProve(name, input, { verbose: true });
 
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 async function main(): Promise<void> {
-  const provider = new ethers.providers.JsonRpcProvider(RPC);
-  const wallet = new ethers.Wallet(PK, provider);
+  const { wallet } = connectAnvil();
   const employerAddr = wallet.address;
 
-  // --- actors (bjj keypairs; scalars are index-derived, PRNG-free) ----------
-  const EMPLOYER = deriveKeypair(111111111111111111111111n);
-  const AUTHORITY = deriveKeypair(555555555555555555555555n); // arbiter key
-  const PAYEE = deriveKeypair(222222222222222222222222n);
-  const recipient = (i: number): Keypair => deriveKeypair(2000000011n + BigInt(i) * 1000003n);
-  const RCPTS = Array.from({ length: B }, (_, i) => recipient(i));
+  // Actors (EMPLOYER/AUTHORITY/PAYEE/RCPTS), salts, and amounts/V are the
+  // harness fixture material shared with the scenario sibling.
 
   // fresh ephemeral ECDH key + nonce PER TRANSACTION (SPEC U2->U4 note: never
-  // reuse an ephemeral key/nonce across txs — that would be a two-time pad).
+  // reuse a (key, nonce) pair across txs — that would be a two-time pad).
+  // Driver-local; the scenario sibling keeps its scalars disjoint from these.
   const ECDH_DEPOSIT = 600000000000000000007n;
   const ECDH_DISBURSE = 700000000000000000001n;
   const ECDH_TRANSFER = 800000000000000000003n;
@@ -152,47 +98,27 @@ async function main(): Promise<void> {
   const NONCE_TRANSFER = 222222222222n;
   const NONCE_WITHDRAW = 444444444444n;
 
-  // salts (distinct per note)
-  const sD0 = 5000001n, sD1 = 5000002n;
-  const sR = (i: number): bigint => 6000000n + BigInt(i);
-  const sPay = 7000001n, sChg = 7000002n;
-  const sPadT = 7100001n, sPadW = 7100002n, sRes = 7200001n;
-
-  // amounts: 16 varying positive values; V := their sum.
-  const amounts = Array.from({ length: B }, (_, i) => 100n + BigInt(i) * 3n);
-  const V = amounts.reduce((a, x) => a + x, 0n);
-
   const oracle = new ImtTree(H, B);
 
   // ============================ DEPLOY ====================================
   step("DEPLOY (anvil): Poseidon-v1, 4 verifiers, BongtuPool(B=16), mock kKRW");
-  const posHex = readFileSync(POSEIDON_HEX, "utf8").trim();
-  const posFactory = new ethers.ContractFactory([], posHex, wallet);
-  const poseidon = await posFactory.deploy();
-  await poseidon.deployed();
+  // deployStack also funds + approves the employer (deposit pulls from
+  // msg.sender via SafeERC20).
+  const { poseidon, token, pool } = await deployStack(wallet, {
+    batchSize: B,
+    authorityPublicKey: AUTHORITY.publicKey,
+    mintAmount: V * 1000n,
+  });
   // sanity: on-chain Poseidon([1,2]) == the SDK / circuit parity constant
   const posAbi = ["function poseidon(uint256[2]) pure returns (uint256)"];
   const posC = new ethers.Contract(poseidon.address, posAbi, wallet);
   const posRef = (await posC.poseidon([1, 2])).toString();
   ok(posRef === poseidon2(1n, 2n).toString(), "on-chain Poseidon-v1 parity == SDK poseidon2(1,2)");
-
-  const dv = await deploy(wallet, "DepositVerifier", "DepositVerifier");
-  const wv = await deploy(wallet, "WithdrawVerifier", "WithdrawVerifier");
-  const dsv = await deploy(wallet, "DisburseVerifier", "DisburseVerifier");
-  const tv = await deploy(wallet, "TransferVerifier", "TransferVerifier");
-  const token = await deploy(wallet, "MockERC20", "MockERC20");
-  const pool = await deployPoolProxy(wallet, [
-    poseidon.address, dv.address, wv.address, dsv.address, tv.address, token.address, B,
-    [dec(AUTHORITY.publicKey[0]), dec(AUTHORITY.publicKey[1])],
-  ]);
   console.log(`   pool=${pool.address} token=${token.address} poseidon=${poseidon.address}`);
 
   ok((await pool.root()).toString() === oracle.getRoot().toString(),
     "empty-tree root: contract == ImtTree oracle");
 
-  // fund + approve the employer (deposit pulls from msg.sender via SafeERC20)
-  await (await token.mint(employerAddr, dec(V * 1000n))).wait();
-  await (await token.approve(pool.address, ethers.constants.MaxUint256)).wait();
   const poolBal0 = await token.balanceOf(pool.address);
 
   const matchRoot = async (label: string): Promise<void> => {

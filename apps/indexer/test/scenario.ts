@@ -1,5 +1,6 @@
 // Scenario driver for the indexer test (a trimmed sibling of
-// deploy/e2e_orchestrator.ts). Deploys a fresh B=16 pool on a live anvil and
+// deploy/e2e_orchestrator.ts; both share the deploy-and-drive skeleton in
+// deploy/lib/e2e_harness.ts). Deploys a fresh B=16 pool on a live anvil and
 // runs the full cross-circuit cycle the indexer must ingest, then returns the
 // secrets the test needs to trial-decrypt + check (recipient keys, amounts,
 // salts, subtree root, single-append leaf commitments).
@@ -22,74 +23,24 @@
 // Proving is CPU snarkjs against circuits/out (same as e2e_orchestrator); no
 // rabbitsnark / GPU. Runs against E2E_RPC (an anvil the harness started).
 
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
 import { ImtTree } from "@bongtu/sdk/imt";
 import { buildAuthorityPlaintext } from "@bongtu/sdk/envelope";
 import {
   deriveKeypair, commitment, nullifier,
   poseidonEncrypt, ecdhSharedSecret, assertDistinctOwnerPubkeys,
 } from "@bongtu/sdk/note";
-import type { Keypair } from "@bongtu/sdk/note";
-import type { FieldInput } from "@bongtu/sdk/babyjub";
-import { toWire } from "@bongtu/sdk/proving";
-import { loadEthers, loadSnarkjs } from "@bongtu/sdk/extern";
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(HERE, "..", "..", ".."); // repo root (apps/indexer/test -> repo)
-const CIRC_OUT = join(ROOT, "circuits", "out");
-const CONTRACTS_OUT = join(ROOT, "contracts", "out");
-const POSEIDON_HEX = join(ROOT, "contracts", "test", "fixtures", "poseidon2.hex");
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const snarkjs: any = loadSnarkjs();
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const ethers: any = loadEthers();
-
-const RPC = process.env.E2E_RPC || "http://127.0.0.1:8545";
-const PK = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"; // anvil #0
-
-const H = 32;
-const B = 16;
-
-const dec = (x: FieldInput): string => BigInt(x).toString();
-
-async function prove(name: string, input: unknown) {
-  const wasm = join(CIRC_OUT, `${name}_js`, `${name}.wasm`);
-  const zkey = join(CIRC_OUT, `${name}.zkey`);
-  const { proof, publicSignals } = await snarkjs.groth16.fullProve(toWire(input), wasm, zkey);
-  const cd = await snarkjs.groth16.exportSolidityCallData(proof, publicSignals);
-  const [a, b, c, pub] = JSON.parse("[" + cd + "]");
-  return { a, b, c, pub, publicSignals };
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function artifact(sol: string, contract: string): { abi: any; bytecode: any } {
-  const j = JSON.parse(readFileSync(join(CONTRACTS_OUT, `${sol}.sol`, `${contract}.json`), "utf8"));
-  return { abi: j.abi, bytecode: j.bytecode.object };
-}
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function deploy(wallet: any, sol: string, contract: string, args: unknown[] = []): Promise<any> {
-  const { abi, bytecode } = artifact(sol, contract);
-  const f = new ethers.ContractFactory(abi, bytecode, wallet);
-  const inst = await f.deploy(...args);
-  await inst.deployed();
-  return inst;
-}
-
-// Deploy BongtuPool behind a UUPS ERC-1967 proxy (SPEC §5.2), initialized in the
-// proxy constructor with the 8-arg initializer. Returns a contract bound to the
-// BongtuPool ABI at the PROXY address (the canonical, upgrade-stable pool).
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function deployPoolProxy(wallet: any, initArgs: unknown[]): Promise<any> {
-  const impl = await deploy(wallet, "BongtuPool", "BongtuPool");
-  const { abi: poolAbi } = artifact("BongtuPool", "BongtuPool");
-  const initData = new ethers.utils.Interface(poolAbi).encodeFunctionData("initialize", initArgs);
-  const proxy = await deploy(wallet, "ERC1967Proxy", "ERC1967Proxy", [impl.address, initData]);
-  return new ethers.Contract(proxy.address, poolAbi, wallet);
-}
+// The deploy-and-drive skeleton (anvil connection, forge-artifact deploys, the
+// UUPS pool proxy, the CPU prove() wrapper, shared actor/salt/amount fixtures)
+// is the harness shared with deploy/e2e_orchestrator.ts — repo test/ops
+// infrastructure, not an npm package export, hence the relative path out of
+// apps/indexer.
+import {
+  RPC, H, GATE_B as B, dec, connectAnvil, deployStack, prove,
+  EMPLOYER, AUTHORITY, PAYEE, RCPTS,
+  sD0, sD1, sR, sPay, sChg, sPadT, sPadW, sRes,
+  amounts, V,
+} from "../../../deploy/lib/e2e_harness.js";
 
 /** The disburse authority (non-repudiation) envelope plaintext (SPEC §4),
  *  laid out by the owning codec (@bongtu/sdk/envelope). */
@@ -150,20 +101,16 @@ export interface ScenarioResult {
 }
 
 export async function runScenario(): Promise<ScenarioResult> {
-  const provider = new ethers.providers.JsonRpcProvider(RPC);
-  const wallet = new ethers.Wallet(PK, provider);
-  const employerAddr = wallet.address;
+  const { provider, wallet } = connectAnvil();
 
-  const EMPLOYER = deriveKeypair(111111111111111111111111n);
-  const AUTHORITY = deriveKeypair(555555555555555555555555n);
-  const PAYEE = deriveKeypair(222222222222222222222222n);
-  const recipient = (i: number): Keypair => deriveKeypair(2000000011n + BigInt(i) * 1000003n);
-  const RCPTS = Array.from({ length: B }, (_, i) => recipient(i));
-
-  const ECDH_DEP = 600000000000000000007n;
-  const ECDH_D1 = 700000000000000000001n;
-  const ECDH_TRANSFER = 800000000000000000003n;
-  const ECDH_D2 = 900000000000000000009n;
+  // Per-tx ECDH ephemeral keys + nonces: driver-local, and every (key, nonce)
+  // pair is unique across BOTH gate drivers — the §11-8 two-time-pad rule
+  // stated literally. The scenario's scalars are deliberately disjoint from
+  // e2e_orchestrator's (6/7/8/9-prefixed) so the claim stays greppable-true.
+  const ECDH_DEP = 650000000000000000007n;
+  const ECDH_D1 = 750000000000000000001n;
+  const ECDH_TRANSFER = 850000000000000000003n;
+  const ECDH_D2 = 900000000000000000019n;
   const ECDH_W = 950000000000000000021n;
   const ECDH_D3 = 970000000000000000011n;
   const NONCE_DEP = 555555555555n;
@@ -173,34 +120,19 @@ export async function runScenario(): Promise<ScenarioResult> {
   const NONCE_W = 666666666666n;
   const NONCE_D3 = 777777777777n;
 
-  const sD0 = 5000001n, sD1 = 5000002n;
-  const sR = (i: number): bigint => 6000000n + BigInt(i);
+  // scenario-only salt families for the two TAMPERED disburse batches (the
+  // honest legs use the shared harness salts)
   const sR2 = (i: number): bigint => 6100000n + BigInt(i);
   const sR3 = (i: number): bigint => 6200000n + BigInt(i);
-  const sPay = 7000001n, sChg = 7000002n;
-  const sPadT = 7100001n, sPadW = 7100002n, sRes = 7200001n;
-
-  const amounts = Array.from({ length: B }, (_, i) => 100n + BigInt(i) * 3n);
-  const V = amounts.reduce((a, x) => a + x, 0n);
 
   const oracle = new ImtTree(H, B);
 
-  // ---- deploy ----
-  const posHex = readFileSync(POSEIDON_HEX, "utf8").trim();
-  const posFactory = new ethers.ContractFactory([], posHex, wallet);
-  const poseidon = await posFactory.deploy();
-  await poseidon.deployed();
-  const dv = await deploy(wallet, "DepositVerifier", "DepositVerifier");
-  const wv = await deploy(wallet, "WithdrawVerifier", "WithdrawVerifier");
-  const dsv = await deploy(wallet, "DisburseVerifier", "DisburseVerifier");
-  const tv = await deploy(wallet, "TransferVerifier", "TransferVerifier");
-  const token = await deploy(wallet, "MockERC20", "MockERC20");
-  const pool = await deployPoolProxy(wallet, [
-    poseidon.address, dv.address, wv.address, dsv.address, tv.address, token.address, B,
-    [dec(AUTHORITY.publicKey[0]), dec(AUTHORITY.publicKey[1])],
-  ]);
-  await (await token.mint(employerAddr, dec(V * 1000n))).wait();
-  await (await token.approve(pool.address, ethers.constants.MaxUint256)).wait();
+  // ---- deploy (harness stack: Poseidon-v1, 4 verifiers, pool proxy, fund) ----
+  const { pool } = await deployStack(wallet, {
+    batchSize: B,
+    authorityPublicKey: AUTHORITY.publicKey,
+    mintAmount: V * 1000n,
+  });
 
   // ---- deposit: note(V)@0, note(0)@1 ----
   const dNoteV = commitment(V, sD0, EMPLOYER.publicKey);
