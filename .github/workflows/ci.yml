@@ -2,8 +2,12 @@
 #
 # INCLUDED
 #   node                 npm ci + typecheck (root cross-tree tsc + every workspace
-#                        tsc) + unit tests (sdk, indexer tree, admin-web,
-#                        wallet-web) + the two vite builds.
+#                        tsc) + unit tests (sdk, admin-web, wallet-web) + the
+#                        two vite builds.
+#   indexer-units        the anvil-free indexer unit suite (tree + disclosure +
+#                        ingest) in its own parallel job: it needs extdeps +
+#                        a forge build (pool ABI), which would fatten the node
+#                        job past the wall-time budget.
 #   forge                contracts: forge test + deploy/deploy_local.sh (full
 #                        B=256 stack deploy + smoke deposit on a self-contained
 #                        anvil). forge-std is vendored under contracts/lib/ and
@@ -90,10 +94,45 @@ jobs:
           key: node-modules-v1-${{ hashFiles('package-lock.json') }}
       - if: steps.nm.outputs.cache-hit != 'true'
         run: npm ci
+      - name: typecheck (root cross-tree)
+        run: npm run typecheck
+      - name: typecheck (workspaces)
+        run: npm run typecheck --workspaces
+      - name: sdk tests
+        run: npm test -w @bongtu/sdk
+      - name: admin-web tests
+        run: npm test -w @bongtu/admin-web
+      - name: wallet-web tests
+        run: npm test -w @bongtu/wallet-web
+      - name: admin-web build
+        run: npm run build -w @bongtu/admin-web
+      - name: wallet-web build
+        run: npm run build -w @bongtu/wallet-web
+
+  indexer-units:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: load toolchain pins
         run: grep -E '^[A-Z0-9_]+=' .github/ci-pins.env >> "$GITHUB_ENV"
-      # The indexer ingest unit test loads modules that require ethers via the
-      # BONGTU_NODE_MODULES external-require seam — provide the pinned extdeps.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.17.1
+          cache: npm
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: nm
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node-modules-v1-${{ hashFiles('package-lock.json') }}
+      - if: steps.nm.outputs.cache-hit != 'true'
+        run: npm ci
+      # The ingest unit test requires ethers at module load (BONGTU_NODE_MODULES
+      # seam) and parses synthetic logs with the REAL pool ABI from the forge
+      # artifact — hence extdeps + a forge build in an otherwise anvil-free job.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: extdeps
         with:
@@ -107,31 +146,14 @@ jobs:
           npm install --no-audit --no-fund --ignore-scripts \
             "ethers@${ETHERS_VERSION}" "snarkjs@${SNARKJS_VERSION}" "circomlib@${CIRCOMLIB_VERSION}"
       - run: echo "BONGTU_NODE_MODULES=$HOME/.cache/bongtu-extdeps/node_modules" >> "$GITHUB_ENV"
-      # The ingest unit test parses synthetic logs with the REAL pool ABI from
-      # the forge artifact (gitignored) — build it rather than hand-copying an
-      # ABI that could drift.
       - uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1.9.0
         with:
           version: v1.7.1
-      - name: forge build (pool ABI artifact for the ingest unit test)
+      - name: forge build (pool ABI artifact)
         run: forge build
         working-directory: contracts
-      - name: typecheck (root cross-tree)
-        run: npm run typecheck
-      - name: typecheck (workspaces)
-        run: npm run typecheck --workspaces
-      - name: sdk tests
-        run: npm test -w @bongtu/sdk
       - name: indexer unit tests (tree + disclosure + ingest, anvil-free)
         run: npm run test:unit -w @bongtu/indexer
-      - name: admin-web tests
-        run: npm test -w @bongtu/admin-web
-      - name: wallet-web tests
-        run: npm test -w @bongtu/wallet-web
-      - name: admin-web build
-        run: npm run build -w @bongtu/admin-web
-      - name: wallet-web build
-        run: npm run build -w @bongtu/wallet-web
 
   forge:
     runs-on: ubuntu-latest
