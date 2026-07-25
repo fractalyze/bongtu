@@ -29,15 +29,15 @@ this v2 pool needs the 256 proof re-proven against its arbiter key — see `docs
 ## Layout
 
 npm workspaces monorepo: `packages/*` (libraries) + `apps/*` (services and web apps); workspace packages
-export **raw `src/*.ts`** (no build step) as `@bongtu/*` specifiers. `circuits/`, `contracts/`, `deploy/`
-stay top-level (non-npm toolchains).
+export **raw `src/*.ts`** (no build step) as `@bongtu/*` specifiers. `circuits/`, `contracts/`, `prover/`,
+`deploy/` stay top-level (non-npm toolchains).
 
 - `circuits/` — circom (transfer 2×2, disburse 1×16 dev / 1×256 prod, withdraw 2×1, deposit; IMT depth-32, Poseidon-v1)
 - `contracts/` — Foundry: `BongtuPool` (unified single-frontier IMT + contract-derived enabled + arbiter epochs) + verifiers
-- `packages/sdk/` — `@bongtu/sdk`: single-frontier IMT, Poseidon, BabyJubjub keys, note/encrypt, trial-decrypt
-- `packages/prover-cli/` — `@bongtu/prover-cli`: pure prover, a typed `ProvingRequest` → Groth16 calldata (snarkjs CPU / rabbitsnark GPU); no CSV/addr-resolve/tx
+- `packages/sdk/` — `@bongtu/sdk`: single-frontier IMT, Poseidon, BabyJubjub keys, note/encrypt, trial-decrypt, shared `ProvingRequest`/`Calldata` wire types
+- `prover/` — Python FastAPI GPU prover service (not an npm package; employer GPU box only): holds the compiled disburse256 zkey resident and serves a typed `ProvingRequest` → Groth16 calldata over `POST /prove`; the wire types live in `packages/sdk/src/proving.ts`
 - `apps/indexer/` — `@bongtu/indexer`: event ingest → MirrorTree mirror (root == on-chain root), merkle-path + ciphertext-feed API, disclosure alarms; **arbiter mode** (`AUTHORITY_KEY`) decrypts every envelope to serve `/notes?owner=` + within-batch paths
-- `apps/admin-web/` — `@bongtu/admin-web`: role-moded console — employer-mode (recipients → request → prover-cli → tx) + auditor-mode (arbiter `/notes` ledger)
+- `apps/admin-web/` — `@bongtu/admin-web`: role-moded console — employer-mode (recipients → request → prover service → tx) + auditor-mode (arbiter `/notes` ledger)
 - `apps/wallet-web/` — `@bongtu/wallet-web`: MetaMask wallet — sign → bjj key, balance from `/notes`, transfer/withdraw with browser snarkjs proving
 - `deploy/` — Foundry deploy script (local anvil + GIWA), the live 256-disburse runner, the M0 cross-circuit e2e
 - `docs/` — specification, milestone records, toolchain (see the index below)
@@ -48,8 +48,8 @@ stay top-level (non-npm toolchains).
 # install the whole workspace (root node_modules + @bongtu/* symlinks)
 npm install
 
-# sdk (TypeScript oracle: IMT / Poseidon / babyjub / note crypto)
-cd packages/sdk && npm test           # 34 tests (tsx + node --test)
+# sdk (TypeScript oracle: IMT / Poseidon / babyjub / note crypto + proving wire types)
+cd packages/sdk && npm test           # 37 tests (tsx + node --test)
 
 # contracts
 cd contracts && forge test            # 37 tests
@@ -68,6 +68,11 @@ bash deploy/deploy_local.sh
 
 # run the indexer against the live GIWA pool (read-only)
 cd apps/indexer && RPC=https://sepolia-rpc.giwa.io npm start
+
+# GPU prover service (employer GPU box; eager-boots the disburse256 zkey ~2.5min)
+bash prover/setup.sh                  # once: python 3.11 venv + rabbitsnark bridge
+bash prover/run.sh                    # then GET :8700/ready -> 200, POST /prove
+cd prover && .venv/bin/python -m pytest   # CPU-only unit gates (schema/calldata)
 ```
 
 The `.ts` scripts under `packages/sdk/`, `deploy/`, `circuits/`, and `contracts/test/fixtures/` run on [`tsx`](https://github.com/privatenumber/tsx)
@@ -91,6 +96,8 @@ Copy `.env.example` → `.env` (gitignored) for a funded GIWA deployer key. Tool
 - [Zeto derivation](docs/zeto-derivation.md) — which Zeto flavor bongtu uses, per-file circuit provenance, the
   deliberate modifications, and the SMT→IMT soundness finding (why Unit 0 redeploys).
 - [Deploy](deploy/README.md) — the reusable B=256 stack deploy: env config, local anvil gate, live GIWA runbook.
+- [Prover service](prover/README.md) — the resident-GPU proving service: wire contract, boot lifecycle, ops
+  invariants (one instance per GPU), env knobs.
 - [Third-party notices](THIRD_PARTY_NOTICES.md) — dependency licenses and how GPL build tools stay un-bundled.
 
 ## Notes

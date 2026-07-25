@@ -13,7 +13,6 @@
     "test": "node --import tsx --test --test-force-exit test/*.test.ts"
   },
   "dependencies": {
-    "@bongtu/prover-cli": "*",
     "@bongtu/sdk": "*",
     "ethers": "^5.8.0",
     "poseidon-lite": "^0.3.0",

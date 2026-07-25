@@ -1,10 +1,10 @@
 // MetaMask tx wiring (SPEC §7 employer-mode: the browser sends the tx). Given
 // prover calldata {a,b,c,pub} + the 2054-element ciphertext, call the live pool's
 // disburseWithCiphertexts. This is the "calldata-submit wired" boundary — proving
-// itself happens in the local GPU helper (proverClient.ts), not the browser.
+// itself happens on the prover service (proverClient.ts), not the browser.
 
 import { ethers } from "ethers";
-import type { Calldata } from "@bongtu/prover-cli/types";
+import type { Calldata } from "@bongtu/sdk/proving";
 
 // A minimal hand-written ABI (avoids importing the Foundry artifact JSON). Only the
 // four functions the admin app touches.

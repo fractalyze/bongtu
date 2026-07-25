@@ -1,5 +1,0 @@
-{
-  "extends": "../../tsconfig.base.json",
-  "// note": "Extends the shared bongtu base (NodeNext ESM, strict). snarkjs loads via createRequire and is `any` by design — real typing is on OUR code (types/prove/index). The cross-tree gate lives in ../tsconfig.json (root), which also includes these globs.",
-  "include": ["src/**/*.ts", "test/**/*.ts"]
-}

@@ -1,25 +1,32 @@
-// prover-cli request/response types.
+// ProvingRequest / Calldata — the shared proving wire types (TS source of truth).
 //
 // A ProvingRequest is a COMPLETE, already-resolved circom witness input plus a
-// circuit tag. prover-cli is a PURE PROVER (SPEC §6): it turns this witness input
+// circuit tag. A prover is a PURE PROVER (SPEC §6): it turns this witness input
 // into a proof. It does NOT parse CSV, resolve ETH addresses to bjj pubkeys, build
-// merkle witnesses from chain state, or submit txs — the admin app (apps/, U4) does
-// all of that and hands prover-cli a finished input. So every membership witness
-// (root/pathElements/leafIndices/enabled) and every ciphertext key (ecdhPrivateKey/
-// encryptionNonce/authorityPublicKey) is already present in the request.
+// merkle witnesses from chain state, or submit txs — the apps (admin-web,
+// wallet-web) do all of that and hand the prover a finished input. So every
+// membership witness (root/pathElements/leafIndices/enabled) and every ciphertext
+// key (ecdhPrivateKey/encryptionNonce/authorityPublicKey) is already present in
+// the request.
+//
+// Two provers consume these types today:
+//   - prover/ (top-level, Python FastAPI over rabbitsnark GPU): serves disburse
+//     (1×256) over HTTP; prover/prover_service/schema.py MIRRORS this file and
+//     must be kept in sync with it.
+//   - apps/wallet-web browser snarkjs: proves transfer/withdraw in-page (a
+//     self-custody wallet never sends spending-key witnesses to a server).
 //
 // The `input` field of each variant is EXACTLY the object the corresponding circom
 // `main` consumes — the same shape deploy/e2e_orchestrator.ts and
-// deploy/giwa_disburse256.ts assemble by hand today. Field elements are FieldInput
-// (bigint | number | string): the prover strifies them to decimal for snarkjs, so a
-// request deserialized from JSON (field elements as decimal strings) is accepted
-// as-is. Points are [x, y] pairs (PointInput).
+// deploy/giwa_disburse256.ts assemble. Field elements are FieldInput
+// (bigint | number | string): provers stringify them to decimal for the witness
+// calculator, so a request deserialized from JSON (field elements as decimal
+// strings) is accepted as-is. Points are [x, y] pairs (PointInput).
 
-import type { FieldInput, PointInput } from "@bongtu/sdk/babyjub";
+import type { FieldInput, PointInput } from "./babyjub.js";
 
 /** Proving backend. deposit/transfer/withdraw prove on CPU (snarkjs); disburse (1×256,
- *  ~1.66M constraints) proves on GPU (rabbitsnark). `backend` on a request overrides
- *  the per-circuit default in prove.ts. */
+ *  ~2.79M constraints) proves on GPU (rabbitsnark, via the prover/ service). */
 export type Backend = "cpu" | "gpu";
 
 /** The four v1 circuits (SPEC §4). */
@@ -45,8 +52,8 @@ export interface DepositInput {
 /** transfer (2-in / 2-out): IMT membership + nullifiers; ciphertext rides as public
  *  signals (small base, no subtree gadget / disclosureHash). All outputs share one
  *  ephemeral key + nonce, so output owner pubkeys must be distinct (§11-8 two-time-pad
- *  guard, enforced in prove.ts). A padded input carries nullifier=0, value=0,
- *  enabled=0, pathElements=zeros. */
+ *  guard — the prover MUST reject duplicates). A padded input carries nullifier=0,
+ *  value=0, enabled=0, pathElements=zeros. */
 export interface TransferInput {
   nullifiers: FieldInput[]; // length 2 (0 for a padded input)
   inputCommitments: FieldInput[]; // length 2
@@ -89,7 +96,8 @@ export interface WithdrawInput {
 
 /** disburse (1-in / 256-out): IMT membership + one nullifier; subtree gadget +
  *  disclosureHash. All 256 outputs share one ephemeral key + nonce, so their owner
- *  pubkeys must be distinct (§11-8). The single input is always real (enabled=[1]). */
+ *  pubkeys must be distinct (§11-8 — the prover MUST reject duplicates). The single
+ *  input is always real (enabled=[1]). */
 export interface DisburseInput {
   nullifiers: FieldInput[]; // length 1
   inputCommitments: FieldInput[]; // length 1

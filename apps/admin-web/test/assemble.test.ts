@@ -1,6 +1,6 @@
 // Pure-logic gate for the employer-mode assembly (SPEC §7 / §6). Given recipient
 // rows + an input note + a membership root/path, buildDisburseRequest must produce
-// a well-formed prover-cli disburse ProvingRequest: correct field shapes, distinct
+// a well-formed disburse ProvingRequest: correct field shapes, distinct
 // output owner pubkeys, output commitments that match sdk commitment(), and the
 // 2054-element ciphertext (disburseCiphertextLen for B=256). No proving, no chain.
 

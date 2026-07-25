@@ -15,8 +15,14 @@ export const DEFAULTS = {
     "3913862942419584217034784582196041949017644467033355253711012199317627839810",
     "9603702957807229873011073182281683387900303214140383090738501285426490726765",
   ] as [string, string],
-  // A local prover-cli helper (apps/admin-web/prover-helper.ts) on the employer's GPU box.
-  proverUrl: "http://localhost:8700/prove",
+  // The bongtu prover service (top-level prover/, Python FastAPI over rabbitsnark)
+  // on the employer's GPU box. Overridable at build time via VITE_PROVER_URL —
+  // the exact dotted expression below is what Vite statically replaces (a cast
+  // or optional-chained form defeats the replacement and makes the override
+  // inert); the typeof guard keeps the node test runtime (tsx, no Vite) alive.
+  proverUrl:
+    (typeof import.meta.env !== "undefined" && import.meta.env.VITE_PROVER_URL) ||
+    "http://127.0.0.1:8700/prove",
   // A public-mode indexer for /head + /path; auditor-mode points at an arbiter indexer.
   indexerUrl: "http://localhost:8600",
 } as const;

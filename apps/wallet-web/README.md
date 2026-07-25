@@ -3,10 +3,10 @@
 A minimal, functional self-custody MetaMask wallet (SPEC §7 public app). No seed to
 store: the wallet **derives** a BabyJubJub spending key from a MetaMask signature, so
 the same account regenerates the same key every session. It imports the `@bongtu/sdk`
-and `@bongtu/prover-cli` **source directly** (the indexer is reached over HTTP only),
-so every commitment / nullifier /
-Poseidon-sponge ciphertext it builds is byte-identical to what the prover proves and
-the contract verifies.
+**source directly** (the indexer is reached over HTTP only), so every commitment /
+nullifier / Poseidon-sponge ciphertext it builds is byte-identical to what the
+provers prove and the contract verifies. All proving happens **in the browser** —
+a self-custody wallet never sends spending-key witnesses to a server.
 
 Vite + TypeScript, minimal deps (`ethers` v5 for MetaMask + keccak, `poseidon-lite`
 via the sdk, `snarkjs` for in-browser proving).
@@ -67,7 +67,7 @@ Two paths, both resolving to `sum(value)` over unspent notes (`src/lib/balance.t
 
 The small CPU circuits, provable in-browser (SPEC §6). `src/lib/spend.ts` (pure)
 assembles the witness the same way `deploy/e2e_orchestrator.ts` does by hand, in
-prover-cli `ProvingRequest` form:
+`ProvingRequest` form (`@bongtu/sdk/proving`):
 
 - Spend 1–2 of the wallet's notes (a single note pads input[1] to `{nullifier:0,
   value:0, enabled:0}` — the §5.2 value belt forces the disabled input's value to 0).
@@ -127,9 +127,9 @@ withdraw.zkey}` under the app's public dir or a CDN and point `circuitBaseUrl` a
 
 ### GPL decision (SPEC §6, explicit)
 
-Shipping `snarkjs` (GPL-3.0) to the page **is** distribution, so the Node-subprocess
-isolation the prover-cli uses does not apply. The PoC takes option **(a): accept GPL for
-the public app.** `snarkjs` is dynamically imported (`import("snarkjs")` in `prove.ts`)
+Shipping `snarkjs` (GPL-3.0) to the page **is** distribution, so no server-side
+isolation applies (and a self-custody wallet must not delegate its proving anyway).
+The PoC takes option **(a): accept GPL for the public app.** `snarkjs` is dynamically imported (`import("snarkjs")` in `prove.ts`)
 so it loads only when the user actually proves. A non-GPL WASM prover (b) or a local
 helper (c) are the documented alternatives.
 

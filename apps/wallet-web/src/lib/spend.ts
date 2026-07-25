@@ -4,7 +4,7 @@
 // AND the headless spend-witness gate. It imports the sdk crypto DIRECTLY, so every
 // commitment / nullifier is byte-identical to what snarkjs proves and the contract
 // verifies — the witness objects produced here are EXACTLY the circom `main` inputs
-// deploy/e2e_orchestrator.ts assembles by hand, in prover-cli ProvingRequest form.
+// deploy/e2e_orchestrator.ts assembles by hand, in ProvingRequest form (@bongtu/sdk/proving).
 //
 // What it does NOT do (SPEC §6 boundary): it does not prove (browser snarkjs, see
 // prove.ts) and does not send the tx (MetaMask, see metamask.ts). It stops at "a
@@ -30,7 +30,7 @@ import type {
   TransferInput,
   WithdrawInput,
   ProvingRequest,
-} from "@bongtu/prover-cli/types";
+} from "@bongtu/sdk/proving";
 import type { WalletIdentity } from "./derive.js";
 import { H } from "../config.js";
 
@@ -360,8 +360,8 @@ function spendMeta(
 }
 
 // Convert bigint-typed inputs to the decimal-string form that survives JSON.stringify
-// (a ProvingRequest POSTed to the prover has no bigints). prover-cli accepts decimal
-// strings as FieldInput as-is.
+// (a serialized ProvingRequest has no bigints). Provers accept decimal strings as
+// FieldInput as-is.
 function toDecimalTransfer(input: TransferInput): TransferInput {
   return {
     nullifiers: input.nullifiers.map(dec),

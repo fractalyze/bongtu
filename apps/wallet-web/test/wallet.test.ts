@@ -9,7 +9,7 @@
 //       unspent balance; and the key-only /events trial-decrypt discovers exactly the
 //       wallet's notes (rejecting a stranger's envelope) with correct spent flags.
 //   (3) SPEND WITNESS — transfer (2×2) and withdraw (2×1) assembly produce a
-//       prover-cli ProvingRequest whose output commitments == sdk commitment(), whose
+//       ProvingRequest whose output commitments == sdk commitment(), whose
 //       value is conserved, whose owners are distinct, and whose membership folds to
 //       root; plus the padded single-input path (enabled=[1,0]).
 

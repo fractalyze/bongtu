@@ -1,7 +1,8 @@
 // Browser Groth16 proving for the two small CPU circuits (SPEC §6 transfer proving).
 //
-// GPL DECISION (SPEC §6, explicit): shipping snarkjs to the page IS distribution, so
-// the Node-subprocess isolation the prover-cli uses does not apply here. The PoC
+// GPL DECISION (SPEC §6, explicit): shipping snarkjs to the page IS distribution
+// (no server-side isolation applies here — and a self-custody wallet must never
+// send spending-key witnesses to a server anyway). The PoC
 // takes option (a): accept GPL-3.0 for the public app, documented in README. snarkjs
 // is dynamically imported so it only loads when the user actually proves.
 //
@@ -14,7 +15,7 @@
 // figure). This module is the un-tested browser edge; the witness it proves is built
 // and unit-tested in spend.ts.
 
-import type { ProvingRequest, Calldata } from "@bongtu/prover-cli/types";
+import type { ProvingRequest, Calldata } from "@bongtu/sdk/proving";
 
 async function fetchBytes(url: string): Promise<Uint8Array> {
   const res = await fetch(url);

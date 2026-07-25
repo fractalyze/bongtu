@@ -6,7 +6,7 @@ import type { Plugin } from "vite";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..", "..");
 
-// The bongtu sdk / indexer / prover-cli sources use NodeNext ".js" import
+// The bongtu sdk / indexer sources use NodeNext ".js" import
 // specifiers that actually point at sibling ".ts" files (e.g. `./poseidon.js`).
 // Vite/rollup resolves the literal ".js" first and would miss the ".ts", so
 // rewrite a relative ".js" import to ".ts" whenever only the ".ts" exists. This
@@ -30,8 +30,8 @@ function tsJsResolve(): Plugin {
 export default {
   plugins: [tsJsResolve()],
   server: {
-    // The wallet imports unbuilt @bongtu/* workspace source (packages/sdk, apps/indexer,
-    // packages/prover-cli via root node_modules symlinks) — allow
+    // The wallet imports unbuilt @bongtu/* workspace source (packages/sdk, apps/indexer
+    // via root node_modules symlinks) — allow
     // the Vite dev server to read the whole monorepo, not just apps/wallet-web.
     fs: { allow: [REPO_ROOT] },
   },

@@ -13,5 +13,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "prover-helper.ts", "vite.config.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "vite.config.ts"]
 }

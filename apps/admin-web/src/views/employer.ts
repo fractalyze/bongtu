@@ -1,7 +1,7 @@
 // EMPLOYER-MODE view (SPEC §7). Holds NO arbiter key. Flow:
 //   recipients (form rows + optional CSV) + input note + membership witness
 //     -> buildDisburseRequest (pure)   -> show the ProvingRequest + ciphertext + meta
-//     -> prove on the local GPU helper  -> get calldata
+//     -> prove on the prover service    -> get calldata
 //     -> submit disburseWithCiphertexts via MetaMask
 // The employer's ledger is its OWN authored recipients + change + receipts (no
 // arbiter key needed — it authored the batch). Downloadable as CSV.
@@ -15,9 +15,9 @@ import {
 } from "../lib/disburse.js";
 import { parseRecipientsCsv } from "../lib/csv.js";
 import { getHead, getPath } from "../lib/indexerClient.js";
-import { proveViaHelper } from "../lib/proverClient.js";
+import { proveViaService } from "../lib/proverClient.js";
 import { submitDisburse } from "../lib/chain.js";
-import type { Calldata } from "@bongtu/prover-cli/types";
+import type { Calldata } from "@bongtu/sdk/proving";
 import { deriveKeypair, commitment } from "@bongtu/sdk/note";
 import { packPubkey } from "@bongtu/sdk/pubkey";
 import { ImtTree } from "@bongtu/sdk/imt";
@@ -237,15 +237,15 @@ export function employerView(): HTMLElement {
 
   const proveStatus = el("div", { class: "status-box" });
   const calldataPane = el("pre", { class: "json-pane" });
-  const proverUrl = input(DEFAULTS.proverUrl, "prover-cli helper URL");
+  const proverUrl = input(DEFAULTS.proverUrl, "prover service URL");
   async function proveBatch(): Promise<void> {
     if (!assembled) {
       statusLine(proveStatus, "assemble a batch first", "err");
       return;
     }
     try {
-      statusLine(proveStatus, "POSTing the request to the local GPU prover helper (cold zkey compile ~2min, warm ~0.5s)…", "info");
-      calldata = await proveViaHelper(proverUrl.value.trim(), assembled.request);
+      statusLine(proveStatus, "POSTing the request to the GPU prover service (compiled once at its boot; warm ~6s)…", "info");
+      calldata = await proveViaService(proverUrl.value.trim(), assembled.request);
       calldataPane.textContent = JSON.stringify(calldata, null, 2);
       statusLine(proveStatus, `proof received: ${calldata.pub.length} public signals; ready to submit`, "ok");
     } catch (e) {
@@ -309,13 +309,13 @@ export function employerView(): HTMLElement {
       button("Build disbursement", buildBatch, "btn"),
       buildStatus,
       metaPane,
-      el("details", {}, el("summary", { textContent: "ProvingRequest (POST body for the prover helper)" }), requestPane),
+      el("details", {}, el("summary", { textContent: "ProvingRequest (POST body for the prover service)" }), requestPane),
       ledgerPane,
     ]),
-    section("6 · Prove on the local GPU helper", [
-      el("p", { class: "note", textContent: "Browser GPU proving is infeasible (1.24GB zkey + rabbitsnark). The honest PoC path: POST the assembled request to a local prover-cli helper on the employer's GPU box (apps/admin-web/prover-helper.ts), get calldata, submit from here." }),
-      field("prover helper URL", proverUrl),
-      button("Prove via helper", () => void proveBatch(), "btn"),
+    section("6 · Prove on the prover service", [
+      el("p", { class: "note", textContent: "Browser GPU proving is infeasible (1.24GB zkey + rabbitsnark). The honest PoC path: POST the assembled request to the bongtu prover service (top-level prover/) on the employer's GPU box, get calldata, submit from here." }),
+      field("prover service URL", proverUrl),
+      button("Prove via service", () => void proveBatch(), "btn"),
       proveStatus,
       el("details", {}, el("summary", { textContent: "calldata {a,b,c,pub}" }), calldataPane),
     ]),

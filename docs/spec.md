@@ -70,7 +70,7 @@ wallet onboards — the GASOK user-KPI bridge).
 │      ▼                                                                          │
 │ packages/sdk/ keys(signTypedData→bjj) · notes · encrypt · trial-decrypt+nullif  │
 │   snarkjs(GPL) + rabbitsnark(GPU) stay repo-external (createRequire / venv)     │
-│ packages/prover-cli/ (employer self-host: ProvingRequest→Groth16 calldata)      │
+│ prover/ (Python FastAPI on the employer GPU box: ProvingRequest→calldata)       │
 │ apps/indexer/ event ingest · IMT mirror(==contract root) · path API ·           │
 │          disclosureHash verify · (auditor-mode) arbiter-decrypt ledger           │
 │ apps/ admin-web(employer-mode | auditor-mode) · wallet-web(MetaMask wallet)     │
@@ -252,15 +252,21 @@ value still counts → **mint-from-nothing**. Fix, applied to **every** verifier
   recovered balance is inflated and produced proofs revert. (Works because Q4 puts all ciphertext on-chain;
   stock Zeto's random off-chain salts made this impossible.) DoD test: `balance_after == balance_before`
   across a spend.
-> **§6 as-built (2026-07-25): prover-cli is a PURE prover.** Decision (user): `packages/prover-cli/` takes a typed,
-> already-resolved `ProvingRequest` (complete circom witness input per circuit) and returns Groth16 calldata —
-> nothing more. CSV parsing, ETH→bjj address resolution, membership-witness building, and tx submission are the
-> **admin app's** job (`apps/admin-web/`), not the prover's. CPU (snarkjs) for deposit/transfer/withdraw, GPU
-> (rabbitsnark) for disburse, selected by a `backend` field. The `apps/wallet-web/` wallet proves its own small
-> transfer/withdraw in the browser (GPL decision (a)); the note-owner identifier everywhere is the **compressed
-> bjj pubkey** (`packages/sdk/src/pubkey.ts`). Original sketch (below) is superseded on the CSV/tx-in-prover point.
+> **§6 as-built (2026-07-25, v2): the prover is a standalone Python service.** Decision (user): the GPU prover
+> is top-level `prover/` — a Python FastAPI service over rabbitsnark that holds the compiled 1.24GB disburse256
+> zkey **resident** (parse+compile once at eager boot, warm proofs ~0.5s GPU) and serves `POST /prove`:
+> a typed, already-resolved `ProvingRequest` (complete circom witness input) → Groth16 calldata — nothing more.
+> The earlier prover-cli npm package + admin-web `prover-helper.ts` shell-out pair are RETIRED by it. The shared
+> `ProvingRequest`/`Calldata` types live in `packages/sdk/src/proving.ts` (TS source of truth; the service's
+> `schema.py` mirrors them). CSV parsing, ETH→bjj address resolution, membership-witness building, and tx
+> submission remain the **admin app's** job (`apps/admin-web/`), not the prover's. The service proves only
+> `disburse` (the one GPU circuit); the `apps/wallet-web/` wallet proves its own small transfer/withdraw
+> **in-browser** (GPL decision (a)) — a self-custody wallet never sends spending-key witnesses to a server;
+> deposit proves CPU-side where assembled (deploy scripts). The note-owner identifier everywhere is the
+> **compressed bjj pubkey** (`packages/sdk/src/pubkey.ts`). Original sketch (below) is superseded on the
+> CSV/tx-in-prover point.
 
-- **Prover (`packages/prover-cli/`, employer self-host):** CSV(addr,amount) → witness (circom `witness_calculator`,
+- **Prover (now `prover/`, employer self-host):** CSV(addr,amount) → witness (circom `witness_calculator`,
   ~89MB witness for disburse) → **rabbitsnark GPU** Groth16 → calldata → tx. Prover-host block: state the GPU
   VRAM floor (measure rabbitsnark high-water), CUDA version, and that **for the PoC "we prove in the demo" is
   the distribution model** (the 1.24GB zkey + private GPU binary aren't shipped to employers yet). snarkjs /
@@ -382,8 +388,8 @@ bongtu/                       # one monorepo, Apache-2.0; npm workspaces = apps/
   circuits/                   # circom + vendored zeto lib/basetokens + our IMT bases (non-npm, top-level)
   contracts/                  # Foundry: BongtuPool, 4 verifiers, Poseidon, differential + gas tests
   packages/
-    sdk/                      # @bongtu/sdk — TS SDK (Apache/MIT); snarkjs(GPL)+rabbitsnark stay repo-external
-    prover-cli/               # @bongtu/prover-cli — employer self-host prover
+    sdk/                      # @bongtu/sdk — TS SDK incl. the shared ProvingRequest wire types (src/proving.ts)
+  prover/                     # Python FastAPI GPU prover service (not an npm package; employer GPU box only)
   apps/
     indexer/                  # @bongtu/indexer — event ingest, IMT mirror, path API, disclosureHash, arbiter ledger
     admin-web/                # @bongtu/admin-web — role-moded admin console
@@ -525,7 +531,7 @@ prices L2 execution only; GIWA's L1 DA scalars are unpublished, hence DoD-3.
 
 - Multi-input `disburse` (nInputs>1) so a large employer sources a batch from several notes — currently 1-in;
   **note this is nPublic-changing = BREAKING per §5.3.**
-- 10만-scale (391 batches) change-note chaining UX in the prover CLI (proof ~0.5s each).
+- 10만-scale (391 batches) change-note chaining UX against the prover service (proof ~0.5s each).
 - GASOK application (deadline 2026-07-31) — business decision, out of spec; the DoD is the MVP narrative.
 
 ## 13. Deferred prod-requirements register (explicitly out of PoC scope)

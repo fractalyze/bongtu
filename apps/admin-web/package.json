@@ -1,7 +1,7 @@
 {
   "name": "@bongtu/admin-web",
   "version": "0.0.0",
-  "description": "bongtu admin PoC — role-moded web app: employer-mode (assemble a disburse ProvingRequest + submit disburseWithCiphertexts) and auditor-mode (arbiter-key decrypt of the /events feed into a ledger). SPEC §7. Imports unbuilt @bongtu/* workspace source directly so the crypto is byte-identical.",
+  "description": "bongtu admin PoC — role-moded web app: employer-mode (assemble a disburse ProvingRequest, prove on the prover/ service, submit disburseWithCiphertexts) and auditor-mode (arbiter-key decrypt of the /events feed into a ledger). SPEC §7. Imports unbuilt @bongtu/* workspace source directly so the crypto is byte-identical.",
   "type": "module",
   "private": true,
   "license": "Apache-2.0",
@@ -10,12 +10,10 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --import tsx --test --test-force-exit test/*.test.ts",
-    "prover-helper": "node --import tsx prover-helper.ts"
+    "test": "node --import tsx --test --test-force-exit test/*.test.ts"
   },
   "dependencies": {
     "@bongtu/indexer": "*",
-    "@bongtu/prover-cli": "*",
     "@bongtu/sdk": "*",
     "ethers": "^5.8.0",
     "poseidon-lite": "^0.3.0"

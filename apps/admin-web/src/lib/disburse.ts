@@ -1,14 +1,14 @@
 // PURE employer-mode assembly (SPEC §7 employer-mode, §6 prover contract).
 //
 // This module owns the whole "recipients + input note + membership -> a complete
-// prover-cli disburse ProvingRequest + the on-chain ciphertext blob" job. It is
+// disburse ProvingRequest + the on-chain ciphertext blob" job. It is
 // FRAMEWORK-FREE and side-effect-free so the exact same code runs in the browser
 // view and in test/assemble.test.ts. It imports the sdk crypto DIRECTLY (not a
 // copy), so every commitment / nullifier / Poseidon-sponge ciphertext is
-// byte-identical to what prover-cli proves and the contract verifies.
+// byte-identical to what the prover service proves and the contract verifies.
 //
 // What it does NOT do (SPEC §6 boundary): it does not prove (that is the local
-// GPU helper) and does not send the tx (that is MetaMask in chain.ts). It stops
+// prover service) and does not send the tx (that is MetaMask in chain.ts). It stops
 // exactly at "a valid ProvingRequest + the 2054-element ciphertext, ready to
 // prove and submit".
 
@@ -24,7 +24,7 @@ import { unpackPubkey } from "@bongtu/sdk/pubkey";
 import { ImtTree } from "@bongtu/sdk/imt";
 import { poseidon2 } from "@bongtu/sdk/poseidon";
 import type { Point } from "@bongtu/sdk/babyjub";
-import type { DisburseInput, ProvingRequest } from "@bongtu/prover-cli/types";
+import type { DisburseInput, ProvingRequest } from "@bongtu/sdk/proving";
 import { H, B } from "../config.js";
 
 // --- app-facing input shapes (all field elements as decimal strings) ------------
@@ -85,7 +85,7 @@ export interface LedgerRow {
 }
 
 export interface AssembleResult {
-  /** The exact request POSTed to the prover-cli helper (all field elements decimal). */
+  /** The exact request POSTed to the prover service (all field elements decimal). */
   request: ProvingRequest;
   /** The 2054-element receiver++authority ciphertext for disburseWithCiphertexts. */
   ciphertext: string[];
@@ -119,7 +119,7 @@ function computeDisclosureHash(receiverFlat: bigint[], authorityCt: bigint[]): b
 }
 
 // Convert a bigint-typed DisburseInput into the decimal-string form that survives
-// JSON.stringify (a ProvingRequest POSTed to the helper has no bigints). prover-cli
+// JSON.stringify (a ProvingRequest POSTed to the service has no bigints). The prover
 // accepts decimal strings as FieldInput as-is.
 function toDecimalInput(input: DisburseInput): DisburseInput {
   const s = (x: bigint | number | string): string => BigInt(x).toString();

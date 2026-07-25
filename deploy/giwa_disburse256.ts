@@ -4,17 +4,20 @@
 // the receiver ciphertext on-chain. Measures the real L2 gas + L1 data fee.
 //
 //   GIWA_RPC (default sepolia-rpc.giwa.io) + DEPLOYER_KEY (env) required.
+//   BONGTU_PROVER_URL (default http://127.0.0.1:8700) must point at a READY
+//   bongtu prover service (top-level prover/ — boot it first, see prover/README.md).
 //   Reuses the deployed addresses in deploy/addresses.91342.json.
 //
-// Disburse proving is GPU (rabbitsnark) because the 1x256 circuit is 1.66M
-// constraints; deposit is snarkjs CPU. The SDK ImtTree mirror is validated
-// against the live root before any tx, so the membership witness is real.
+// Disburse proving is GPU (rabbitsnark) because the 1x256 circuit is 2.79M
+// constraints: this script POSTs the assembled disburse ProvingRequest to the
+// prover service and gets back verifier-ready calldata. Deposit is snarkjs CPU,
+// in-process. The SDK ImtTree mirror is validated against the live root before
+// any tx, so the membership witness is real.
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { execSync } from "node:child_process";
 
 import { ImtTree } from "@bongtu/sdk/imt";
 import { poseidon2, poseidonN } from "@bongtu/sdk/poseidon";
@@ -24,11 +27,11 @@ import {
 } from "@bongtu/sdk/note";
 import type { Keypair } from "@bongtu/sdk/note";
 import type { FieldInput } from "@bongtu/sdk/babyjub";
+import type { Calldata, DisburseInput } from "@bongtu/sdk/proving";
 
 const require = createRequire(import.meta.url);
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
-const DISCLO = join(ROOT, "..");
 const NODE_MODULES = process.env.BONGTU_NODE_MODULES || "/home/a41/Workspace/zkx-snap/circuits/node_modules";
 // snarkjs + ethers v5 are loaded via createRequire (no usable types here) => `any`.
 const snarkjs = require(join(NODE_MODULES, "snarkjs/build/main.cjs"));
@@ -41,15 +44,10 @@ if (!PK) throw new Error("DEPLOYER_KEY env required");
 const H = 32, B = 256;
 const CIRC_OUT = join(ROOT, "circuits", "out");
 const CONTRACTS_OUT = join(ROOT, "contracts", "out");
-// The belted + unified-arbiter-key disburse256 (v2): wasm/witness from the vendored
-// circuit build, zkey = the regenerated 1.24GB proving key. The old zeto
-// out_imt256/run_nonrep_imt_256 build is pre-belt and no longer matches this zkey.
-const WASM256 = join(CIRC_OUT, "disburse256_js", "disburse256.wasm");
-const GENW256 = join(CIRC_OUT, "disburse256_js", "generate_witness.js");
-const ZKEY256 = join(DISCLO, "artifacts/circuit.zkey");
-const SCRATCH = "/tmp/claude-1000/-home-a41-Workspace/a46e0b1b-a259-4c09-a106-e94cd5151974/scratchpad";
-const JV = "/home/a41/Workspace/jolt-zorch/.venv/bin/python";
-const RBS = "/home/a41/Workspace/rabbitsnark-py";
+// The bongtu prover service (top-level prover/) holds the belted disburse256
+// zkey compiled on GPU0 and serves ProvingRequest -> calldata over HTTP. Boot it
+// (and wait for GET /ready == 200) before running this script.
+const PROVER_URL = (process.env.BONGTU_PROVER_URL || "http://127.0.0.1:8700").replace(/\/$/, "");
 
 const addr = JSON.parse(readFileSync(join(ROOT, "deploy", "addresses.91342.json"), "utf8"));
 
@@ -78,23 +76,23 @@ async function proveSnark(name: string, input: unknown) {
   const [a, b, c, pub] = JSON.parse("[" + cd + "]");
   return { a, b, c, pub };
 }
-async function proveDisburse256(input: unknown) {
-  const inPath = join(SCRATCH, "giwa_disb_input.json");
-  const wtns = join(SCRATCH, "giwa_disb.wtns");
-  const proofP = join(SCRATCH, "giwa_disb_proof.json");
-  const pubP = join(SCRATCH, "giwa_disb_public.json");
-  writeFileSync(inPath, JSON.stringify(strify(input)));
-  console.log("   generating 256 witness...");
-  execSync(`node ${GENW256} ${WASM256} ${inPath} ${wtns}`, { stdio: "inherit" });
-  console.log("   rabbitsnark GPU prove (compile ~116s cold + prove ~0.5s)...");
+async function proveDisburse256(input: DisburseInput): Promise<Calldata> {
+  // POST the complete disburse ProvingRequest to the prover service; it runs
+  // witness-gen + the rabbitsnark GPU proof and returns exportSolidityCallData-form
+  // calldata (warm ~seconds; the ~2.5min zkey compile happened at service boot).
+  console.log(`   POSTing disburse ProvingRequest to ${PROVER_URL}/prove ...`);
   const t0 = Date.now();
-  execSync(`cd ${RBS} && CUDA_VISIBLE_DEVICES=0 PYTHONPATH=${RBS} ${JV} -m rabbitsnark.cli circom prove ${ZKEY256} ${proofP} ${pubP} --wtns ${wtns}`, { stdio: "inherit" });
-  console.log(`   proved disburse-256 in ${((Date.now() - t0) / 1000).toFixed(1)}s (incl. one-time compile)`);
-  const proof = JSON.parse(readFileSync(proofP, "utf8"));
-  const publicSignals = JSON.parse(readFileSync(pubP, "utf8"));
-  const cd = await snarkjs.groth16.exportSolidityCallData(proof, publicSignals);
-  const [a, b, c, pub] = JSON.parse("[" + cd + "]");
-  return { a, b, c, pub };
+  const res = await fetch(`${PROVER_URL}/prove`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ circuit: "disburse", input: strify(input), backend: "gpu" }),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`prover service ${res.status}: ${text.slice(0, 400)}`);
+  const cd = JSON.parse(text) as Calldata;
+  if (!cd.a || !cd.b || !cd.c || !cd.pub) throw new Error("prover service response missing a/b/c/pub");
+  console.log(`   proved disburse-256 via the service in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  return cd;
 }
 function foldToRoot(leaf: FieldInput, siblings: bigint[], pathIndices: number[]): bigint {
   let cur = BigInt(leaf);

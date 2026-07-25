@@ -7,7 +7,7 @@
 
 import { ethers } from "ethers";
 import type { KeyDerivationTypedData } from "./derive.js";
-import type { Calldata } from "@bongtu/prover-cli/types";
+import type { Calldata } from "@bongtu/sdk/proving";
 
 // GIWA wants ~0.001 gwei; ethers' auto-estimate overpays ~1500x. 0.005 gwei is a safe
 // floor (matches deploy/giwa_disburse256.ts and apps/admin-web/src/lib/chain.ts).
