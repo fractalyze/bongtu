@@ -107,6 +107,15 @@ jobs:
           npm install --no-audit --no-fund --ignore-scripts \
             "ethers@${ETHERS_VERSION}" "snarkjs@${SNARKJS_VERSION}" "circomlib@${CIRCOMLIB_VERSION}"
       - run: echo "BONGTU_NODE_MODULES=$HOME/.cache/bongtu-extdeps/node_modules" >> "$GITHUB_ENV"
+      # The ingest unit test parses synthetic logs with the REAL pool ABI from
+      # the forge artifact (gitignored) — build it rather than hand-copying an
+      # ABI that could drift.
+      - uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1.9.0
+        with:
+          version: v1.7.1
+      - name: forge build (pool ABI artifact for the ingest unit test)
+        run: forge build
+        working-directory: contracts
       - name: typecheck (root cross-tree)
         run: npm run typecheck
       - name: typecheck (workspaces)
