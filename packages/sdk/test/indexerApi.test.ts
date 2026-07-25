@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { deriveKeypair } from "../src/note.js";
 import { packPubkey, unpackPubkey } from "../src/pubkey.js";
 import { notesAuthMessage, parseSignature, signNotesAuth, verifyNotesAuth, packSignature } from "../src/eddsa.js";
-import { buildNotesUrl } from "../src/indexerApi.js";
+import { buildNotesUrl, buildHistoryUrl } from "../src/indexerApi.js";
 
 const OWNER_SCALAR = 424242424242424242424242n;
 
@@ -73,4 +73,42 @@ test("buildNotesUrl signs identically for bigint and decimal-string private keys
 
 test("buildNotesUrl rejects a malformed compressed owner pubkey (client-side 400 guard)", () => {
   assert.throws(() => buildNotesUrl("http://localhost:8600", "0x1234", 1n));
+});
+
+// --- /history mirrors /notes EXACTLY (same auth, only the path differs) ----------
+
+test("buildHistoryUrl output passes the indexer route's exact verification steps", () => {
+  const kp = deriveKeypair(OWNER_SCALAR);
+  const compressed = packPubkey(kp.publicKey);
+  const url = buildHistoryUrl("http://localhost:8600/", compressed, kp.formattedPrivateKey);
+
+  const { u, owner, ts, sig } = parts(url);
+  assert.equal(u.pathname, "/history"); // only the path differs from /notes
+  assert.equal(owner, compressed); // owner round-trips through the query encoding
+
+  // ts is unix SECONDS and inside the server's 300s replay window "now".
+  assert.ok(Number.isInteger(ts), `ts not an integer: ${ts}`);
+  assert.ok(Math.abs(Math.floor(Date.now() / 1000) - ts) <= 5, "ts not fresh unix seconds");
+
+  // The /history route's checks are identical to /notes: unpack owner, parse sig,
+  // rebuild the message from (ownerPub, ts), verify against the queried key.
+  const pub = unpackPubkey(owner);
+  const parsed = parseSignature(sig);
+  assert.ok(verifyNotesAuth(pub, notesAuthMessage(pub, ts), parsed), "client-built sig rejected by the server-side verifier");
+});
+
+test("buildHistoryUrl signs the SAME (pub, ts) message as buildNotesUrl (only the path differs)", () => {
+  const kp = deriveKeypair(OWNER_SCALAR);
+  const compressed = packPubkey(kp.publicKey);
+  const url = buildHistoryUrl("http://localhost:8600", compressed, kp.formattedPrivateKey);
+  const { ts, sig } = parts(url);
+  // Deterministic signing (Poseidon nonce): the sig must equal a direct sign over
+  // Poseidon(ownerPub.x, ownerPub.y, ts) — the exact construction the route expects.
+  const pub = unpackPubkey(compressed);
+  const expected = packSignature(signNotesAuth(kp.formattedPrivateKey, notesAuthMessage(pub, ts)));
+  assert.equal(sig, expected);
+});
+
+test("buildHistoryUrl rejects a malformed compressed owner pubkey (client-side 400 guard)", () => {
+  assert.throws(() => buildHistoryUrl("http://localhost:8600", "0x1234", 1n));
 });

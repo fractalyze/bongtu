@@ -65,6 +65,22 @@ export interface OwnerNote {
   spent: boolean;
 }
 
+/** The kind of a `GET /history` activity item (arbiter-mode per-owner feed). */
+export type HistoryKind = "received" | "sent" | "withdraw" | "deposit";
+
+/** One `GET /history` activity item as the arbiter mode serves it: the owner's
+ *  view of an op the ledger decrypted. `counterparty` is a COMPRESSED bjj pubkey
+ *  hex (the other party — sender for "received", payee for "sent") or null for
+ *  a "deposit"/"withdraw". `amount` is what moved for the owner (decimal). */
+export interface HistoryItem {
+  kind: HistoryKind;
+  counterparty: string | null; // compressed bjj pubkey hex, or null
+  amount: string;
+  txHash: string;
+  blockTimestamp: number; // unix seconds
+  seq: number; // newest-first: the feed is sorted by seq desc
+}
+
 /** `GET /head` — the ingested mirror state. */
 export interface Head {
   root: string;
@@ -163,4 +179,28 @@ export function buildNotesUrl(
 /** Fetch a signed /notes URL (from `buildNotesUrl`) into the owner's note list. */
 export function fetchNotes(url: string): Promise<OwnerNote[]> {
   return getJson<OwnerNote[]>(url);
+}
+
+/**
+ * Build the signed `GET /history` URL for an owner — the arbiter-mode activity
+ * feed. Mirrors `buildNotesUrl` EXACTLY (same owner/ts/sig params, same
+ * Poseidon(ownerPub.x, ownerPub.y, ts) message the route verifies); only the
+ * path differs (`/history`). The caller must hold the owner's private scalar.
+ */
+export function buildHistoryUrl(
+  indexerUrl: string,
+  ownerCompressed: string,
+  ownerPrivateKey: FieldInput,
+): string {
+  const owner = ownerCompressed.trim();
+  const pub = unpackPubkey(owner); // validates the compressed pubkey
+  const ts = Math.floor(Date.now() / 1000); // unix seconds; server allows |now-ts| <= 300
+  const msg = notesAuthMessage(pub, ts);
+  const sig = signNotesAuth(ownerPrivateKey, msg);
+  return `${trim(indexerUrl)}/history?owner=${encodeURIComponent(owner)}&ts=${ts}&sig=${packSignature(sig)}`;
+}
+
+/** Fetch a signed /history URL (from `buildHistoryUrl`) into the owner's feed. */
+export function fetchHistory(url: string): Promise<HistoryItem[]> {
+  return getJson<HistoryItem[]>(url);
 }

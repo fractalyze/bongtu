@@ -93,6 +93,11 @@ export interface ScenarioResult {
   // ---- arbiter-mode fixtures (SPEC §6b v2) ---------------------------------
   arbiterPrivateKey: string; // decimal — the AUTHORITY keypair's private scalar
   blockAfterHonestDisburse: number; // block height after disburse#1, BEFORE the transfer
+  // Expected /history amounts + counterparty for recipient#0 (decimal strings):
+  // the arbiter leg checks received(from employer) / sent / withdraw against these.
+  employerPub: [string, string];
+  transferPayAmount: string;
+  withdrawnAmount: string;
   recipient0Note: ArbiterNote; // recipient #0's disburse-batch note (spent by the transfer)
   recipient0PrivateKey: string; // decimal — TEST-ONLY: recipient #0 signs its own /notes auth
   payeeNote: ArbiterNote; // the payee's transfer output note (created by the transfer)
@@ -327,6 +332,9 @@ export async function runScenario(): Promise<ScenarioResult> {
     // arbiter test assert the note ledger + spent transition from envelopes alone.
     arbiterPrivateKey: dec(AUTHORITY.formattedPrivateKey),
     blockAfterHonestDisburse,
+    employerPub: [dec(EMPLOYER.publicKey[0]), dec(EMPLOYER.publicKey[1])],
+    transferPayAmount: dec(payVal),
+    withdrawnAmount: dec(chgVal),
     recipient0Note: {
       owner: [dec(RCPTS[0].publicKey[0]), dec(RCPTS[0].publicKey[1])],
       leafIndex: honestStart, // 16 — recipient #0's batch leaf, spent by the transfer

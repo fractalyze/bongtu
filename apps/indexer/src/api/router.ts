@@ -17,6 +17,9 @@
 //   GET /notes?owner=x,y     -> [{ value, salt, leafIndex, commitment, txHash,
 //                               spent }]  (ARBITER MODE ONLY — registered only when
 //                               the indexer holds the arbiter key; else 404)
+//   GET /history?owner=&ts=&sig= -> [{ kind, counterparty, amount, txHash,
+//                               blockTimestamp, seq }]  (ARBITER MODE ONLY; same
+//                               bjj read-auth as /notes; newest-first)
 //
 // All endpoints serve INGESTED state (the MirrorTree is asserted against the
 // contract per insert and at every scanned head), so the API stays mutually
@@ -42,6 +45,7 @@ import { alarms } from "./routes/alarms.js";
 import { health } from "./routes/health.js";
 import { nullifiers } from "./routes/nullifiers.js";
 import { notes } from "./routes/notes.js";
+import { history } from "./routes/history.js";
 
 /** What a route handler receives: the indexer + the parsed request, no HTTP types. */
 export interface RouteContext {
@@ -64,8 +68,9 @@ export interface Route {
 
 // Ordered match table. The patterns are disjoint, so order is not correctness-
 // critical; it reads top-down like the SPEC §6b endpoint list above. `/nullifiers`
-// is public (always on); `/notes` is ARBITER-ONLY and composed in per-indexer by
-// makeHandler, so public mode returns 404 for it (the endpoint does not exist).
+// is public (always on); `/notes` + `/history` are ARBITER-ONLY and composed in
+// per-indexer by makeHandler, so public mode returns 404 for them (the endpoints
+// do not exist).
 export const routes: Route[] = [head, events, path, alarms, health, nullifiers];
 
 function writeJson(res: ServerResponse, status: number, body: unknown, headers?: Record<string, string>): void {
@@ -78,7 +83,7 @@ function writeJson(res: ServerResponse, status: number, body: unknown, headers?:
  *  fixed at build time: arbiter mode adds /notes, so an unauthorised indexer can
  *  never serve a user's decrypted notes even by request-path (the route is absent). */
 export function makeHandler(ix: Indexer) {
-  const activeRoutes = ix.arbiterMode ? [...routes, notes] : routes;
+  const activeRoutes = ix.arbiterMode ? [...routes, notes, history] : routes;
   return (req: { url?: string; method?: string }, res: ServerResponse): void => {
     try {
       const url = new URL(req.url ?? "/", "http://localhost");

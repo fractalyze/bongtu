@@ -31,12 +31,15 @@ response bodies against them.
 | `GET /nullifiers` | `string[]` — the spent-nullifier set from events (public, key-free) |
 | `GET /health` | `{ ok, lastBlock, nextLeafIndex, batchSize, alarms, lastSuccessAt, lastError, lastErrorAt, consecutiveFailures }` — `ok` is false when the tail poll is persistently failing |
 | `GET /notes?owner=&ts=&sig=` | **arbiter mode only** (the route does not exist otherwise → 404): one owner's decrypted notes `[{ value, salt, leafIndex, commitment, txHash, spent }]` |
+| `GET /history?owner=&ts=&sig=` | **arbiter mode only** (else 404): one owner's activity feed `[{ kind, counterparty, amount, txHash, blockTimestamp, seq }]`, newest-first. `kind` ∈ `received`/`sent`/`withdraw`/`deposit`; `counterparty` is a compressed pubkey (or null); derived from the same decrypted envelopes as `/notes` — same bjj read-auth |
 
-`/notes` auth is enforced: `owner` is the compressed bjj pubkey
-(`@bongtu/sdk/pubkey`), `sig` a bjj EdDSA-Poseidon signature over
-`Poseidon(ownerPub.x, ownerPub.y, ts)` checked against the queried key
+`/notes` and `/history` share the same enforced read-auth: `owner` is the
+compressed bjj pubkey (`@bongtu/sdk/pubkey`), `sig` a bjj EdDSA-Poseidon signature
+over `Poseidon(ownerPub.x, ownerPub.y, ts)` checked against the queried key
 (`@bongtu/sdk/eddsa`), and `|now − ts| ≤ 300s` bounds replay. Malformed owner → 400;
-wrong key or expired ts → 401.
+missing ts/sig → 400; wrong key or expired ts → 401. `buildNotesUrl` /
+`buildHistoryUrl` (`@bongtu/sdk/indexerApi`) are the one client-side implementation,
+headless-tested against the same verifier the routes use.
 
 Routing is a plain ordered table (`src/api/router.ts`): each route is a pure function
 of the indexer + parsed params returning `{status, body}`; arbiter mode composes the
@@ -104,7 +107,7 @@ src/
   tree.ts         MirrorTree: ImtTree mirror + per-leaf records + batch subtrees + path builder
   store.ts        ingested events / alarms / nullifiers store
   disclosure.ts   disclosureHash verify + alarm classification (chain fold from @bongtu/sdk/envelope)
-  ledger.ts       arbiter-mode per-owner note ledger (spent from envelopes alone; decode via @bongtu/sdk/envelope)
+  ledger.ts       arbiter-mode per-owner note ledger + activity history (spent from envelopes alone; decode via @bongtu/sdk/envelope)
   api/            router + one file per route (see Endpoints above)
 test/             unit tests + the anvil conformance scenario (run.sh)
 ```

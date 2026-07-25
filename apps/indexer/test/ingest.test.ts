@@ -21,6 +21,7 @@
 
 import { deriveKeypair, commitment, poseidonEncrypt, ecdhSharedSecret } from "@bongtu/sdk/note";
 import type { Keypair } from "@bongtu/sdk/note";
+import { packPubkey } from "@bongtu/sdk/pubkey";
 import { ImtTree } from "@bongtu/sdk/imt";
 import { MirrorTree } from "../src/tree.js";
 import { NoteLedger, type OpEnvelope } from "../src/ledger.js";
@@ -85,6 +86,9 @@ function makeSim() {
     blockNumber,
     logIndex: logIndex++,
     txHash,
+    // Synthetic block time: monotonic in block order (anvil/live blocks carry a
+    // real one; the ingest history feed only needs a per-block unix-seconds stamp).
+    blockTimestamp: 1_700_000_000 + blockNumber,
     args,
   });
   const appended = (txHash: string, leaf: bigint): ParsedLog => {
@@ -250,6 +254,23 @@ async function main(): Promise<void> {
   const r0Notes = ix.ledger!.notesOf(RCPTS[0].publicKey[0], RCPTS[0].publicKey[1]);
   ok(r0Notes.length === 1 && r0Notes[0].leafIndex === d1.start && r0Notes[0].value === "3", "recipient#0 batch note recorded from the authority tail");
 
+  step("HISTORY: a 2-payee transfer yields one 'sent' PER non-self output (not one merged item)");
+  // transfer#2 pays U2(5) AND U3(15) — two independent non-self payees. The
+  // employer's history must carry BOTH, never a single collapsed 20→U2 item.
+  const empHist = ix.ledger!.historyOf(EMP.publicKey[0], EMP.publicKey[1]);
+  const empSent = empHist.filter((h) => h.kind === "sent");
+  const sentTo = (kp: typeof U2): string | undefined =>
+    empSent.find((h) => h.counterparty === packPubkey(kp.publicKey))?.amount;
+  ok(sentTo(U1) === "12", "employer 'sent' 12 to U1 (transfer#1)");
+  ok(sentTo(U2) === "5", "employer 'sent' 5 to U2 (transfer#2, split payee A)");
+  ok(sentTo(U3) === "15", "employer 'sent' 15 to U3 (transfer#2, split payee B) — NOT merged into U2");
+  ok(empSent.length === 3, "exactly three 'sent' items (12→U1, 5→U2, 15→U3), no collapsed item");
+  const u3Hist = ix.ledger!.historyOf(U3.publicKey[0], U3.publicKey[1]);
+  ok(
+    u3Hist.some((h) => h.kind === "received" && h.amount === "15" && h.counterparty === packPubkey(EMP.publicKey)),
+    "U3 'received' 15 from the employer",
+  );
+
   step("DISBURSE: published batch opens; withheld batch stays a sentinel + alarms");
   ok(feed[3].disclosure?.status === "verified", "published disburse disclosure checks out");
   ok(feed[4].disclosure?.status === "withheld", "ciphertext-less disburse → withheld feed entry");
@@ -297,6 +318,7 @@ async function main(): Promise<void> {
       kind: "deposit",
       txHash: "0xledger",
       logIndex: 7,
+      blockTimestamp: 1_700_000_000,
       ecdhPublicKey: pub2(deriveKeypair(eph)),
       nonce: 99n,
       authorityCt: poseidonEncrypt(plain, ecdhSharedSecret(eph, ARB.publicKey), 99n),

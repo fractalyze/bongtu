@@ -142,6 +142,51 @@ async function runArbiter(sc: any): Promise<void> {
     const malformed = await get(abase, `/notes?owner=abc&ts=${now}&sig=0x00`);
     ok(malformed.status === 400, "malformed compressed owner → 400");
 
+    // ---- GET /history (SPEC §6b): per-owner activity from the decrypted envelopes.
+    // recipient#0 received a disburse note (from the employer), then transferred to
+    // the payee, then withdrew — so its feed carries received + sent + withdraw,
+    // newest-first. Same bjj read-auth as /notes (wrong key 401, missing ts/sig 400).
+    step("ARBITER /history — received(from employer) + sent(to payee) + withdraw, sorted desc");
+    const employerCompressed = packPubkey([BigInt(sc.employerPub[0]), BigInt(sc.employerPub[1])]);
+    const payeeCompressed = packPubkey([BigInt(pay.owner[0]), BigInt(pay.owner[1])]);
+    const histQ = (
+      owner: [string, string],
+      signPriv: string,
+      ts: number = Math.floor(Date.now() / 1000),
+    ): string => {
+      const pub: [bigint, bigint] = [BigInt(owner[0]), BigInt(owner[1])];
+      const sig = packSignature(signNotesAuth(BigInt(signPriv), notesAuthMessage(pub, ts)));
+      return `/history?owner=${packPubkey(pub)}&ts=${ts}&sig=${sig}`;
+    };
+    const hh = await get(abase, histQ(r0.owner, sc.recipient0PrivateKey));
+    ok(hh.status === 200, "GET /history (recipient#0, signed) 200 (arbiter)");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const items = hh.body as any[];
+    ok(items.length === 3, `recipient#0 /history has exactly 3 items (got ${items.length})`);
+    ok(items.every((x, i) => i === 0 || items[i - 1].seq > x.seq), "/history sorted by seq desc (newest-first)");
+    ok(items.every((x) => typeof x.blockTimestamp === "number" && x.blockTimestamp > 0), "every /history item carries a block timestamp");
+
+    const recv = items.find((x) => x.kind === "received");
+    ok(!!recv, "recipient#0 /history has a received item (the disburse)");
+    ok(recv.amount === r0.value, `received amount == the disbursed amount (${r0.value})`);
+    ok(recv.counterparty === employerCompressed, "received counterparty == the employer (disburse input owner)");
+
+    const sent = items.find((x) => x.kind === "sent");
+    ok(!!sent, "recipient#0 /history has a sent item (the transfer)");
+    ok(sent.amount === sc.transferPayAmount, `sent amount == what left recipient#0 (${sc.transferPayAmount})`);
+    ok(sent.counterparty === payeeCompressed, "sent counterparty == the payee");
+
+    const wd = items.find((x) => x.kind === "withdraw");
+    ok(!!wd, "recipient#0 /history has a withdraw item");
+    ok(wd.amount === sc.withdrawnAmount && wd.counterparty === null,
+      `withdraw amount == ${sc.withdrawnAmount}, counterparty null`);
+
+    // AUTH parity with /notes: a wrong-key sig → 401, owner without ts/sig → 400.
+    const histWrong = await get(abase, histQ(r0.owner, sc.payeePrivateKey));
+    ok(histWrong.status === 401, "wrong-key signature over recipient#0's /history → 401");
+    const histNoAuth = await get(abase, `/history?owner=${packPubkey([BigInt(r0.owner[0]), BigInt(r0.owner[1])])}`);
+    ok(histNoAuth.status === 400, "GET /history with owner but no ts/sig → 400");
+
     // ARBITER /path into the disburse batch now serves a REAL path folding to root.
     step("ARBITER /path — within-batch leaf now servable (ledger filled the batch)");
     const bp = await get(abase, `/path/${r0.leafIndex}`);
@@ -302,6 +347,8 @@ async function main(): Promise<void> {
     for (const nf of sc.spentNullifiers) ok(nfSet.has(nf), `/nullifiers contains spent nullifier ${nf.slice(0, 12)}…`);
     const notesPublic = await get(base, `/notes?owner=${sc.recipient0Note.owner[0]},${sc.recipient0Note.owner[1]}`);
     ok(notesPublic.status === 404, "GET /notes → 404 in public mode (route not registered)");
+    const historyPublic = await get(base, `/history?owner=${sc.recipient0Note.owner[0]},${sc.recipient0Note.owner[1]}`);
+    ok(historyPublic.status === 404, "GET /history → 404 in public mode (route not registered)");
   } finally {
     await api.stop();
   }

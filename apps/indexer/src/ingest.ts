@@ -35,6 +35,10 @@ export interface ParsedLog {
   blockNumber: number;
   logIndex: number;
   txHash: string;
+  // Unix-seconds timestamp of the block this log landed in — fetched per distinct
+  // block (deduped) in getLogsChunked and threaded onto the arbiter history feed
+  // (each activity item carries its blockTimestamp). See getLogsChunked below.
+  blockTimestamp: number;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   args: any;
 }
@@ -108,6 +112,7 @@ export class Indexer {
             blockNumber: log.blockNumber,
             logIndex: log.logIndex,
             txHash: log.transactionHash,
+            blockTimestamp: 0, // filled below, once per distinct block
             args: (ev as { args: unknown }).args,
           });
         }
@@ -127,6 +132,24 @@ export class Indexer {
       await walk(lo, Math.min(lo + CHUNK - 1, to));
     }
     out.sort((a, b) => (a.blockNumber - b.blockNumber) || (a.logIndex - b.logIndex));
+    // Block timestamps: the ledger's per-owner history feed stamps each activity
+    // item with its block time. Fetch getBlock ONCE per distinct block in the
+    // range (a poll batch usually spans a handful of blocks, and one disburse tx
+    // can carry many logs) — deduping by blockNumber avoids an RPC round-trip per
+    // log. A missing/pending block (should not happen for a scanned range) folds
+    // to 0 rather than throwing the whole ingest.
+    const blockNums = [...new Set(out.map((l) => l.blockNumber))];
+    const tsByBlock = new Map<number, number>();
+    // Bounded concurrency: a cold-start backfill can span thousands of active
+    // blocks; an unbounded Promise.all would open one socket per block and let a
+    // single RPC rejection fail the whole ingest. Fetch in fixed-size waves.
+    const CONC = 16;
+    for (let i = 0; i < blockNums.length; i += CONC) {
+      const wave = blockNums.slice(i, i + CONC);
+      const blocks = await Promise.all(wave.map((n) => this.provider.getBlock(n)));
+      wave.forEach((n, j) => tsByBlock.set(n, Number(blocks[j]?.timestamp ?? 0)));
+    }
+    for (const l of out) l.blockTimestamp = tsByBlock.get(l.blockNumber) ?? 0;
     return out;
   }
 
@@ -285,7 +308,7 @@ export class Indexer {
         });
         if (dEntry && this.ledger) {
           this.ledger.apply({
-            kind: "deposit", txHash: l.txHash, logIndex: l.logIndex,
+            kind: "deposit", txHash: l.txHash, logIndex: l.logIndex, blockTimestamp: l.blockTimestamp,
             ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
             nonce: bn(l.args.encryptionNonce),
             authorityCt: (l.args.encryptedValuesForAuthority as unknown[]).map(bn),
@@ -321,7 +344,7 @@ export class Indexer {
           this.store.addNullifiers([bn(l.args.nullifiers[0]), bn(l.args.nullifiers[1])]);
           if (this.ledger) {
             this.ledger.apply({
-              kind: "transfer", txHash: l.txHash, logIndex: l.logIndex,
+              kind: "transfer", txHash: l.txHash, logIndex: l.logIndex, blockTimestamp: l.blockTimestamp,
               ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
               nonce: bn(l.args.encryptionNonce),
               // authority envelope = ct[8..23] (receiver0[4] ++ receiver1[4] ++ authority[16])
@@ -345,7 +368,7 @@ export class Indexer {
           this.store.addNullifiers([bn(l.args.nullifiers[0]), bn(l.args.nullifiers[1])]);
           if (this.ledger) {
             this.ledger.apply({
-              kind: "withdraw", txHash: l.txHash, logIndex: l.logIndex,
+              kind: "withdraw", txHash: l.txHash, logIndex: l.logIndex, blockTimestamp: l.blockTimestamp,
               ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
               nonce: bn(l.args.encryptionNonce),
               authorityCt: (l.args.encryptedValuesForAuthority as unknown[]).map(bn),
@@ -388,7 +411,7 @@ export class Indexer {
           // withheld publish) there is nothing to open — skip.
           if (this.ledger && ct.length > B * 4) {
             this.ledger.apply({
-              kind: "disburse", txHash: l.txHash, logIndex: l.logIndex,
+              kind: "disburse", txHash: l.txHash, logIndex: l.logIndex, blockTimestamp: l.blockTimestamp,
               ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
               nonce: bn(l.args.encryptionNonce),
               authorityCt: ct.slice(B * 4),
