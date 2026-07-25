@@ -36,6 +36,16 @@ deleted.
 
 ## Deferred (4) — with revival criteria
 
+> **Status 2026-07-25 (same day, supervised session): all four resolved.**
+> #1 APPLIED `fed1a22` (byte-pins first, exactly as prescribed — 15 pins incl. the
+> circuit ground truth `disclosureChain == committed pub[2]`; both heavy gates
+> re-run). #16 APPLIED `052fceb` (equality test written first, mutation-checked
+> both directions). #17 DECIDED (b) + APPLIED `3f48ae4` (see its entry).
+> #18 APPLIED `dfa2be0` (pure extraction, verified deletion-by-deletion; the
+> drivers' false "ECDH values differ" comments were corrected and the scenario's
+> scalars made genuinely disjoint). The entries below keep the original deferral
+> reasoning as the record of *why* the ordering and safeguards were what they were.
+
 **#1 — sdk envelope codec module (`packages/sdk/src/envelope.ts`).** The
 highest-value candidate: the byte-exact authority-envelope plaintext layout + the
 disclosureHash fold exist as 4 encoder sites, an indexer-side decoder that admin-web

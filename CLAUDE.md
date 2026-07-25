@@ -23,11 +23,10 @@ Read `README.md` once at session start; for anything deeper, follow its
 - **Heavy gates**: iterate on `packages/sdk` tests + `tsc`; run `deploy/e2e_m0.sh` and the indexer
   conformance test (`cd apps/indexer && npm test`) as the final gate, not per iteration (each spins
   an anvil + CPU proofs).
-- **Indexer modes**: the indexer runs *public* (no key) by default; setting `AUTHORITY_KEY`
-  (the arbiter bjj private key) flips it to *arbiter mode* — it then decrypts every op's
-  authority envelope, serves `GET /notes?owner=` and within-batch `/path`, and must be treated
-  as institution-internal (`/notes` requires the bjj EdDSA read-auth, but the arbiter instance
-  still holds every owner's decrypted notes). Never log or return the key.
+- **Indexer arbiter mode**: `AUTHORITY_KEY` (the arbiter bjj private key) flips the indexer
+  to arbiter mode — treat that instance as institution-internal (it holds every owner's
+  decrypted notes even with `/notes` read-auth). Never log or return the key. Mode
+  mechanics: `apps/indexer/README.md`.
 - **Arbiter key at deploy**: every committed proof fixture is bound to ONE arbiter key
   (`realproofs.arbiterKey` == disburse256 `public[8..9]` — the `Deploy.s.sol` default). Only
   override `ARBITER_KEY_X/Y` alongside freshly re-proven fixtures, or the smoke deposit
