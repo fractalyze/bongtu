@@ -24,16 +24,23 @@ import type { ProvingRequest, Calldata } from "@bongtu/core/proving";
 import { CIRCUITS_VERSION } from "../config.js";
 import { prefetchCircuitAssets, type CircuitAssets, type PrefetchDeps } from "./assets.js";
 
-type CpuCircuit = "transfer" | "withdraw";
+// The circuits the public wallet proves in-browser on CPU (SPEC §6): the two spends
+// (transfer/withdraw) plus the 0-in/2-out deposit/shield. disburse is GPU-only (prover/).
+type CpuCircuit = "transfer" | "withdraw" | "deposit";
 
 // Session-scoped in-flight prefetch, one per circuit: the version-keyed Cache Storage
 // bucket survives a restart (disk), and caching the PROMISE (not just the resolved
 // value) coalesces the two calls React StrictMode fires on mount into one download.
 const inflight: Partial<Record<CpuCircuit, Promise<CircuitAssets>>> = {};
 
-function assertCpuCircuit(circuit: string): asserts circuit is CpuCircuit {
-  if (circuit !== "transfer" && circuit !== "withdraw") {
-    throw new Error(`the public wallet only proves transfer/withdraw in-browser, not ${circuit}`);
+/** Whether `circuit` is one the wallet proves in-browser (transfer/withdraw/deposit). */
+export function isCpuCircuit(circuit: string): circuit is CpuCircuit {
+  return circuit === "transfer" || circuit === "withdraw" || circuit === "deposit";
+}
+
+export function assertCpuCircuit(circuit: string): asserts circuit is CpuCircuit {
+  if (!isCpuCircuit(circuit)) {
+    throw new Error(`the public wallet only proves transfer/withdraw/deposit in-browser, not ${circuit}`);
   }
 }
 
@@ -67,6 +74,10 @@ export async function ensureCircuitAssets(
  * the browser's compiled-module cache is warm when the real proof builds its curve.
  * NON-FATAL by contract: any failure (module shape drift, no threads) is swallowed —
  * never blocks the UI; a cold curve on the first proof is the fallback.
+ *
+ * Takes no circuit argument on purpose: it warms only the SHARED bn128 curve, which is
+ * identical across transfer/withdraw/deposit — the per-circuit wasm/zkey are prefetched
+ * separately by ensureCircuitAssets.
  */
 export async function prewarmProver(): Promise<void> {
   try {

@@ -51,14 +51,14 @@ export const DEFAULTS = {
   circuitBaseUrl: "/circuits",
 } as const;
 
-// first 8 of sha256(public/circuits/transfer.zkey || withdraw.zkey) — covers BOTH
-// keys the wallet proves against, since the version bucket stores both. Regenerate on
-// any circuit change (bongtu regen recipe) so the browser cache auto-refetches. The
-// proving-asset module keys its Cache Storage bucket on this ("bongtu-circuits-v<version>")
-// and evicts any stale bucket, so a re-proven zkey forces a one-time re-download instead
-// of serving a mismatched key from disk (a stale key fails on-chain verify with no
-// self-heal). Bump this the moment EITHER zkey changes on disk:
-//   cat public/circuits/transfer.zkey public/circuits/withdraw.zkey | sha256sum | cut -c1-8
-export const CIRCUITS_VERSION = "2fef02a1";
+// first 8 of sha256(public/circuits/transfer.zkey || withdraw.zkey || deposit.zkey) —
+// covers all THREE keys the wallet proves against, since the version bucket stores them
+// all. Regenerate on any circuit change (bongtu regen recipe) so the browser cache
+// auto-refetches. The proving-asset module keys its Cache Storage bucket on this
+// ("bongtu-circuits-v<version>") and evicts any stale bucket, so a re-proven zkey forces
+// a one-time re-download instead of serving a mismatched key from disk (a stale key fails
+// on-chain verify with no self-heal). Bump this the moment ANY zkey changes on disk:
+//   cat public/circuits/transfer.zkey public/circuits/withdraw.zkey circuits/out/deposit.zkey | sha256sum | cut -c1-8
+export const CIRCUITS_VERSION = "d1712abf";
 
 export { H, B } from "@bongtu/core/network";

@@ -1,33 +1,38 @@
-// The staged proving indicator for Send/Withdraw. Shows the three coarse stages
-// (assemble → prove → submit) with the current one active and prior ones done, plus
-// an HONEST elapsed-seconds clock during the proof. Copy per the brief: never promise
-// sub-5s — proving on-device is typically 5–20 s and we say exactly that.
+// The staged proving indicator for Send/Withdraw AND Deposit. Shows three coarse stages
+// with the current one active and prior ones done, plus an HONEST elapsed-seconds clock
+// during the proof. Copy per the brief: never promise sub-5s — proving on-device is
+// typically 5–20 s and we say exactly that. The stages default to the spend flow's
+// (assemble → prove → submit); the Deposit screen passes its own (approve → prove →
+// submit). Every flow keys its proving stage "prove" and its submit stage "submit", so
+// the elapsed-clock and confirm notes below stay stage-key driven and flow-agnostic.
 
 import type { ReactNode } from "react";
-import type { SpendStage } from "../../lib/spendFlow.js";
 
-const STAGES: { key: SpendStage; label: string }[] = [
+export interface StagedStep {
+  key: string;
+  label: string;
+}
+
+const SPEND_STEPS: StagedStep[] = [
   { key: "assemble", label: "Assembling" },
   { key: "prove", label: "Proving" },
   { key: "submit", label: "Submitting" },
 ];
 
-function rank(stage: SpendStage): number {
-  return STAGES.findIndex((s) => s.key === stage);
-}
-
 export function StagedProgress({
   stage,
   elapsed,
+  steps = SPEND_STEPS,
 }: {
-  stage: SpendStage;
+  stage: string;
   elapsed: number;
+  steps?: StagedStep[];
 }): ReactNode {
-  const active = rank(stage);
+  const active = steps.findIndex((s) => s.key === stage);
   return (
     <div className="staged" role="status" aria-live="polite">
       <ol className="staged-steps">
-        {STAGES.map((s, i) => {
+        {steps.map((s, i) => {
           const cls = i < active ? "done" : i === active ? "active" : "pending";
           return (
             <li key={s.key} className={`staged-step staged-${cls}`}>

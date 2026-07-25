@@ -24,6 +24,7 @@ import { useHashRoute, navigate } from "./hooks.js";
 import { Onboarding } from "./screens/Onboarding.js";
 import { Home } from "./screens/Home.js";
 import { Receive } from "./screens/Receive.js";
+import { Deposit } from "./screens/Deposit.js";
 import { SpendScreen } from "./components/SpendScreen.js";
 import { Settings } from "./screens/Settings.js";
 
@@ -190,6 +191,8 @@ function Router({ route }: { route: string }): ReactNode {
       return <SpendScreen key="transfer" kind="transfer" />;
     case "withdraw":
       return <SpendScreen key="withdraw" kind="withdraw" />;
+    case "deposit":
+      return <Deposit />;
     case "settings":
       return <Settings />;
     default:

@@ -111,6 +111,8 @@ body {
 .field-label { font-size: 0.82rem; color: var(--muted); font-weight: 600; }
 .field-hint { font-size: 0.78rem; color: var(--muted); }
 .field-err { font-size: 0.8rem; color: var(--err); }
+.faucet { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.faucet .hint { text-align: center; }
 .input {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -165,7 +167,7 @@ body {
 .balance-dim { font-size: 2.5rem; color: var(--muted); }
 .balance-handle { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
 
-.actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 .action {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -179,6 +181,7 @@ body {
 }
 .action:hover { background: var(--panel-2); border-color: var(--accent); }
 .action-glyph { font-size: 1.2rem; color: var(--accent); }
+.home-token-line { margin: 12px 0 0; text-align: center; font-size: 0.78rem; color: var(--muted); }
 
 /* --- activity ------------------------------------------------------------- */
 

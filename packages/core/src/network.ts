@@ -59,6 +59,11 @@ export const GIWA_GAS_FLOOR_GWEI = "0.005";
 // enforced-length form — the 2054-element receiver++authority ciphertext is a
 // separate calldata arg the contract length-checks.
 export const POOL_ABI_FRAGMENTS = {
+  // deposit (0-in/2-out mint): permissionless (external, whenInitialized, nonReentrant,
+  // NO onlyOwner), pulls V of the ERC-20 from msg.sender. pub is length 18, pub[0] == V;
+  // its single authority envelope rides in pub, so no separate ciphertext arg.
+  deposit:
+    "function deposit(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[18] pub)",
   transfer:
     "function transfer(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[36] pub)",
   withdraw:
@@ -68,6 +73,20 @@ export const POOL_ABI_FRAGMENTS = {
   root: "function root() view returns (uint256)",
   nextLeafIndex: "function nextLeafIndex() view returns (uint256)",
   B: "function B() view returns (uint256)",
+} as const;
+
+// Minimal ERC-20 fragments the public wallet needs for the deposit/shield flow: the
+// depositor approves the pool to pull exactly V (skipped when the current allowance
+// already covers V), and the Home/Deposit screens read the raw kKRW balance + pool
+// allowance. Raw-integer token units everywhere (no decimal conversion).
+export const ERC20_ABI_FRAGMENTS = {
+  approve: "function approve(address spender, uint256 amount) returns (bool)",
+  allowance: "function allowance(address owner, address spender) view returns (uint256)",
+  balanceOf: "function balanceOf(address owner) view returns (uint256)",
+  // Mock-token dev faucet: the deployed kKRW is MockERC20, whose mint(to, amount) is
+  // FULLY permissionless (no onlyOwner, no cap) — so a user self-mints test kKRW from
+  // their own MetaMask and pays their own GIWA gas. NOT present on a production token.
+  mint: "function mint(address to, uint256 amount)",
 } as const;
 
 /** Explorer link for a tx hash; `base` defaults to the live GIWA explorer. */

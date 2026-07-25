@@ -3,9 +3,9 @@
 
 import { useEffect, useState } from "react";
 
-export type Route = "home" | "receive" | "send" | "withdraw" | "settings";
+export type Route = "home" | "receive" | "send" | "withdraw" | "deposit" | "settings";
 
-const ROUTES: readonly Route[] = ["home", "receive", "send", "withdraw", "settings"];
+const ROUTES: readonly Route[] = ["home", "receive", "send", "withdraw", "deposit", "settings"];
 
 function parseHash(): Route {
   const h = window.location.hash.replace(/^#\/?/, "");

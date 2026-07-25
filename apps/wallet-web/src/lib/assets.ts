@@ -5,10 +5,10 @@
 //
 // The strategy:
 //   - one Cache Storage bucket per circuit VERSION ("bongtu-circuits-v<hash>"),
-//     where <hash> = the first 8 of sha256(transfer.zkey || withdraw.zkey)
-//     (config.CIRCUITS_VERSION) — both keys the bucket stores, so regenerating
-//     either one changes the version. The bucket is disk-backed, so a warmed key
-//     survives a browser restart.
+//     where <hash> = the first 8 of sha256(transfer.zkey || withdraw.zkey ||
+//     deposit.zkey) (config.CIRCUITS_VERSION) — all three keys the bucket stores, so
+//     regenerating any one changes the version. The bucket is disk-backed, so a warmed
+//     key survives a browser restart.
 //   - on prefetch, evict any OTHER "bongtu-circuits-*" bucket: when the circuit is
 //     re-proven the version changes and the stale key must not be served (it would
 //     fail on-chain verify), so the browser silently re-downloads the new one.
@@ -114,7 +114,7 @@ async function cachedFetch(cache: CacheLike, url: string, deps: PrefetchDeps): P
  * download overlaps the user typing.
  */
 export async function prefetchCircuitAssets(
-  circuit: "transfer" | "withdraw",
+  circuit: "transfer" | "withdraw" | "deposit",
   circuitBaseUrl: string,
   version: string = CIRCUITS_VERSION,
   deps: PrefetchDeps = {},

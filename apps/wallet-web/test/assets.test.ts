@@ -155,6 +155,43 @@ test("warm prefetch serves from cache with no network and no download announceme
   assert.equal(zkey.byteLength, 32);
 });
 
+test("cold prefetch of the deposit circuit downloads deposit.wasm + deposit.zkey once", async () => {
+  // The deposit/shield circuit is the third CPU circuit this app proves in-browser; its
+  // assets must prefetch through the same version-keyed path as transfer/withdraw.
+  const cs = new FakeCacheStorage();
+  const downloads: string[] = [];
+  const fetched: string[] = [];
+  const fetchFn = async (url: string): Promise<Response> => {
+    fetched.push(url);
+    return bytesResponse(url.endsWith(".zkey") ? 32 : 8);
+  };
+
+  const { wasm, zkey } = await prefetchCircuitAssets("deposit", "/circuits", "88542b90", {
+    cacheStorage: cs,
+    fetchFn,
+    onDownloadStart: (u) => downloads.push(u),
+  });
+
+  assert.equal(wasm.byteLength, 8);
+  assert.equal(zkey.byteLength, 32);
+  assert.deepEqual(fetched.sort(), ["/circuits/deposit.wasm", "/circuits/deposit.zkey"]);
+  assert.deepEqual(downloads.sort(), ["/circuits/deposit.wasm", "/circuits/deposit.zkey"]);
+
+  // warm re-run of deposit must not touch the network nor announce a download.
+  let calls = 0;
+  const warmDownloads: string[] = [];
+  await prefetchCircuitAssets("deposit", "/circuits", "88542b90", {
+    cacheStorage: cs,
+    fetchFn: async (url: string) => {
+      calls++;
+      return bytesResponse(url.endsWith(".zkey") ? 32 : 8);
+    },
+    onDownloadStart: (u) => warmDownloads.push(u),
+  });
+  assert.equal(calls, 0, "warm deposit cache must not fetch");
+  assert.deepEqual(warmDownloads, [], "warm deposit cache must not announce a download");
+});
+
 test("prefetch evicts a stale-version bucket before serving the current one", async () => {
   const cs = new FakeCacheStorage();
   cs.seed("bongtu-circuits-vOLDVERSION");
