@@ -50,6 +50,7 @@ import {
   type MembershipWitness,
 } from "../src/lib/spend.js";
 import { DEFAULTS, H, B } from "../src/config.js";
+import { resolveIndexerProxy } from "../vite.config.js";
 
 // A fixed stand-in for what eth_signTypedData_v4 returns (65-byte ECDSA sig). MetaMask
 // is deterministic per (account, domain, message), so a fixed hex models a fixed account.
@@ -95,6 +96,16 @@ test("the default indexer base is same-origin relative (Vite proxy contract)", (
   // tunnel, so pin the default to a root-relative path.
   assert.ok(DEFAULTS.indexerUrl.startsWith("/"), `indexerUrl must be root-relative, got ${DEFAULTS.indexerUrl}`);
   assert.ok(!/^https?:/i.test(DEFAULTS.indexerUrl), "indexerUrl default must not be an absolute origin");
+});
+
+test("the Vite indexer proxy is on in development and auto-disabled in production", () => {
+  // The proxy is a dev-only convenience; in production the app is a static build served
+  // behind an Nginx/ingress reverse-proxy that owns `/indexer/*`. `vite preview` defaults
+  // to production mode, so gating on `mode` is what keeps a live proxy from masking a
+  // missing prod route. Pin both ends of that contract.
+  const dev = resolveIndexerProxy("development");
+  assert.ok(dev && "/indexer" in dev, "development must proxy /indexer");
+  assert.equal(resolveIndexerProxy("production"), undefined, "production must not proxy — infra owns /indexer");
 });
 
 test("the key-derivation struct is domain-separated (chainId, pool, version)", () => {
