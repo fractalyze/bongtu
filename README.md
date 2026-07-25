@@ -1,5 +1,7 @@
 # bongtu (봉투)
 
+[![ci](https://github.com/fractalyze/bongtu/actions/workflows/ci.yml/badge.svg)](https://github.com/fractalyze/bongtu/actions/workflows/ci.yml)
+
 An institutional privacy token on **GIWA** (OP Stack L2), built on [Zeto](https://github.com/hyperledger-labs/zeto)
 with **enforced auditor disclosure**. A digital 월급봉투: everyone sees envelopes handed out, only the recipient
 sees the amount inside, and a designated authority can open every envelope.
@@ -49,7 +51,7 @@ export **raw `src/*.ts`** (no build step) as `@bongtu/*` specifiers. `circuits/`
 npm install
 
 # sdk (TypeScript oracle: IMT / Poseidon / babyjub / note crypto + proving wire types)
-cd packages/sdk && npm test           # 37 tests (tsx + node --test)
+cd packages/sdk && npm test           # 42 tests (tsx + node --test)
 
 # contracts
 cd contracts && forge test            # 37 tests
@@ -99,6 +101,10 @@ Copy `.env.example` → `.env` (gitignored) for a funded GIWA deployer key. Tool
 - [Prover service](prover/README.md) — the resident-GPU proving service: wire contract, boot lifecycle, ops
   invariants (one instance per GPU), env knobs.
 - [Third-party notices](THIRD_PARTY_NOTICES.md) — dependency licenses and how GPL build tools stay un-bundled.
+- Folder READMEs — each folder's own layout, run/test commands, and API surface:
+  [`packages/sdk`](packages/sdk/README.md) · [`apps/indexer`](apps/indexer/README.md) ·
+  [`circuits`](circuits/README.md) · [`contracts`](contracts/README.md) ·
+  [`apps/admin-web`](apps/admin-web/README.md) · [`apps/wallet-web`](apps/wallet-web/README.md).
 
 ## Notes
 

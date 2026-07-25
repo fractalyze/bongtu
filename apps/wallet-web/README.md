@@ -159,3 +159,8 @@ src/
 test/
   wallet.test.ts       the three headless gates (derivation, balance, spend witness)
 ```
+
+## License
+
+Apache-2.0 — see the root [`LICENSE`](../../LICENSE); for snarkjs, see the GPL
+decision section above (SPEC §6).

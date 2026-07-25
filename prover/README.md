@@ -123,3 +123,7 @@ tests/                   CPU-only unit gates: .venv/bin/python -m pytest  (no GP
 The venv bridges to the **read-only** rabbitsnark/jax installs via a `.pth`
 file instead of pip-installing them — see `setup.sh` for why and for the
 overridable machine paths.
+
+## License
+
+Apache-2.0 — see the root [`LICENSE`](../LICENSE).

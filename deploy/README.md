@@ -16,8 +16,12 @@ on GIWA Sepolia (only RPC + key + `--verify` differ).
    shape the pool supports). On a real network, swap this for the real token
    address (the pool takes the token as a **constructor** arg — there is no
    `setERC20`; it is immutable).
-4. **`BongtuPool(B=256)`** wired to Poseidon + the 4 verifiers + the token, then
-   `initialize(arbiterKey)` seeds arbiter epoch 0. Owner = the deployer.
+4. **`BongtuPool(B=256)` behind a UUPS (ERC-1967) proxy**: the implementation is
+   deployed first, then a proxy whose constructor runs
+   `initialize(arbiterKey, ...)` atomically — seeding arbiter epoch 0 and wiring
+   Poseidon + the 4 verifiers + the token. The **proxy** is the canonical,
+   upgrade-stable pool address; the addresses file records both `pool` (proxy)
+   and `poolImpl`. Owner = the deployer.
 
 Addresses are written to `deploy/addresses.<chainid>.json` (forge also writes
 `contracts/broadcast/Deploy.s.sol/<chainid>/run-latest.json`).
@@ -52,7 +56,14 @@ the tokens. Proves the full stack is live and correctly wired.
 
 Overridable: `DEPLOY_PORT` (default 8550), `RPC`, `CHAINID`, `FORGE`/`ANVIL`/`CAST`.
 
-## Deploy to GIWA Sepolia (deferred — needs a funded key)
+## Deploy to GIWA Sepolia (done — the live stack)
+
+The live B=256 stack is already deployed with this pipeline: addresses in the
+committed `deploy/addresses.91342.json` (proxy + impl also in the root
+[`README.md`](../README.md) Status table). **The live pool is canonical — do not
+redeploy for new work**; a circuit change ships as a UUPS upgrade (repo
+[`CLAUDE.md`](../CLAUDE.md)). The runbook below is the recipe that produced it,
+kept for a from-scratch redeploy.
 
 GIWA Sepolia is the SAME `Deploy.s.sol` with different env. Facts (verified
 2026-07-23): chain **91342**, RPC **https://sepolia-rpc.giwa.io**, Blockscout
@@ -62,7 +73,7 @@ precompiles present (native Groth16 verify).
 
 ```sh
 cd bongtu/contracts
-export DEPLOYER_KEY=0x<funded-giwa-sepolia-key>   # fund via faucet.giwa.io
+export DEPLOYER_KEY=0x<funded-giwa-sepolia-key>   # fund via faucet.giwa.io; lives in .env (gitignored, template .env.example)
 # optional: real arbiter key / real token (else a mock kKRW is deployed)
 # export ARBITER_KEY_X=... ARBITER_KEY_Y=...
 # export TOKEN_ADDRESS=0x<existing-erc20>
@@ -97,7 +108,17 @@ Notes for the live run:
 
 ## Files
 
-- `Deploy.s.sol` — the stack deploy + `addresses.<chainid>.json` writer.
+- `Deploy.s.sol` — the stack deploy (impl + ERC-1967 proxy) + `addresses.<chainid>.json` writer.
 - `Smoke.s.sol` — real-deposit smoke tx against the deployed pool.
-- `deploy_local.sh` — anvil + Deploy + getter reads + Smoke, the U6 gate.
+- `deploy_local.sh` — anvil + Deploy + getter reads + Smoke, the U6 gate (also the CI `forge` job's deploy gate).
 - `e2e_m0.sh` / `e2e_orchestrator.ts` — the M0 full spend-cycle e2e (separate).
+- `giwa_disburse256.ts` — the live 256-recipient disburse runner against the deployed
+  GIWA pool: rebuilds the mirror from chain, deposits, POSTs the assembled
+  `ProvingRequest` to the [`prover/`](../prover/README.md) service, submits
+  `disburseWithCiphertexts`, and measures L2 gas + L1 data fee (needs `DEPLOYER_KEY`
+  + a READY prover; pins `gasPrice` so ethers does not overpay).
+- `addresses.31337.json` / `addresses.91342.json` — recorded deployments (local anvil / live GIWA).
+
+## License
+
+Apache-2.0 — see the root [`LICENSE`](../LICENSE).

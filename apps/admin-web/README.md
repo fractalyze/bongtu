@@ -118,3 +118,7 @@ src/
 test/
   assemble.test.ts     the pure-logic assembly gate
 ```
+
+## License
+
+Apache-2.0 — see the root [`LICENSE`](../../LICENSE).
