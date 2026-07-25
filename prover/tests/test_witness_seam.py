@@ -31,7 +31,9 @@ def run_stub(monkeypatch, tmp_path):
     the real config attributes at teardown)."""
     monkeypatch.setattr(config, "DISBURSE_GEN_WITNESS", STUB)
     monkeypatch.setattr(config, "DISBURSE_WASM", tmp_path / "stub.wasm")
-    monkeypatch.setattr(config, "WITNESS_TIMEOUT", 2.0)
+    # Generous: a COLD node spawn on a 2-core CI runner can exceed 2s, which
+    # failed the success leg there. The timeout leg overrides this locally.
+    monkeypatch.setattr(config, "WITNESS_TIMEOUT", 30.0)
 
     prover = Disburse256Prover()
 
@@ -62,7 +64,8 @@ def test_zero_exit_without_wtns_is_an_infra_fault(run_stub):
         run_stub("no-wtns")
 
 
-def test_timeout_is_an_infra_fault(run_stub):
+def test_timeout_is_an_infra_fault(run_stub, monkeypatch):
+    monkeypatch.setattr(config, "WITNESS_TIMEOUT", 2.0)
     with pytest.raises(WitnessInfraError, match="timed out"):
         run_stub("hang")
 
