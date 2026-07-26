@@ -3,6 +3,10 @@
 // recipient pubkey and withdraw does not. Keeping them one component means the
 // validate → confirm → staged-prove → success flow lives in exactly one place.
 //
+// Amounts: the form takes DECIMAL kKRW (parseKkrw, ≤6 fraction digits, 2^100 belt) and
+// converts to raw wei at the UI edge — the flow/witness layer still receives raw wei
+// strings, unchanged.
+//
 // On open we PREFETCH the circuit's wasm+zkey (the ~28 MB one-time download) and
 // pre-warm the bn128 curve, so the heavy I/O overlaps the user typing the amount.
 
@@ -14,9 +18,11 @@ import { ensureCircuitAssets, prewarmProver } from "../../lib/prove.js";
 import { runSpend, type SpendStage, type SpendOutcome } from "../../lib/spendFlow.js";
 import { useWallet } from "../App.js";
 import { navigate, useElapsedSeconds } from "../hooks.js";
-import { formatAmount, normalizePubkey } from "../format.js";
+import { formatKkrw, parseKkrw } from "../../lib/money.js";
+import { normalizePubkey } from "../format.js";
 import { ScreenHeader } from "./ScreenHeader.js";
 import { StagedProgress } from "./StagedProgress.js";
+import { SuccessMark } from "./SuccessMark.js";
 
 type Phase = "form" | "confirm" | "running" | "done";
 
@@ -38,12 +44,10 @@ function recipientError(raw: string, selfPubkey: string): string | null {
 }
 
 function amountError(raw: string, balance: bigint | null): string | null {
-  const v = raw.trim();
-  if (!v) return "Enter an amount.";
-  if (!/^\d+$/.test(v)) return "Amount must be a whole number.";
-  const amt = BigInt(v);
-  if (amt <= 0n) return "Amount must be greater than zero.";
-  if (balance !== null && amt > balance) return "Amount exceeds your balance.";
+  const p = parseKkrw(raw);
+  if (!p.ok) return p.error;
+  if (p.wei <= 0n) return "Amount must be greater than zero.";
+  if (balance !== null && p.wei > balance) return "Amount exceeds your balance.";
   return null;
 }
 
@@ -79,10 +83,12 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
 
   const title = isTransfer ? "Send" : "Withdraw";
 
-  const review = useMemo(() => {
-    const amt = /^\d+$/.test(amount.trim()) ? BigInt(amount.trim()) : 0n;
-    return formatAmount(amt);
+  // The raw-wei amount the protocol layer receives; 0n while the input is invalid.
+  const amountWei = useMemo(() => {
+    const p = parseKkrw(amount);
+    return p.ok ? p.wei : 0n;
   }, [amount]);
+  const review = formatKkrw(amountWei);
 
   async function submit(): Promise<void> {
     if (!identity || !connection) return;
@@ -92,7 +98,7 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
       const res = await runSpend(
         kind,
         { identity, connection, indexerUrl, notes },
-        { to: isTransfer ? recipient.trim() : undefined, amount: amount.trim() },
+        { to: isTransfer ? recipient.trim() : undefined, amount: amountWei.toString() },
         (s) => setStage(s),
       );
       setOutcome(res);
@@ -110,15 +116,15 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
       <div className="screen">
         <ScreenHeader title={title} />
         <div className="success">
-          <div className="success-check">✓</div>
+          <SuccessMark />
           <h2 className="success-title">{isTransfer ? "Payment sent" : "Withdrawal sent"}</h2>
           <p className="success-amount">
             {review} <span className="unit">kKRW</span>
           </p>
           <a className="success-link" href={outcome.explorerUrl} target="_blank" rel="noreferrer">
-            View on explorer ↗
+            View on explorer
           </a>
-          <p className="success-change">Change kept: {formatAmount(outcome.changeValue)} kKRW</p>
+          <p className="success-change">Change kept: {formatKkrw(outcome.changeValue)} kKRW</p>
           <button className="btn btn-primary btn-block" onClick={() => navigate("home")}>
             Done
           </button>
@@ -206,13 +212,13 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
           <span className="field-label">Amount (kKRW)</span>
           <input
             className="input"
-            inputMode="numeric"
-            placeholder="0"
+            inputMode="decimal"
+            placeholder="0.00"
             value={amount}
-            onChange={(e) => setAmount(e.target.value.replace(/[^\d]/g, ""))}
+            onChange={(e) => setAmount(e.target.value.replace(/[^\d.,]/g, ""))}
           />
           <span className="field-hint">
-            Balance: {balance === null ? "—" : formatAmount(balance)} kKRW
+            Balance: {balance === null ? "—" : formatKkrw(balance)} kKRW
           </span>
           {amount.trim() && amtErr && <span className="field-err">{amtErr}</span>}
         </label>

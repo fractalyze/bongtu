@@ -17,7 +17,7 @@ export function Receive(): ReactNode {
   useEffect(() => {
     if (!pubkey) return;
     let alive = true;
-    void QRCode.toDataURL(pubkey, { margin: 1, width: 240, color: { dark: "#0e1116", light: "#ffffff" } })
+    void QRCode.toDataURL(pubkey, { margin: 1, width: 240, color: { dark: "#111827", light: "#ffffff" } })
       .then((url) => {
         if (alive) setQr(url);
       })
@@ -47,7 +47,7 @@ export function Receive(): ReactNode {
         <div className="qr-frame">{qr ? <img className="qr" src={qr} alt="Your address QR" /> : <div className="qr-skeleton" />}</div>
         <div className="pubkey-box mono">{pubkey}</div>
         <button className="btn btn-primary btn-block" onClick={copy}>
-          {copied ? "Copied ✓" : "Copy address"}
+          {copied ? "Copied" : "Copy address"}
         </button>
       </div>
     </div>

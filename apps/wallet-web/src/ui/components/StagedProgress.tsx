@@ -19,6 +19,22 @@ const SPEND_STEPS: StagedStep[] = [
   { key: "submit", label: "Submitting" },
 ];
 
+// SVG, not a checkmark character — the locked visual language bans glyph chars in UI.
+function CheckMark(): ReactNode {
+  return (
+    <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
+      <path
+        d="M3 8.5 6.5 12 13 4.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function StagedProgress({
   stage,
   elapsed,
@@ -36,7 +52,7 @@ export function StagedProgress({
           const cls = i < active ? "done" : i === active ? "active" : "pending";
           return (
             <li key={s.key} className={`staged-step staged-${cls}`}>
-              <span className="staged-bullet">{i < active ? "✓" : i + 1}</span>
+              <span className="staged-bullet">{i < active ? <CheckMark /> : i + 1}</span>
               {s.label}
             </li>
           );

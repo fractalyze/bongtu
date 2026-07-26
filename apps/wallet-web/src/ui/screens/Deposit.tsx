@@ -3,6 +3,9 @@
 // recipient and NO note selection — an amount-only form → confirm → staged run
 // (approve → prove → submit) → success with an explorer link.
 //
+// Amounts: the form takes DECIMAL kKRW (parseKkrw, ≤6 fraction digits, 2^100 belt) and
+// converts to raw wei at the UI edge; runDeposit still receives a raw-wei string.
+//
 // On open we PREFETCH the deposit wasm+zkey (the one-time download) and pre-warm the
 // bn128 curve, so the heavy I/O overlaps the user typing the amount; we also read the
 // account's public kKRW balance + current pool allowance (view calls, no gas) to bound
@@ -13,12 +16,13 @@ import type { ReactNode } from "react";
 import { DEFAULTS } from "../../config.js";
 import { ensureCircuitAssets, prewarmProver } from "../../lib/prove.js";
 import { runDeposit, type DepositStage, type DepositOutcome } from "../../lib/depositFlow.js";
-import { readTokenState, mintTestToken } from "../../lib/metamask.js";
-import { FAUCET_AMOUNT, shouldOfferFaucet } from "../../lib/faucet.js";
+import { readTokenState, mintTestToken, approveToken } from "../../lib/metamask.js";
+import { FAUCET_AMOUNT } from "../../lib/faucet.js";
 import { useWallet } from "../App.js";
 import { navigate, useElapsedSeconds } from "../hooks.js";
-import { formatAmount } from "../format.js";
+import { formatKkrw, parseKkrw, allowanceLabel } from "../../lib/money.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
+import { SuccessMark } from "../components/SuccessMark.js";
 import { StagedProgress, type StagedStep } from "../components/StagedProgress.js";
 
 type Phase = "form" | "confirm" | "running" | "done";
@@ -32,12 +36,10 @@ const DEPOSIT_STEPS: StagedStep[] = [
 ];
 
 function amountError(raw: string, balance: bigint | null): string | null {
-  const v = raw.trim();
-  if (!v) return "Enter an amount.";
-  if (!/^\d+$/.test(v)) return "Amount must be a whole number.";
-  const amt = BigInt(v);
-  if (amt <= 0n) return "Amount must be greater than zero.";
-  if (balance !== null && amt > balance) return "Amount exceeds your kKRW balance.";
+  const p = parseKkrw(raw);
+  if (!p.ok) return p.error;
+  if (p.wei <= 0n) return "Amount must be greater than zero.";
+  if (balance !== null && p.wei > balance) return "Amount exceeds your kKRW balance.";
   return null;
 }
 
@@ -54,11 +56,12 @@ export function Deposit(): ReactNode {
   const [allowance, setAllowance] = useState<bigint | null>(null);
   const [faucetPending, setFaucetPending] = useState(false);
   const [faucetTxUrl, setFaucetTxUrl] = useState<string | null>(null);
+  const [revoking, setRevoking] = useState(false);
 
   const elapsed = useElapsedSeconds(phase === "running" && stage === "prove");
 
-  // Re-read balance + allowance on demand (after the faucet mint confirms, so the user
-  // can immediately deposit the freshly minted kKRW). Best-effort: an RPC hiccup shows "—".
+  // Re-read balance + allowance on demand (after the faucet mint or a revoke confirms).
+  // Best-effort: an RPC hiccup shows "—".
   const refreshTokenState = useCallback(async (): Promise<void> => {
     if (!connection) return;
     try {
@@ -81,48 +84,28 @@ export function Deposit(): ReactNode {
     void prewarmProver();
   }, []);
 
-  // Read the public kKRW balance + pool allowance on open (view calls; the deposit flow
-  // re-reads the allowance at submit time to decide skip-approve).
   useEffect(() => {
-    if (!connection) return;
-    let alive = true;
-    void readTokenState(connection, DEFAULTS.token, connection.address, DEFAULTS.pool)
-      .then((s) => {
-        if (alive) {
-          setTokenBalance(s.balance);
-          setAllowance(s.allowance);
-        }
-      })
-      .catch(() => {
-        if (alive) {
-          setTokenBalance(null);
-          setAllowance(null);
-        }
-      });
-    return () => {
-      alive = false;
-    };
-  }, [connection]);
+    void refreshTokenState();
+  }, [refreshTokenState]);
 
   const amtErr = amountError(amount, tokenBalance);
   // Guard on a KNOWN balance: until the token state loads (tokenBalance===null) the
   // over-spend check can't fire, so don't let the user start a proof that would revert.
   const formValid = tokenBalance !== null && !amtErr;
 
-  const review = useMemo(() => {
-    const amt = /^\d+$/.test(amount.trim()) ? BigInt(amount.trim()) : 0n;
-    return formatAmount(amt);
+  // The raw-wei amount the flow receives; 0n while the input is invalid.
+  const amountWei = useMemo(() => {
+    const p = parseKkrw(amount);
+    return p.ok ? p.wei : 0n;
   }, [amount]);
+  const review = formatKkrw(amountWei);
 
   // Whether the confirm step will need an approve tx (allowance already covers V => skip).
-  const willApprove = useMemo(() => {
-    if (allowance === null || !/^\d+$/.test(amount.trim())) return true;
-    return allowance < BigInt(amount.trim());
-  }, [allowance, amount]);
+  const willApprove = allowance === null || amountWei <= 0n || allowance < amountWei;
 
   // DEV FAUCET: self-mint test kKRW from the connected wallet (MockERC20.mint is
-  // permissionless; the user pays their own gas), then refresh balance/allowance so the
-  // deposit form unlocks immediately. Only offered when the public balance is 0.
+  // permissionless; the user pays their own gas), then refresh balance/allowance.
+  // Always offered — a tester with a non-zero balance still needs a way to mint more.
   async function getTestTokens(): Promise<void> {
     if (!connection) return;
     setFaucetPending(true);
@@ -139,6 +122,21 @@ export function Deposit(): ReactNode {
     }
   }
 
+  // Revoke = approve(pool, 0); afterwards deposits fall back to the exact-V approve cycle.
+  async function revoke(): Promise<void> {
+    if (!connection) return;
+    setRevoking(true);
+    setError(null);
+    try {
+      await approveToken(connection, DEFAULTS.token, DEFAULTS.pool, 0n);
+      await refreshTokenState();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRevoking(false);
+    }
+  }
+
   async function submit(): Promise<void> {
     if (!identity || !connection) return;
     setPhase("running");
@@ -146,7 +144,7 @@ export function Deposit(): ReactNode {
     try {
       const res = await runDeposit(
         { identity, connection },
-        { amount: amount.trim() },
+        { amount: amountWei.toString() },
         (s) => setStage(s),
       );
       setOutcome(res);
@@ -164,13 +162,13 @@ export function Deposit(): ReactNode {
       <div className="screen">
         <ScreenHeader title="Deposit" />
         <div className="success">
-          <div className="success-check">✓</div>
+          <SuccessMark />
           <h2 className="success-title">Deposit shielded</h2>
           <p className="success-amount">
             {review} <span className="unit">kKRW</span>
           </p>
           <a className="success-link" href={outcome.explorerUrl} target="_blank" rel="noreferrer">
-            View on explorer ↗
+            View on explorer
           </a>
           <p className="success-change">Now in your private balance.</p>
           <button className="btn btn-primary btn-block" onClick={() => navigate("home")}>
@@ -243,40 +241,52 @@ export function Deposit(): ReactNode {
           <span className="field-label">Amount (kKRW)</span>
           <input
             className="input"
-            inputMode="numeric"
-            placeholder="0"
+            inputMode="decimal"
+            placeholder="0.00"
             value={amount}
-            onChange={(e) => setAmount(e.target.value.replace(/[^\d]/g, ""))}
+            onChange={(e) => setAmount(e.target.value.replace(/[^\d.,]/g, ""))}
           />
           <span className="field-hint">
-            kKRW balance: {tokenBalance === null ? "—" : formatAmount(tokenBalance)} · Pool
-            allowance: {allowance === null ? "—" : formatAmount(allowance)}
+            kKRW balance: {tokenBalance === null ? "—" : formatKkrw(tokenBalance)} · Pool
+            allowance: {allowance === null ? "—" : allowanceLabel(allowance)}
+            {allowance !== null && allowance > 0n && (
+              <>
+                {" "}
+                <button
+                  className="link-btn link-btn-sm"
+                  disabled={revoking}
+                  onClick={() => void revoke()}
+                >
+                  {revoking ? "Revoking…" : "Revoke"}
+                </button>
+              </>
+            )}
           </span>
           {amount.trim() && amtErr && <span className="field-err">{amtErr}</span>}
         </label>
 
-        {/* Dev faucet: only when the public balance is 0 — a fresh wallet with nothing to
-            shield. Self-mint test kKRW (user pays gas), then the balance/allowance refresh
-            unlocks the form. */}
-        {tokenBalance !== null && shouldOfferFaucet(tokenBalance) && (
-          <div className="faucet">
-            <p className="hint">
-              You have no kKRW yet. Mint some test kKRW to try a deposit — you only pay gas.
-            </p>
-            <button
-              className="btn btn-ghost btn-block"
-              disabled={faucetPending}
-              onClick={() => void getTestTokens()}
-            >
-              {faucetPending ? "Minting test kKRW…" : "Get test kKRW"}
-            </button>
-            {faucetTxUrl && (
-              <a className="success-link" href={faucetTxUrl} target="_blank" rel="noreferrer">
-                Minted ✓ View on explorer ↗
-              </a>
-            )}
+        <div className="faucet">
+          <div className="faucet-head">
+            <span className="testnet-tag">Testnet</span>
+            <span className="faucet-title">Need test kKRW?</span>
           </div>
-        )}
+          <p className="hint">
+            Mint {formatKkrw(FAUCET_AMOUNT)} test kKRW to your wallet any time — you only pay
+            gas.
+          </p>
+          <button
+            className="btn btn-ghost btn-block"
+            disabled={faucetPending || !connection}
+            onClick={() => void getTestTokens()}
+          >
+            {faucetPending ? "Minting test kKRW…" : "Get test kKRW"}
+          </button>
+          {faucetTxUrl && (
+            <a className="success-link" href={faucetTxUrl} target="_blank" rel="noreferrer">
+              Minted — view on explorer
+            </a>
+          )}
+        </div>
 
         {error && <div className="banner banner-err">{error}</div>}
         {downloading && (

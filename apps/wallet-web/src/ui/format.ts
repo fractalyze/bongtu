@@ -1,16 +1,5 @@
-// Small presentation helpers (PURE, no React). Amounts are raw integer field values
-// (BigInt-safe decimal strings), so grouping is done on the string — never via Number,
-// which would lose precision on large balances.
-
-/** Group a non-negative integer decimal string with thousands separators. */
-export function formatAmount(raw: string | bigint): string {
-  let s = typeof raw === "bigint" ? raw.toString() : raw;
-  const neg = s.startsWith("-");
-  if (neg) s = s.slice(1);
-  s = s.replace(/^0+(?=\d)/, ""); // trim leading zeros, keep a lone "0"
-  const grouped = s.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return (neg ? "-" : "") + grouped;
-}
+// Small presentation helpers (PURE, no React). Money formatting/parsing lives in
+// src/lib/money.ts (the single raw-wei <-> kKRW edge); these are the non-money bits.
 
 /** Shorten a compressed bjj pubkey / address for display: `0x05c818…1f96`. */
 export function shortenPubkey(hex: string): string {

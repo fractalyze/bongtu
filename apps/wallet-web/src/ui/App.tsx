@@ -26,6 +26,7 @@ import { Home } from "./screens/Home.js";
 import { Receive } from "./screens/Receive.js";
 import { Deposit } from "./screens/Deposit.js";
 import { SpendScreen } from "./components/SpendScreen.js";
+import { Activity } from "./screens/Activity.js";
 import { Settings } from "./screens/Settings.js";
 
 // --- wallet context --------------------------------------------------------------
@@ -193,6 +194,8 @@ function Router({ route }: { route: string }): ReactNode {
       return <SpendScreen key="withdraw" kind="withdraw" />;
     case "deposit":
       return <Deposit />;
+    case "activity":
+      return <Activity />;
     case "settings":
       return <Settings />;
     default:

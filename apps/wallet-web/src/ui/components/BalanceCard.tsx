@@ -1,9 +1,9 @@
-// The hero balance card on Home: the big private kKRW balance with a shielded
-// affordance, plus the wallet's receive handle. Values are raw field integers, so
-// formatAmount groups the decimal string (never Number).
+// The hero balance card on Home: the big private kKRW balance plus the wallet's
+// receive handle. Values are raw wei; formatKkrw is the one UI edge (never Number).
 
 import type { ReactNode } from "react";
-import { formatAmount, shortenPubkey } from "../format.js";
+import { formatKkrw } from "../../lib/money.js";
+import { shortenPubkey } from "../format.js";
 
 export function BalanceCard({
   balance,
@@ -16,15 +16,13 @@ export function BalanceCard({
 }): ReactNode {
   return (
     <section className="balance-card">
-      <div className="balance-label">
-        <span className="shield">◈</span> Private balance
-      </div>
+      <div className="balance-label">Private balance</div>
       <div className="balance-value">
         {balance === null ? (
           <span className="balance-dim">{loading ? "…" : "—"}</span>
         ) : (
           <>
-            <span className="balance-num">{formatAmount(balance)}</span>
+            <span className="balance-num">{formatKkrw(balance)}</span>
             <span className="balance-unit">kKRW</span>
           </>
         )}

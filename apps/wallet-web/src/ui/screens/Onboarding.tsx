@@ -11,22 +11,17 @@ export function Onboarding(): ReactNode {
   return (
     <div className="onboarding">
       <div className="onboarding-hero">
-        <div className="mark">◈</div>
         <h1 className="onboarding-title">bongtu</h1>
         <p className="onboarding-tag">Self-custody private kKRW on GIWA.</p>
       </div>
 
       <ul className="onboarding-points">
         <li>
-          <span className="pt-glyph">🔑</span> Your spending key is derived from your wallet
-          signature — never stored, never sent.
+          Your spending key is derived from your wallet signature — never stored, never
+          sent.
         </li>
-        <li>
-          <span className="pt-glyph">◈</span> Balances and amounts stay private on-chain.
-        </li>
-        <li>
-          <span className="pt-glyph">⚡</span> Proofs are generated on your device.
-        </li>
+        <li>Balances and amounts stay private on-chain.</li>
+        <li>Proofs are generated on your device.</li>
       </ul>
 
       {connectError && <div className="banner banner-err">{connectError}</div>}
