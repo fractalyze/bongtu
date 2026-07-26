@@ -192,6 +192,27 @@ src/
 test/             unit tests + the anvil conformance scenario (run.sh) + the Postgres integration gate (pg_integration.sh)
 ```
 
+## Ops — dev-box continuous release
+
+The public arbiter indexer runs on the fractalyze GPU dev box, released
+continuously from `main`:
+
+- **Deploy clone**: `/home/a41/bongtu-deploy` — a dedicated checkout (separate
+  from any dev working tree) that runs the compose stack above
+  (`docker compose --env-file .env.compose up -d --build`, `restart: unless-stopped`).
+- **Public endpoint**: Tailscale Funnel maps
+  `https://gpu-server.tailec11d1.ts.net:10000` → local `:8600`
+  (`tailscale funnel --bg --https=10000 http://127.0.0.1:8600`; ports 443/8443
+  on that node belong to other apps).
+- **CD**: a self-hosted GitHub runner on the box (user systemd unit
+  `bongtu-runner.service`, runner name `gpu-server-bongtu`, label
+  `bongtu-devbox`) executes `.github/workflows/deploy-indexer.yml` on push to
+  `main`: fetch+reset the deploy clone, `compose up -d --build`, gate on
+  `/health`.
+- **Secrets**: `AUTHORITY_KEY` (arbiter bjj key) and the RPC URL live ONLY in
+  the deploy clone's gitignored `.env.compose` (mode 600) — never in the
+  workflow yml or repo history.
+
 ## License
 
 Apache-2.0 — see the root [`LICENSE`](../../LICENSE).
