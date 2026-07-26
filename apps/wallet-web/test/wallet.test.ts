@@ -380,3 +380,14 @@ test("freshSpendCrypto draws every field from the injected randomness", () => {
   const f = fixture([1000n]);
   assert.doesNotThrow(() => buildTransferRequest(f.wallet, f.inputs, f.memberships, f.recipient, "100", freshSpendCrypto(rand)));
 });
+
+test("freshSpendCrypto clamps the encryption nonce below 2^128 (circuit constraint)", () => {
+  // Same constraint as deposit: SymmetricEncrypt (both the receiver ciphertexts and
+  // the authority envelope) requires nonce < 2^128; the browser randField draws
+  // 248-bit fields, so the factory must clamp the nonce and ONLY the nonce.
+  const wide = ((1n << 247n) + 54321n).toString();
+  const c = freshSpendCrypto(() => wide);
+  assert.ok(BigInt(c.encryptionNonce) < 1n << 128n, "nonce must satisfy nonce < 2^128");
+  assert.equal(c.changeSalt, wide, "salts keep the full draw");
+  assert.equal(c.ecdhPrivateKey, wide, "ephemeral key keeps the full draw");
+});

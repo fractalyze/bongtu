@@ -133,3 +133,15 @@ test("freshDepositCrypto draws exactly four fields from the injected randomness"
   const wallet = deriveIdentityFromSignature(SIG);
   assert.doesNotThrow(() => buildDepositRequest(wallet, "100", freshDepositCrypto(rand)));
 });
+
+test("freshDepositCrypto clamps the encryption nonce below 2^128 (circuit constraint)", () => {
+  // The browser CSPRNG (spendFlow randField) draws 248-bit fields; SymmetricEncrypt
+  // constrains nonce < 2^128, so an unclamped draw kills witness generation with
+  // "Assert Failed … SymmetricEncrypt" (live-repro'd 2026-07-26). Salts and the
+  // ephemeral key must KEEP the full draw width.
+  const wide = ((1n << 247n) + 12345n).toString();
+  const c = freshDepositCrypto(() => wide);
+  assert.ok(BigInt(c.encryptionNonce) < 1n << 128n, "nonce must satisfy nonce < 2^128");
+  assert.equal(c.salt0, wide, "salts keep the full draw");
+  assert.equal(c.ecdhPrivateKey, wide, "ephemeral key keeps the full draw");
+});

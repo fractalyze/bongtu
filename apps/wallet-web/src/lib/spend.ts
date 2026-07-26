@@ -153,6 +153,17 @@ export function selectInputNotes(notes: readonly SelectableNote[], amount: strin
 export type RandField = () => string;
 
 /**
+ * Clamp a fresh field draw to a valid Poseidon-encryption nonce. Every circuit's
+ * `SymmetricEncrypt` constrains `nonce < 2^128` (zeto encrypt.circom — the nonce
+ * shares a Poseidon state slot with `messageLength * 2^128`), so a full-width
+ * field draw fails witness generation with "Assert Failed … SymmetricEncrypt".
+ * Masking to the low 128 bits keeps the draw uniform.
+ */
+export function toEncryptionNonce(fieldDraw: string): string {
+  return (BigInt(fieldDraw) & ((1n << 128n) - 1n)).toString();
+}
+
+/**
  * Draw the fresh per-tx crypto material for one spend. Every draw is a NEW field
  * element from `rand`: sharing the ephemeral ECDH key + nonce across outputs of
  * ONE tx is fine, but reuse ACROSS txs is a two-time pad — so callers draw a
@@ -163,7 +174,7 @@ export type RandField = () => string;
 export function freshSpendCrypto(rand: RandField): SpendCrypto {
   return {
     ecdhPrivateKey: rand(),
-    encryptionNonce: rand(),
+    encryptionNonce: toEncryptionNonce(rand()),
     authorityPubKey: DEFAULTS.arbiterPubKey,
     changeSalt: rand(),
     padSalt: rand(),

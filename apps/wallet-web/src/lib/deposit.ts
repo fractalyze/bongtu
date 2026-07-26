@@ -21,6 +21,7 @@ import type { Point } from "@bongtu/core/babyjub";
 import { toWire } from "@bongtu/core/proving";
 import type { DepositInput, ProvingRequest } from "@bongtu/core/proving";
 import type { WalletIdentity } from "./derive.js";
+import { toEncryptionNonce } from "./spend.js";
 import { DEFAULTS } from "../config.js";
 
 /** Fresh per-tx crypto material for one deposit. `ecdhPrivateKey`/`encryptionNonce`
@@ -67,7 +68,8 @@ export type RandField = () => string;
 export function freshDepositCrypto(rand: RandField): DepositCrypto {
   return {
     ecdhPrivateKey: rand(),
-    encryptionNonce: rand(),
+    // clamped: SymmetricEncrypt constrains nonce < 2^128 (see toEncryptionNonce)
+    encryptionNonce: toEncryptionNonce(rand()),
     salt0: rand(),
     salt1: rand(),
     authorityPubKey: DEFAULTS.arbiterPubKey,
