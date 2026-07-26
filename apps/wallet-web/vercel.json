@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "installCommand": "",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/indexer/:path*",
+      "destination": "https://gpu-server.tailec11d1.ts.net:10000/:path*"
+    }
+  ]
+}
