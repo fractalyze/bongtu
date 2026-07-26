@@ -192,26 +192,31 @@ src/
 test/             unit tests + the anvil conformance scenario (run.sh) + the Postgres integration gate (pg_integration.sh)
 ```
 
-## Ops — dev-box continuous release
+## Ops — dev-box deployment (manual by choice)
 
-The public arbiter indexer runs on the fractalyze GPU dev box, released
-continuously from `main`:
+The public arbiter indexer runs on the fractalyze GPU dev box. Deploys are
+**manual** — indexer releases are infrequent and each one moves the live
+arbiter state, so a human runs them deliberately rather than on every push:
 
 - **Deploy clone**: `/home/a41/bongtu-deploy` — a dedicated checkout (separate
-  from any dev working tree) that runs the compose stack above
-  (`docker compose --env-file .env.compose up -d --build`, `restart: unless-stopped`).
+  from any dev working tree) that runs the compose stack above. Redeploy:
+
+  ```sh
+  cd /home/a41/bongtu-deploy
+  git fetch origin main && git reset --hard origin/main
+  docker compose --env-file .env.compose up -d --build
+  curl -fsS localhost:8600/health   # gate: "ok": true, cursor advancing
+  ```
+
+  The stack itself is always-on (`restart: unless-stopped`; Postgres cursor
+  gap-resumes across any restart).
 - **Public endpoint**: Tailscale Funnel maps
   `https://gpu-server.tailec11d1.ts.net:10000` → local `:8600`
   (`tailscale funnel --bg --https=10000 http://127.0.0.1:8600`; ports 443/8443
-  on that node belong to other apps).
-- **CD**: a self-hosted GitHub runner on the box (user systemd unit
-  `bongtu-runner.service`, runner name `gpu-server-bongtu`, label
-  `bongtu-devbox`) executes `.github/workflows/deploy-indexer.yml` on push to
-  `main`: fetch+reset the deploy clone, `compose up -d --build`, gate on
-  `/health`.
+  on that node belong to other apps). The mapping persists across reboots.
 - **Secrets**: `AUTHORITY_KEY` (arbiter bjj key) and the RPC URL live ONLY in
-  the deploy clone's gitignored `.env.compose` (mode 600) — never in the
-  workflow yml or repo history.
+  the deploy clone's gitignored `.env.compose` (mode 600) — never in repo
+  history.
 
 ## License
 
