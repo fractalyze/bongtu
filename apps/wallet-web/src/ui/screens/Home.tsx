@@ -1,15 +1,16 @@
-// Home: the balance hero, the primary actions, and the recent activity head. This is
-// the whole app most of the time — other screens are pushed on top via the hash route.
-// All private data (balance, activity) comes from the arbiter indexer; a dataError
-// renders a calm "connect an arbiter-mode indexer" panel instead of numbers.
+// Home: the balance hero, the connected-wallet card, the primary actions, and the
+// recent activity head — sibling white cards in one vertical stack. This is the whole
+// app most of the time — other screens are pushed on top via the hash route. All
+// private data (balance, activity) comes from the arbiter indexer; a dataError
+// renders a calm "connect an arbiter-mode indexer" panel instead of numbers. The
+// public kKRW token context lives on the Deposit screen only (where the flow needs it).
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import type { ReactNode } from "react";
 import { useWallet } from "../App.js";
 import { navigate } from "../hooks.js";
 import { DEFAULTS } from "../../config.js";
-import { readTokenState, approveToken } from "../../lib/metamask.js";
-import { formatKkrw, allowanceLabel } from "../../lib/money.js";
+import { walletBrand } from "../../lib/walletBrand.js";
 import { shortenPubkey } from "../format.js";
 import { BalanceCard } from "../components/BalanceCard.js";
 import { ActivityList } from "../components/ActivityList.js";
@@ -23,59 +24,23 @@ import {
   IconSend,
   IconWithdraw,
   IconDeposit,
+  MetaMaskFox,
 } from "../components/icons.js";
 
-// Home shows the head of the feed; the full day-grouped list lives at #/activity.
+// Home shows the head of the feed; the full flat list lives at #/activity.
 const RECENT_COUNT = 4;
 
 export function Home(): ReactNode {
   const { identity, connection, balance, history, loading, dataError, indexerUrl, refresh } =
     useWallet();
 
-  // Public kKRW wallet balance + current pool allowance (view calls, no gas) — the
-  // funds available to shield via Deposit. Best-effort: an RPC hiccup just shows "—".
-  const [tokenBalance, setTokenBalance] = useState<bigint | null>(null);
-  const [allowance, setAllowance] = useState<bigint | null>(null);
-  const [revoking, setRevoking] = useState(false);
-  const [revokeError, setRevokeError] = useState<string | null>(null);
   // Receive is a modal over Home (primary path — the #/receive route is a deep link).
   const [receiveOpen, setReceiveOpen] = useState(false);
 
-  const loadTokenState = useCallback(async (): Promise<void> => {
-    if (!connection) return;
-    try {
-      const s = await readTokenState(connection, DEFAULTS.token, connection.address, DEFAULTS.pool);
-      setTokenBalance(s.balance);
-      setAllowance(s.allowance);
-    } catch {
-      setTokenBalance(null);
-      setAllowance(null);
-    }
-  }, [connection]);
-
-  useEffect(() => {
-    void loadTokenState();
-  }, [loadTokenState]);
-
-  // Revoke = approve(pool, 0): after it, deposits fall back to the exact-V approve
-  // cycle naturally. A user-rejected popup (4001) is silent by intent; a real
-  // RPC/tx failure must NOT look identical to success-with-stale-read.
-  async function revoke(): Promise<void> {
-    if (!connection) return;
-    setRevoking(true);
-    setRevokeError(null);
-    try {
-      await approveToken(connection, DEFAULTS.token, DEFAULTS.pool, 0n);
-      await loadTokenState();
-    } catch (e) {
-      const code = (e as { code?: number }).code;
-      if (code !== 4001) setRevokeError("Revoke failed — check MetaMask/RPC and retry.");
-    } finally {
-      setRevoking(false);
-    }
-  }
-
   if (!identity) return null;
+
+  // The raw injected EIP-1193 provider sits under the ethers Web3Provider.
+  const brand = connection ? walletBrand(connection.provider?.provider) : "unknown";
 
   return (
     <div className="screen home">
@@ -100,9 +65,9 @@ export function Home(): ReactNode {
       />
 
       {connection && (
-        <div className="wallet-row" aria-label="Connected wallet">
-          <IconLink size={15} />
-          <IconWallet size={15} />
+        <section className="wallet-card" aria-label="Connected wallet">
+          <IconLink size={16} />
+          {brand === "metamask" ? <MetaMaskFox size={18} /> : <IconWallet size={16} />}
           <span className="tip-wrap">
             <span className="wallet-addr mono" tabIndex={0} aria-describedby="wallet-addr-tip">
               {shortenPubkey(connection.address)}
@@ -111,7 +76,7 @@ export function Home(): ReactNode {
               {connection.address}
             </span>
           </span>
-        </div>
+        </section>
       )}
 
       <div className="actions">
@@ -128,21 +93,6 @@ export function Home(): ReactNode {
           <span>Deposit</span>
         </button>
       </div>
-
-      <p className="home-token-line">
-        kKRW available: {tokenBalance === null ? "—" : formatKkrw(tokenBalance)}
-        {" · "}Pool allowance: {allowance === null ? "—" : allowanceLabel(allowance)}
-        {allowance !== null && allowance > 0n && (
-          <>
-            {" "}
-            <button className="link-btn link-btn-sm" disabled={revoking} onClick={() => void revoke()}>
-              {revoking ? "Revoking…" : "Revoke"}
-            </button>
-          </>
-        )}
-      </p>
-
-      {revokeError ? <div className="banner banner-warn">{revokeError}</div> : null}
 
       {dataError ? (
         <div className="banner banner-warn">

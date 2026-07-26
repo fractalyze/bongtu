@@ -256,13 +256,18 @@ body {
 }
 .balance-handle:hover { background: var(--border); color: var(--ink); }
 
-/* connected MetaMask wallet — informational, no click action */
-.wallet-row {
+/* connected wallet — informational, no click action; same white-card treatment as
+   the other home sections so they all read as sibling cards */
+.wallet-card {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 8px;
   color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 11px 14px;
 }
 .wallet-addr { font-size: 0.78rem; border-radius: 6px; }
 .wallet-addr:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
@@ -284,29 +289,31 @@ body {
   gap: 5px;
 }
 .action:hover { border-color: var(--border-strong); }
-.home-token-line { margin: 0; text-align: center; font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 
-/* --- activity (card list, day-grouped) ------------------------------------ */
+/* --- activity (ONE white card of flat rows, newest first) ------------------ */
 
-.activity { display: flex; flex-direction: column; gap: 10px; }
-.activity-head { display: flex; justify-content: space-between; align-items: baseline; }
-.activity-empty { color: var(--muted); font-size: 0.88rem; margin: 4px 0; }
-.activity-day { display: flex; flex-direction: column; gap: 8px; }
-.activity-day + .activity-day { margin-top: 6px; }
-.activity-day-label { font-size: 0.74rem; color: var(--muted); font-weight: 650; margin: 0; text-transform: uppercase; letter-spacing: 0.06em; }
-.activity-cards { display: flex; flex-direction: column; gap: 8px; }
-.activity-card {
+.activity {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  gap: 6px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 12px 14px;
+}
+.activity-head { display: flex; justify-content: space-between; align-items: baseline; }
+.activity-empty { color: var(--muted); font-size: 0.88rem; margin: 4px 0; }
+.activity-rows { display: flex; flex-direction: column; }
+.activity-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
   text-decoration: none;
   color: var(--ink);
 }
-.activity-card:hover { border-color: var(--border-strong); }
+.activity-row + .activity-row { border-top: 1px solid var(--border); }
+.activity-row:hover .activity-ext { color: var(--primary); }
 .activity-icon {
   width: 34px; height: 34px;
   border-radius: 50%;
@@ -323,6 +330,8 @@ body {
 .activity-amt { font-weight: 700; font-variant-numeric: tabular-nums; font-size: 0.92rem; color: var(--ink); }
 .activity-amt.activity-in { color: var(--pos); }
 .activity-time { font-size: 0.72rem; color: var(--muted); }
+/* signals the row opens the explorer; lights up on row hover */
+.activity-ext { display: inline-flex; color: var(--border-strong); flex: none; }
 
 /* --- secondary screen header --------------------------------------------- */
 

@@ -1,15 +1,23 @@
-// The activity feed as a card list, grouped under local-day headers (Today /
-// Yesterday / date) by the PURE groupByDay. Each card: an SVG kind icon (no glyph
-// characters — locked visual language), the verb, the shortened counterparty when
-// there is one, the signed amount (green only for incoming), a relative time; the
-// whole card links to the explorer tx. Home passes a sliced recent feed + onViewAll;
-// the Activity screen passes the full feed.
+// The activity feed as ONE white card (same treatment as the other home sections) of
+// flat rows, newest first — no day headers (feedback: flat list, per-item relative
+// time only). Row order is the wire order: /history is contractually seq-desc
+// (newest-first), so no client re-sort. Each row: a Remix kind icon consistent with
+// the action icons, the verb, the shortened counterparty when there is one, the
+// signed amount (green only for incoming), a relative time, and an external-link
+// icon signalling that click opens the explorer tx. Home passes a sliced recent feed
+// + onViewAll; the Activity screen passes the full feed.
 
 import type { ReactNode } from "react";
 import type { HistoryItem, HistoryKind } from "../../lib/indexerClient.js";
-import { groupByDay } from "../../lib/activity.js";
 import { formatKkrw } from "../../lib/money.js";
 import { relativeTime, shortenPubkey } from "../format.js";
+import {
+  IconReceived,
+  IconSend,
+  IconDeposit,
+  IconWithdraw,
+  IconExternalLink,
+} from "./icons.js";
 
 const VERB: Record<HistoryKind, string> = {
   received: "Received",
@@ -23,35 +31,23 @@ function signOf(kind: HistoryKind): "in" | "out" {
   return kind === "received" || kind === "deposit" ? "in" : "out";
 }
 
-const ICON_PATH: Record<HistoryKind, string> = {
-  received: "M12 5v14m0 0l-5-5m5 5l5-5",
-  sent: "M12 19V5m0 0l-5 5m5-5l5 5",
-  deposit: "M12 5v14M5 12h14",
-  withdraw: "M12 4v10m0 0l-4-4m4 4l4-4M5 19h14",
+// Kind icons mirror the Home action icons (send-plane / into-pool / out-of-pool) so
+// a feed row and the button that caused it read as the same gesture.
+const KIND_ICON: Record<HistoryKind, (props: { size?: number }) => ReactNode> = {
+  received: IconReceived,
+  sent: IconSend,
+  deposit: IconDeposit,
+  withdraw: IconWithdraw,
 };
 
-function KindIcon({ kind }: { kind: HistoryKind }): ReactNode {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-      <path
-        d={ICON_PATH[kind]}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function Card({ item, explorerBase }: { item: HistoryItem; explorerBase: string }): ReactNode {
+function Row({ item, explorerBase }: { item: HistoryItem; explorerBase: string }): ReactNode {
   const dir = signOf(item.kind);
+  const Kind = KIND_ICON[item.kind];
   const href = `${explorerBase.replace(/\/+$/, "")}/tx/${item.txHash}`;
   return (
-    <a className="activity-card" href={href} target="_blank" rel="noreferrer">
+    <a className="activity-row" href={href} target="_blank" rel="noreferrer">
       <span className={`activity-icon activity-${dir}`}>
-        <KindIcon kind={item.kind} />
+        <Kind size={16} />
       </span>
       <span className="activity-mid">
         <span className="activity-verb">{VERB[item.kind]}</span>
@@ -67,6 +63,9 @@ function Card({ item, explorerBase }: { item: HistoryItem; explorerBase: string 
           {formatKkrw(item.amount)}
         </span>
         <span className="activity-time">{relativeTime(item.blockTimestamp)}</span>
+      </span>
+      <span className="activity-ext">
+        <IconExternalLink size={14} />
       </span>
     </a>
   );
@@ -87,7 +86,6 @@ export function ActivityList({
   /** when set, renders a "View all" link beside the heading (Home's recent slice). */
   onViewAll?: () => void;
 }): ReactNode {
-  const groups = groupByDay(history);
   return (
     <section className="activity">
       {heading !== null && (
@@ -100,19 +98,14 @@ export function ActivityList({
           )}
         </div>
       )}
-      {groups.length === 0 ? (
+      {history.length === 0 ? (
         <p className="activity-empty">{loading ? "Loading activity…" : "No activity yet."}</p>
       ) : (
-        groups.map((g) => (
-          <div className="activity-day" key={g.dayStart}>
-            <h3 className="activity-day-label">{g.label}</h3>
-            <div className="activity-cards">
-              {g.items.map((it) => (
-                <Card key={`${it.seq}-${it.txHash}`} item={it} explorerBase={explorerBase} />
-              ))}
-            </div>
-          </div>
-        ))
+        <div className="activity-rows">
+          {history.map((it) => (
+            <Row key={`${it.seq}-${it.txHash}`} item={it} explorerBase={explorerBase} />
+          ))}
+        </div>
       )}
     </section>
   );
