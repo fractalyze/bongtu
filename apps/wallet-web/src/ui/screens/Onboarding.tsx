@@ -1,38 +1,31 @@
-// First run: a single Connect CTA. Connecting is ONE flow — MetaMask connect, the
-// deterministic eth_signTypedData_v4 signature, and bjj key derivation happen back to
-// back (App.connectWallet), so the user sees one button and lands on Home with a key.
-// Nothing is persisted: the spending key is re-derived from the signature each session.
+// First run: a compact centered hero and a single Connect CTA. Connecting is ONE
+// flow — MetaMask connect, the deterministic eth_signTypedData_v4 signature, and bjj
+// key derivation happen back to back (App.connectWallet), so the user sees one button
+// and lands on Home with a key. Copy is deliberately non-technical (locked): no key /
+// proof mechanics on this screen, one reassurance line only.
 
 import type { ReactNode } from "react";
 import { useWallet } from "../App.js";
+import { EnvelopeLogo } from "../components/icons.js";
 
 export function Onboarding(): ReactNode {
   const { connectWallet, connecting, connectError } = useWallet();
   return (
     <div className="onboarding">
       <div className="onboarding-hero">
+        <span className="onboarding-logo">
+          <EnvelopeLogo size={52} />
+        </span>
         <h1 className="onboarding-title">bongtu</h1>
-        <p className="onboarding-tag">Self-custody private kKRW on GIWA.</p>
+        <p className="onboarding-tag">The privacy wallet for kKRW on GIWA.</p>
       </div>
-
-      <ul className="onboarding-points">
-        <li>
-          Your spending key is derived from your wallet signature — never stored, never
-          sent.
-        </li>
-        <li>Balances and amounts stay private on-chain.</li>
-        <li>Proofs are generated on your device.</li>
-      </ul>
 
       {connectError && <div className="banner banner-err">{connectError}</div>}
 
       <button className="btn btn-primary btn-block btn-lg" onClick={connectWallet} disabled={connecting}>
-        {connecting ? "Connecting…" : "Connect wallet"}
+        {connecting ? "Connecting…" : "Connect Wallet"}
       </button>
-      <p className="onboarding-fine">
-        You'll be asked to sign a message to derive your spending key. Only sign inside the
-        official bongtu wallet.
-      </p>
+      <p className="onboarding-fine">Self-custody wallet. Your privacy, guaranteed by proofs.</p>
     </div>
   );
 }

@@ -10,9 +10,20 @@ import { navigate } from "../hooks.js";
 import { DEFAULTS } from "../../config.js";
 import { readTokenState, approveToken } from "../../lib/metamask.js";
 import { formatKkrw, allowanceLabel } from "../../lib/money.js";
+import { shortenPubkey } from "../format.js";
 import { BalanceCard } from "../components/BalanceCard.js";
 import { ActivityList } from "../components/ActivityList.js";
 import { StatusChip } from "../components/StatusChip.js";
+import { ReceiveModal } from "../components/ReceiveModal.js";
+import {
+  EnvelopeLogo,
+  IconGear,
+  IconLink,
+  IconWallet,
+  IconSend,
+  IconWithdraw,
+  IconDeposit,
+} from "../components/icons.js";
 
 // Home shows the head of the feed; the full day-grouped list lives at #/activity.
 const RECENT_COUNT = 4;
@@ -27,6 +38,8 @@ export function Home(): ReactNode {
   const [allowance, setAllowance] = useState<bigint | null>(null);
   const [revoking, setRevoking] = useState(false);
   const [revokeError, setRevokeError] = useState<string | null>(null);
+  // Receive is a modal over Home (primary path — the #/receive route is a deep link).
+  const [receiveOpen, setReceiveOpen] = useState(false);
 
   const loadTokenState = useCallback(async (): Promise<void> => {
     if (!connection) return;
@@ -67,29 +80,52 @@ export function Home(): ReactNode {
   return (
     <div className="screen home">
       <header className="home-head">
-        <div className="brand">bongtu</div>
+        <div className="brand">
+          <EnvelopeLogo size={26} />
+          <span className="brand-name">bongtu</span>
+        </div>
         <div className="home-head-right">
           <StatusChip indexerUrl={indexerUrl} />
-          <button className="link-btn" onClick={() => navigate("settings")}>
-            Settings
+          <button className="icon-btn" aria-label="Settings" onClick={() => navigate("settings")}>
+            <IconGear />
           </button>
         </div>
       </header>
 
-      <BalanceCard balance={balance} loading={loading} pubkey={identity.compressedPubkey} />
+      <BalanceCard
+        balance={balance}
+        loading={loading}
+        pubkey={identity.compressedPubkey}
+        onOpenReceive={() => setReceiveOpen(true)}
+      />
+
+      {connection && (
+        <div className="wallet-row" aria-label="Connected wallet">
+          <IconLink size={15} />
+          <IconWallet size={15} />
+          <span className="tip-wrap">
+            <span className="wallet-addr mono" tabIndex={0} aria-describedby="wallet-addr-tip">
+              {shortenPubkey(connection.address)}
+            </span>
+            <span className="tip mono" role="tooltip" id="wallet-addr-tip">
+              {connection.address}
+            </span>
+          </span>
+        </div>
+      )}
 
       <div className="actions">
-        <button className="action" onClick={() => navigate("deposit")}>
-          Deposit
-        </button>
         <button className="action" onClick={() => navigate("send")}>
-          Send
+          <IconSend />
+          <span>Send</span>
         </button>
         <button className="action" onClick={() => navigate("withdraw")}>
-          Withdraw
+          <IconWithdraw />
+          <span>Withdraw</span>
         </button>
-        <button className="action" onClick={() => navigate("receive")}>
-          Receive
+        <button className="action" onClick={() => navigate("deposit")}>
+          <IconDeposit />
+          <span>Deposit</span>
         </button>
       </div>
 
@@ -122,6 +158,10 @@ export function Home(): ReactNode {
           explorerBase={DEFAULTS.explorer}
           onViewAll={() => navigate("activity")}
         />
+      )}
+
+      {receiveOpen && (
+        <ReceiveModal pubkey={identity.compressedPubkey} onClose={() => setReceiveOpen(false)} />
       )}
     </div>
   );

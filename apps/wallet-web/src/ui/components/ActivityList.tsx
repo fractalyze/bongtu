@@ -37,7 +37,7 @@ function KindIcon({ kind }: { kind: HistoryKind }): ReactNode {
         d={ICON_PATH[kind]}
         fill="none"
         stroke="currentColor"
-        strokeWidth="2"
+        strokeWidth="1.6"
         strokeLinecap="round"
         strokeLinejoin="round"
       />

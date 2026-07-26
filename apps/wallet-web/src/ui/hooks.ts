@@ -1,7 +1,8 @@
-// Tiny view hooks: hash-based routing (no router lib — the brief locks a single SPA)
-// and an elapsed-seconds counter for the proving stage.
+// Tiny view hooks: hash-based routing (no router lib — the brief locks a single SPA),
+// an elapsed-seconds counter for the proving stage, and copy-with-feedback.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { copyText } from "../lib/clipboard.js";
 
 export type Route = "home" | "receive" | "send" | "withdraw" | "deposit" | "activity" | "settings";
 
@@ -43,4 +44,22 @@ export function useElapsedSeconds(active: boolean): number {
     return () => clearInterval(id);
   }, [active]);
   return secs;
+}
+
+/** Copy `text` and flip a short-lived `copied` flag — only on a REAL clipboard write
+ *  (copyText's boolean), so the UI never claims "Copied" when the browser refused.
+ *  The timeout lives in an effect so unmount can't fire a setState on a dead tree. */
+export function useCopyFeedback(text: string, resetMs = 1500): { copied: boolean; copy: () => void } {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const id = setTimeout(() => setCopied(false), resetMs);
+    return () => clearTimeout(id);
+  }, [copied, resetMs]);
+  const copy = useCallback((): void => {
+    void copyText(text).then((ok) => {
+      if (ok) setCopied(true);
+    });
+  }, [text]);
+  return { copied, copy };
 }
