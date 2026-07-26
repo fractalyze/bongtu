@@ -29,11 +29,11 @@ export function ReceivePanel({ pubkey }: { pubkey: string }): ReactNode {
 
   return (
     <div className="receive-body">
-      <p className="receive-lead">Share this ID to receive privacy kKRW.</p>
-      <div className="qr-frame">{qr ? <img className="qr" src={qr} alt="Your bongtu ID QR" /> : <div className="qr-skeleton" />}</div>
+      <p className="receive-lead">Share this address to receive privacy kKRW.</p>
+      <div className="qr-frame">{qr ? <img className="qr" src={qr} alt="Your bongtu address QR" /> : <div className="qr-skeleton" />}</div>
       <div className="pubkey-box mono">{pubkey}</div>
       <button className="btn btn-primary btn-block" onClick={copy}>
-        {copied ? "Copied" : "Copy ID"}
+        {copied ? "Copied" : "Copy address"}
       </button>
     </div>
   );

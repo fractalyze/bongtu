@@ -3,19 +3,74 @@
 // and Disconnect. Editing the indexer URL re-runs the balance load (App effect keys on
 // indexerUrl). Disconnect drops the derived key from memory (it was never persisted).
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { ReactNode } from "react";
 import { DEFAULTS } from "../../config.js";
 import { useWallet } from "../App.js";
+import { IconExternalLink } from "../components/icons.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
 import { shortenPubkey } from "../format.js";
 
-function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }): ReactNode {
+const EXPLORER = DEFAULTS.explorer.replace(/\/+$/, "");
+
+// One concrete row shape, three renderings:
+//   value only        → plain text (Network, Batch size, Key version)
+//   full              → middle-shortened + custom tooltip revealing the full value
+//                       (title= is unstylable and keyboard-dead — retired here)
+//   full + href       → same, wrapped in an external explorer link with the shared icon
+function Row({
+  label,
+  value,
+  full,
+  href,
+  mono,
+}: {
+  label: string;
+  /** Shown verbatim; ignored when `full` is given. */
+  value?: string;
+  /** Long value: rendered start8…end4 with a tooltip carrying the full string. */
+  full?: string;
+  /** External link target (new tab) for the value. */
+  href?: string;
+  mono?: boolean;
+}): ReactNode {
+  const tipId = useId();
+  const cls = `settings-val${mono ? " mono" : ""}`;
+  if (!full) {
+    return (
+      <div className="settings-row">
+        <span className="settings-key">{label}</span>
+        <span className={cls}>{value}</span>
+      </div>
+    );
+  }
+  const short = shortenPubkey(full);
   return (
     <div className="settings-row">
       <span className="settings-key">{label}</span>
-      <span className={`settings-val${mono ? " mono" : ""}`} title={value}>
-        {value}
+      <span className="tip-wrap">
+        {href ? (
+          <span className={cls}>
+            <a
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`View ${label.toLowerCase()} ${short} on the explorer`}
+              aria-describedby={tipId}
+            >
+              {short}
+              <IconExternalLink size={14} />
+            </a>
+          </span>
+        ) : (
+          // tabIndex so keyboard users can reveal the tooltip (.tip-wrap:has(:focus-visible))
+          <span className={cls} tabIndex={0} aria-describedby={tipId}>
+            {short}
+          </span>
+        )}
+        <span className="tip mono" role="tooltip" id={tipId}>
+          {full}
+        </span>
       </span>
     </div>
   );
@@ -56,12 +111,12 @@ export function Settings(): ReactNode {
         <h2 className="section-title">Deployment</h2>
         <div className="settings-card">
           <Row label="Network" value={`GIWA · chain ${DEFAULTS.chainId}`} />
-          <Row label="Pool" value={DEFAULTS.pool} mono />
-          <Row label="Token" value={DEFAULTS.token} mono />
+          <Row label="Pool" full={DEFAULTS.pool} href={`${EXPLORER}/address/${DEFAULTS.pool}`} mono />
+          <Row label="Token" full={DEFAULTS.token} href={`${EXPLORER}/address/${DEFAULTS.token}`} mono />
           <Row label="Batch size" value={String(DEFAULTS.batchSize)} />
           <Row label="Key version" value={DEFAULTS.keyVersion} />
-          <Row label="Arbiter key" value={shortenPubkey(DEFAULTS.arbiterPubKey[0])} mono />
-          {identity && <Row label="Your address" value={identity.compressedPubkey} mono />}
+          <Row label="Arbiter key" full={DEFAULTS.arbiterPubKey[0]} mono />
+          {identity && <Row label="Your address" full={identity.compressedPubkey} mono />}
         </div>
 
         <button className="btn btn-danger btn-block" onClick={disconnect}>

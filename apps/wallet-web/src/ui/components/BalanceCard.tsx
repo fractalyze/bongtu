@@ -40,7 +40,7 @@ export function BalanceCard({
           <button
             className="balance-handle"
             onClick={onOpenReceive}
-            aria-label="Your bongtu ID. Open receive"
+            aria-label="Your bongtu address. Open receive"
             aria-describedby="bongtu-id-tip"
           >
             {shortenPubkey(pubkey)}
@@ -49,7 +49,7 @@ export function BalanceCard({
             {pubkey}
           </span>
         </span>
-        <button className={`icon-btn icon-btn-sm${copied ? " icon-btn-ok" : ""}`} onClick={copy} aria-label={copied ? "Copied" : "Copy bongtu ID"}>
+        <button className={`icon-btn icon-btn-sm${copied ? " icon-btn-ok" : ""}`} onClick={copy} aria-label={copied ? "Copied" : "Copy bongtu address"}>
           {copied ? <IconCheck size={15} /> : <IconCopy size={15} />}
         </button>
       </div>

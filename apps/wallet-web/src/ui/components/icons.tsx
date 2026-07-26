@@ -19,6 +19,7 @@ import {
   RiCheckLine,
   RiCloseLine,
   RiExternalLinkLine,
+  RiArrowLeftLine,
 } from "@remixicon/react";
 
 interface IconProps {
@@ -74,6 +75,11 @@ export function IconCheck({ size = 16 }: IconProps): ReactNode {
 
 export function IconClose({ size = 18 }: IconProps): ReactNode {
   return <RiCloseLine size={size} aria-hidden="true" />;
+}
+
+/** Back navigation in pushed-screen headers. */
+export function IconBack({ size = 20 }: IconProps): ReactNode {
+  return <RiArrowLeftLine size={size} aria-hidden="true" />;
 }
 
 /** Signals "opens the block explorer" on activity cards and outbound links. */

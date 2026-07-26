@@ -58,6 +58,8 @@ body {
 }
 
 .screen { padding: 18px 18px 26px; display: flex; flex-direction: column; gap: 18px; }
+/* home stacks five sibling cards; 18px between every pair reads airy-to-a-fault */
+.screen.home { gap: 12px; }
 
 /* --- generic bits --------------------------------------------------------- */
 
@@ -309,11 +311,9 @@ body {
   align-items: center;
   gap: 12px;
   padding: 11px 0;
-  text-decoration: none;
-  color: var(--ink);
 }
 .activity-row + .activity-row { border-top: 1px solid var(--border); }
-.activity-row:hover .activity-ext { color: var(--primary); }
+.activity-ext:hover, .activity-ext:focus-visible { color: var(--primary); }
 .activity-icon {
   width: 34px; height: 34px;
   border-radius: 50%;
@@ -326,17 +326,18 @@ body {
 .activity-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .activity-verb { font-weight: 600; font-size: 0.92rem; }
 .activity-cpty { font-family: var(--mono); font-size: 0.74rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.activity-right { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex: none; }
-.activity-amt { font-weight: 700; font-variant-numeric: tabular-nums; font-size: 0.92rem; color: var(--ink); }
+.activity-right { display: flex; flex-direction: column; align-items: flex-end; gap: 0; flex: none; }
+.activity-amt { font-weight: 700; font-variant-numeric: tabular-nums; font-size: 0.92rem; color: var(--ink); line-height: 1.25; }
 .activity-amt.activity-in { color: var(--pos); }
-.activity-time { font-size: 0.72rem; color: var(--muted); }
-/* signals the row opens the explorer; lights up on row hover */
-.activity-ext { display: inline-flex; color: var(--border-strong); flex: none; }
+.activity-time { font-size: 0.72rem; color: var(--muted); line-height: 1.2; }
+/* the ONE explorer affordance per row (the row itself does not navigate) — resting
+   color must clear the 3:1 UI-component floor, border-strong (~1.9:1) does not */
+.activity-ext { display: inline-flex; color: var(--muted); flex: none; padding: 4px; margin: -4px; border-radius: 6px; }
 
 /* --- secondary screen header --------------------------------------------- */
 
 .screen-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
-.screen-head .link-btn { justify-self: start; }
+.screen-head .link-btn, .screen-head .icon-btn { justify-self: start; }
 .screen-title { font-size: 1.05rem; font-weight: 650; text-align: center; margin: 0; }
 .screen-head-right { display: flex; justify-content: flex-end; }
 
@@ -423,6 +424,11 @@ body {
 .settings-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 14px; }
 .settings-row { display: flex; justify-content: space-between; gap: 14px; padding: 11px 0; border-bottom: 1px solid var(--border); font-size: 0.88rem; }
 .settings-row:last-child { border-bottom: none; }
+.settings-val { display: inline-flex; align-items: center; gap: 6px; }
+/* the value hugs the frame's right edge; a centered 250px tip would be clipped by
+   .frame overflow:hidden — anchor it to the right instead */
+.settings-row .tip { left: auto; right: 0; transform: none; }
+.settings-val a { color: inherit; display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+.settings-val a:hover { color: var(--primary); }
 .settings-key { color: var(--muted); flex: none; }
-.settings-val { text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
 .settings-fine { font-size: 0.76rem; color: var(--muted); margin: 0; }

@@ -1,8 +1,6 @@
-// Text "Back", not a chevron glyph: the locked visual language bans glyph characters
-// in buttons (buttons are text-first).
-
 import type { ReactNode } from "react";
 import { navigate } from "../hooks.js";
+import { IconBack } from "./icons.js";
 
 export function ScreenHeader({
   title,
@@ -13,8 +11,8 @@ export function ScreenHeader({
 }): ReactNode {
   return (
     <header className="screen-head">
-      <button className="link-btn" onClick={() => navigate("home")}>
-        Back
+      <button className="icon-btn" aria-label="Back" onClick={() => navigate("home")}>
+        <IconBack />
       </button>
       <h1 className="screen-title">{title}</h1>
       <div className="screen-head-right">{right}</div>

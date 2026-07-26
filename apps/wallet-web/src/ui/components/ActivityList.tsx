@@ -44,8 +44,10 @@ function Row({ item, explorerBase }: { item: HistoryItem; explorerBase: string }
   const dir = signOf(item.kind);
   const Kind = KIND_ICON[item.kind];
   const href = `${explorerBase.replace(/\/+$/, "")}/tx/${item.txHash}`;
+  // Only the external-link icon navigates (user decision): a whole-row anchor made
+  // every stray tap an explorer round-trip.
   return (
-    <a className="activity-row" href={href} target="_blank" rel="noreferrer">
+    <div className="activity-row">
       <span className={`activity-icon activity-${dir}`}>
         <Kind size={16} />
       </span>
@@ -64,10 +66,16 @@ function Row({ item, explorerBase }: { item: HistoryItem; explorerBase: string }
         </span>
         <span className="activity-time">{relativeTime(item.blockTimestamp)}</span>
       </span>
-      <span className="activity-ext">
-        <IconExternalLink size={14} />
-      </span>
-    </a>
+      <a
+        className="activity-ext"
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        aria-label="View transaction on the explorer"
+      >
+        <IconExternalLink size={16} />
+      </a>
+    </div>
   );
 }
 
