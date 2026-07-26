@@ -5,7 +5,7 @@ off-chain mirror of the on-chain IMT, and serves the merkle-path / ciphertext-fe
 alarm API that the wallet and admin apps depend on. It is read-only on-chain (opens no
 wallet, sends no transactions) and — post-Q4 — a convenience/availability layer, not
 trust-critical for funds. The normative API contract and the security model live in
-[`docs/spec.md`](../../docs/spec.md) §6b; the wire shapes are owned by
+[`.dev/spec-decisions.md`](../../.dev/spec-decisions.md) §6b; the wire shapes are owned by
 [`@bongtu/core/indexerApi`](../../packages/core/README.md) and the routes type their
 response bodies against them.
 

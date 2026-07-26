@@ -12,7 +12,7 @@
 subtree-attach on the unified mixed-mode tree is spendable by the *other* circuits against the same root, and
 (b) the corrected `enabled` semantics (contract-derives `enabled[i]=(nullifier[i]!=0)`, never from calldata).
 It does this at **seconds-per-iteration** — a **1-in/16-out** disburse variant, CPU-proved with snarkjs, **no
-1.24GB zkey / no rabbitsnark GPU in the loop** (those are M1). Ref: [spec.md](../docs/spec.md) §4, §5, §10b.
+1.24GB zkey / no rabbitsnark GPU in the loop** (those are M1). Ref: [spec-decisions.md](spec-decisions.md) §4, §5, §10b.
 
 ## Done condition (tick at each unit boundary)
 
@@ -86,4 +86,4 @@ M0 is done when ALL hold, each judged by a named artifact:
       `disburse` untouched → U3 tests stay 19/19). Toolchain paths made PATH-overridable for CI reproducibility.
 
 Status legend: [ ] pending · [~] in-progress · [x] done (with gate evidence) · [!] blocked.
-Toolchain + exact commands: [toolchain.md](../docs/toolchain.md). Product decisions: [spec.md](../docs/spec.md). Not git-tracked: zkey/wtns/r1cs.
+Toolchain + exact commands: [toolchain.md](../docs/toolchain.md). Product decisions: [spec-decisions.md](spec-decisions.md). Not git-tracked: zkey/wtns/r1cs.

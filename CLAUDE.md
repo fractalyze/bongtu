@@ -1,7 +1,11 @@
 # CLAUDE.md
 
-Read `README.md` once at session start; for anything deeper, follow its
-`## Docs` index into `docs/`. Do not re-derive what those files own.
+Read `README.md` once at session start, then follow its `## Docs` index. `docs/`
+owns system guarantees and inter-component contracts (one file per topic); each
+folder's own `README.md` owns how to run and test that folder. Decision history
+and milestone trackers live in `.dev/` — including `.dev/spec-decisions.md`, the
+retired spec whose section numbers the `SPEC §n` comments in code still cite. Do
+not re-derive what those files own.
 
 ## Rules an agent cannot see from code + README
 

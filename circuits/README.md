@@ -4,7 +4,7 @@ The circom toolchain: the four bongtu circuits, their vendored Zeto bases, the
 deterministic witness-input generators, and the CPU prove pipeline that gates every
 change. Each circuit embeds IMT depth-32 membership (Poseidon-v1) and an in-circuit
 authority envelope encrypted to the arbiter key. What each circuit must enforce and
-why is owned by [`docs/spec.md`](../docs/spec.md) §4 (publics) and §5.2 (soundness
+why is owned by [`.dev/spec-decisions.md`](../.dev/spec-decisions.md) §4 (publics) and §5.2 (soundness
 belts); per-file Zeto provenance and the deliberate modifications are in
 [`docs/zeto-derivation.md`](../docs/zeto-derivation.md).
 
@@ -66,7 +66,7 @@ helpers through `fixture_lib.ts`, and write committed JSON into `inputs/`:
 
 Attack fixtures must stay **unprovable** while honest spends stay provable — these
 scripts fail loudly if a belt regresses (the exploits they close are documented in
-`docs/spec.md` §5.2 and `docs/zeto-derivation.md`):
+`.dev/spec-decisions.md` §5.2 and `docs/zeto-derivation.md`):
 
 ```sh
 bash test_zero_leaf_unsat.sh          # zero-commitment belt UNSAT for all 3 spending circuits

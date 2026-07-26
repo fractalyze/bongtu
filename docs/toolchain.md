@@ -1,61 +1,70 @@
-# bongtu toolchain (verified 2026-07-23)
+# Toolchain
 
-Exact invocations. circom needs the ld-linux shim (nix-built binary); snarkjs and ptau live outside the repo.
-transfer/withdraw/deposit prove on **CPU** (`snarkjs groth16 prove`); disburse-256 proves on **GPU** via
-rabbitsnark (regen recipe in `CLAUDE.md`).
+Exact invocations. circom, snarkjs, circomlib and the powers-of-tau file live **outside** the repo,
+and each entry point names its own overrides: `circuits/prove_all.sh` reads
+`CIRCOM`/`SNARKJS`/`NODE`/`ZETO`/`CIRCOMLIB`/`PTAU`, the deploy scripts read
+`NODE`/`FORGE`/`ANVIL`/`CAST` plus their RPC and key vars (and, on the proving paths,
+`BONGTU_NODE_MODULES` below). Only `NODE` is shared — moving to a new
+machine means setting several, not one.
 
-## Binaries
+## Binaries and roots
 
 ```sh
-CIRCOM='/lib64/ld-linux-x86-64.so.2 /usr/local/bin/circom'          # v2.2.2 — direct exec fails, shim required
+CIRCOM='/lib64/ld-linux-x86-64.so.2 /usr/local/bin/circom'   # 2.2.2 — direct exec fails, ld shim required
 SNARKJS='node --max-old-space-size=16000 /home/a41/Workspace/zkx-snap/circuits/node_modules/.bin/snarkjs'
-ZETO=/home/a41/Workspace/research/disclosure-poc/zeto/zkp/circuits                     # -l root: TRACKED upstream sub-checks (lib/check-*, encrypt-outputs) + node_modules/circomlib
-CIRCOMLIB="$ZETO/node_modules"                                                          # -l root: bare circomlib/circuits/*
-# ptau (BN254, Hermez): pot22 covers every bongtu circuit (biggest ~150K << 2^22)
-PTAU=/home/a41/Workspace/zkx-snap/circuits/ptau/pot22_hez.ptau       # 4.8GB; pot15_hez (2^15) too small for transfer(~60K)
-FORGE=/home/a41/.foundry/bin/forge                                   # v1.7.1  (anvil alongside)
-NODE=/home/a41/.nvm/versions/node/v22.17.1/bin/node                  # v22.17.1
+NODE=/home/a41/.nvm/versions/node/v22.17.1/bin/node           # v22.17.1
+FORGE=/home/a41/.foundry/bin/forge                            # 1.7.1 (anvil, cast alongside)
+PTAU=/home/a41/Workspace/zkx-snap/circuits/ptau/pot22_hez.ptau  # BN254, 4.8 GB; 2^22 covers every circuit
+ZETO=/home/a41/Workspace/research/disclosure-poc/zeto/zkp/circuits
+CIRCOMLIB="$ZETO/node_modules"
 ```
 
-## Per-circuit CPU pipeline
+The **node-side** scripts get `ethers` and `snarkjs` at runtime from `BONGTU_NODE_MODULES` via
+`packages/core/src/extern.ts` — no workspace declares them for that path, so on another machine set
+the env var. The call sites are the three `deploy/` scripts (`loadEthers` in all of them,
+`loadSnarkjs` too in the proving paths `lib/e2e_harness.ts` and `giwa_disburse256.ts`),
+`apps/indexer/src/chain.ts` (`loadEthers`), `circuits/auditor_decrypt_check.ts` (`loadSnarkjs`),
+and `contracts/test/fixtures/gen_realproofs.ts`. The `circuits/gen_*.ts` fixture generators are
+*not* on this path: they import only `@bongtu/core` and node builtins, so `prove_all.sh` runs
+without it. The browser apps are separate:
+`apps/wallet-web` declares `ethers` + `snarkjs` and `apps/admin-web` declares `ethers` as ordinary
+dependencies, bundled by Vite. `pot15_hez` is too small — `transfer` alone is ~62K constraints.
+
+## Include resolution roots
+
+`prove_all.sh` passes `-l "$ZETO" -l "$CIRCOMLIB" -l lib`. Which root resolves which include —
+and why self-containment comes from the include *spelling*, not the search order — is owned by
+[circuits.md](circuits.md#structure-and--l-resolution).
+
+## Per-circuit pipeline
 
 ```sh
-cd /home/a41/Workspace/research/disclosure-poc/bongtu/circuits
-$CIRCOM <name>.circom --r1cs --wasm --sym -o out/ -l "$ZETO" -l "$CIRCOMLIB" -l lib   # lib/ = bongtu-vendored bases + check-imt-proof
-$SNARKJS groth16 setup out/<name>.r1cs "$PTAU" out/<name>.zkey                # seconds for small arities
-$SNARKJS zkey export verificationkey out/<name>.zkey out/<name>.vkey.json
+cd circuits
+$CIRCOM <name>.circom --r1cs --wasm --sym -o out/ -l "$ZETO" -l "$CIRCOMLIB" -l lib
+$SNARKJS r1cs info                    out/<name>.r1cs
+$SNARKJS groth16 setup                out/<name>.r1cs "$PTAU" out/<name>.zkey
+$SNARKJS zkey export verificationkey  out/<name>.zkey out/<name>.vkey.json
 $SNARKJS zkey export solidityverifier out/<name>.zkey out/<name>_verifier.sol
-node out/<name>_js/generate_witness.js out/<name>_js/<name>.wasm input.json out/<name>.wtns
-$SNARKJS groth16 prove out/<name>.zkey out/<name>.wtns proof.json public.json
-$SNARKJS groth16 verify out/<name>.vkey.json public.json proof.json           # must print OK
+$NODE out/<name>_js/generate_witness.js out/<name>_js/<name>.wasm inputs/<name>.json out/<name>.wtns
+$SNARKJS groth16 prove  out/<name>.zkey out/<name>.wtns out/<name>.proof.json out/<name>.public.json
+$SNARKJS groth16 verify out/<name>.vkey.json out/<name>.public.json out/<name>.proof.json   # prints OK
 ```
 
-## Reusable sources (read, don't reinvent)
+`bash prove_all.sh` runs exactly this for deposit / disburse / transfer / withdraw and copies each
+verifier into the committed `circuits/verifiers/`. `out/` is gitignored and regenerated each run.
 
-- **Vendored project-authored bases (provenance: `docs/zeto-derivation.md`):** `circuits/lib/` carries
-  `check-imt-proof.circom` (the IMT membership gadget) and
-  `anon_enc_nullifier_non_repudiation_imt_base.circom` (the 256 disburse base, incl. the §5.2
-  zero-commitment belt) — project-authored, not upstream Zeto. `disburse.circom` / `disburse256.circom`
-  include the vendored base by bare name (resolved via `-l lib`), so **a fresh checkout builds `disburse`
-  with no dependency on any untracked zeto file** (verified by hiding the untracked files and recompiling).
-  `circuits/disburse256.circom` supersedes the formerly untracked `run_nonrep_imt_256.circom` (same base +
-  public list).
-- Sub-checks that resolve into the pinned zeto checkout (TRACKED upstream, byte-identical by
-  construction, via `-l $ZETO` / `-l $ZETO/node_modules`): `lib/check-positive.circom`, `lib/check-hashes.circom`,
-  `lib/check-sum.circom`, `lib/check-nullifiers.circom`, `lib/encrypt-outputs.circom`, and `circomlib`.
-- Other vendored derivations: `lib/check-nullifiers-value-imt-base.circom` (withdraw base — SMT→IMT rebase
-  of upstream `lib/check-nullifiers-value-base.circom` at :21/:44/:84) and `lib/deposit_authority_imt_base.circom`
-  (deposit base — upstream `lib/deposit.circom` plus the in-circuit authority envelope, SPEC §6b).
-- Contract-pattern provenance: `BongtuPool`'s frontier + root-history + subtree attach derive from
-  `../onchain/src/BatchInsertPoolV2.sol` (its per-deposit 256-block burn replaced by incremental
-  single-frontier append, §5.1); its test patterns (Poseidon parity gate, stub-verifier isolation, gas
-  assertions) from `../onchain/test/*.t.sol`;
-  `contracts/test/fixtures/gen_poseidon.ts` generates the Poseidon-v1 bytecode fixture (poseidon2.hex).
-- Poseidon-v1 reference hash (parity gate): `Poseidon([1,2]) == 7853200120776062878684798364095072458815029376092732009249414926327459813530`.
+**disburse256 is not in that loop**: multi-minute CPU setup, 1.3 GB zkey, GPU proving. Regenerate it
+with the same commands through `zkey export solidityverifier`, then prove on GPU0 with rabbitsnark —
+recipe and GPU hygiene rules are in the repo `CLAUDE.md`.
 
-## Foundry
+Contract build/test invocations are owned by [`contracts/README.md`](../contracts/README.md); `$FORGE`
+above is the binary those commands need on PATH.
 
-```sh
-cd contracts && forge init --no-git --force .   # first time; foundry.toml needs ffi=true for calldata gen
-$FORGE test -vv
+## Parity constant
+
+Every layer's Poseidon must agree. The gate value (`contracts/test/fixtures/poseidon_ref.txt`,
+asserted by `contracts/test/Poseidon.t.sol`):
+
+```
+Poseidon([1,2]) == 7853200120776062878684798364095072458815029376092732009249414926327459813530
 ```

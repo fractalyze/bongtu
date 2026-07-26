@@ -6,7 +6,7 @@ defined once here, byte-identical to what the circom circuits prove and the on-c
 `BongtuPool` computes: the contract's Foundry differential test pins its IMT against
 this package's `ImtTree`, and the circuit fixture generators build their witnesses from
 these primitives. Design rationale and security invariants live in
-[`docs/spec.md`](../../docs/spec.md) (§5.1 IMT, §6 keys/encryption, §6b indexer API) —
+[`.dev/spec-decisions.md`](../../.dev/spec-decisions.md) (§5.1 IMT, §6 keys/encryption, §6b indexer API) —
 this README covers only what the package contains and how to run it.
 
 ## Modules

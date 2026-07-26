@@ -1,7 +1,7 @@
 // The authority (non-repudiation) envelope codec — THE consensus artifact.
 //
 // Every bongtu op encrypts an authority envelope to the SINGLE arbiter key
-// INSIDE the proof (docs/spec.md §6b v2 enforced disclosure): the contract
+// INSIDE the proof (.dev/spec-decisions.md §6b v2 enforced disclosure): the contract
 // injects the stored arbiter key before verify, so a wrong-key or absent
 // encryption makes the proof fail. The envelope carries the op's note fields
 // (owner pubkey, value, salt) for BOTH the consumed inputs and the created
@@ -20,7 +20,7 @@
 // apps/indexer/test/ingest.test.ts makeSim (the ingest suite's synthetic
 // envelope builder).
 //
-// PLAINTEXT LAYOUTS (docs/spec.md §4 / the four *_authority circuits; field
+// PLAINTEXT LAYOUTS (.dev/spec-decisions.md §4 / the four *_authority circuits; field
 // order is consensus — a reorder passes TS round-trips but breaks auditor
 // decryption of live-chain envelopes):
 //   deposit  (0-in/2-out): [o0.x,o0.y, o1.x,o1.y, v0,s0, v1,s1]                  (len 8    -> ct[10])
@@ -36,7 +36,7 @@
 //   shared    = ecdhSharedSecret(arbiterPriv, ecdhPublicKey)   // == circuit Ecdh(ephemeralPriv, arbiterPub)
 //   plaintext = poseidonDecrypt(ct, shared, encryptionNonce, plaintextLen)
 //
-// DISCLOSURE CHAIN (docs/spec.md §6b indexer duty, §4/§11-6): a disburse proof
+// DISCLOSURE CHAIN (.dev/spec-decisions.md §6b indexer duty, §4/§11-6): a disburse proof
 // commits to a Poseidon(2) fold over its emitted ciphertext — every receiver
 // element then every authority element, seeded at 0. disclosureChain is that
 // fold; the on-chain disclosureHash public signal is its final value, and the

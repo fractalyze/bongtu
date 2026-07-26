@@ -5,7 +5,7 @@ unified single-frontier IMT, the nullifier set, arbiter epochs, ERC-20 custody, 
 the four Groth16 verifier calls (with `enabled` derived on-contract from the
 nullifiers) — plus the generated verifiers and the Poseidon-v1 parity plumbing. Why
 the pool is shaped this way (IMT design, enabled/nullifier soundness, disclosure
-enforcement) is owned by [`docs/spec.md`](../docs/spec.md) §5; this README covers the
+enforcement) is owned by [`.dev/spec-decisions.md`](../.dev/spec-decisions.md) §5; this README covers the
 folder's layout, tests, and fixtures.
 
 ## Layout

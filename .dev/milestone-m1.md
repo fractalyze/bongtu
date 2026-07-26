@@ -1,7 +1,7 @@
 # M1 — Goal & Done criteria
 
 **M1 scales M0 from the 1×16 dev loop to the real 1×256 disburse on GPU, proves it verifies on-chain under
-the gas cap, and deploys to GIWA Sepolia.** Ref: [spec.md](../docs/spec.md) §4/§9/§10b (M1), M0 is complete (all 4 units).
+the gas cap, and deploys to GIWA Sepolia.** Ref: [spec-decisions.md](spec-decisions.md) §4/§9/§10b (M1), M0 is complete (all 4 units).
 
 Key reuse (verified 2026-07-24): bongtu `disburse` at nOutputs=256 is **byte-identical** to the existing
 `run_nonrep_imt_256` (same base `anon_enc_nullifier_non_repudiation_imt_base`, same public list
@@ -14,7 +14,7 @@ warm ~0.5s per the old PoC. **GPU hygiene (memory rule): CUDA_VISIBLE_DEVICES=0,
 > **Later note (2026-07-24, post-M1):** the security overhaul added the §5.2 zero-commitment belt to the
 > disburse base, changing its r1cs — the zkey byte-reuse above held for M1 but was then retired (zkey
 > regenerated), and the v1 pool `0x22a2F38a…` below was superseded by the v2 UUPS-proxy pool. Current
-> addresses + the v2 run: [spec.md](../docs/spec.md) §9; rationale: [zeto-derivation.md](../docs/zeto-derivation.md).
+> addresses + the v2 run: [spec-decisions.md](spec-decisions.md) §9; rationale: [zeto-derivation.md](../docs/zeto-derivation.md).
 
 ## Done condition (tick at each unit boundary)
 

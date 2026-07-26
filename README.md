@@ -23,10 +23,29 @@ enforced four-op auditor disclosure.
 | BongtuPool impl | [`0x459f80A457f11328eBd67aeBFa9F90D05c58b27f`](https://sepolia-explorer.giwa.io/address/0x459f80A457f11328eBd67aeBFa9F90D05c58b27f) |
 
 Verified on-chain through the proxy: `B()==256`, `disburseCiphertextLen==2054` (disclosure enforced), a real
-envelope-carrying `deposit`. Measured: warm 256-disburse GPU proof **~0.47s** (2.79M constraints); on-chain
-256-payout ~3M L2 gas (~11.8k/recipient, under the Karst cap); the L1/blob-DA fee is negligible even with all
-ciphertext on-chain. The headline 256-disburse has run end-to-end on this pool (tx `0xe254240a…`,
-`nextLeafIndex` 4→512) — details and per-run gas in `docs/spec.md` §9.
+envelope-carrying `deposit`. Measured: warm 256-disburse GPU proof **~0.47s** (2.79M constraints); the
+headline 256-disburse has run end-to-end on this pool (tx `0xe254240a…`, `nextLeafIndex` 4→512) at
+3,872,403 L2 gas — 15,126 per recipient, far under the Karst cap — plus ~4e-6 ETH of L1 data fee for the
+~66 KB ciphertext array. Per-op gas and proof times: [`docs/performance.md`](docs/performance.md).
+
+## System map
+
+```
+ wallet-web (browser, self-custody)          admin-web (employer console)
+   MetaMask sign ─▶ bjj key                    recipient list (≤256)
+   snarkjs proves transfer/withdraw/deposit      │ POST /prove — witness incl. the
+   │ tx (a,b,c,pub)   ▲ /notes /history /path    ▼           employer spending key
+   │                  │                        prover/ (GPU box, disburse256 zkey resident)
+   ▼                  │                          │ Groth16 calldata
+ ┌─────────────────────────────────┐    tx      ▼
+ │   BongtuPool (GIWA L2)          │◀────────── employer submits disburse
+ │   4 verifiers + IMT + kKRW escrow│
+ └───────────────┬─────────────────┘
+                 │ events: ciphertext, roots, disclosureHash
+                 ▼
+          indexer (arbiter key) — mirrors the tree (root == on-chain), decrypts every
+          envelope into per-owner notes/history, raises disclosure alarms
+```
 
 ## Layout
 
@@ -42,7 +61,8 @@ export **raw `src/*.ts`** (no build step) as `@bongtu/*` specifiers. `circuits/`
 - `apps/admin-web/` — `@bongtu/admin-web`: role-moded console — employer-mode (recipients → request → prover service → tx) + auditor-mode (arbiter `/notes` ledger)
 - `apps/wallet-web/` — `@bongtu/wallet-web`: MetaMask wallet — sign → bjj key, balance from `/notes`, transfer/withdraw with browser snarkjs proving
 - `deploy/` — Foundry deploy script (local anvil + GIWA), the live 256-disburse runner, the M0 cross-circuit e2e
-- `docs/` — current-fact reference docs: specification, toolchain, Zeto provenance (see the index below)
+- `docs/` — current-fact reference docs, one file per topic: protocol, circuits, contracts, deployment,
+  indexer, wallet, security model, performance, toolchain, Zeto provenance (see the index below)
 - `.dev/` — agent-facing working docs: milestone trackers and decision records (see [`.dev/README.md`](.dev/README.md))
 
 ## Run
@@ -89,12 +109,31 @@ Copy `.env.example` → `.env` (gitignored) for a funded GIWA deployer key. Tool
 
 ## Docs
 
-- [Specification](docs/spec.md) — what bongtu is and why it is shaped this way: locked product decisions,
-  circuits/publics, IMT §5.1, indexer API §6b, apps §7, GIWA facts + live addresses §9, risk register §11.
+System guarantees and inter-component contracts live in [`docs/`](docs/) — one file per topic:
+
+- [Protocol](docs/protocol.md) — notes, commitments, nullifiers, the single-frontier IMT, batch attach,
+  authority-envelope layouts and the disclosure chain.
+- [Circuits](docs/circuits.md) — the four circuits, their exact public surfaces, the soundness belts, and how
+  `-l` resolves the vendored and upstream includes.
+- [Contracts](docs/contracts.md) — `BongtuPool`'s duties: proof binding, nullifier spend, enforced disclosure,
+  events, arbiter epochs, the UUPS proxy and verifier wiring.
+- [Deployment](docs/deployment.md) — live GIWA Sepolia addresses, chain facts, the deploy scripts, and the
+  arbiter-key-at-deploy coupling.
+- [Indexer](docs/indexer.md) — the mirror invariant, single-transaction persist and gap-only resume, the HTTP
+  API with its read-auth, and the arbiter-mode trust boundary.
+- [Wallet](docs/wallet.md) — key derivation from a MetaMask signature, in-browser proving and the stale-zkey
+  hazard, the deposit/faucet shape, and the indexer dependency.
+- [Security model](docs/security-model.md) — who sees what, the enforced-auditor-disclosure invariant, the
+  zero-commitment guard, and the residual gaps and testnet caveats.
+- [Performance](docs/performance.md) — measured gas per operation, the live 256-disburse run, proof times,
+  and where the gas actually goes.
 - [Toolchain](docs/toolchain.md) — the exact circom/snarkjs/ptau/forge invocations and paths that build and
   prove everything.
 - [Zeto derivation](docs/zeto-derivation.md) — which Zeto flavor bongtu uses, per-file circuit provenance, the
-  deliberate modifications, and the SMT→IMT zero-commitment guard.
+  deliberate modifications, and the SMT→IMT soundness debt.
+
+How to run each piece is owned by its own README:
+
 - [Deploy](deploy/README.md) — the reusable B=256 stack deploy: env config, local anvil gate, live GIWA runbook.
 - [Prover service](prover/README.md) — the resident-GPU proving service: wire contract, boot lifecycle, ops
   invariants (one instance per GPU), env knobs.
@@ -111,7 +150,7 @@ Milestone trackers and decision records (applied/deferred/rejected lists, layout
 ## Notes
 
 Testnet PoC: single-party trusted setup, a demo arbiter key, and a mock kKRW token — mainnet requires a
-phase-2 MPC ceremony and a real authority key (see [`docs/spec.md`](docs/spec.md) §11/§13).
+phase-2 MPC ceremony and a real authority key (see [`docs/security-model.md`](docs/security-model.md)).
 
 ## License & credits
 
