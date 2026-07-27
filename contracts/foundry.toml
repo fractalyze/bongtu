@@ -6,10 +6,14 @@ solc = "0.8.24"
 optimizer = true
 optimizer_runs = 200
 ffi = true
-# read ./test          : fixtures (poseidon2.hex, realproofs.json, disburse256.*) for tests + deploy scripts
-# read-write ../deploy : Deploy.s.sol writes addresses.<chainid>.json there; Smoke.s.sol reads it back
+# read ./test                  : fixtures (poseidon2.hex, realproofs.json, disburse256.*) for tests + deploy scripts
+# read ./src                   : VerifierDrift.t.sol reads the shipped verifiers as text
+# read ../circuits/verifiers   : ...and the snarkjs-generated originals it must equal
+# read-write ../deploy         : Deploy.s.sol writes addresses.<chainid>.json there; Smoke.s.sol reads it back
 fs_permissions = [
     { access = "read", path = "./test" },
+    { access = "read", path = "./src" },
+    { access = "read", path = "../circuits/verifiers" },
     { access = "read-write", path = "../deploy" },
 ]
 # The deploy/upgrade scripts live in ../deploy (outside this project root) and

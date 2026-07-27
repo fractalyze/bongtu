@@ -2,7 +2,13 @@
 pragma solidity ^0.8.20;
 
 import {IPoseidon2} from "./interfaces/IPoseidon2.sol";
-import {IDepositVerifier, IWithdrawVerifier, IDisburseVerifier, ITransferVerifier} from "./interfaces/IVerifiers.sol";
+import {
+    IDepositVerifier,
+    IWithdrawVerifier,
+    IDisburseVerifier,
+    ITransferVerifier,
+    ITransfer10Verifier
+} from "./interfaces/IVerifiers.sol";
 import {IERC20} from "./utils/IERC20.sol";
 import {SafeERC20} from "./utils/SafeERC20.sol";
 import {Ownable2StepUpgradeable} from "./utils/Ownable2StepUpgradeable.sol";
@@ -99,6 +105,11 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     //                [10..25]=cipherTextAuthority[16] [26]=kemBinding [27..28]=nf
     //                [29]=root [30..31]=enabled [32..33]=oc [34]=nonce
     //                [35..36]=authorityPubKey
+    // transfer10 (141): the same vector at arity 10 —
+    //                [0..1]=ecdhPub [2..41]=cipherTexts[10][4]
+    //                [42..105]=cipherTextAuthority[64] [106]=kemBinding
+    //                [107..116]=nf [117]=root [118..127]=enabled
+    //                [128..137]=oc [138]=nonce [139..140]=authorityPubKey
 
     // --- events (all ciphertext copied from verified publicSignals) -----------
     event Appended(uint256 indexed leafIndex, uint256 leaf, uint256 root);
@@ -134,6 +145,25 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         uint256[4] encryptedValuesForReceiver0,
         uint256[4] encryptedValuesForReceiver1,
         uint256[16] encryptedValuesForAuthority,
+        uint256 encryptionNonce,
+        uint256 root,
+        uint256 kemBinding,
+        bytes kemCiphertext
+    );
+    /// @notice transfer10 (10-in / 10-out). A SEPARATE event, not a widened
+    ///         `Transferred`: the 2-in shape stays on the live wire (an indexer
+    ///         spanning the upgrade block must keep parsing it), and the arity-10
+    ///         receiver ciphertexts arrive as ONE flat `uint256[40]` rather than
+    ///         ten named fields — ingest slices it at `i*4` in leaf order, which
+    ///         is the same loop it already runs over a disburse batch, and
+    ///         `encryptedValuesForReceiverN` x10 would be neither.
+    event Transferred10(
+        uint256 indexed epoch,
+        uint256[10] nullifiers,
+        uint256[10] outputCommitments,
+        uint256[2] ecdhPublicKey,
+        uint256[40] encryptedValuesForReceivers,
+        uint256[64] encryptedValuesForAuthority,
         uint256 encryptionNonce,
         uint256 root,
         uint256 kemBinding,
@@ -358,6 +388,25 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         transferVerifier = _transferVerifier;
     }
 
+    /// @notice The transfer10 migration payload (U-Z1): {transfer10} is a NEW
+    ///         entry point behind a NEW verifier, so this ADDS `transfer10Verifier`
+    ///         and touches nothing else — the 2-in {transfer} path keeps its own
+    ///         verifier and keeps working through and after the upgrade, and no
+    ///         epoch is minted (no arbiter key material changes; an epoch boundary
+    ///         means a key change to the indexer and the wallets).
+    ///
+    ///         `reinitializer(4)` requires version < 4, so — exactly as noted on
+    ///         {initializeV3} — the payload would also run on a pool that never
+    ///         took V2/V3 and would then put those payloads permanently out of
+    ///         reach. Ordering is pinned OUTSIDE the contract, by the deploy
+    ///         script's pre-flight: it reads the Initializable version out of the
+    ///         ERC-7201 slot and refuses anything below 3, the same require
+    ///         `deploy/UpgradeSelfSend.s.sol` uses for the V2-then-V3 step.
+    function initializeV4(ITransfer10Verifier _transfer10Verifier) external onlyOwner reinitializer(4) {
+        if (address(_transfer10Verifier) == address(0)) revert ZeroVerifier();
+        transfer10Verifier = _transfer10Verifier;
+    }
+
     /// @notice Append an epoch and emit its index; the arbiter pubkey is read
     ///         from storage at execution (never calldata) so a sender cannot
     ///         encrypt to their own key and silently kill non-repudiation.
@@ -573,6 +622,104 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         );
     }
 
+    // --- transfer10 public-signal bases (the index map at the top) ------------
+    // Named because the arity-10 vector is four 10-wide runs plus two 40/64-wide
+    // ciphertext runs, and a bare `pub[118 + i]` says nothing about which run it
+    // indexes. Constants live in bytecode, not storage — no upgrade impact.
+    uint256 public constant TRANSFER10_ARITY = 10;
+    uint256 private constant T10_RECEIVER_CT = 2; // cipherTexts[10][4] -> 40 elements
+    uint256 private constant T10_AUTHORITY_CT = 42; // cipherTextAuthority[64]
+    uint256 private constant T10_KEM_BINDING = 106;
+    uint256 private constant T10_NULLIFIER = 107; // nullifiers[10]
+    uint256 private constant T10_ROOT = 117;
+    uint256 private constant T10_ENABLED = 118; // enabled[10] (contract-derived)
+    uint256 private constant T10_OUTPUT_COMMITMENT = 128; // outputCommitments[10]
+    uint256 private constant T10_NONCE = 138;
+    uint256 private constant T10_AUTHORITY_KEY = 139; // authorityPublicKey[2]
+
+    /// @notice transfer10 (10-in / 10-out): permissionless, and the SAME rules as
+    ///         {transfer} at arity 10 — contract-derived
+    ///         `enabled[i] = (nullifier[i] != 0)`, the arbiter key injected from
+    ///         storage, an any-historical-root membership check, all ten
+    ///         nullifiers spent and all ten outputs appended.
+    ///
+    ///         The circuit does NOT check that the ten nullifiers are DISTINCT
+    ///         (it never did at arity 2 either), so in-transaction double-spend
+    ///         safety rests entirely on {_spendNullifier} being run over every
+    ///         slot in order: the duplicate hits an already-marked nullifier and
+    ///         reverts `NullifierAlreadyUsed`. Skipping even one slot would let a
+    ///         single note be spent ten times in one call.
+    ///
+    ///         There is no ciphertext ARGUMENT to length-check the way
+    ///         {disburseWithCiphertexts} has one: like {transfer}, transfer10's
+    ///         receiver ciphertexts (40 elements) and authority envelope (64)
+    ///         ride INSIDE the public-signal vector, so the fixed `uint[141]`
+    ///         calldata type and the verifier itself bind them — strictly
+    ///         stronger than a length rule on free calldata. The one free
+    ///         argument, `kemCiphertext`, is length-checked like every other op.
+    function transfer10(
+        uint[2] calldata a,
+        uint[2][2] calldata b,
+        uint[2] calldata c,
+        uint[141] calldata pub,
+        bytes calldata kemCiphertext
+    ) external whenInitialized nonReentrant {
+        _checkKemCiphertext(kemCiphertext);
+        if (!knownRoots[pub[T10_ROOT]]) revert UnknownRoot(pub[T10_ROOT]);
+
+        uint[141] memory injected = pub;
+        for (uint256 i = 0; i < TRANSFER10_ARITY; i++) {
+            injected[T10_ENABLED + i] = pub[T10_NULLIFIER + i] != 0 ? 1 : 0;
+        }
+        (injected[T10_AUTHORITY_KEY], injected[T10_AUTHORITY_KEY + 1]) = currentArbiterKey();
+        if (!transfer10Verifier.verifyProof(a, b, c, injected)) revert InvalidProof();
+
+        // Sequential and complete: the second occurrence of a repeated nullifier
+        // reverts here (see the note above). Padded slots carry 0 and are skipped.
+        for (uint256 i = 0; i < TRANSFER10_ARITY; i++) {
+            _spendNullifier(pub[T10_NULLIFIER + i]);
+        }
+
+        for (uint256 i = 0; i < TRANSFER10_ARITY; i++) {
+            uint256 oc = pub[T10_OUTPUT_COMMITMENT + i];
+            // A zero output commitment is a non-note (self-burn foot-gun); never
+            // append it. An UNUSED transfer10 output slot is still a real note —
+            // a value-0 note with a salt — so its commitment is nonzero too.
+            if (oc == 0) revert ZeroOutputCommitment();
+            _appendLeaf(oc);
+        }
+
+        _emitTransferred10(pub, kemCiphertext);
+    }
+
+    /// @dev Split out of {transfer10} for the same reason as {_emitTransferred}:
+    ///      the 10-field event plus the verify locals overflows the EVM stack in
+    ///      a single frame (non-via-IR build).
+    function _emitTransferred10(uint[141] calldata pub, bytes calldata kemCiphertext) private {
+        uint256[10] memory nfs;
+        uint256[10] memory ocs;
+        for (uint256 i = 0; i < TRANSFER10_ARITY; i++) {
+            nfs[i] = pub[T10_NULLIFIER + i];
+            ocs[i] = pub[T10_OUTPUT_COMMITMENT + i];
+        }
+        uint256[40] memory rct;
+        for (uint256 i = 0; i < 40; i++) rct[i] = pub[T10_RECEIVER_CT + i];
+        uint256[64] memory cta;
+        for (uint256 i = 0; i < 64; i++) cta[i] = pub[T10_AUTHORITY_CT + i];
+        emit Transferred10(
+            currentEpoch(),
+            nfs,
+            ocs,
+            [pub[0], pub[1]],
+            rct,
+            cta,
+            pub[T10_NONCE],
+            root,
+            pub[T10_KEM_BINDING],
+            kemCiphertext
+        );
+    }
+
     /// @notice withdraw (2-in / 1-out): permissionless. Contract injects
     ///         enabled[i]=(nullifier[i]!=0) (§5.2) AND the stored arbiter key into
     ///         the authority envelope (§6b v2 — a withdraw not encrypted to the
@@ -703,8 +850,18 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     // encapsulation key; epochs minted pre-upgrade read 0 — the pre-KEM marker.
     mapping(uint256 => bytes32) public arbiterKemPkHash;
 
-    /// @dev Reserved trailing storage so a future BongtuPoolV3 can add state
+    // --- V4 (transfer10) state -------------------------------------------------
+    // Appended AFTER every earlier slot, consuming the next word of __gap, for
+    // the same reason arbiterKemPkHash did: inserting it next to the other four
+    // verifier slots would re-stride everything below and corrupt the live pool's
+    // roots/nullifiers/epochs on upgrade. Zero until {initializeV4} runs, which is
+    // why {transfer10} is unreachable (a call to address(0) reverts) rather than
+    // silently accepting on a pool that has not taken the payload.
+    ITransfer10Verifier public transfer10Verifier;
+
+    /// @dev Reserved trailing storage so a future implementation can add state
     ///      without colliding with any slot introduced here (upgrade-safety).
-    ///      Was 50 in V1; the V2 arbiterKemPkHash mapping consumed one slot.
-    uint256[49] private __gap;
+    ///      Was 50 in V1; V2's arbiterKemPkHash and V4's transfer10Verifier each
+    ///      consumed one slot.
+    uint256[48] private __gap;
 }

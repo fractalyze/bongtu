@@ -8,6 +8,8 @@
 //   - one multicall tx carrying TWO transfers (the ordered per-tx pair queues);
 //   - a Transferred whose commitment != its Appended leaf (correlation throw);
 //   - a replayed log range (must converge, not double feed/notes/nullifiers);
+//   - transfer10, whose one op moves ten leaves through the correlation ladder
+//     at once (self-merge and fan-out, plus its own replay convergence);
 //   - Disbursed with and without its DisburseCiphertexts log (withheld feed
 //     entry + alarm; the ledger only opens published batches);
 //   - PostgresLedger's own (txHash, logIndex) replay dedup;
@@ -192,6 +194,51 @@ function makeSim() {
     return out;
   };
 
+  // transfer10 has no V1 vintage (it ships with the V4 upgrade), so this builder
+  // is V2-only. `ins` are the REAL inputs — all owned by ins[0].owner, which is
+  // what the envelope's single input-owner head encodes — and `outs` the real
+  // outputs; both are padded to arity 10 with value-0 self notes, the wallet's
+  // convention. Receiver i is keyed at `nonce + i` (§11-8 v1.1 per-output
+  // nonce), the thing that makes a self-merge's ten identical output owners safe.
+  const transfer10 = (
+    txHash: string,
+    ins: NoteSpec[],
+    outs: NoteSpec[],
+    eph: bigint,
+    nonce: bigint,
+    nfs: bigint[],
+    padSaltBase: bigint,
+  ): ParsedLog[] => {
+    tx();
+    const N = 10;
+    const sender = ins[0].owner;
+    const pad = (n: number, base: bigint): NoteSpec[] =>
+      Array.from({ length: n }, (_, i) => note(sender, 0n, base + BigInt(i)));
+    const inAll = [...ins, ...pad(N - ins.length, padSaltBase)];
+    const outAll = [...outs, ...pad(N - outs.length, padSaltBase + 100n)];
+    const commits = outAll.map(commitOf);
+    const logs = commits.map((c) => appended(txHash, c));
+    const plain = [
+      ...pub2(sender),
+      ...inAll.flatMap((n) => [n.v, n.s]),
+      ...outAll.flatMap((n) => pub2(n.owner)),
+      ...outAll.flatMap((n) => [n.v, n.s]),
+    ];
+    logs.push(
+      log("Transferred10", txHash, {
+        outputCommitments: commits,
+        nullifiers: nfs,
+        epoch: 1n,
+        ecdhPublicKey: pub2(deriveKeypair(eph)),
+        encryptedValuesForReceivers: outAll.flatMap((o, i) =>
+          poseidonEncrypt([o.v, o.s], ecdhSharedSecret(eph, o.owner.publicKey), nonce + BigInt(i))),
+        encryptedValuesForAuthority: poseidonEncrypt(plain, ecdhSharedSecret(eph, ARB.publicKey), nonce),
+        encryptionNonce: nonce,
+      }),
+    );
+    return logs;
+  };
+
   const disburse = (
     txHash: string,
     input: NoteSpec,
@@ -233,7 +280,7 @@ function makeSim() {
     return { logs, start, commits };
   };
 
-  return { oracle, deposit, transfer, disburse };
+  return { oracle, deposit, transfer, transfer10, disburse };
 }
 
 // PostgresLedger is the ONLY ledger (Postgres-only, U-I4); its apply/notesOf/
@@ -365,6 +412,98 @@ async function main(): Promise<void> {
     ok(notesS.filter((n) => !n.spent && n.value !== "0").length === 1, "after the merge exactly one live nonzero note remains");
   }
 
+  step("TRANSFER10: a 4-input self-merge ingests as ONE op — 10 leaves, 4 spends, a self-send pair");
+  {
+    const sim10 = makeSim();
+    const ix10 = makeIndexer(true);
+    // Four notes for U1 (two deposits), then ONE transfer10 merging all four
+    // into a single note — the shape the 2-in circuit needed a chain of
+    // self-sends for. The other six input slots and nine output slots are pads.
+    const f = [note(U1, 10n, 7001n), note(U1, 20n, 7002n), note(U1, 30n, 7003n), note(U1, 40n, 7004n)];
+    const merged = note(U1, 100n, 7101n);
+    const nfs = [501n, 502n, 503n, 504n, 0n, 0n, 0n, 0n, 0n, 0n];
+    ix10.applyLogs([
+      ...sim10.deposit("0xm1", f[0], f[1], 600000000000000000011n, 771n),
+      ...sim10.deposit("0xm2", f[2], f[3], 610000000000000000013n, 772n),
+      ...sim10.transfer10("0xmerge10", f, [merged], 620000000000000000017n, 773n, nfs, 7200n),
+    ]);
+
+    ok(ix10.tree.root() === sim10.oracle.getRoot(), "mirror root == reference oracle root after transfer10");
+    ok(ix10.tree.nextLeafIndex() === 14, `4 deposit leaves + 10 transfer10 leaves (got ${ix10.tree.nextLeafIndex()})`);
+    const feed10 = ix10.store.allEvents();
+    ok(feed10.map((e) => e.kind).join(",") === "deposit,deposit,transfer10", "transfer10 joins the feed under its own kind");
+    const e10 = feed10[2];
+    ok(e10.slices.length === 11, "ten receiver slices + the authority tail");
+    ok(e10.slices.slice(0, 10).every((s, i) => s.offset === i * 4 && s.elts === 4 && s.leafIndex === 4 + i),
+      "receiver slice i sits at offset 4i and names leaf 4+i (flat uint256[40], leaf order)");
+    const tail = e10.slices[10];
+    ok(tail.offset === 40 && tail.elts === 64 && tail.leafIndex === null, "the authority envelope is a 64-element non-leaf tail at offset 40");
+    ok(e10.ciphertext.length === 104, "feed carries all 104 ciphertext elements (40 receiver + 64 authority)");
+    ok(new Set(ix10.store.nullifiers()).size === 4, "only the 4 real nullifiers are spent (the 6 padded 0s are skipped)");
+
+    const u1n = ix10.ledger!.notesOf(U1.publicKey[0], U1.publicKey[1]);
+    ok(f.every((n) => u1n.some((x) => x.commitment === commitOf(n).toString() && x.spent)),
+      "all four merged inputs marked spent from the envelope alone");
+    const live = u1n.filter((n) => !n.spent && n.value !== "0");
+    ok(live.length === 1 && live[0].value === "100" && live[0].leafIndex === 4,
+      "exactly one live note remains, the merged 100 at the first output leaf");
+
+    // deriveHistory routes transfer10 through the SAME branch as transfer, so a
+    // merge with every nonzero output back to the sender is the pure self-send
+    // case: one "sent" + one "received" over the payment slot (test/deriveHistory
+    // pins that table at arity 2).
+    const h10 = ix10.ledger!.historyOf(U1.publicKey[0], U1.publicKey[1]).filter((x) => x.txHash === "0xmerge10");
+    ok(h10.length === 2, "the self-merge yields exactly the two-item pair");
+    ok(h10[0].kind === "received" && h10[1].kind === "sent", "received-above-sent in the seq-desc feed");
+    ok(h10.every((x) => x.amount === "100" && x.counterparty === packPubkey(U1.publicKey)),
+      "both carry the merged sum and name the merger's own key");
+  }
+
+  step("TRANSFER10: a fan-out to two payees is sent-for-payer / received-for-payee, per payee");
+  {
+    const simF = makeSim();
+    const ixF = makeIndexer(true);
+    const src = [note(EMP, 50n, 8001n), note(EMP, 50n, 8002n)];
+    const payA = note(U1, 30n, 8101n);
+    const payB = note(U2, 60n, 8102n);
+    const chg = note(EMP, 10n, 8103n);
+    ixF.applyLogs([
+      ...simF.deposit("0xf1", src[0], src[1], 630000000000000000019n, 781n),
+      ...simF.transfer10("0xfan10", src, [payA, payB, chg], 640000000000000000023n, 782n,
+        [601n, 602n, 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 8200n),
+    ]);
+
+    const empH = ixF.ledger!.historyOf(EMP.publicKey[0], EMP.publicKey[1]).filter((x) => x.txHash === "0xfan10");
+    const sentTo10 = (kp: typeof U1): string | undefined =>
+      empH.find((x) => x.kind === "sent" && x.counterparty === packPubkey(kp.publicKey))?.amount;
+    ok(sentTo10(U1) === "30" && sentTo10(U2) === "60", "one 'sent' per non-self payee, never merged");
+    ok(empH.length === 2, "the sender's own change output stays suppressed (2 items, not 3)");
+    ok(ixF.ledger!.historyOf(U1.publicKey[0], U1.publicKey[1])
+      .some((x) => x.kind === "received" && x.amount === "30" && x.counterparty === packPubkey(EMP.publicKey)),
+      "payee U1 'received' 30 from the sender");
+    ok(ixF.ledger!.notesOf(U2.publicKey[0], U2.publicKey[1]).some((n) => n.value === "60" && !n.spent),
+      "payee U2's note is recorded live at its own leaf");
+  }
+
+  step("TRANSFER10: replaying the range converges (no doubled leaves, notes or nullifiers)");
+  {
+    const simR = makeSim();
+    const ixR = makeIndexer(true);
+    const src = [note(U3, 25n, 8501n), note(U3, 25n, 8502n)];
+    const logsR = [
+      ...simR.deposit("0xr1", src[0], src[1], 650000000000000000029n, 791n),
+      ...simR.transfer10("0xr2", src, [note(U3, 50n, 8601n)], 660000000000000000031n, 792n,
+        [701n, 702n, 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 8700n),
+    ];
+    ixR.applyLogs(logsR);
+    const before = ixR.ledger!.notesOf(U3.publicKey[0], U3.publicKey[1]).length;
+    ixR.applyLogs(logsR);
+    ok(ixR.store.allEvents().length === 2, "feed did not grow on replay");
+    ok(ixR.tree.nextLeafIndex() === 12 && ixR.tree.root() === simR.oracle.getRoot(), "tree unchanged on replay");
+    ok(ixR.ledger!.notesOf(U3.publicKey[0], U3.publicKey[1]).length === before, "ledger notes did not double on replay");
+    ok(new Set(ixR.store.nullifiers()).size === 2, "nullifier set unchanged on replay");
+  }
+
   step("DISBURSE: published batch opens; withheld batch stays a sentinel + alarms");
   ok(feed[3].disclosure?.status === "verified", "published disburse disclosure checks out");
   ok(feed[4].disclosure?.status === "withheld", "ciphertext-less disburse → withheld feed entry");
@@ -470,6 +609,35 @@ async function main(): Promise<void> {
     ok(v1Raw.topics[0] !== v2Raw.topics[0], "V1/V2 topic0 differ (the reason dual-ABI is required)");
   }
 
+  step("TRANSFER10 ABI: the pool's own event fragment decodes into the names ingest destructures");
+  {
+    // The scenarios above drive applyLogs with SYNTHETIC ParsedLogs, so nothing
+    // there would catch an ingest branch reading a field the emitted event does
+    // not actually carry (or carries at another width). Round-trip a
+    // Transferred10 through the real built ABI and check exactly the fields the
+    // branch touches. transfer10 has no V1 vintage, so there is only one shape.
+    const iface = ix.pool.interface;
+    const raw = iface.encodeEventLog(iface.getEvent("Transferred10"), [
+      1n,
+      Array.from({ length: 10 }, (_, i) => BigInt(100 + i)),
+      Array.from({ length: 10 }, (_, i) => BigInt(200 + i)),
+      [1n, 2n],
+      new Array(40).fill(3n),
+      new Array(64).fill(4n),
+      42n, 99n, 77n, "0x" + "ab".repeat(1088),
+    ]);
+    const p = iface.parseLog({ topics: raw.topics, data: raw.data });
+    ok(p.name === "Transferred10", "the built ABI models Transferred10");
+    ok(p.args.nullifiers.length === 10 && p.args.outputCommitments.length === 10,
+      "ten nullifiers and ten output commitments");
+    ok(p.args.encryptedValuesForReceivers.length === 40, "receiver ciphertexts arrive as ONE flat 40-element run");
+    ok(p.args.encryptedValuesForAuthority.length === 64, "the authority envelope is 64 elements at arity 10");
+    ok(p.args.kemBinding !== undefined && ethers.utils.arrayify(p.args.kemCiphertext).length === 1088,
+      "kemBinding + a 1088-byte kemCiphertext ride along (kemOf dispatches on their presence)");
+    ok(Number(p.args.epoch) === 1 && Number(p.args.encryptionNonce) === 42,
+      "epoch and encryptionNonce decode where the feed entry reads them");
+  }
+
   step("V2 KEM: hybrid envelopes decapsulate + binding-check; a junk ct alarms and withholds");
   {
     const simK = makeSim();
@@ -565,7 +733,7 @@ async function main(): Promise<void> {
     ok(b3.ok === true && b3.lastSuccessAt !== null, "recovered → /health ok:true");
   }
 
-  console.log(`\n${failures === 0 ? "INGEST UNIT TEST PASS — multicall correlation, self-send history, correlation guard, replay convergence, withheld disburse, ledger dedup, pollOnce/health" : `INGEST UNIT TEST FAIL — ${failures} assertion(s)`}`);
+  console.log(`\n${failures === 0 ? "INGEST UNIT TEST PASS — multicall correlation, self-send history, transfer10 merge/fan-out, correlation guard, replay convergence, withheld disburse, ledger dedup, pollOnce/health" : `INGEST UNIT TEST FAIL — ${failures} assertion(s)`}`);
   process.exit(failures === 0 ? 0 : 1);
 }
 

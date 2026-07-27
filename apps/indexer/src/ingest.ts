@@ -419,8 +419,8 @@ export class Indexer {
     // order, consuming the pass-1 pairs as ordered per-tx queues. One tx may
     // hold several pool ops (multicall / Safe / 4337 bundle — transfer and
     // withdraw are permissionless, so third-party wrappers can batch them
-    // today): each Deposited/Transferred consumes 2 pairs, each Withdrawn 1,
-    // each Disbursed consumes the next SubtreeAppended of its tx. Every
+    // today): each Deposited/Transferred consumes 2 pairs, each Transferred10
+    // 10, each Withdrawn 1, and each Disbursed the next SubtreeAppended. Every
     // consumed pair is cross-checked against the event's own commitment
     // argument — a correlation slip throws instead of recording a wrong leaf.
     const takeAppend = (txHash: string, expected: bigint, what: string): number => {
@@ -509,6 +509,46 @@ export class Indexer {
               authorityCt: (l.args.encryptedValuesForAuthority as unknown[]).map(bn),
               kem: kemOf(l.args),
               outputLeaves: [{ leafIndex: i0, commitment: oc0 }, { leafIndex: i1, commitment: oc1 }],
+            });
+          }
+        }
+      } else if (l.name === "Transferred10") {
+        // The arity-10 transfer: same event grammar as Transferred, ten of
+        // everything, and the ten receiver ciphertexts arrive as ONE flat
+        // uint256[40] in leaf order — sliced at i*4, the same loop a disburse
+        // batch already uses. There is no V1 vintage to dual-parse: transfer10
+        // did not exist before the V4 upgrade, so a log of it always carries the
+        // KEM fields.
+        const ocs = (l.args.outputCommitments as unknown[]).map(bn);
+        const leaves = ocs.map((oc, i) => ({
+          leafIndex: takeAppend(l.txHash, oc, `Transferred10#out${i}`),
+          commitment: oc,
+        }));
+        for (const lf of leaves) this.tree.recordLeaf(lf.leafIndex, lf.commitment);
+        const authorityCt = (l.args.encryptedValuesForAuthority as unknown[]).map(bn);
+        // ciphertext layout: receivers[10][4] (flat) ++ authority[64]
+        const ct: bigint[] = [...(l.args.encryptedValuesForReceivers as unknown[]).map(bn), ...authorityCt];
+        const slices: Slice[] = leaves.map((lf, i) => ({ offset: i * 4, elts: 4, leafIndex: lf.leafIndex }));
+        slices.push({ offset: 4 * leaves.length, elts: authorityCt.length, leafIndex: null }); // authority envelope (not a leaf)
+        const t10Entry = this.store.addEvent({
+          txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
+          kind: "transfer10", epoch: Number(bn(l.args.epoch)),
+          ecdhPublicKey: [dec(bn(l.args.ecdhPublicKey[0])), dec(bn(l.args.ecdhPublicKey[1]))],
+          encryptionNonce: dec(bn(l.args.encryptionNonce)),
+          slices, ciphertext: ct.map(dec),
+        });
+        if (t10Entry) {
+          // Padded slots carry nullifier 0; addNullifiers drops those, exactly as
+          // the contract's _spendNullifier skips them.
+          this.store.addNullifiers((l.args.nullifiers as unknown[]).map(bn));
+          if (this.ledger) {
+            this.ledger.apply({
+              kind: "transfer10", txHash: l.txHash, logIndex: l.logIndex, blockTimestamp: l.blockTimestamp,
+              ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
+              nonce: bn(l.args.encryptionNonce),
+              authorityCt,
+              kem: kemOf(l.args),
+              outputLeaves: leaves,
             });
           }
         }

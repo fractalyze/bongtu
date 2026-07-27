@@ -113,6 +113,30 @@ async function main(): Promise<void> {
     out.transfer = { ...cd, seedLeaves: inC.map(s), rootAfter: s(t.getRoot()), ...kemFor("transfer", cd.pub[26]) };
   }
 
+  // --- transfer10 (10-in / 10-out) -----------------------------------------
+  // Two fixtures share the circuit: the partly-filled spend (4 real inputs, a
+  // payment + change, the rest padded) and the full-arity consolidation (all 10
+  // inputs real, merged into one self-owned output). Seed = the REAL input
+  // commitments only — `circuits/fixture_lib.ts membership()` builds the
+  // membership tree from those, and a padded slot carries a zeros path it never
+  // proves against (enabled=0). transfer10 publics (141): [107..116]=nf
+  // [117]=root [128..137]=oc [139..140]=authorityPubKey.
+  for (const name of ["transfer10", "transfer10_consolidate"]) {
+    const cd = await calldata(name);
+    const inp = rd(join(INPUTS, `${name}.json`));
+    // enabled[] is the fixture's own record of which slots are real; the
+    // membership tree holds exactly those, in order.
+    const seed = (inp.inputCommitments as string[]).filter((_, i) => BigInt(inp.enabled[i]) === 1n).map(BigInt);
+    assertEq(rootAfterAppends(seed), cd.pub[117], `${name} membership root != pub[117]`);
+    const t = new ImtTree(H, B);
+    for (const c of seed) t.appendLeaf(c);
+    // All ten outputs are appended, pads included: an unused output slot is a
+    // real value-0 note with a salt, so its commitment is nonzero and the
+    // contract's ZeroOutputCommitment guard never fires on it.
+    for (let i = 0; i < 10; i++) t.appendLeaf(BigInt(cd.pub[128 + i]));
+    out[name] = { ...cd, seedLeaves: seed.map(s), rootAfter: s(t.getRoot()), ...kemFor(name, cd.pub[106]) };
+  }
+
   // --- withdraw (2-in / 1-out) ---------------------------------------------
   // withdraw publics (26): [0]=out [1..2]=ecdhPub [3..15]=cipherTextAuthority[13]
   //   [16]=kemBinding [17..18]=nf [19]=root [20..21]=enabled [22]=oc0(change)
@@ -157,6 +181,10 @@ async function main(): Promise<void> {
   assertEq(out.deposit.pub[18], out.arbiterKey[1], "deposit authY != disburse authY");
   assertEq(out.withdraw.pub[24], out.arbiterKey[0], "withdraw authX != disburse authX");
   assertEq(out.withdraw.pub[25], out.arbiterKey[1], "withdraw authY != disburse authY");
+  for (const name of ["transfer10", "transfer10_consolidate"]) {
+    assertEq(out[name].pub[139], out.arbiterKey[0], `${name} authX != disburse authX`);
+    assertEq(out[name].pub[140], out.arbiterKey[1], `${name} authY != disburse authY`);
+  }
 
   // --- arbiter ML-KEM-768 encapsulation key (PQ half of the hybrid envelope) --
   // Joins the fixture metadata the same way arbiterKey does: every fixture

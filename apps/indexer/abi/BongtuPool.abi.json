@@ -59,6 +59,19 @@
     },
     {
       "type": "function",
+      "name": "TRANSFER10_ARITY",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
       "name": "UPGRADE_INTERFACE_VERSION",
       "inputs": [],
       "outputs": [
@@ -410,6 +423,19 @@
     },
     {
       "type": "function",
+      "name": "initializeV4",
+      "inputs": [
+        {
+          "name": "_transfer10Verifier",
+          "type": "address",
+          "internalType": "contract ITransfer10Verifier"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
       "name": "initialized",
       "inputs": [],
       "outputs": [
@@ -637,6 +663,52 @@
       ],
       "outputs": [],
       "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "transfer10",
+      "inputs": [
+        {
+          "name": "a",
+          "type": "uint256[2]",
+          "internalType": "uint256[2]"
+        },
+        {
+          "name": "b",
+          "type": "uint256[2][2]",
+          "internalType": "uint256[2][2]"
+        },
+        {
+          "name": "c",
+          "type": "uint256[2]",
+          "internalType": "uint256[2]"
+        },
+        {
+          "name": "pub",
+          "type": "uint256[141]",
+          "internalType": "uint256[141]"
+        },
+        {
+          "name": "kemCiphertext",
+          "type": "bytes",
+          "internalType": "bytes"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "transfer10Verifier",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "contract ITransfer10Verifier"
+        }
+      ],
+      "stateMutability": "view"
     },
     {
       "type": "function",
@@ -1115,6 +1187,73 @@
           "type": "uint256[16]",
           "indexed": false,
           "internalType": "uint256[16]"
+        },
+        {
+          "name": "encryptionNonce",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "root",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "kemBinding",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "kemCiphertext",
+          "type": "bytes",
+          "indexed": false,
+          "internalType": "bytes"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "Transferred10",
+      "inputs": [
+        {
+          "name": "epoch",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "nullifiers",
+          "type": "uint256[10]",
+          "indexed": false,
+          "internalType": "uint256[10]"
+        },
+        {
+          "name": "outputCommitments",
+          "type": "uint256[10]",
+          "indexed": false,
+          "internalType": "uint256[10]"
+        },
+        {
+          "name": "ecdhPublicKey",
+          "type": "uint256[2]",
+          "indexed": false,
+          "internalType": "uint256[2]"
+        },
+        {
+          "name": "encryptedValuesForReceivers",
+          "type": "uint256[40]",
+          "indexed": false,
+          "internalType": "uint256[40]"
+        },
+        {
+          "name": "encryptedValuesForAuthority",
+          "type": "uint256[64]",
+          "indexed": false,
+          "internalType": "uint256[64]"
         },
         {
           "name": "encryptionNonce",

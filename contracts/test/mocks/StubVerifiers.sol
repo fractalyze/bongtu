@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.20;
 
-import {IDepositVerifier, IWithdrawVerifier, IDisburseVerifier, ITransferVerifier} from "../../src/interfaces/IVerifiers.sol";
+import {
+    IDepositVerifier,
+    IWithdrawVerifier,
+    IDisburseVerifier,
+    ITransferVerifier,
+    ITransfer10Verifier
+} from "../../src/interfaces/IVerifiers.sol";
 
 // Always-accept stubs: the differential test isolates the single-frontier IMT
 // tree logic, whose root correctness is independent of proof validity.
@@ -37,6 +43,16 @@ contract StubDisburseVerifier is IDisburseVerifier {
 
 contract StubTransferVerifier is ITransferVerifier {
     function verifyProof(uint[2] calldata, uint[2][2] calldata, uint[2] calldata, uint[37] calldata)
+        external
+        pure
+        returns (bool)
+    {
+        return true;
+    }
+}
+
+contract StubTransfer10Verifier is ITransfer10Verifier {
+    function verifyProof(uint[2] calldata, uint[2][2] calldata, uint[2] calldata, uint[141] calldata)
         external
         pure
         returns (bool)
