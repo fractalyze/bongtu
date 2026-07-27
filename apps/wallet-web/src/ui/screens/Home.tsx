@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 import type { ReactNode } from "react";
+import { encodeAddress } from "@bongtu/core/pubkey";
 import { useWallet } from "../App.js";
 import { navigate } from "../hooks.js";
 import { DEFAULTS } from "../../config.js";
@@ -62,7 +63,8 @@ export function Home(): ReactNode {
       <BalanceCard
         balance={balance}
         loading={loading}
-        pubkey={identity.compressedPubkey}
+        // Users only ever see (and copy) the base58check form; hex stays internal.
+        pubkey={encodeAddress(identity.compressedPubkey)}
         onOpenReceive={() => setReceiveOpen(true)}
       />
 
@@ -148,7 +150,7 @@ export function Home(): ReactNode {
       )}
 
       {receiveOpen && (
-        <ReceiveModal pubkey={identity.compressedPubkey} onClose={() => setReceiveOpen(false)} />
+        <ReceiveModal pubkey={encodeAddress(identity.compressedPubkey)} onClose={() => setReceiveOpen(false)} />
       )}
     </div>
   );

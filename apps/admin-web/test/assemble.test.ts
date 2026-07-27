@@ -14,7 +14,7 @@ import {
   nullifier,
   assertDistinctOwnerPubkeys,
 } from "@bongtu/core/note";
-import { packPubkey } from "@bongtu/core/pubkey";
+import { packPubkey, encodeAddress } from "@bongtu/core/pubkey";
 import { ImtTree } from "@bongtu/core/imt";
 import { ml_kem768, kemSsToLimbs, kemHexToBytes, kemBytesToHex } from "@bongtu/core/kem";
 import { ARBITER_KEM_PK } from "@bongtu/core/network";
@@ -204,4 +204,14 @@ test("rejects a malformed recipient compressed pubkey", () => {
   const f = fixture(1);
   const bad: RecipientRow[] = [{ pubkey: "0xdeadbeef", amount: "100" }];
   assert.throws(() => buildDisburseRequest(f.inputNote, f.membership, bad, f.crypto), /pubkey invalid/);
+});
+
+test("base58check recipient rows assemble the identical request as hex rows", () => {
+  const f = fixture(2);
+  const viaHex = buildDisburseRequest(f.inputNote, f.membership, f.recipients, f.crypto);
+  const b58Rows: RecipientRow[] = f.recipients.map((r) => ({ ...r, pubkey: encodeAddress(r.pubkey) }));
+  const viaB58 = buildDisburseRequest(f.inputNote, f.membership, b58Rows, f.crypto);
+  assert.deepEqual(viaB58.request, viaHex.request);
+  // The operator-facing ledger shows canonical hex regardless of the input form.
+  assert.deepEqual(viaB58.ledger, viaHex.ledger);
 });

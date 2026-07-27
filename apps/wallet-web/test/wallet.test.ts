@@ -28,7 +28,7 @@ import {
   poseidonEncrypt,
   ecdhSharedSecret,
 } from "@bongtu/core/note";
-import { packPubkey } from "@bongtu/core/pubkey";
+import { packPubkey, encodeAddress, decodeAddress } from "@bongtu/core/pubkey";
 import { ImtTree } from "@bongtu/core/imt";
 import type { Point } from "@bongtu/core/babyjub";
 
@@ -50,6 +50,7 @@ import {
   type WalletInputNote,
   type MembershipWitness,
 } from "../src/lib/spend.js";
+import { recipientError } from "../src/ui/format.js";
 import { DEFAULTS, H, B } from "../src/config.js";
 import { ml_kem768, kemSsToLimbs, kemHexToBytes, kemBytesToHex } from "@bongtu/core/kem";
 import { ARBITER_KEM_PK } from "@bongtu/core/network";
@@ -452,4 +453,39 @@ test("walletErrorMessage: provider error objects render as words, never [object 
   assert.equal(walletErrorMessage({ data: { message: "nested node error" } }), "nested node error");
   assert.equal(walletErrorMessage(new Error("plain")), "plain");
   assert.equal(walletErrorMessage({ weird: true }), '{"weird":true}');
+});
+
+// =================== (6) ADDRESS EDGE (base58check <-> hex) ==================
+// The UI edge accepts base58check OR legacy hex and normalizes via the core
+// decodeAddress before anything below (witness building) sees the value.
+
+test("recipientError: accepts base58check and legacy hex, rejects tampered/self", () => {
+  const f = fixture([1000n]);
+  const self = f.wallet.compressedPubkey;
+  const b58 = encodeAddress(f.recipient);
+
+  assert.equal(recipientError(f.recipient, self), null, "legacy hex rejected");
+  assert.equal(recipientError(b58, self), null, "base58check rejected");
+  assert.equal(recipientError("  " + b58 + "  ", self), null, "whitespace-padded base58 rejected");
+
+  // A single flipped character must trip the checksum, not silently pay a stranger.
+  const last = b58[b58.length - 1];
+  const tampered = b58.slice(0, -1) + (last === "2" ? "5" : "2");
+  assert.equal(recipientError(tampered, self), "That doesn't look like a valid bongtu address.");
+  assert.equal(recipientError("", self), "Enter a recipient.");
+  assert.equal(recipientError("junk", self), "That doesn't look like a valid bongtu address.");
+
+  // Self-send is caught in EITHER encoding (two-time pad, §11-8).
+  assert.equal(recipientError(self, self), "You can't send to your own address.");
+  assert.equal(recipientError(encodeAddress(self), self), "You can't send to your own address.");
+});
+
+test("spend path: a base58 recipient normalized via decodeAddress builds the identical request", () => {
+  const f = fixture([1000n, 500n]);
+  const viaHex = buildTransferRequest(f.wallet, f.inputs, f.memberships, f.recipient, "600", f.crypto);
+  const viaB58 = buildTransferRequest(
+    f.wallet, f.inputs, f.memberships,
+    decodeAddress(encodeAddress(f.recipient)), "600", f.crypto,
+  );
+  assert.deepEqual(viaB58.request, viaHex.request);
 });

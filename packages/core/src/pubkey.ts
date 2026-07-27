@@ -17,6 +17,8 @@
 // Field sqrt is Tonelli-Shanks: the base field prime p ≡ 1 (mod 4) (in fact 2^28
 // divides p-1), so the (p+1)/4 shortcut does not apply.
 
+import { sha256 } from "@noble/hashes/sha2.js";
+
 import { P, A, D, isOnCurve, mod, modpow, inv } from "./babyjub.js";
 import type { Point, PointInput } from "./babyjub.js";
 
@@ -116,4 +118,126 @@ export function unpackPubkey(hex: string): Point {
   const point: Point = [x, y];
   if (!isOnCurve(point)) throw new Error("unpackPubkey: recovered point is not on the curve");
   return point;
+}
+
+// ---------------------------------------------------------------------------
+// base58check address format (the user-facing WIRE/DISPLAY encoding).
+//
+// Everything below the UI edge keeps the 0x-hex compressed pubkey; base58check
+// exists only so what users see/copy/paste is compact, case-unambiguous
+// (Bitcoin alphabet — no 0OIl) and TYPO-DETECTING: a 4-byte double-sha256
+// checksum makes a mistyped character fail loudly instead of paying a stranger.
+//
+//   encodeAddress: 0x-hex -> base58( VERSION || payload(32) || sha256(sha256(VERSION||payload))[0..4] )
+//   decodeAddress: base58check OR legacy 0x-hex -> canonical lowercase 0x-hex.
+//                  This is the ONE normalization point every input edge routes through.
+
+/**
+ * Address version byte. 0x42 (ASCII 'B', for Bongtu) — with a 37-byte
+ * version||payload||checksum string this pins every address to the visual
+ * prefix "3" at a fixed 51 characters, and disambiguates bongtu addresses
+ * from other base58check namespaces.
+ */
+export const ADDRESS_VERSION = 0x42;
+
+// Bitcoin base58 alphabet: no 0 (zero), O, I, l — the visually ambiguous glyphs.
+const B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const B58_INDEX = new Map<string, bigint>([...B58_ALPHABET].map((c, i) => [c, BigInt(i)]));
+
+function b58encode(bytes: Uint8Array): string {
+  let n = 0n;
+  for (const b of bytes) n = (n << 8n) | BigInt(b);
+  let out = "";
+  while (n > 0n) {
+    out = B58_ALPHABET[Number(n % 58n)] + out;
+    n /= 58n;
+  }
+  // Leading zero bytes carry no big-integer weight — encode each as '1'.
+  for (const b of bytes) {
+    if (b !== 0) break;
+    out = "1" + out;
+  }
+  return out;
+}
+
+function b58decode(s: string): Uint8Array {
+  let n = 0n;
+  for (const c of s) {
+    const v = B58_INDEX.get(c);
+    if (v === undefined) {
+      throw new Error(`decodeAddress: invalid base58 character ${JSON.stringify(c)}`);
+    }
+    n = n * 58n + v;
+  }
+  const bytes: number[] = [];
+  while (n > 0n) {
+    bytes.unshift(Number(n & 0xffn));
+    n >>= 8n;
+  }
+  for (const c of s) {
+    if (c !== "1") break;
+    bytes.unshift(0);
+  }
+  return new Uint8Array(bytes);
+}
+
+function checksum4(versionAndPayload: Uint8Array): Uint8Array {
+  return sha256(sha256(versionAndPayload)).slice(0, 4);
+}
+
+// The legacy on-the-wire shape: 32-byte hex, 0x optional, case-insensitive —
+// exactly what unpackPubkey has always accepted.
+const HEX_ADDRESS_RE = /^(0x|0X)?[0-9a-fA-F]{64}$/;
+
+/**
+ * Encode a compressed bjj pubkey (0x-hex, as produced by packPubkey) as a
+ * user-facing base58check address ("3…", 51 chars).
+ */
+export function encodeAddress(compressedHex: string): string {
+  const v = compressedHex.trim();
+  if (!HEX_ADDRESS_RE.test(v)) {
+    throw new Error(`encodeAddress: expected 32-byte hex (64 chars), got ${JSON.stringify(compressedHex)}`);
+  }
+  const h = v.startsWith("0x") || v.startsWith("0X") ? v.slice(2) : v;
+  const body = new Uint8Array(33);
+  body[0] = ADDRESS_VERSION;
+  for (let i = 0; i < 32; i++) body[i + 1] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
+  const full = new Uint8Array(37);
+  full.set(body);
+  full.set(checksum4(body), 33);
+  return b58encode(full);
+}
+
+/**
+ * Normalize ANY user-supplied address — base58check or legacy hex — to the
+ * canonical internal form: lowercase 0x-prefixed 32-byte hex. Throws a distinct
+ * error per failure mode (alphabet / length / checksum / version / off-curve),
+ * so callers can surface "typo" separately from "not an address at all".
+ */
+export function decodeAddress(input: string): string {
+  const v = input.trim();
+  // Legacy hex short-circuits BEFORE base58: every 64-char hex string is taken
+  // as hex (a base58 address is 51 chars, so the two shapes never collide).
+  if (HEX_ADDRESS_RE.test(v)) {
+    unpackPubkey(v); // curve-validate; throws its own descriptive error
+    const h = v.startsWith("0x") || v.startsWith("0X") ? v.slice(2) : v;
+    return "0x" + h.toLowerCase();
+  }
+  if (v === "") throw new Error("decodeAddress: empty address");
+  const bytes = b58decode(v);
+  if (bytes.length !== 37) {
+    throw new Error(`decodeAddress: bad length (${bytes.length} bytes, expected 37)`);
+  }
+  const body = bytes.slice(0, 33);
+  const check = checksum4(body);
+  for (let i = 0; i < 4; i++) {
+    if (check[i] !== bytes[33 + i]) throw new Error("decodeAddress: bad checksum");
+  }
+  if (body[0] !== ADDRESS_VERSION) {
+    throw new Error(`decodeAddress: unknown address version 0x${body[0].toString(16).padStart(2, "0")}`);
+  }
+  let hex = "";
+  for (let i = 1; i < 33; i++) hex += body[i].toString(16).padStart(2, "0");
+  unpackPubkey(hex); // the payload must be a real compressed bjj pubkey
+  return "0x" + hex;
 }

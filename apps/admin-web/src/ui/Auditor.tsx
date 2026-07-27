@@ -6,6 +6,7 @@
 
 import { useState } from "react";
 import type { ReactNode } from "react";
+import { decodeAddress } from "@bongtu/core/pubkey";
 import { DEFAULTS } from "../config.js";
 import { getEvents, getAlarms, type Alarm } from "../lib/indexerClient.js";
 import { buildAuditorLedger, type AuditorLedger, type LedgerNote } from "../lib/ledger.js";
@@ -68,7 +69,8 @@ export function Auditor(): ReactNode {
   async function lookupNotes(): Promise<void> {
     try {
       setNotesStatus({ kind: "info", text: "signing + fetching /notes…" });
-      const url = buildNotesUrl(idxUrl.trim(), noteOwner.trim(), notePriv.trim());
+      // The /notes wire param is canonical hex; the operator may paste either form.
+      const url = buildNotesUrl(idxUrl.trim(), decodeAddress(noteOwner), notePriv.trim());
       const notes = await fetchNotes(url);
       setNotesJson(JSON.stringify(notes, null, 2));
       setNotesStatus({ kind: "ok", text: "notes fetched (auth verified against the owner key)" });
@@ -193,7 +195,7 @@ export function Auditor(): ReactNode {
           /events.
         </Note>
         <Field label="owner pubkey">
-          <TextInput value={noteOwner} placeholder="owner compressed pubkey (32-byte hex)" onChange={setNoteOwner} />
+          <TextInput value={noteOwner} placeholder="owner address (3… base58 or 32-byte hex)" onChange={setNoteOwner} />
         </Field>
         <Field label="owner private scalar">
           <TextInput value={notePriv} placeholder="that owner's private scalar (auth binds to it)" onChange={setNotePriv} />

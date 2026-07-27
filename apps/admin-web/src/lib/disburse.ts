@@ -20,7 +20,7 @@ import {
   ecdhSharedSecret,
   assertDistinctOwnerPubkeys,
 } from "@bongtu/core/note";
-import { unpackPubkey } from "@bongtu/core/pubkey";
+import { unpackPubkey, decodeAddress } from "@bongtu/core/pubkey";
 import { ImtTree, foldToRoot } from "@bongtu/core/imt";
 import { buildAuthorityPlaintext, disclosureChain } from "@bongtu/core/envelope";
 import {
@@ -40,7 +40,7 @@ import { H, B } from "../config.js";
 // --- app-facing input shapes (all field elements as decimal strings) ------------
 
 export interface RecipientRow {
-  /** The recipient's compressed bjj pubkey — a 32-byte hex string (sdk/pubkey.ts). */
+  /** The recipient's bongtu address — base58check or legacy 32-byte hex (both normalized via decodeAddress). */
   pubkey: string;
   /** The amount to pay this recipient, decimal. */
   amount: string;
@@ -167,9 +167,14 @@ export function buildDisburseRequest(
   let disbursed = 0n;
   const ledger: LedgerRow[] = [];
   recipients.forEach((r, i) => {
+    // Rows may arrive as base58check (pasted address) or legacy hex; decodeAddress
+    // is the one normalization point, so the witness AND the ledger both see
+    // canonical hex (the admin console is an operator tool — it displays hex).
     let owner: Point;
+    let canonical: string;
     try {
-      owner = unpackPubkey(r.pubkey.trim());
+      canonical = decodeAddress(r.pubkey);
+      owner = unpackPubkey(canonical);
     } catch (e) {
       throw new Error(`recipient #${i + 1} pubkey invalid: ${(e as Error).message}`);
     }
@@ -177,7 +182,7 @@ export function buildDisburseRequest(
     if (amt <= 0n) throw new Error(`recipient #${i + 1} amount must be positive, got ${amt}`);
     disbursed += amt;
     outs.push({ owner, value: amt, kind: "recipient" });
-    ledger.push({ pubkey: r.pubkey.trim(), amount: amt.toString(), kind: "recipient" });
+    ledger.push({ pubkey: canonical, amount: amt.toString(), kind: "recipient" });
   });
   if (disbursed > V) {
     throw new Error(`recipients sum ${disbursed} exceeds input note value ${V} (nothing to over-spend)`);

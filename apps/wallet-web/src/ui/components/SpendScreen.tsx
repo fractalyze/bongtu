@@ -12,7 +12,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { unpackPubkey } from "@bongtu/core/pubkey";
+import { decodeAddress, encodeAddress } from "@bongtu/core/pubkey";
 import { DEFAULTS } from "../../config.js";
 import { ensureCircuitAssets, prewarmProver } from "../../lib/prove.js";
 import { walletErrorMessage } from "../../lib/metamask.js";
@@ -20,7 +20,7 @@ import { runSpend, type SpendStage, type SpendOutcome } from "../../lib/spendFlo
 import { useWallet } from "../App.js";
 import { navigate, useCircuitDownload, useElapsedSeconds } from "../hooks.js";
 import { formatKkrw, parseKkrw } from "../../lib/money.js";
-import { normalizePubkey } from "../format.js";
+import { recipientError } from "../format.js";
 import { ScreenHeader } from "./ScreenHeader.js";
 import { StagedProgress } from "./StagedProgress.js";
 import { SuccessMark } from "./SuccessMark.js";
@@ -28,23 +28,6 @@ import { DownloadProgress } from "./DownloadProgress.js";
 import { AmountInput, Button, ErrorBanner, Field, TextInput } from "./controls.js";
 
 type Phase = "form" | "confirm" | "running" | "done";
-
-// Reject an obviously-bad recipient before proving (the pure spend.ts rejects it too,
-// but a 28 MB proof is a bad place to learn you fat-fingered a key). unpackPubkey
-// throws on a malformed compressed bjj pubkey; a self-send is a two-time pad (§11-8).
-function recipientError(raw: string, selfPubkey: string): string | null {
-  const v = raw.trim();
-  if (!v) return "Enter a recipient.";
-  try {
-    unpackPubkey(v);
-  } catch {
-    return "That doesn't look like a valid bongtu address.";
-  }
-  if (normalizePubkey(v) === normalizePubkey(selfPubkey)) {
-    return "You can't send to your own address.";
-  }
-  return null;
-}
 
 function amountError(raw: string, balance: bigint | null): string | null {
   const p = parseKkrw(raw);
@@ -99,7 +82,9 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
       const res = await runSpend(
         kind,
         { identity, connection, indexerUrl, notes },
-        { to: isTransfer ? recipient.trim() : undefined, amount: amountWei.toString() },
+        // The flow/witness layer only ever sees the canonical hex form — base58
+        // stops at this edge.
+        { to: isTransfer ? decodeAddress(recipient.trim()) : undefined, amount: amountWei.toString() },
         (s) => setStage(s),
       );
       setOutcome(res);
@@ -172,7 +157,9 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
               <>
                 <dt className="text-muted text-sm">To</dt>
                 <dd className="font-mono text-right text-[0.9rem] [overflow-wrap:anywhere]">
-                  {recipient.trim()}
+                  {/* canonical base58 regardless of which form was typed — what
+                      the user confirms is the address, not their keystrokes */}
+                  {encodeAddress(decodeAddress(recipient.trim()))}
                 </dd>
               </>
             )}
@@ -229,7 +216,7 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
           <Field label="Recipient address" error={recipient.trim() ? rcptErr : null}>
             <TextInput
               mono
-              placeholder="0x… compressed bongtu pubkey"
+              placeholder="bongtu address (3… or legacy 0x…)"
               value={recipient}
               onChange={(e) => setRecipient(e.target.value)}
               autoCapitalize="off"

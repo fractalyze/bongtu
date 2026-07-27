@@ -8,6 +8,7 @@
 // + onViewAll; the Activity screen passes the full feed.
 
 import type { ReactNode } from "react";
+import { encodeAddress } from "@bongtu/core/pubkey";
 import type { HistoryItem, HistoryKind } from "../../lib/indexerClient.js";
 import { formatKkrw } from "../../lib/money.js";
 import { relativeTime, shortenPubkey } from "../format.js";
@@ -59,11 +60,13 @@ function Row({ item, explorerBase }: { item: HistoryItem; explorerBase: string }
       <span className="flex-1 min-w-0 flex flex-col gap-0.5">
         <span className="font-semibold text-[0.92rem]">{VERB[item.kind]}</span>
         {item.counterparty && (
+          // /history serves canonical hex; users only ever SEE base58, so encode
+          // at this display edge like every other address surface.
           <span
             className="font-mono text-[0.74rem] text-muted overflow-hidden text-ellipsis whitespace-nowrap"
-            title={item.counterparty}
+            title={encodeAddress(item.counterparty)}
           >
-            {shortenPubkey(item.counterparty)}
+            {shortenPubkey(encodeAddress(item.counterparty))}
           </span>
         )}
       </span>

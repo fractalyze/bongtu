@@ -5,6 +5,7 @@
 
 import { useId, useState } from "react";
 import type { ReactNode } from "react";
+import { encodeAddress } from "@bongtu/core/pubkey";
 import { DEFAULTS } from "../../config.js";
 import { useWallet } from "../App.js";
 import { IconExternalLink } from "../components/icons.js";
@@ -129,7 +130,7 @@ export function Settings(): ReactNode {
           <Row label="Batch size" value={String(DEFAULTS.batchSize)} />
           <Row label="Key version" value={DEFAULTS.keyVersion} />
           <Row label="Arbiter key" full={DEFAULTS.arbiterPubKey[0]} mono />
-          {identity && <Row label="Your address" full={identity.compressedPubkey} mono />}
+          {identity && <Row label="Your address" full={encodeAddress(identity.compressedPubkey)} mono />}
         </div>
 
         <Button variant="danger" block onClick={disconnect}>

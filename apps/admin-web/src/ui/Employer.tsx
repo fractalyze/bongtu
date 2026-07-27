@@ -310,7 +310,7 @@ export function Employer(): ReactNode {
                   <TextInput
                     compact
                     value={r.pubkey}
-                    placeholder="0x… compressed bjj pubkey (32-byte hex)"
+                    placeholder="bongtu address (3… base58 or 0x… hex)"
                     onChange={(v) => setRecipient(i, { pubkey: v })}
                   />
                 </Td>
