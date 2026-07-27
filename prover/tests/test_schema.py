@@ -8,7 +8,12 @@
 # circom-main / fixture / proving.ts / schema.py triangle are pinned by real
 # artifacts rather than hand-written literals, (3) the §11-8 two-time-pad
 # guard and the field-element/shape validators reject what the TS prover
-# rejected.
+# rejected — and accept what it accepts, which since U-X3 includes a transfer
+# whose two outputs share one owner (a self-send).
+#
+# No committed fixture is a self-send (circuits/inputs/transfer.json has distinct
+# owners), so that case is built by collapsing the real fixture's two owners onto
+# one rather than by hand-writing a witness.
 
 import json
 from pathlib import Path
@@ -123,19 +128,19 @@ def test_two_time_pad_guard_rejects_duplicate_disburse_owners():
         request_adapter.validate_python({"circuit": "disburse", "input": dup})
 
 
-def test_two_time_pad_guard_rejects_duplicate_transfer_owners():
-    dup = minimal_disburse_input(
-        nullifiers=["1", "0"],
-        inputCommitments=["1", "2"],
-        inputValues=["50", "0"],
-        inputSalts=["1", "2"],
-        pathElements=[["0"] * 32, ["0"] * 32],
-        leafIndices=["0", "0"],
-        enabled=["1", "0"],
-        outputOwnerPublicKeys=[["1", "2"], ["1", "2"]],
-    )
-    with pytest.raises(ValidationError, match="duplicate output owner pubkey"):
-        request_adapter.validate_python({"circuit": "transfer", "input": dup})
+def test_self_send_transfer_with_duplicate_owners_is_accepted():
+    # U-X3 made a self-send legal: the transfer base derives receiver ct_i from
+    # `encryptionNonce + i`, so both outputs may belong to one owner. The mirror
+    # must accept what the TS prover accepts — a guard here would 422 exactly the
+    # self-send the wallet ships. Built from the committed transfer fixture (not
+    # a literal) with its two output owners collapsed onto the first, so the shape
+    # is the real one and only the owner distinctness differs.
+    raw = json.loads((INPUTS / "transfer.json").read_text())
+    self_send = {**raw, "outputOwnerPublicKeys": [raw["outputOwnerPublicKeys"][0]] * 2}
+    req = request_adapter.validate_python({"circuit": "transfer", "input": self_send})
+    assert req.circuit == "transfer"
+    assert req.input.outputOwnerPublicKeys[0] == req.input.outputOwnerPublicKeys[1]
+    assert req.input.model_dump() == self_send
 
 
 @pytest.mark.parametrize(

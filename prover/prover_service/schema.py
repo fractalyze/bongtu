@@ -7,10 +7,12 @@
 #
 # Field elements arrive as decimal strings (JSON has no bigint; the TS side
 # stringifies) or small ints; points are [x, y] pairs. The §11-8 two-time-pad
-# guard (transfer/disburse output owners must be DISTINCT because every output
-# of a tx shares one ephemeral key + nonce) is enforced at validation time,
-# mirroring @bongtu/core assertDistinctOwnerPubkeys — the prover MUST reject
-# such a request before any proving work (SPEC §4).
+# guard (a DISBURSE batch's output owners must be DISTINCT, because all B outputs
+# share one ephemeral key + nonce) is enforced at validation time, mirroring
+# @bongtu/core assertDistinctOwnerPubkeys — the prover MUST reject such a request
+# before any proving work (SPEC §4). transfer is exempt since U-X3: its base
+# encrypts ct_i under `encryptionNonce + i`, which is what makes a self-send
+# legal (docs/circuits.md).
 
 from __future__ import annotations
 
@@ -102,12 +104,14 @@ def _assert_distinct_owner_pubkeys(pubkeys: list[list[str]]) -> None:
 
 
 class TransferInput(_SpendInput):
-    """transfer (2-in / 2-out): distinct output owners required (§11-8)."""
+    """transfer (2-in / 2-out): duplicate output owners are LEGAL since U-X3.
 
-    @model_validator(mode="after")
-    def _two_time_pad_guard(self) -> "TransferInput":
-        _assert_distinct_owner_pubkeys(self.outputOwnerPublicKeys)
-        return self
+    The transfer base encrypts receiver ciphertext i under `encryptionNonce + i`
+    (§11-8 v1.1, encrypt-outputs-per-output-nonce.circom), so two outputs to one
+    owner are no longer a two-time pad — that is exactly what makes a self-send
+    provable. disburse still shares one nonce across the batch and keeps the
+    guard (packages/core/src/proving.ts, docs/circuits.md).
+    """
 
 
 class WithdrawInput(_SpendInput):
