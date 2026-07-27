@@ -6,8 +6,8 @@
 // GPL-3.0 for the public app, documented in README. snarkjs is dynamically imported
 // so it only loads when the user actually proves.
 //
-// ASSET BOUNDARY (SPEC §6 "one-time zkey download"): the wasm + zkey for
-// transfer/withdraw are served as static assets at `${circuitBaseUrl}/<circuit>.wasm`
+// ASSET BOUNDARY (SPEC §6 "one-time zkey download"): the wasm + zkey for each
+// browser-proved circuit are served as static assets at `${circuitBaseUrl}/<circuit>.wasm`
 // and `.zkey` (NOT bundled — transfer.zkey ~28 MB). `assets.ts` fetches them once into
 // a version-keyed Cache Storage bucket; this module KEEPS the returned ArrayBuffers on
 // the session and proves against them with the two-step `wtns.calculate` +
@@ -21,7 +21,7 @@
 // unit-tested in spend.ts, and the asset caching is unit-tested in assets.test.ts.
 
 import type { ProvingRequest, Calldata } from "@bongtu/core/proving";
-import { CIRCUITS_VERSION } from "../config.js";
+import { CIRCUITS_VERSION, type BrowserCircuit } from "../config.js";
 import {
   prefetchCircuitAssets,
   type AssetDownloadProgress,
@@ -29,9 +29,10 @@ import {
   type PrefetchDeps,
 } from "./assets.js";
 
-// The circuits the public wallet proves in-browser on CPU (SPEC §6): the two spends
-// (transfer/withdraw) plus the 0-in/2-out deposit/shield. disburse is GPU-only (prover/).
-type CpuCircuit = "transfer" | "withdraw" | "deposit";
+// The circuits the public wallet proves in-browser on CPU (SPEC §6): the spends
+// (transfer, its arity-10 form transfer10, and withdraw) plus the 0-in/2-out
+// deposit/shield. disburse is GPU-only (prover/).
+type CpuCircuit = BrowserCircuit;
 
 // Session-scoped in-flight prefetch, one per circuit: the version-keyed Cache Storage
 // bucket survives a restart (disk), and caching the PROMISE (not just the resolved
@@ -76,14 +77,21 @@ export function subscribeCircuitDownload(
   return () => downloadListeners[circuit]?.delete(cb);
 }
 
-/** Whether `circuit` is one the wallet proves in-browser (transfer/withdraw/deposit). */
+/** Whether `circuit` is one the wallet proves in-browser. */
 export function isCpuCircuit(circuit: string): circuit is CpuCircuit {
-  return circuit === "transfer" || circuit === "withdraw" || circuit === "deposit";
+  return (
+    circuit === "transfer" ||
+    circuit === "transfer10" ||
+    circuit === "withdraw" ||
+    circuit === "deposit"
+  );
 }
 
 export function assertCpuCircuit(circuit: string): asserts circuit is CpuCircuit {
   if (!isCpuCircuit(circuit)) {
-    throw new Error(`the public wallet only proves transfer/withdraw/deposit in-browser, not ${circuit}`);
+    throw new Error(
+      `the public wallet only proves transfer/transfer10/withdraw/deposit in-browser, not ${circuit}`,
+    );
   }
 }
 
@@ -138,7 +146,7 @@ export async function ensureCircuitAssets(
  * never blocks the UI; a cold curve on the first proof is the fallback.
  *
  * Takes no circuit argument on purpose: it warms only the SHARED bn128 curve, which is
- * identical across transfer/withdraw/deposit — the per-circuit wasm/zkey are prefetched
+ * identical across every browser-proved circuit — the per-circuit wasm/zkey are prefetched
  * separately by ensureCircuitAssets.
  */
 export async function prewarmProver(): Promise<void> {

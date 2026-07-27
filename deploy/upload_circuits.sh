@@ -19,12 +19,12 @@ HERE=$(cd "$(dirname "$0")/.." && pwd)
 ASSETS=${1:-"$HERE/apps/wallet-web/public/circuits"}
 : "${BLOB_READ_WRITE_TOKEN:?set BLOB_READ_WRITE_TOKEN (vercel env pull in the linked wallet dir)}"
 
-for f in transfer.wasm transfer.zkey withdraw.wasm withdraw.zkey deposit.wasm deposit.zkey; do
+for f in transfer.wasm transfer.zkey transfer10.wasm transfer10.zkey withdraw.wasm withdraw.zkey deposit.wasm deposit.zkey; do
   test -s "$ASSETS/$f" || { echo "missing proving asset: $ASSETS/$f" >&2; exit 1; }
 done
 
 pinned=$(grep -oE 'CIRCUITS_VERSION = "[0-9a-f]+"' "$HERE/apps/wallet-web/src/config.ts" | grep -oE '[0-9a-f]{8}')
-actual=$(cat "$ASSETS/transfer.zkey" "$ASSETS/withdraw.zkey" "$ASSETS/deposit.zkey" | sha256sum | cut -c1-8)
+actual=$(cat "$ASSETS/transfer.zkey" "$ASSETS/transfer10.zkey" "$ASSETS/withdraw.zkey" "$ASSETS/deposit.zkey" | sha256sum | cut -c1-8)
 if [ "$pinned" != "$actual" ]; then
   echo "zkeys do not match CIRCUITS_VERSION: pinned=$pinned actual=$actual" >&2
   echo "regen left src/config.ts and $ASSETS out of sync — fix before uploading" >&2
@@ -32,7 +32,7 @@ if [ "$pinned" != "$actual" ]; then
 fi
 
 echo "uploading circuits @$pinned"
-for f in transfer.wasm transfer.zkey withdraw.wasm withdraw.zkey deposit.wasm deposit.zkey; do
+for f in transfer.wasm transfer.zkey transfer10.wasm transfer10.zkey withdraw.wasm withdraw.zkey deposit.wasm deposit.zkey; do
   # Versioned path => immutable; a year of caching is safe.
   vercel blob put "$ASSETS/$f" \
     --pathname "circuits/$pinned/$f" \

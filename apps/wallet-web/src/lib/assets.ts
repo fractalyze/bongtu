@@ -21,7 +21,7 @@
 // eviction + hit/miss behaviour is unit-tested with an in-memory fake — no browser
 // (test/assets.test.ts). This is the genuinely NEW behaviour this unit adds.
 
-import { CIRCUITS_VERSION, CIRCUIT_ASSET_BYTES } from "../config.js";
+import { CIRCUITS_VERSION, CIRCUIT_ASSET_BYTES, type BrowserCircuit } from "../config.js";
 
 /** The shared family prefix every circuit-asset bucket carries. Eviction keeps the
  *  current version's bucket and deletes the rest of this family; unrelated caches
@@ -171,7 +171,7 @@ async function cachedFetch(
  * download overlaps the user typing.
  */
 export async function prefetchCircuitAssets(
-  circuit: "transfer" | "withdraw" | "deposit",
+  circuit: BrowserCircuit,
   circuitBaseUrl: string,
   version: string = CIRCUITS_VERSION,
   deps: PrefetchDeps = {},

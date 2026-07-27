@@ -7,6 +7,7 @@ import { isWalletUnlocked, subscribeLock } from "../lib/keyCache.js";
 import { announcedWallet, subscribeWallets, walletDiscoveryVersion } from "../lib/eip6963.js";
 import { describeWallet, type WalletDescription } from "../lib/walletBrand.js";
 import { subscribeCircuitDownload, type CircuitDownloadState } from "../lib/prove.js";
+import type { BrowserCircuit } from "../config.js";
 
 export type Route = "home" | "receive" | "send" | "withdraw" | "deposit" | "activity" | "settings";
 
@@ -92,7 +93,7 @@ const IDLE_DOWNLOAD: CircuitDownloadView = { active: false, received: 0, total: 
  * remounts and StrictMode's coalesced prefetch). Updates are coalesced to ~4/s so
  * a fast stream doesn't re-render the screen per network chunk.
  */
-export function useCircuitDownload(circuit: "transfer" | "withdraw" | "deposit"): CircuitDownloadView {
+export function useCircuitDownload(circuit: BrowserCircuit): CircuitDownloadView {
   const [view, setView] = useState<CircuitDownloadView>(IDLE_DOWNLOAD);
   const lastPaint = useRef(0);
   useEffect(() => {

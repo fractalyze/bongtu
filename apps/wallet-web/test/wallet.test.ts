@@ -302,8 +302,11 @@ function fixture(values: bigint[]) {
     kemSs: FIXED_KEM.kemSs,
     kemCiphertext: FIXED_KEM.kemCiphertext,
     changeSalt: "7000002",
-    padSalt: "7100001",
+    // one salt per padded input slot (9 = arity 10 with a single real note), and one
+    // per zero-value output slot transfer10 pads with.
+    padSalts: Array.from({ length: 9 }, (_, i) => `${7100001 + i}`),
     payeeSalt: "7000001",
+    outputPadSalts: Array.from({ length: 8 }, (_, i) => `${7200001 + i}`),
   };
   return { wallet, inputs, memberships, recipient, crypto, salts };
 }
@@ -472,9 +475,11 @@ test("freshSpendCrypto draws every field from the injected randomness", () => {
   let i = 0;
   const rand = (): string => String(++i * 1111);
   const c = freshSpendCrypto(rand);
-  assert.equal(i, 5); // ecdh key, nonce, change/pad/payee salts — one fresh draw each
-  const drawn = [c.ecdhPrivateKey, c.encryptionNonce, c.changeSalt, c.padSalt, c.payeeSalt];
-  assert.equal(new Set(drawn).size, 5, "no two fields share a draw (two-time-pad guard)");
+  // ecdh key, nonce, change salt, 9 input-pad salts, payee salt, 8 output-pad salts —
+  // one fresh draw each, drawn at the WIDEST arity so one bundle serves either circuit.
+  assert.equal(i, 21);
+  const drawn = [c.ecdhPrivateKey, c.encryptionNonce, c.changeSalt, ...c.padSalts, c.payeeSalt, ...c.outputPadSalts];
+  assert.equal(new Set(drawn).size, 21, "no two fields share a draw (two-time-pad guard)");
   assert.deepEqual([...c.authorityPubKey], [...DEFAULTS.arbiterPubKey]); // pool's stored arbiter key
   // and the material is accepted by the builders
   const f = fixture([1000n]);
@@ -492,7 +497,7 @@ test("freshSpendCrypto: kem draw — deterministic injection, fresh by default, 
     return FIXED_KEM;
   });
   assert.equal(kemDraws, 1, "exactly one KEM encapsulation per crypto bundle");
-  assert.equal(i, 5, "the kem draw does not consume field randomness");
+  assert.equal(i, 21, "the kem draw does not consume field randomness");
   assert.deepEqual(injected.kemSs, FIXED_KEM.kemSs);
   assert.equal(injected.kemCiphertext, FIXED_KEM.kemCiphertext);
 

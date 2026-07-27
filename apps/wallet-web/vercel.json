@@ -7,7 +7,7 @@
     },
     {
       "source": "/circuits/:path*",
-      "destination": "https://hbttd0nloguhlykr.public.blob.vercel-storage.com/circuits/f623e71c/:path*"
+      "destination": "https://hbttd0nloguhlykr.public.blob.vercel-storage.com/circuits/2109f115/:path*"
     }
   ]
 }

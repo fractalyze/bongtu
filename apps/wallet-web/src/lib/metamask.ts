@@ -27,9 +27,18 @@ const GAS_PRICE = ethers.utils.parseUnits(GIWA_GAS_FLOOR_GWEI, "gwei");
 // The shared per-function ABI fragments (@bongtu/core/network) — only the pool
 // functions the wallet touches. deposit is the 0-in/2-out mint (a,b,c,pub) the
 // shield flow submits.
+// transfer10 (10-in / 10-out, BongtuPool V4) is the one fragment not yet in the
+// shared sdk table: same (a, b, c, pub, kemCiphertext) shape as transfer, with the
+// arity-10 public vector (141 signals — 10 nullifiers, 10 output commitments, the
+// 64-element authority ciphertext and the per-output receiver ciphertexts). Move it
+// into POOL_ABI_FRAGMENTS once the sdk carries it, so the two apps cannot drift.
+const TRANSFER10_FRAGMENT =
+  "function transfer10(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[141] pub, bytes kemCiphertext)";
+
 const POOL_ABI = [
   POOL_ABI_FRAGMENTS.deposit,
   POOL_ABI_FRAGMENTS.transfer,
+  TRANSFER10_FRAGMENT,
   POOL_ABI_FRAGMENTS.withdraw,
   POOL_ABI_FRAGMENTS.root,
   POOL_ABI_FRAGMENTS.nextLeafIndex,
@@ -282,7 +291,7 @@ function assertKemCiphertext(kemCiphertext: string): void {
 async function submit(
   connection: Connection,
   poolAddr: string,
-  fn: "deposit" | "transfer" | "withdraw",
+  fn: "deposit" | "transfer" | "transfer10" | "withdraw",
   calldata: Calldata,
   kemCiphertext: string,
   explorerBase: string,
@@ -303,6 +312,18 @@ export function submitTransfer(
   explorerBase: string,
 ): Promise<SubmitResult> {
   return submit(connection, poolAddr, "transfer", calldata, kemCiphertext, explorerBase);
+}
+
+/** The arity-10 transfer: what the wallet picks for a payment needing 3–10 notes,
+ *  and what a self-merge runs on. Calldata is transfer's, with a longer `pub`. */
+export function submitTransfer10(
+  connection: Connection,
+  poolAddr: string,
+  calldata: Calldata,
+  kemCiphertext: string,
+  explorerBase: string,
+): Promise<SubmitResult> {
+  return submit(connection, poolAddr, "transfer10", calldata, kemCiphertext, explorerBase);
 }
 
 /** Submit a proven withdraw. */

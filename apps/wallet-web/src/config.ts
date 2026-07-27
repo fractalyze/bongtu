@@ -69,18 +69,18 @@ export const DEFAULTS = {
   circuitBaseUrl: "/circuits",
 } as const;
 
-// first 8 of sha256(public/circuits/transfer.zkey || withdraw.zkey || deposit.zkey) —
-// covers all THREE keys the wallet proves against, since the version bucket stores them
-// all. Regenerate on any circuit change (bongtu regen recipe) so the browser cache
-// auto-refetches. The proving-asset module keys its Cache Storage bucket on this
+// first 8 of sha256 over the FOUR keys the wallet proves against, concatenated in
+// this documented order (the version bucket stores them all, so regenerating any one
+// must change the version):
+//   cat public/circuits/transfer.zkey circuits/out/transfer10.zkey public/circuits/withdraw.zkey circuits/out/deposit.zkey | sha256sum | cut -c1-8
+// The proving-asset module keys its Cache Storage bucket on this
 // ("bongtu-circuits-v<version>") and evicts any stale bucket, so a re-proven zkey forces
 // a one-time re-download instead of serving a mismatched key from disk (a stale key fails
-// on-chain verify with no self-heal). Bump this the moment ANY zkey changes on disk:
-//   cat public/circuits/transfer.zkey public/circuits/withdraw.zkey circuits/out/deposit.zkey | sha256sum | cut -c1-8
+// on-chain verify with no self-heal). Bump this the moment ANY zkey changes on disk.
 // A bump is live only with its two companions in the SAME change: upload the new
 // assets (deploy/upload_circuits.sh — refuses a hash that doesn't match this pin)
 // and point vercel.json's /circuits rewrite at the new circuits/<version>/ path.
-export const CIRCUITS_VERSION = "f623e71c";
+export const CIRCUITS_VERSION = "2109f115";
 
 // Exact byte sizes of the served proving assets — the download progress bar's
 // denominator. Needed because the CDN strips/deflates Content-Length on some
@@ -88,8 +88,16 @@ export const CIRCUITS_VERSION = "f623e71c";
 // are the DECODED sizes, matching what the streaming reader counts. Re-pin
 // alongside CIRCUITS_VERSION whenever a zkey/wasm changes:
 //   stat -c "%n %s" public/circuits/*
-export const CIRCUIT_ASSET_BYTES: Record<"transfer" | "withdraw" | "deposit", { wasm: number; zkey: number }> = {
+/** The circuits with browser-served proving assets — one name per {wasm, zkey} pair
+ *  under `circuitBaseUrl`, and the key every asset/download path is typed on. */
+export type BrowserCircuit = "transfer" | "transfer10" | "withdraw" | "deposit";
+
+export const CIRCUIT_ASSET_BYTES: Record<BrowserCircuit, { wasm: number; zkey: number }> = {
   transfer: { wasm: 3924469, zkey: 28903456 },
+  // transfer10 is ~114 MB of zkey — 4x the 2x2 transfer — which is why the wallet
+  // fetches it ONLY once note selection says a spend needs 3+ input notes, never on
+  // screen open (sizes from circuits/out/, the same build the blob store serves).
+  transfer10: { wasm: 4717238, zkey: 114422848 },
   withdraw: { wasm: 3881862, zkey: 24869572 },
   deposit: { wasm: 3364023, zkey: 6776800 },
 };

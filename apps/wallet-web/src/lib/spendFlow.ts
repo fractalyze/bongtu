@@ -11,18 +11,29 @@
 
 import { DEFAULTS } from "../config.js";
 import type { Connection } from "./metamask.js";
-import { assertPoolKemEpoch, ensureChain, submitTransfer, submitWithdraw } from "./metamask.js";
+import {
+  assertPoolKemEpoch,
+  ensureChain,
+  submitTransfer,
+  submitTransfer10,
+  submitWithdraw,
+} from "./metamask.js";
 import { keyCache, type KeyCache } from "./keyCache.js";
 import { getHead, getPath, type OwnerNote } from "./indexerClient.js";
 import {
   buildTransferRequest,
+  buildTransfer10Request,
   buildWithdrawRequest,
-  selectInputNotes,
+  planSpendAction,
   freshSpendCrypto,
   randField,
+  type SpendAction,
+  type SpendCrypto,
+  type SpendKind,
   type WalletInputNote,
   type MembershipWitness,
 } from "./spend.js";
+import type { WalletIdentity } from "./derive.js";
 import { proveInBrowser } from "./prove.js";
 
 /** The coarse stages a spend passes through (no witness sub-stage — witness is
@@ -57,6 +68,7 @@ export interface RunSpendDeps {
   getPath: typeof getPath;
   proveInBrowser: typeof proveInBrowser;
   submitTransfer: typeof submitTransfer;
+  submitTransfer10: typeof submitTransfer10;
   submitWithdraw: typeof submitWithdraw;
 }
 const DEFAULT_DEPS: RunSpendDeps = {
@@ -67,36 +79,53 @@ const DEFAULT_DEPS: RunSpendDeps = {
   getPath,
   proveInBrowser,
   submitTransfer,
+  submitTransfer10,
   submitWithdraw,
 };
 
-// Amount-aware note selection is PURE + unit-tested (spend.ts selectInputNotes); this
-// wiring only fetches the live membership witnesses for the selected leaves.
-async function selectSpendInputs(
+// Circuit choice and note selection are PURE + unit-tested (spend.ts
+// planSpendAction); this wiring only fetches the live membership witnesses for the
+// selected leaves.
+async function fetchMemberships(
   io: RunSpendDeps,
   indexerUrl: string,
-  notes: OwnerNote[],
-  amount: string,
-): Promise<{ inputs: WalletInputNote[]; memberships: MembershipWitness[] }> {
-  const inputs = selectInputNotes(notes, amount);
+  inputs: WalletInputNote[],
+): Promise<MembershipWitness[]> {
   const head = await io.getHead(indexerUrl);
   const memberships: MembershipWitness[] = [];
   for (const n of inputs) {
     const p = await io.getPath(indexerUrl, n.leafIndex); // 422 for a within-batch leaf in public mode
     memberships.push({ root: head.root, pathElements: p.siblings, leafIndex: n.leafIndex });
   }
-  return { inputs, memberships };
+  return memberships;
+}
+
+// Each circuit's builder gets exactly the witness its `main` takes; withdraw has no
+// payee, and transfer10 serves both the 3–10-note payment and the self-merge.
+function buildRequest(
+  action: SpendAction,
+  identity: WalletIdentity,
+  memberships: MembershipWitness[],
+  crypto: SpendCrypto,
+) {
+  const { circuit, inputs, to, amount } = action;
+  if (circuit === "withdraw") return buildWithdrawRequest(identity, inputs, memberships, amount, crypto);
+  if (circuit === "transfer10") {
+    return buildTransfer10Request(identity, inputs, memberships, to, amount, crypto);
+  }
+  return buildTransferRequest(identity, inputs, memberships, to, amount, crypto);
 }
 
 /**
- * Select notes → assemble the witness → prove in-browser → submit through the
- * connected wallet, for a transfer (needs `to`) or a withdraw (no recipient).
- * `onStage` fires as each coarse stage begins. Throws the same distinct errors the
- * pure libs raise (insufficient balance, needs-more-than-2-notes, membership-stale,
- * …) for the UI to show.
+ * Plan the spend (which circuit, which notes) → fetch membership → assemble the
+ * witness → prove in-browser → submit through the connected wallet. `kind` is what
+ * the user asked for — a transfer (needs `to`), a withdraw, or a merge, which reads
+ * its notes and amount off the wallet and ignores `args` entirely. `onStage` fires
+ * as each coarse stage begins. Throws the same distinct errors the pure libs raise
+ * (insufficient balance, needs-merge, membership-stale, …) for the UI to show.
  */
 export async function runSpend(
-  kind: "transfer" | "withdraw",
+  kind: SpendKind,
   ctx: SpendContext,
   args: { to?: string; amount: string },
   onStage: (stage: SpendStage) => void,
@@ -121,12 +150,12 @@ export async function runSpend(
   // witness input to the in-browser prover.
   const identity = await io.keyCache.unlock(ctx.connection, ctx.sessionPubkey);
   if (locked) onStage("assemble");
-  const { inputs, memberships } = await selectSpendInputs(io, ctx.indexerUrl, ctx.notes, args.amount);
+  // The wallet picks the circuit here — ≤2 notes stay on the 2×2 transfer/withdraw,
+  // 3–10 go to transfer10, a merge is always transfer10 (spend.ts planSpendAction).
+  const action = planSpendAction(kind, ctx.notes, ctx.sessionPubkey, args);
+  const memberships = await fetchMemberships(io, ctx.indexerUrl, action.inputs);
   const crypto = freshSpendCrypto(randField);
-  const built =
-    kind === "transfer"
-      ? buildTransferRequest(identity, inputs, memberships, args.to ?? "", args.amount, crypto)
-      : buildWithdrawRequest(identity, inputs, memberships, args.amount, crypto);
+  const built = buildRequest(action, identity, memberships, crypto);
   if (!built.meta.membershipOk) {
     throw new Error("Your balance just changed — go back and try again.");
   }
@@ -138,9 +167,17 @@ export async function runSpend(
   // The tx carries the SAME encapsulation the proof's kemBinding committed to
   // (crypto.kemCiphertext) — a different ct would decapsulate to mismatching
   // limbs at the arbiter and burn the envelope into an alarm.
-  const res =
-    kind === "transfer"
-      ? await io.submitTransfer(ctx.connection, DEFAULTS.pool, calldata, crypto.kemCiphertext, DEFAULTS.explorer)
-      : await io.submitWithdraw(ctx.connection, DEFAULTS.pool, calldata, crypto.kemCiphertext, DEFAULTS.explorer);
+  const submitFor = {
+    transfer: io.submitTransfer,
+    transfer10: io.submitTransfer10,
+    withdraw: io.submitWithdraw,
+  }[action.circuit];
+  const res = await submitFor(
+    ctx.connection,
+    DEFAULTS.pool,
+    calldata,
+    crypto.kemCiphertext,
+    DEFAULTS.explorer,
+  );
   return { txHash: res.txHash, explorerUrl: res.explorerUrl };
 }

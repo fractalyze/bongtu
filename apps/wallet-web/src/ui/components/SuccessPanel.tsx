@@ -15,6 +15,8 @@ export function SuccessPanel({
   amount,
   explorerUrl,
   syncing,
+  doneLabel = "Done",
+  onDone,
 }: {
   /** The screen header (Send / Withdraw / Deposit) — unchanged from the form. */
   title: string;
@@ -24,6 +26,10 @@ export function SuccessPanel({
   explorerUrl: string;
   /** true while the post-action poll waits for the indexer to catch up. */
   syncing: boolean;
+  doneLabel?: string;
+  /** Where the button goes. Defaults home; a merge overrides it to hand the user
+   *  back to the payment they were making when they were sent to merge. */
+  onDone?: () => void;
 }): ReactNode {
   return (
     <div className="flex flex-col gap-4.5 px-4.5 pt-4.5 pb-6.5">
@@ -40,8 +46,13 @@ export function SuccessPanel({
             Updating your balance…
           </p>
         )}
-        <Button variant="primary" block className="mt-2" onClick={() => navigate("home")}>
-          Done
+        <Button
+          variant="primary"
+          block
+          className="mt-2"
+          onClick={onDone ?? (() => navigate("home"))}
+        >
+          {doneLabel}
         </Button>
       </div>
     </div>

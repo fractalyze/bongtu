@@ -1,21 +1,26 @@
-// PURE wallet-side witness assembly for the two small CPU circuits the public app
-// proves in the browser: transfer (2-in / 2-out) and withdraw (2-in / 1-out), SPEC
-// §4 / §7. Framework- and network-free so the exact code runs in the browser view
-// AND the headless spend-witness gate. It imports the sdk crypto DIRECTLY, so every
-// commitment / nullifier is byte-identical to what snarkjs proves and the contract
-// verifies — the witness objects produced here are EXACTLY the circom `main` inputs
-// deploy/e2e_orchestrator.ts assembles by hand, in ProvingRequest form (@bongtu/core/proving).
+// PURE wallet-side witness assembly for the CPU circuits the public app proves in
+// the browser: transfer (2-in / 2-out), transfer10 (10-in / 10-out) and withdraw
+// (2-in / 1-out), SPEC §4 / §7. Framework- and network-free so the exact code runs
+// in the browser view AND the headless spend-witness gate. It imports the sdk crypto
+// DIRECTLY, so every commitment / nullifier is byte-identical to what snarkjs proves
+// and the contract verifies — the witness objects produced here are EXACTLY the
+// circom `main` inputs deploy/e2e_orchestrator.ts assembles by hand, in
+// ProvingRequest form (@bongtu/core/proving).
 //
 // What it does NOT do (SPEC §6 boundary): it does not prove (browser snarkjs, see
 // prove.ts) and does not send the tx (MetaMask, see metamask.ts). It stops at "a
-// valid transfer/withdraw ProvingRequest", ready to prove and submit.
+// valid transfer/transfer10/withdraw ProvingRequest", ready to prove and submit.
 //
-// Both circuits take TWO inputs; a wallet with one note to spend pads input[1] with
-// {nullifier:0, value:0, enabled:0, path:zeros} — the contract-derived enabled=0
-// disables its membership and the §5.2 value-belt forces its value to 0 (no mint).
-// Transfer/withdraw emit their ciphertext as circuit outputs (public signals), so —
-// unlike disburse — the wallet assembles NO separate ciphertext blob; the tx is
-// just (a, b, c, pub).
+// ARITY, and who picks it. Every circuit here takes a FIXED number of inputs — 2 for
+// transfer/withdraw, 10 for transfer10 — so a spend that needs fewer pads the rest
+// with {nullifier:0, value:0, enabled:0, path:zeros}: the contract-derived enabled=0
+// disables that slot's membership and the §5.2 value-belt forces its value to 0 (no
+// mint). The wallet PICKS the circuit from how many notes the payment needs
+// (planSpendAction): ≤2 notes stay on the cheap 2×2 transfer, 3–10 go to transfer10,
+// and a withdraw — which has no arity-10 circuit — stays at 2 and asks the user to
+// merge first. All of them emit their ciphertext as circuit outputs (public
+// signals), so — unlike disburse — the wallet assembles NO separate ciphertext blob;
+// the tx is just (a, b, c, pub, kemCiphertext).
 
 import {
   deriveKeypair,
@@ -26,10 +31,12 @@ import { ml_kem768, kemSsToLimbs, kemHexToBytes, kemBytesToHex } from "@bongtu/c
 import { ARBITER_KEM_PK } from "@bongtu/core/network";
 import { unpackPubkey } from "@bongtu/core/pubkey";
 import { foldToRoot } from "@bongtu/core/imt";
+import { TRANSFER10_ARITY } from "@bongtu/core/envelope";
 import type { Point } from "@bongtu/core/babyjub";
 import { toWire } from "@bongtu/core/proving";
 import type {
   TransferInput,
+  Transfer10Input,
   WithdrawInput,
   ProvingRequest,
 } from "@bongtu/core/proving";
@@ -78,11 +85,22 @@ export interface SpendCrypto {
   kemCiphertext: string;
   /** salt for the change note back to the wallet. */
   changeSalt: string;
-  /** salt for the padded (value-0) input note when only one real note is spent. */
-  padSalt: string;
+  /** salts for the padded (value-0) input slots — one per slot the spend does not
+   *  fill, so no two pads land on the same commitment. A 2-arity spend of one note
+   *  uses the first; transfer10 can use all nine. */
+  padSalts: string[];
   /** transfer only: salt for the payment output to the recipient. */
   payeeSalt?: string;
+  /** transfer10 only: salts for the zero-value output slots after payment + change
+   *  (8 of them at arity 10). */
+  outputPadSalts: string[];
 }
+
+/** Pad slots a spend can have to fill: 9 unused inputs (arity 10, one real note)
+ *  and 8 unused outputs (arity 10, payment + change). Drawn on every spend so one
+ *  SpendCrypto bundle serves either arity. */
+const MAX_INPUT_PADS = TRANSFER10_ARITY - 1;
+const MAX_OUTPUT_PADS = TRANSFER10_ARITY - 2;
 
 export interface SpendMeta {
   /** recomputed input commitments (real inputs then, if padded, the value-0 note). */
@@ -101,28 +119,70 @@ export interface SpendMeta {
   outputValues: string[];
 }
 
-export interface SpendResult<C extends "transfer" | "withdraw"> {
+/** The circuits a spend can land on. transfer10 is picked only when the payment
+ *  genuinely needs 3–10 notes — its zkey is ~4x the 2×2 one to download. */
+export type SpendCircuit = "transfer" | "transfer10" | "withdraw";
+
+export interface SpendResult<C extends SpendCircuit> {
   request: Extract<ProvingRequest, { circuit: C }>;
   meta: SpendMeta;
 }
 
 // --- note selection + per-tx crypto ---------------------------------------------
 
+/** Why a spend cannot go ahead, in the two shapes the UI answers differently:
+ *  `insufficient` — the wallet simply does not hold enough; `needs-merge` — it
+ *  does, but across more notes than the circuit can spend at once, so the way
+ *  forward is a self-merge rather than a smaller amount. */
+export type SpendBlocker = "insufficient" | "needs-merge";
+
+/** A selection failure carrying WHICH of the two it is, so the form can offer the
+ *  merge action instead of leaving the user at a dead-end error. */
+export class SpendSelectionError extends Error {
+  constructor(
+    readonly blocker: SpendBlocker,
+    message: string,
+  ) {
+    super(message);
+    this.name = "SpendSelectionError";
+  }
+}
+
+/** Unspent notes, largest value first (leafIndex breaks ties for determinism). */
+function unspentLargestFirst(notes: readonly SelectableNote[]): SelectableNote[] {
+  return [...notes]
+    .filter((n) => !n.spent)
+    .sort((a, b) => {
+      const d = BigInt(b.value) - BigInt(a.value); // value descending…
+      return d > 0n ? 1 : d < 0n ? -1 : a.leafIndex - b.leafIndex; // …then leafIndex for determinism
+    });
+}
+
+const pickNote = (n: SelectableNote): WalletInputNote => ({
+  value: n.value,
+  salt: n.salt,
+  leafIndex: n.leafIndex,
+});
+
 /**
  * Pick which unspent notes fund a payment of `amount` — the wallet's coin
- * selection, PURE. Amount-aware largest-first cover with at most 2 notes (the
- * transfer/withdraw circuits take exactly 2 inputs, padding the second): if the
- * largest unspent note covers the amount it is spent alone; otherwise the two
- * largest are tried. Largest-first is optimal here — if ANY single note covers,
- * the largest does, and if ANY pair covers, the two largest do.
+ * selection, PURE. Amount-aware largest-first cover with at most `maxArity` notes
+ * (the circuit's fixed input count; unused slots are padded): take notes in
+ * descending value until they cover the amount. Largest-first is optimal here —
+ * if ANY k notes cover the amount, the largest k do — so a selection that
+ * overruns `maxArity` proves no k-note cover exists at all.
  *
  * Distinct failures so the UI can say the right thing:
  *   - no spendable notes at all (balance not loaded / everything spent);
- *   - "insufficient balance": the whole unspent total is below the amount;
- *   - "more than 2 notes": the balance suffices but no 1- or 2-note cover
- *     exists — the user must consolidate (e.g. two smaller spends) first.
+ *   - `insufficient`: the whole unspent total is below the amount;
+ *   - `needs-merge`: the balance suffices but is spread over more than
+ *     `maxArity` notes — the user must consolidate first.
  */
-export function selectInputNotes(notes: readonly SelectableNote[], amount: string): WalletInputNote[] {
+export function selectInputNotes(
+  notes: readonly SelectableNote[],
+  amount: string,
+  maxArity = 2,
+): WalletInputNote[] {
   let amt: bigint;
   try {
     amt = BigInt(amount);
@@ -131,28 +191,138 @@ export function selectInputNotes(notes: readonly SelectableNote[], amount: strin
   }
   if (amt <= 0n) throw new Error(`amount must be a positive integer, got ${amt}`);
 
-  const unspent = [...notes]
-    .filter((n) => !n.spent)
-    .sort((a, b) => {
-      const d = BigInt(b.value) - BigInt(a.value); // value descending…
-      return d > 0n ? 1 : d < 0n ? -1 : a.leafIndex - b.leafIndex; // …then leafIndex for determinism
-    });
-  if (unspent.length === 0) throw new Error("no spendable notes — load your balance first");
+  const unspent = unspentLargestFirst(notes);
+  if (unspent.length === 0) {
+    throw new SpendSelectionError("insufficient", "no spendable notes — load your balance first");
+  }
 
-  const pick = (n: SelectableNote): WalletInputNote => ({ value: n.value, salt: n.salt, leafIndex: n.leafIndex });
-  const [first, second] = unspent;
-  if (BigInt(first.value) >= amt) return [pick(first)];
-  if (second && BigInt(first.value) + BigInt(second.value) >= amt) return [pick(first), pick(second)];
+  const chosen: WalletInputNote[] = [];
+  let covered = 0n;
+  for (const n of unspent) {
+    if (covered >= amt) break;
+    chosen.push(pickNote(n));
+    covered += BigInt(n.value);
+  }
+  if (covered >= amt && chosen.length <= maxArity) return chosen;
 
   const total = unspent.reduce((s, n) => s + BigInt(n.value), 0n);
   if (total < amt) {
-    throw new Error(`insufficient balance: amount ${amt} exceeds unspent total ${total}`);
+    throw new SpendSelectionError(
+      "insufficient",
+      `insufficient balance: amount ${amt} exceeds unspent total ${total}`,
+    );
   }
-  const pairTotal = BigInt(first.value) + BigInt(second!.value);
-  throw new Error(
-    `amount ${amt} needs more than 2 notes (largest two cover ${pairTotal}); ` +
-      `a spend takes at most 2 input notes — consolidate or split the payment first`,
+  const bestCover = unspent.slice(0, maxArity).reduce((s, n) => s + BigInt(n.value), 0n);
+  throw new SpendSelectionError(
+    "needs-merge",
+    `amount ${amt} needs more than ${maxArity} notes (the largest ${maxArity} cover ${bestCover}); ` +
+      `this spend takes at most ${maxArity} input notes — merge your notes or split the payment first`,
   );
+}
+
+// --- circuit choice (the wallet's auto-pick) -------------------------------------
+
+/** The kinds of value-moving spend the wallet runs. `merge` is the guided
+ *  self-consolidation: a transfer10 whose every output is the user's own key. */
+export type SpendKind = "transfer" | "withdraw" | "merge";
+
+/** A resolved spend: which circuit proves it, which notes it consumes, who is paid
+ *  and how much — everything the flow needs before it touches the network. */
+export interface SpendAction {
+  circuit: SpendCircuit;
+  inputs: WalletInputNote[];
+  /** compressed bjj pubkey of the payee; the wallet's own for a merge, unused by
+   *  withdraw (whose only output is the change note). */
+  to: string;
+  amount: string;
+}
+
+/**
+ * Resolve a spend to its circuit and its input notes — the wallet's circuit
+ * AUTO-PICK, PURE and the single place the rule lives:
+ *
+ *   transfer  ≤2 notes  -> transfer   (the cheap 2×2 zkey, ~29 MB)
+ *   transfer  3–10 notes-> transfer10 (~114 MB, fetched only when needed)
+ *   transfer  >10 notes -> needs-merge
+ *   withdraw  ≤2 notes  -> withdraw   (there is no withdraw10 circuit…)
+ *   withdraw  >2 notes  -> needs-merge (…so consolidating is the only way through)
+ *   merge               -> transfer10 over the up-to-10 largest notes, all outputs
+ *                          to `self`, amount = their total
+ *
+ * Throws SpendSelectionError for both blocked cases; previewSpend below is the
+ * non-throwing form the form uses while the user is still typing.
+ */
+export function planSpendAction(
+  kind: SpendKind,
+  notes: readonly SelectableNote[],
+  /** the wallet's own compressed pubkey — the payee of a merge. */
+  self: string,
+  args: { to?: string; amount: string },
+): SpendAction {
+  if (kind === "merge") {
+    const inputs = selectMergeNotes(notes);
+    return { circuit: "transfer10", inputs, to: self, amount: totalValue(inputs) };
+  }
+  const { amount } = args;
+  if (kind === "withdraw") {
+    return { circuit: "withdraw", inputs: selectInputNotes(notes, amount, 2), to: "", amount };
+  }
+  const inputs = selectInputNotes(notes, amount, TRANSFER10_ARITY);
+  return { circuit: inputs.length > 2 ? "transfer10" : "transfer", inputs, to: args.to ?? "", amount };
+}
+
+/**
+ * What the Send/Withdraw form needs while the user types: which circuit this
+ * amount would use (so the screen can start the right one-time zkey download) and
+ * whether it is blocked. Never throws — an amount that is empty or unparseable is
+ * simply "not decided yet": the default circuit and no blocker, since the form's
+ * own amountError already says what is wrong with it.
+ */
+export function previewSpend(
+  kind: "transfer" | "withdraw",
+  notes: readonly SelectableNote[],
+  amount: string,
+): { circuit: SpendCircuit; blocker: SpendBlocker | null } {
+  const fallback: SpendCircuit = kind === "withdraw" ? "withdraw" : "transfer";
+  try {
+    return { circuit: planSpendAction(kind, notes, "", { amount }).circuit, blocker: null };
+  } catch (e) {
+    return { circuit: fallback, blocker: e instanceof SpendSelectionError ? e.blocker : null };
+  }
+}
+
+/** Sum of a selection's note values, as a decimal string. */
+function totalValue(inputs: readonly WalletInputNote[]): string {
+  return inputs.reduce((s, n) => s + BigInt(n.value), 0n).toString();
+}
+
+/**
+ * The notes ONE self-merge consolidates: the up-to-10 largest unspent, which is
+ * the most a transfer10 can take. Merging fewer than two would spend a proof to
+ * change nothing, so that is refused.
+ */
+export function selectMergeNotes(notes: readonly SelectableNote[]): WalletInputNote[] {
+  const unspent = unspentLargestFirst(notes);
+  if (unspent.length < 2) {
+    throw new SpendSelectionError(
+      "insufficient",
+      `merging needs at least 2 unspent notes, got ${unspent.length}`,
+    );
+  }
+  return unspent.slice(0, TRANSFER10_ARITY).map(pickNote);
+}
+
+/** What a self-merge would do right now — how many notes it folds together and
+ *  into what value — for the confirm sheet. null when there is nothing to merge. */
+export function previewMerge(
+  notes: readonly SelectableNote[],
+): { count: number; total: string } | null {
+  try {
+    const inputs = selectMergeNotes(notes);
+    return { count: inputs.length, total: totalValue(inputs) };
+  } catch {
+    return null;
+  }
 }
 
 /** A fresh field element (decimal string) per call — the injectable randomness
@@ -213,6 +383,10 @@ export function toEncryptionNonce(fieldDraw: string): string {
  * arbiter PUBLIC key (§6b v2): the contract injects the same key from storage
  * before verifying, so a different target fails the proof. `drawKem` adds the
  * fresh per-tx ML-KEM encapsulation (hybrid envelope, injectable for tests).
+ *
+ * The pad salts are drawn for the WIDEST arity (transfer10) on every spend, so one
+ * bundle serves whichever circuit the auto-pick lands on — a 2×2 spend simply uses
+ * the first of them. Drawing 21 field elements is microseconds next to the proof.
  */
 export function freshSpendCrypto(rand: RandField, drawKem: KemDrawFn = freshKemMaterial): SpendCrypto {
   const kem = drawKem();
@@ -223,17 +397,19 @@ export function freshSpendCrypto(rand: RandField, drawKem: KemDrawFn = freshKemM
     kemSs: kem.kemSs,
     kemCiphertext: kem.kemCiphertext,
     changeSalt: rand(),
-    padSalt: rand(),
+    padSalts: Array.from({ length: MAX_INPUT_PADS }, () => rand()),
     payeeSalt: rand(),
+    outputPadSalts: Array.from({ length: MAX_OUTPUT_PADS }, () => rand()),
   };
 }
 
 // --- helpers -------------------------------------------------------------------
 
-// The 2-input membership witness shared by transfer + withdraw: recompute each real
-// input's commitment + nullifier from the wallet key, pad input[1] to a value-0 note
-// when only one real note is spent, and fold every real input to the shared root.
-interface TwoInputs {
+// The membership witness shared by every spending circuit: recompute each real
+// input's commitment + nullifier from the wallet key, pad the remaining slots up to
+// the circuit's arity with value-0 notes, and fold every real input to the shared
+// root.
+interface AssembledInputs {
   nullifiers: bigint[];
   inputCommitments: bigint[];
   inputValues: bigint[];
@@ -250,13 +426,18 @@ function assembleInputs(
   identity: WalletIdentity,
   inputs: WalletInputNote[],
   memberships: MembershipWitness[],
-  padSalt: bigint,
-): TwoInputs {
-  if (inputs.length < 1 || inputs.length > 2) {
-    throw new Error(`spend takes 1 or 2 input notes, got ${inputs.length}`);
+  padSalts: string[],
+  arity: number,
+): AssembledInputs {
+  if (inputs.length < 1 || inputs.length > arity) {
+    throw new Error(`this spend takes 1 to ${arity} input notes, got ${inputs.length}`);
   }
   if (memberships.length !== inputs.length) {
     throw new Error(`need one membership witness per input: ${memberships.length} != ${inputs.length}`);
+  }
+  const padCount = arity - inputs.length;
+  if (padSalts.length < padCount) {
+    throw new Error(`need ${padCount} pad salts for a ${inputs.length}-of-${arity} spend, got ${padSalts.length}`);
   }
   const self = identity.keypair;
   const zeros: bigint[] = new Array(H).fill(0n);
@@ -299,15 +480,18 @@ function assembleInputs(
     inputTotal += v;
   });
 
-  // Pad input[1] to a value-0 note owned by the wallet: nullifier 0, enabled 0, zeros
-  // path (its membership is disabled; the value belt forces value 0 -> no mint).
-  if (inputs.length === 1) {
+  // Pad the unused slots with value-0 notes owned by the wallet: nullifier 0,
+  // enabled 0, zeros path (membership disabled; the value belt forces value 0 -> no
+  // mint), each on its OWN salt so no two pads share a commitment. This is the
+  // convention the committed circuits/inputs/transfer10.json fixture carries.
+  for (let i = 0; i < padCount; i++) {
+    const s = BigInt(padSalts[i]);
     nullifiers.push(0n);
-    inputCommitments.push(commitment(0n, padSalt, self.publicKey));
+    inputCommitments.push(commitment(0n, s, self.publicKey));
     inputValues.push(0n);
-    inputSalts.push(padSalt);
+    inputSalts.push(s);
     enabled.push(0n);
-    pathElements.push(zeros);
+    pathElements.push([...zeros]);
     leafIndices.push(0n);
   }
 
@@ -349,14 +533,9 @@ export function buildTransferRequest(
 ): SpendResult<"transfer"> {
   if (crypto.payeeSalt === undefined) throw new Error("transfer needs crypto.payeeSalt for the payment output");
   const self = identity.keypair;
-  const ins = assembleInputs(identity, inputs, memberships, BigInt(crypto.padSalt));
+  const ins = assembleInputs(identity, inputs, memberships, crypto.padSalts, 2);
 
-  let payee: Point;
-  try {
-    payee = unpackPubkey(recipientCompressed.trim());
-  } catch (e) {
-    throw new Error(`recipient pubkey invalid: ${(e as Error).message}`);
-  }
+  const payee = parsePayee(recipientCompressed);
   const payVal = BigInt(amount);
   if (payVal <= 0n) throw new Error(`transfer amount must be positive, got ${payVal}`);
   if (payVal > ins.inputTotal) {
@@ -403,6 +582,99 @@ export function buildTransferRequest(
   };
 }
 
+// --- transfer10 (10-in / 10-out) ------------------------------------------------
+
+/** The recipient's point from its compressed form, with a message that names the
+ *  field the user typed rather than the crypto that rejected it. */
+function parsePayee(recipientCompressed: string): Point {
+  try {
+    return unpackPubkey(recipientCompressed.trim());
+  } catch (e) {
+    throw new Error(`recipient pubkey invalid: ${(e as Error).message}`);
+  }
+}
+
+/**
+ * Assemble a transfer10 ProvingRequest: spend 1–10 of the wallet's notes, pay
+ * `recipientCompressed` `amount`, send the change back to the wallet. Same shape as
+ * buildTransferRequest at arity 10 — the extra input slots are padded (nullifier 0,
+ * value 0, enabled 0, zeros path, a value-0 self-owned commitment) and the extra
+ * OUTPUT slots are real value-0 notes back to the wallet, which is exactly what the
+ * committed circuits/inputs/transfer10.json fixture carries.
+ *
+ * The two uses, both through this one builder:
+ *   - a payment needing 3–10 notes (recipient = the payee);
+ *   - a self-merge (recipient = the wallet's own address, amount = the full input
+ *     total), which lands everything in ONE note and leaves 9 value-0 notes behind.
+ * Duplicate output owners are safe: receiver ciphertext i is encrypted under
+ * encryptionNonce + i (§11-8 v1.1), so the shared-keystream ban that applies to
+ * disburse does not apply here.
+ */
+export function buildTransfer10Request(
+  identity: WalletIdentity,
+  inputs: WalletInputNote[],
+  memberships: MembershipWitness[],
+  recipientCompressed: string,
+  amount: string,
+  crypto: SpendCrypto,
+): SpendResult<"transfer10"> {
+  if (crypto.payeeSalt === undefined) throw new Error("transfer10 needs crypto.payeeSalt for the payment output");
+  const self = identity.keypair;
+  const ins = assembleInputs(identity, inputs, memberships, crypto.padSalts, TRANSFER10_ARITY);
+
+  const payee = parsePayee(recipientCompressed);
+  const payVal = BigInt(amount);
+  if (payVal <= 0n) throw new Error(`transfer amount must be positive, got ${payVal}`);
+  if (payVal > ins.inputTotal) {
+    throw new Error(`amount ${payVal} exceeds spendable input total ${ins.inputTotal}`);
+  }
+  const changeVal = ins.inputTotal - payVal;
+
+  const padCount = TRANSFER10_ARITY - 2;
+  if (crypto.outputPadSalts.length < padCount) {
+    throw new Error(`transfer10 needs ${padCount} outputPadSalts, got ${crypto.outputPadSalts.length}`);
+  }
+  // Fixed output order, mirrored by the circuit's per-output nonces: output 0 =
+  // payment, output 1 = change, outputs 2..9 = value-0 notes back to the wallet.
+  const outputOwnerPublicKeys: Point[] = [
+    payee,
+    ...Array.from({ length: padCount + 1 }, () => self.publicKey),
+  ];
+  const outputValues = [payVal, changeVal, ...Array.from({ length: padCount }, () => 0n)];
+  const outputSalts = [
+    BigInt(crypto.payeeSalt),
+    BigInt(crypto.changeSalt),
+    ...crypto.outputPadSalts.slice(0, padCount).map((s) => BigInt(s)),
+  ];
+  const outputCommitments = outputValues.map((v, i) => commitment(v, outputSalts[i], outputOwnerPublicKeys[i]));
+
+  const inputBig: Transfer10Input = {
+    nullifiers: ins.nullifiers,
+    inputCommitments: ins.inputCommitments,
+    inputValues: ins.inputValues,
+    inputSalts: ins.inputSalts,
+    inputOwnerPrivateKey: self.formattedPrivateKey,
+    ecdhPrivateKey: BigInt(crypto.ecdhPrivateKey),
+    root: ins.root,
+    pathElements: ins.pathElements,
+    leafIndices: ins.leafIndices,
+    enabled: ins.enabled,
+    outputCommitments,
+    outputValues,
+    outputSalts,
+    outputOwnerPublicKeys,
+    kemSs: [BigInt(crypto.kemSs[0]), BigInt(crypto.kemSs[1])],
+    encryptionNonce: BigInt(crypto.encryptionNonce),
+    authorityPublicKey: [BigInt(crypto.authorityPubKey[0]), BigInt(crypto.authorityPubKey[1])],
+  };
+
+  const request = { circuit: "transfer10", input: toWire(inputBig), backend: "cpu" } as const;
+  return {
+    request,
+    meta: spendMeta(ins, payVal.toString(), changeVal.toString(), outputCommitments, outputValues),
+  };
+}
+
 // --- withdraw (2-in / 1-out) ----------------------------------------------------
 
 /**
@@ -423,7 +695,7 @@ export function buildWithdrawRequest(
   crypto: SpendCrypto,
 ): SpendResult<"withdraw"> {
   const self = identity.keypair;
-  const ins = assembleInputs(identity, inputs, memberships, BigInt(crypto.padSalt));
+  const ins = assembleInputs(identity, inputs, memberships, crypto.padSalts, 2);
 
   const out = BigInt(amount);
   if (out <= 0n) throw new Error(`withdraw amount must be positive, got ${out}`);
@@ -468,7 +740,7 @@ export function buildWithdrawRequest(
 // serializers pinned on the committed fixtures before the swap)
 
 function spendMeta(
-  ins: TwoInputs,
+  ins: AssembledInputs,
   amount: string,
   changeValue: string,
   outputCommitments: bigint[],

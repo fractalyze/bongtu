@@ -14,7 +14,7 @@
 // elapsed clock).
 
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { DEFAULTS } from "../config.js";
+import { DEFAULTS, type BrowserCircuit } from "../config.js";
 import { ensureCircuitAssets, prewarmProver } from "../lib/prove.js";
 import { walletErrorMessage } from "../lib/metamask.js";
 import { withUnlock, type StagedStep } from "./components/StagedProgress.js";
@@ -116,16 +116,22 @@ export interface ActionMachineView<O extends ActionResult> extends ActionSnapsho
 }
 
 /**
- * The machine, wired for a screen. On mount it also PREFETCHES the circuit's wasm+zkey
- * (the one-time download) and pre-warms the bn128 curve, so the heavy I/O overlaps the
- * user typing the amount. Progress/disable state comes from the prove.ts registry — not
- * from that call's promise — so a remount mid-download stays honest.
+ * The machine, wired for a screen. It also PREFETCHES `circuit`'s wasm+zkey (the
+ * one-time download) and pre-warms the bn128 curve, so the heavy I/O overlaps the
+ * user typing the amount. Progress/disable state comes from the prove.ts registry —
+ * not from that call's promise — so a remount mid-download stays honest.
+ *
+ * `circuit` may CHANGE while the form is open: Send starts on the 2×2 transfer and
+ * switches to transfer10 the moment the typed amount needs 3+ notes. Each value is
+ * fetched at most once per session (prove.ts coalesces), so the switch adds the
+ * arity-10 key without re-fetching the first — which is exactly why the ~114 MB key
+ * is never pulled on screen open.
  */
 export function useActionMachine<O extends ActionResult>({
   circuit,
   steps,
 }: {
-  circuit: "transfer" | "withdraw" | "deposit";
+  circuit: BrowserCircuit;
   /** the flow's stages, in order; its first key is the opening stage. */
   steps: StagedStep[];
 }): ActionMachineView<O> {
@@ -136,8 +142,12 @@ export function useActionMachine<O extends ActionResult>({
 
   useEffect(() => {
     void ensureCircuitAssets(circuit, DEFAULTS.circuitBaseUrl).catch(() => {});
-    void prewarmProver();
   }, [circuit]);
+  // The bn128 curve is shared by every circuit, so warm it once per screen — not
+  // again each time the auto-pick switches which key is being fetched.
+  useEffect(() => {
+    void prewarmProver();
+  }, []);
 
   return {
     ...snap,
