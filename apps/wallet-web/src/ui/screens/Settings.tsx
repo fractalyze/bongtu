@@ -1,23 +1,23 @@
-// Settings: read-only deployment facts (pool, token, chain, arbiter key version) plus
-// the ONE editable knob — the indexer URL the balance/history/health reads point at —
-// and Disconnect. Editing the indexer URL re-runs the balance load (App effect keys on
-// indexerUrl). Disconnect is the logout: it clears the stored login record (view token
-// only — the spending key is never in state or storage; session.ts).
+// Settings: the deployment facts a user might actually want to check — which network,
+// which pool, which token — and Disconnect. Nothing here is editable (U-W9): the
+// indexer URL is deployment-fixed (App.INDEXER_URL), and the batch size, key version,
+// arbiter key and own address were protocol trivia no user acts on. Disconnect is the
+// logout: it clears the stored login record (view token only — the spending key is
+// never in state or storage; session.ts).
 
-import { useId, useState } from "react";
+import { useId } from "react";
 import type { ReactNode } from "react";
-import { encodeAddress } from "@bongtu/core/pubkey";
 import { DEFAULTS } from "../../config.js";
 import { useWallet } from "../App.js";
 import { IconExternalLink } from "../components/icons.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
-import { Button, TextInput } from "../components/controls.js";
+import { Button } from "../components/controls.js";
 import { shortenPubkey } from "../format.js";
 
 const EXPLORER = DEFAULTS.explorer.replace(/\/+$/, "");
 
 // One concrete row shape, three renderings:
-//   value only        → plain text (Network, Batch size, Key version)
+//   value only        → plain text (Network)
 //   full              → middle-shortened + custom tooltip revealing the full value
 //                       (title= is unstylable and keyboard-dead — retired here)
 //   full + href       → same, wrapped in an external explorer link with the shared icon
@@ -89,49 +89,24 @@ function Row({
 }
 
 export function Settings(): ReactNode {
-  const { session, indexerUrl, setIndexerUrl, disconnect } = useWallet();
-  const [draft, setDraft] = useState(indexerUrl);
-  const dirty = draft.trim() !== indexerUrl;
+  const { disconnect } = useWallet();
 
   return (
     <div className="flex flex-col gap-4.5 px-4.5 pt-4.5 pb-6.5">
       <ScreenHeader title="Settings" />
       <div className="flex flex-col gap-3.5">
-        <h2 className="text-xs uppercase tracking-[0.08em] text-muted [font-weight:650]">Indexer</h2>
-        <label className="flex flex-col gap-1.5">
-          <span className="text-[0.82rem] text-muted font-semibold">Arbiter indexer URL</span>
-          <TextInput
-            mono
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-          />
-          <span className="text-[0.78rem] text-muted">
-            Balance and activity are read from this arbiter-mode indexer.
-          </span>
-        </label>
-        <Button
-          variant="primary"
-          block
-          disabled={!dirty || !draft.trim()}
-          onClick={() => setIndexerUrl(draft.trim())}
-        >
-          Save Indexer URL
-        </Button>
-
         <h2 className="text-xs uppercase tracking-[0.08em] text-muted [font-weight:650]">
           Deployment
         </h2>
         <div className="bg-surface border border-border rounded-xl px-3.5 py-1">
           <Row label="Network" value={`GIWA · chain ${DEFAULTS.chainId}`} />
           <Row label="Pool" full={DEFAULTS.pool} href={`${EXPLORER}/address/${DEFAULTS.pool}`} mono />
-          <Row label="Token" full={DEFAULTS.token} href={`${EXPLORER}/address/${DEFAULTS.token}`} mono />
-          <Row label="Batch size" value={String(DEFAULTS.batchSize)} />
-          <Row label="Key version" value={DEFAULTS.keyVersion} />
-          <Row label="Arbiter key" full={DEFAULTS.arbiterPubKey[0]} mono />
-          {session && <Row label="Your address" full={encodeAddress(session.compressedPubkey)} mono />}
+          <Row
+            label="Token (kKRW)"
+            full={DEFAULTS.token}
+            href={`${EXPLORER}/address/${DEFAULTS.token}`}
+            mono
+          />
         </div>
 
         <Button variant="danger" block onClick={disconnect}>

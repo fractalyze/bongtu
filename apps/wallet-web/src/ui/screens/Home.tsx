@@ -14,7 +14,7 @@ import { DEFAULTS } from "../../config.js";
 import { shortenPubkey } from "../format.js";
 import { BalanceCard } from "../components/BalanceCard.js";
 import { ActivityList } from "../components/ActivityList.js";
-import { StatusChip } from "../components/StatusChip.js";
+import { IndexerSyncDot } from "../components/SyncDot.js";
 import { LockChip } from "../components/LockChip.js";
 import { ReceiveModal } from "../components/ReceiveModal.js";
 import { WalletMark } from "../components/WalletMark.js";
@@ -23,7 +23,6 @@ import {
   EnvelopeLogo,
   IconGear,
   IconLink,
-  IconRefresh,
   IconSend,
   IconWithdraw,
   IconDeposit,
@@ -50,18 +49,25 @@ export function Home(): ReactNode {
           <span className="font-bold text-[1.1rem] tracking-[-0.01em]">bongtu</span>
           {DEFAULTS.testnet && <TestnetTag />}
         </div>
-        <div className="flex items-center gap-2">
+        {/* Icons only (U-W9): sync state, lock state, which wallet, settings — each
+            with its words in a hover tooltip. The sync dot is also the manual
+            refresh, so no separate refresh button competes with it. */}
+        <div className="flex items-center gap-0.5">
+          <IndexerSyncDot
+            indexerUrl={indexerUrl}
+            refreshing={refreshing}
+            dataError={dataError !== null}
+            onRefresh={() => void refresh()}
+          />
           <LockChip walletName={wallet.name} />
-          <StatusChip indexerUrl={indexerUrl} />
-          {/* manual refresh — the SAME path the post-action poll lands on; spins
-              (and refuses re-entry) while any load is running */}
-          <IconButton
-            aria-label="Refresh balance"
-            disabled={refreshing}
-            onClick={() => void refresh()}
+          <span
+            className="inline-flex items-center p-[5px] text-muted"
+            role="img"
+            aria-label={wallet.name}
+            title={wallet.name}
           >
-            <IconRefresh className={refreshing ? "animate-spin" : undefined} />
-          </IconButton>
+            <WalletMark wallet={wallet} size={17} />
+          </span>
           <IconButton aria-label="Settings" onClick={() => navigate("settings")}>
             <IconGear />
           </IconButton>

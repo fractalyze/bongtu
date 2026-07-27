@@ -50,11 +50,20 @@ returning visit restores silently as long as the wallet still reports the same a
 
 **Spending** runs on the key itself, held by `src/lib/keyCache.ts` — the wallet's *lock*, and the
 only place the bjj private key lives between actions. It is memory-only: never storage, never React
-state, gone on reload. The first send/withdraw/deposit after a page load derives it (one signature,
-shown as an "Unlocking" stage); later actions reuse it, so they cost only the transaction popup. The
-hold ends on sign-out, on a wallet account switch, and after 10 idle minutes — enforced twice,
-by a timer that also flips the header's Locked/Unlocked chip, and by a timestamp check at use time
-that a throttled background tab cannot skip.
+state, gone on reload.
+
+A **fresh login starts unlocked**: connecting already derived the key to sign the token handshake,
+so `App.connectWallet` hands that identity to the lock (`keyCache.seed`, which re-checks it against
+the session pubkey exactly as `unlock` checks a derived one) instead of dropping it. No second
+popup, and the idle clock starts at login. A **silently restored session starts locked** — nothing
+persists the key — and its first send/withdraw/deposit derives it (one signature, shown as an
+"Unlocking" stage). Either way later actions reuse the hold, so they cost only the transaction popup.
+
+The hold ends on sign-out, on a wallet account switch, and after 10 idle minutes — enforced twice,
+by a timer that also flips the header's padlock to closed, and by a timestamp check at use time that
+a throttled background tab cannot skip. The first login on a device gets a one-screen explainer for
+exactly this (`src/lib/lockIntro.ts` stores one boolean — not key material — under
+`bongtu.lockIntro.v1`).
 
 A held key belongs to exactly one wallet account. If the selected account changes, the wallet
 refuses the action outright (`ACCOUNT_MISMATCH_MESSAGE`) rather than derive and spend under a
@@ -186,7 +195,8 @@ The indexer base URL defaults to the **relative** path `/indexer`, so every `/no
 Disabling the proxy in production is deliberate: a live proxy under `vite preview` would forward to
 a `localhost:8600` that does not exist in prod and mask a missing infra route. `--mode` is the
 escape hatch in either direction. Set `VITE_INDEXER_URL` to an absolute URL to bypass `/indexer`
-entirely; the Settings screen can override it per session.
+entirely. The URL is **build-time only** (`App.INDEXER_URL`): the Settings screen's runtime override
+was removed, because a typo there silently broke balance and activity with no way back.
 
 ## What the client bundles
 

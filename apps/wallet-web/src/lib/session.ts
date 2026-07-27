@@ -2,8 +2,9 @@
 // (user-mandated): the bjj private key is NEVER written to any browser storage in
 // ANY form — the only stored credential is the indexer's VIEW-ONLY token (it can
 // read this owner's balance/activity and nothing else; no write path accepts it).
-// The spending key is re-derived from a MetaMask signature at ACTION time and
-// dropped (spendFlow/depositFlow); losing this record loses nothing but a login.
+// The spending key lives in memory only (keyCache.ts): a login hands it the identity
+// the connect signature produced, and a page that did not log in re-derives it from a
+// fresh signature at ACTION time. Losing this record loses nothing but a login.
 //
 // Pure + storage-injected so expiry/shape handling is unit-tested headlessly
 // (test/session.test.ts); the app passes the real window.localStorage.

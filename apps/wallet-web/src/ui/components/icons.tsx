@@ -21,7 +21,6 @@ import {
   RiCloseLine,
   RiExternalLinkLine,
   RiArrowLeftLine,
-  RiRefreshLine,
   RiLockLine,
   RiLockUnlockLine,
 } from "@remixicon/react";
@@ -40,12 +39,8 @@ export function IconGear({ size = 20 }: IconProps): ReactNode {
   return <RiSettings3Line size={size} aria-hidden="true" />;
 }
 
-/** Manual balance refresh (Home header). `className` lets the caller spin it. */
-export function IconRefresh({ size = 20, className }: IconProps): ReactNode {
-  return <RiRefreshLine size={size} className={className} aria-hidden="true" />;
-}
-
-/** The two faces of the spending lock (Home header chip). */
+/** The two faces of the spending lock: the nav padlock, and the lock explainer's
+ *  hero glyph (LockIntro). */
 export function IconLock({ size = 14 }: IconProps): ReactNode {
   return <RiLockLine size={size} aria-hidden="true" />;
 }

@@ -2,8 +2,13 @@
 // (src/lib/keyCache.ts). This is the module that decides how often the user sees a
 // signature popup and how long a key stays usable, so every branch is pinned here:
 //
-//   (1) LAZY DERIVE — the first action derives (one popup); later actions in the same
-//       page session reuse the SAME identity with no second derivation.
+//   (0) LOGIN SEEDING — the login already paid for a signature, so it hands the
+//       identity straight to the cache: the wallet is unlocked with no extra popup,
+//       the seeded key is refused if it is not the session's, and it is an ORDINARY
+//       hold from then on (same idle wipe, same account binding, same lock()).
+//   (1) LAZY DERIVE — a page that did not log in (a restored session) derives on its
+//       first action (one popup); later actions in the same page session reuse the
+//       SAME identity with no second derivation.
 //   (2) ACCOUNT BINDING — a MetaMask account switch drops the hold and refuses the
 //       action with the distinct mismatch error, WITHOUT spending a popup to prove it;
 //       a first derivation under a foreign account is refused too (popup already spent
@@ -18,6 +23,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { deriveIdentityFromSignature } from "../src/lib/derive.js";
 import { ACCOUNT_MISMATCH_MESSAGE } from "../src/lib/identity.js";
@@ -76,6 +82,8 @@ function harness(opts: { suppressTimer?: boolean } = {}) {
     cache,
     state,
     unlock: () => cache.unlock(CONNECTION, SESSION.compressedPubkey),
+    /** What App.connectWallet does with the identity its login signature produced. */
+    seed: (): void => cache.seed(SESSION, ACCOUNT, SESSION.compressedPubkey),
     fireIdle: (): void => {
       assert.ok(pending, "no idle wipe is armed");
       const fn = pending;
@@ -85,6 +93,79 @@ function harness(opts: { suppressTimer?: boolean } = {}) {
     },
   };
 }
+
+// ============================ (0) LOGIN SEEDING ==============================
+
+test("seeding from the login unlocks the wallet without spending another popup", async () => {
+  const h = harness();
+  assert.equal(h.cache.isUnlocked(), false, "before the login there is nothing held");
+
+  h.seed();
+  assert.equal(h.cache.isUnlocked(), true, "the login's identity IS the unlock");
+  assert.equal(h.state.derives, 0, "the login signature is the only one paid for");
+  assert.equal(h.state.notifications, 1, "the header flips to Unlocked at login");
+
+  // and the first real action rides the seeded key rather than deriving again
+  const id = await h.unlock();
+  assert.equal(h.state.derives, 0, "the first send after login costs no signature");
+  assert.equal(id.compressedPubkey, SESSION.compressedPubkey);
+});
+
+test("the login derives through identity.ts — there is ONE derivation recipe", () => {
+  // A second copy of typed-data → sign → derive in the shell could drift from the
+  // lock's copy (a changed domain, a changed key version), and the two would then
+  // produce different keys for the same account: a login that unlocks a key the
+  // notes are not owned by. The seam is a source fact, so it is gated as one.
+  const app = readFileSync(new URL("../src/ui/App.tsx", import.meta.url).pathname, "utf8");
+  assert.match(app, /deriveTransientIdentity\(conn\)/, "the login must use the owner module");
+  for (const inlined of [
+    "keyDerivationTypedData",
+    "signKeyDerivation",
+    "deriveIdentityFromSignature",
+  ]) {
+    assert.ok(!app.includes(inlined), `App.tsx re-implements the derivation via ${inlined}`);
+  }
+});
+
+test("a seeded key that is not the session's is refused and nothing is held", () => {
+  const h = harness();
+  assert.throws(() => h.cache.seed(OTHER, ACCOUNT, SESSION.compressedPubkey), MISMATCH);
+  assert.equal(h.cache.isUnlocked(), false, "the same belt unlock() applies to a derived key");
+  assert.equal(h.state.notifications, 0);
+});
+
+test("a seeded key is wiped by the same idle timer as a derived one", async () => {
+  const h = harness();
+  h.seed();
+  h.state.now += IDLE_WIPE_MS - 1_000; // still inside the window that started at login
+  await h.unlock();
+  assert.equal(h.state.derives, 0);
+
+  h.fireIdle();
+  assert.equal(h.cache.isUnlocked(), false, "10 idle minutes from LOGIN lock it again");
+  h.state.now += IDLE_WIPE_MS;
+  await h.unlock();
+  assert.equal(h.state.derives, 1, "past the wipe the next action pays one signature");
+});
+
+test("a seeded key expires at use time too, in a tab whose timer never fired", async () => {
+  const h = harness({ suppressTimer: true });
+  h.seed();
+  h.state.now += IDLE_WIPE_MS;
+  assert.equal(h.cache.isUnlocked(), false, "an expired seeded key reads as locked");
+  await h.unlock();
+  assert.equal(h.state.derives, 1);
+});
+
+test("an account switch still locks a wallet that was unlocked by the login", async () => {
+  const h = harness();
+  h.seed();
+  h.state.account = OTHER_ACCOUNT;
+  await assert.rejects(h.unlock(), MISMATCH);
+  assert.equal(h.state.derives, 0, "the seeded key proves the mismatch — no popup is spent");
+  assert.equal(h.cache.isUnlocked(), false);
+  assert.equal(h.state.armed, false, "the idle timer is disarmed along with the key");
+});
 
 // ============================ (1) LAZY DERIVE ================================
 
@@ -242,6 +323,7 @@ test("a full unlock/reuse/wipe cycle touches no browser storage", async () => {
   g.document = trap("document");
   try {
     const h = harness();
+    h.seed(); // the login hand-off is part of the lifecycle, and writes nothing
     await h.unlock();
     await h.unlock();
     h.fireIdle();

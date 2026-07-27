@@ -2,40 +2,48 @@
 // the connected wallet. The deployed kKRW is MockERC20 whose `mint` is permissionless
 // (no backend faucet service or operator key) — the user pays their own GIWA gas, so a
 // zero-gas account is pre-checked and told plainly (with the GIWA faucet link) instead
-// of failing inside the wallet with an opaque object. The amount is prefilled with the
-// standard faucet amount and freely editable; on a confirmed mint the caller refreshes
-// its token state and the dialog switches to its completion view (MintSuccess), so the
-// Mint button cannot be pressed twice for one visit.
+// of failing inside the wallet with an opaque object. The amount starts EMPTY (U-W9: a
+// prefilled million read as a fixed faucet ration rather than a field to fill in); on a
+// confirmed mint the caller refreshes its token state and the dialog switches to its
+// completion view (MintSuccess), so the Mint button cannot be pressed twice for one
+// visit.
 
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { DEFAULTS } from "../../config.js";
-import { FAUCET_AMOUNT } from "../../lib/faucet.js";
 import {
   mintTestToken,
   readGasBalance,
   walletErrorMessage,
   type Connection,
 } from "../../lib/metamask.js";
-import { groupAmountInput, parseKkrw } from "../../lib/money.js";
+import { parseKkrw } from "../../lib/money.js";
+import { shortenPubkey } from "../format.js";
 import { ExplorerLink } from "./ExplorerLink.js";
 import { Modal } from "./Modal.js";
 import { AmountInput, Button, ErrorBanner, Field, TestnetTag } from "./controls.js";
 
-/** The dialog after a confirmed mint: what happened, where to look, and the way out —
- *  no second Mint button. Its own component so the completed state renders (and
- *  gates) without a live transaction. */
+/** The dialog after a confirmed mint: what happened, WHICH transaction it was, where
+ *  to look, and the way out — no second Mint button. Its own component so the
+ *  completed state renders (and gates) without a live transaction. */
 export function MintSuccess({
+  txHash,
   explorerUrl,
   onClose,
 }: {
+  txHash: string;
   explorerUrl: string;
   onClose: () => void;
 }): ReactNode {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm">Test kKRW added to your account.</p>
-      <ExplorerLink href={explorerUrl} />
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        {/* shortenPubkey is the app's one middle-shortener (addresses, keys, and
+            here a tx hash) — the full hash is one tap away behind the link. */}
+        <span className="font-mono text-xs text-muted">{shortenPubkey(txHash)}</span>
+        <ExplorerLink href={explorerUrl} />
+      </div>
       <Button variant="primary" block onClick={onClose}>
         Close
       </Button>
@@ -53,11 +61,10 @@ export function MintModal({
   /** Called after a confirmed mint so the opener re-reads balance/allowance. */
   onMinted: () => Promise<void> | void;
 }): ReactNode {
-  // Editable prefill: whole-kKRW form ("1,000,000"), not the display formatter's
-  // six-fraction-digit output.
-  const [amount, setAmount] = useState(groupAmountInput((FAUCET_AMOUNT / 10n ** 18n).toString()));
+  // Starts empty: the user says how much test kKRW they want.
+  const [amount, setAmount] = useState("");
   const [pending, setPending] = useState(false);
-  const [txUrl, setTxUrl] = useState<string | null>(null);
+  const [tx, setTx] = useState<{ hash: string; explorerUrl: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const parsed = parseKkrw(amount);
@@ -71,7 +78,7 @@ export function MintModal({
     if (!connection || !parsed.ok) return;
     setPending(true);
     setError(null);
-    setTxUrl(null);
+    setTx(null);
     try {
       // The mint is permissionless but still a tx: an account with ZERO gas ETH
       // fails inside the wallet with an opaque object — say it plainly instead.
@@ -81,7 +88,7 @@ export function MintModal({
         );
       }
       const res = await mintTestToken(connection, DEFAULTS.token, connection.address, parsed.wei);
-      setTxUrl(res.explorerUrl);
+      setTx({ hash: res.txHash, explorerUrl: res.explorerUrl });
       await onMinted();
     } catch (e) {
       setError(walletErrorMessage(e));
@@ -100,10 +107,13 @@ export function MintModal({
       ariaLabel="Get Test kKRW"
       onClose={onClose}
     >
-      {txUrl ? (
-        <MintSuccess explorerUrl={txUrl} onClose={onClose} />
+      {tx ? (
+        <MintSuccess txHash={tx.hash} explorerUrl={tx.explorerUrl} onClose={onClose} />
       ) : (
         <div className="flex flex-col gap-3">
+          <p className="text-sm text-muted">
+            Mints test kKRW to your connected account — you only pay gas.
+          </p>
           <Field label="Amount (kKRW)" error={amount.trim() ? amtErr : null}>
             <AmountInput value={amount} onValueChange={setAmount} disabled={pending} />
           </Field>

@@ -1,13 +1,17 @@
-// The spending lock, shown in the Home header next to the indexer chip.
+// The spending lock, shown in the nav as a padlock and nothing else.
 //
-// Locked means the wallet is not holding your spending permission: the next send,
-// withdraw or deposit asks you to confirm once in the wallet you connected with.
-// Unlocked means it is holding it, and those actions go straight to the transaction.
-// The tooltip names that wallet as it detected it, never a brand. It says nothing
-// about VIEWING — balance and activity read with the login token and work either
-// way — so the copy talks about sending, never about keys.
+// Closed and muted means the wallet is not holding your spending permission: the next
+// send, withdraw or deposit asks you to confirm once in the wallet you connected with.
+// Open and green means it is holding it, and those actions go straight to the
+// transaction. The words live in the tooltip (and in the aria-label, so a screen
+// reader gets them without a hover); the nav itself is icons only.
 //
-// Fresh load, ten idle minutes, and signing out all show Locked.
+// The tooltip names the connected wallet as it detected it, never a brand. It says
+// nothing about VIEWING — balance and activity read with the login token and work
+// either way — so the copy talks about sending, never about keys.
+//
+// Logging in unlocks it (App.connectWallet seeds the lock with the identity the login
+// signature already produced). Ten idle minutes, a reload, and signing out show Locked.
 
 import type { ReactNode } from "react";
 import { NEUTRAL_WALLET_NAME } from "../../lib/walletBrand.js";
@@ -16,23 +20,18 @@ import { IconLock, IconUnlock } from "./icons.js";
 
 export function LockChip({ walletName = NEUTRAL_WALLET_NAME }: { walletName?: string }): ReactNode {
   const unlocked = useWalletUnlocked();
-  const word = unlocked ? "Unlocked" : "Locked";
   return (
     <span
-      className="inline-flex items-center gap-1 text-xs text-muted"
+      className={`inline-flex items-center p-[5px] ${unlocked ? "text-pos" : "text-muted"}`}
       role="status"
-      aria-label={`Wallet ${word.toLowerCase()}`}
+      aria-label={unlocked ? "Wallet unlocked" : "Wallet locked"}
       title={
         unlocked
           ? "Unlocked — you can send without confirming again for a while."
           : `Locked — you'll confirm once in ${walletName} the next time you send.`
       }
     >
-      {unlocked ? <IconUnlock /> : <IconLock />}
-      {/* The header already carries the brand, a testnet tag, the indexer chip and
-          two buttons; below ~640px the padlock stands alone rather than squeeze
-          the row (the label is still announced, and hoverable on desktop). */}
-      <span className="hidden sm:inline">{word}</span>
+      {unlocked ? <IconUnlock size={17} /> : <IconLock size={17} />}
     </span>
   );
 }

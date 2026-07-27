@@ -3,9 +3,11 @@
 // time only). Row order is the wire order: /history is contractually seq-desc
 // (newest-first), so no client re-sort. Each row: a Remix kind icon consistent with
 // the action icons, the verb, the shortened counterparty when there is one, the
-// signed amount (green only for incoming), a relative time, and an external-link
-// icon signalling that click opens the explorer tx. Home passes a sliced recent feed
-// + onViewAll; the Activity screen passes the full feed.
+// signed amount with its token symbol (green only for incoming), a relative time, and
+// an external-link icon signalling that click opens the explorer tx. The rows are
+// ruled top AND bottom, so the list's edges read like the rules between its rows
+// instead of like two wider gaps. Home passes a sliced recent feed + onViewAll; the
+// Activity screen passes the full feed.
 
 import type { ReactNode } from "react";
 import { encodeAddress } from "@bongtu/core/pubkey";
@@ -44,7 +46,7 @@ function Row({ item, explorerBase }: { item: HistoryItem; explorerBase: string }
   // Only the external-link icon navigates (user decision): a whole-row anchor made
   // every stray tap an explorer round-trip.
   return (
-    <div className="flex items-center gap-3 py-[11px] border-t border-border first:border-t-0">
+    <div className="flex items-center gap-3 py-[11px] border-t border-border">
       <span
         className={`w-[34px] h-[34px] rounded-full grid place-items-center flex-none ${
           dir === "in" ? "bg-pos-bg text-pos" : "bg-surface-2 text-muted"
@@ -73,6 +75,8 @@ function Row({ item, explorerBase }: { item: HistoryItem; explorerBase: string }
         >
           {dir === "in" ? "+" : dir === "out" ? "-" : ""}
           {formatKkrw(item.amount)}
+          {/* muted symbol beside a colored number — the balance hero's idiom */}
+          <span className="text-muted font-semibold text-[0.72rem] ml-1">kKRW</span>
         </span>
         <span className="text-xs text-muted leading-[1.2]">
           {relativeTime(item.blockTimestamp)}
@@ -123,7 +127,7 @@ export function ActivityList({
           {loading ? "Loading activity…" : "No activity yet."}
         </p>
       ) : (
-        <div className="flex flex-col">
+        <div className="flex flex-col border-b border-border">
           {history.map((it) => (
             <Row key={`${it.seq}-${it.txHash}`} item={it} explorerBase={explorerBase} />
           ))}

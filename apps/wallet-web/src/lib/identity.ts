@@ -5,7 +5,8 @@
 // put in React state, and never survives a page load. Between actions it is held by
 // exactly one module — keyCache.ts, the wallet's lock, which drops it on logout, on
 // an account switch, and after 10 idle minutes. Flows take their identity from that
-// lock; nothing else may keep the value this function returns.
+// lock, and the login hands what it derives straight to the lock (keyCache.seed);
+// nothing else may keep the value this function returns.
 
 import { DEFAULTS } from "../config.js";
 import {
@@ -20,6 +21,10 @@ import { signKeyDerivation, type Connection } from "./metamask.js";
  * (bjj keypair + compressed pubkey). Deterministic per (account, pool, key version),
  * so a derivation after any wipe reproduces the SAME key the session's notes are
  * owned by — which is what makes re-locking cheap to recover from.
+ *
+ * The ONE derivation site: the login (App.connectWallet, which then seeds the lock)
+ * and the lock's own lazy derive both come through here, so the two can never drift
+ * into deriving different keys from the same account.
  */
 export async function deriveTransientIdentity(connection: Connection): Promise<WalletIdentity> {
   const typed = keyDerivationTypedData(DEFAULTS.chainId, DEFAULTS.pool, DEFAULTS.keyVersion);

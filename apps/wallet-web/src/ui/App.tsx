@@ -1,16 +1,18 @@
 // The wallet shell: a mobile-width vertical frame centered on the page, holding all
-// runtime state (connection, session, indexer URL, balance/notes/history) in one
-// React context and switching screens on the hash route. There is NO local-journal
-// fallback (locked decision): balance + activity come only from the arbiter-mode
-// indexer's /notes and /history.
+// runtime state (connection, session, balance/notes/history) in one React context and
+// switching screens on the hash route. There is NO local-journal fallback (locked
+// decision): balance + activity come only from the arbiter-mode indexer's /notes and
+// /history.
 //
 // KEY-CUSTODY RULE (user-mandated): the bjj private key NEVER enters React state or
-// browser storage. Connect derives it transiently (one signature), trades it for a
-// VIEW-ONLY indexer token, and drops it; the persisted record (session.ts) is only
-// { eoa address, compressed pubkey, token, exp }. Actions take the key from the
-// wallet's in-memory lock (keyCache.ts), which this shell drops on sign-out and on
-// an account switch in the connected wallet; a page load starts locked because
-// nothing persists it.
+// browser storage. Connect derives it (one signature), trades it for a VIEW-ONLY
+// indexer token, and hands it to the wallet's in-memory lock (keyCache.ts) — so a
+// fresh login lands on Home already unlocked, on the popup it just spent, and the
+// lock's 10-minute idle wipe runs from that moment. The persisted record (session.ts)
+// is only { eoa address, compressed pubkey, token, exp }. Actions take the key from
+// that same lock, which this shell drops on sign-out and on an account switch in the
+// connected wallet; a page load with no fresh login (a silently restored session)
+// starts LOCKED, because nothing persists the key.
 //
 // A stored unexpired session restores SILENTLY on load: eth_accounts (no popup)
 // must still report the same account, then balance+activity load via the token —
@@ -19,12 +21,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { DEFAULTS } from "../config.js";
-import { deriveIdentityFromSignature, keyDerivationTypedData } from "../lib/derive.js";
+import { deriveTransientIdentity } from "../lib/identity.js";
 import {
   connect,
   onAccountsChanged,
   reconnect,
-  signKeyDerivation,
   walletErrorMessage,
   type Connection,
 } from "../lib/metamask.js";
@@ -44,6 +45,7 @@ import {
   type HistoryItem,
 } from "../lib/indexerClient.js";
 import { clearSession, loadSession, saveSession, type StoredSession } from "../lib/session.js";
+import { markLockIntroSeen, shouldShowLockIntro } from "../lib/lockIntro.js";
 import {
   classifyReadFailure,
   pollForAction,
@@ -52,6 +54,7 @@ import {
 } from "../lib/refresh.js";
 import { useHashRoute, navigate, useWalletDescription } from "./hooks.js";
 import { Onboarding } from "./screens/Onboarding.js";
+import { LockIntro } from "./screens/LockIntro.js";
 import { Home } from "./screens/Home.js";
 import { Receive } from "./screens/Receive.js";
 import { Deposit } from "./screens/Deposit.js";
@@ -68,8 +71,8 @@ export interface WalletContextValue {
   wallet: WalletDescription;
   /** the logged-in session: account, receive pubkey, view token. NO key material. */
   session: StoredSession | null;
+  /** where every read goes. Fixed for the page (config/env — see INDEXER_URL). */
   indexerUrl: string;
-  setIndexerUrl: (url: string) => void;
 
   // arbiter-indexer-derived state (null until first successful load)
   balance: bigint | null;
@@ -95,6 +98,12 @@ export interface WalletContextValue {
 
 const WalletContext = createContext<WalletContextValue | null>(null);
 
+// The indexer every read goes to. Deployment-fixed, not user-editable: the runtime
+// override in Settings was retired (U-W9) because a wrong URL there silently broke
+// balance and activity with no way back. `VITE_INDEXER_URL` still points a dev build
+// at another box (config.ts), and vite proxies the default relative `/indexer`.
+const INDEXER_URL = DEFAULTS.indexerUrl;
+
 /** Access the wallet context (throws if used outside the provider — a wiring bug). */
 export function useWallet(): WalletContextValue {
   const ctx = useContext(WalletContext);
@@ -107,7 +116,8 @@ export function App(): ReactNode {
 
   const [connection, setConnection] = useState<Connection | null>(null);
   const [session, setSession] = useState<StoredSession | null>(null);
-  const [indexerUrl, setIndexerUrl] = useState<string>(DEFAULTS.indexerUrl);
+  // The lock explainer stands in front of Home for the one login that earns it.
+  const [lockIntro, setLockIntro] = useState(false);
 
   const [balance, setBalance] = useState<bigint | null>(null);
   const [notes, setNotes] = useState<OwnerNote[]>([]);
@@ -180,12 +190,12 @@ export function App(): ReactNode {
     try {
       // Reads authenticate with the VIEW token only — no key, no signature popup.
       const snap = await loadOwnerData(
-        buildNotesTokenUrl(indexerUrl, session.compressedPubkey, session.token),
-        buildHistoryTokenUrl(indexerUrl, session.compressedPubkey, session.token),
+        buildNotesTokenUrl(INDEXER_URL, session.compressedPubkey, session.token),
+        buildHistoryTokenUrl(INDEXER_URL, session.compressedPubkey, session.token),
       );
       applySnapshot(snap);
     } catch (e) {
-      const failure = classifyReadFailure(e, indexerUrl);
+      const failure = classifyReadFailure(e, INDEXER_URL);
       if (failure.kind === "expired") {
         endSession(failure.message); // back to onboarding — retrying can only 401 again
         return;
@@ -197,13 +207,12 @@ export function App(): ReactNode {
     } finally {
       setLoading(false);
     }
-  }, [session, indexerUrl, loadOwnerData, applySnapshot, endSession]);
+  }, [session, loadOwnerData, applySnapshot, endSession]);
 
-  // Auto-load whenever the session or indexer changes (after connect/restore, or a
-  // settings edit).
+  // Auto-load whenever the session changes (after a connect or a silent restore).
   useEffect(() => {
     if (session) void refresh();
-  }, [session, indexerUrl, refresh]);
+  }, [session, refresh]);
 
   // A held spending key belongs to ONE wallet account, so a switch drops it at the
   // moment it happens — the flows re-check anyway, this just makes the header honest
@@ -236,14 +245,16 @@ export function App(): ReactNode {
     setConnectError(null);
     try {
       const conn = await connect();
-      const typed = keyDerivationTypedData(DEFAULTS.chainId, DEFAULTS.pool, DEFAULTS.keyVersion);
-      const sig = await signKeyDerivation(conn, typed);
-      // The identity (bjj keypair) lives only inside THIS function: it signs the
-      // token handshake, then goes out of scope. Only key-free fields survive.
-      const id = deriveIdentityFromSignature(sig);
+      // ONE signature popup, through the module that owns the derivation (identity.ts)
+      // — the same call the lock makes when it derives lazily, so a login-seeded key
+      // and a lazily-derived one are the same key by construction, not by two copies
+      // of the recipe agreeing. The identity (bjj keypair) never enters React state:
+      // it signs the token handshake here, and the only reference that outlives this
+      // function is the one keyCache.seed takes below (memory-only, idle-wiped).
+      const id = await deriveTransientIdentity(conn);
       let sess: StoredSession;
       try {
-        const vt = await obtainViewToken(indexerUrl, id.compressedPubkey, id.keypair.formattedPrivateKey);
+        const vt = await obtainViewToken(INDEXER_URL, id.compressedPubkey, id.keypair.formattedPrivateKey);
         sess = { eoaAddress: conn.address, compressedPubkey: id.compressedPubkey, token: vt.token, exp: vt.exp };
         saveSession(sess); // the ONLY persisted record: address + pubkey + view token
       } catch {
@@ -254,8 +265,8 @@ export function App(): ReactNode {
         try {
           applySnapshot(
             await loadOwnerData(
-              buildNotesUrl(indexerUrl, id.compressedPubkey, id.keypair.formattedPrivateKey),
-              buildHistoryUrl(indexerUrl, id.compressedPubkey, id.keypair.formattedPrivateKey),
+              buildNotesUrl(INDEXER_URL, id.compressedPubkey, id.keypair.formattedPrivateKey),
+              buildHistoryUrl(INDEXER_URL, id.compressedPubkey, id.keypair.formattedPrivateKey),
             ),
           );
         } catch {
@@ -263,15 +274,22 @@ export function App(): ReactNode {
           // notice is what the user will see once the session state lands.
         }
       }
+      // The login popup already paid for the key — hold it (the seed re-checks it
+      // against the session pubkey, exactly as unlock() does with a derived one) so
+      // the first send/withdraw/deposit costs only its transaction popup.
+      keyCache.seed(id, conn.address, sess.compressedPubkey);
       setConnection(conn);
       setSession(sess);
+      // The lock explainer is a once-per-device screen, and ONLY a fresh login sees
+      // it: a restored session is already past its first unlock (lockIntro.ts).
+      setLockIntro(shouldShowLockIntro("connect"));
       navigate("home");
     } catch (e) {
       setConnectError(walletErrorMessage(e));
     } finally {
       setConnecting(false);
     }
-  }, [indexerUrl, loadOwnerData, applySnapshot]);
+  }, [loadOwnerData, applySnapshot]);
 
   const disconnect = useCallback((): void => endSession(null), [endSession]);
 
@@ -291,8 +309,8 @@ export function App(): ReactNode {
       try {
         const load = (): Promise<OwnerSnapshot> =>
           loadOwnerData(
-            buildNotesTokenUrl(indexerUrl, session.compressedPubkey, session.token),
-            buildHistoryTokenUrl(indexerUrl, session.compressedPubkey, session.token),
+            buildNotesTokenUrl(INDEXER_URL, session.compressedPubkey, session.token),
+            buildHistoryTokenUrl(INDEXER_URL, session.compressedPubkey, session.token),
           );
         const { last } = await pollForAction(load, { notes, history }, txHash);
         if (last) {
@@ -305,7 +323,7 @@ export function App(): ReactNode {
         setSyncing(false);
       }
     },
-    [session, indexerUrl, notes, history, loadOwnerData, applySnapshot, refresh],
+    [session, notes, history, loadOwnerData, applySnapshot, refresh],
   );
 
   const value = useMemo<WalletContextValue>(
@@ -313,8 +331,7 @@ export function App(): ReactNode {
       connection,
       wallet,
       session,
-      indexerUrl,
-      setIndexerUrl,
+      indexerUrl: INDEXER_URL,
       balance,
       notes,
       history,
@@ -330,7 +347,7 @@ export function App(): ReactNode {
       refreshAfterAction,
     }),
     [
-      connection, wallet, session, indexerUrl, balance, notes, history, loading, syncing, dataError,
+      connection, wallet, session, balance, notes, history, loading, syncing, dataError,
       dataNotice, connecting, connectError, connectWallet, disconnect, refresh, refreshAfterAction,
     ],
   );
@@ -339,7 +356,18 @@ export function App(): ReactNode {
     <WalletContext.Provider value={value}>
       <div className="min-h-full flex justify-center items-stretch p-[clamp(0px,3vw,28px)]">
         <div className="w-full max-w-[420px] bg-bg border border-border rounded-[clamp(0px,3vw,20px)] shadow-[0_8px_28px_-18px_rgba(17,24,39,0.18)] overflow-hidden flex flex-col min-h-[min(760px,calc(100vh-56px))]">
-          {session ? <Router route={route} /> : <Onboarding />}
+          {!session ? (
+            <Onboarding />
+          ) : lockIntro ? (
+            <LockIntro
+              onDone={() => {
+                markLockIntroSeen();
+                setLockIntro(false);
+              }}
+            />
+          ) : (
+            <Router route={route} />
+          )}
         </div>
       </div>
     </WalletContext.Provider>

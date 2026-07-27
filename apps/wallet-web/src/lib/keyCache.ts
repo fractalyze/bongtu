@@ -7,9 +7,13 @@
 // account switch, the idle wipe) drops the reference outright.
 //
 // Why hold it at all: deriving is one MetaMask signature popup, and asking for it on
-// every send/withdraw/deposit was rejected UX. So the FIRST action after a page load
-// derives (the wallet becomes "unlocked"), and later actions in the same page session
-// reuse that identity — only the transaction popup remains.
+// every send/withdraw/deposit was rejected UX. Logging in already spends that popup —
+// connect derives the identity to sign the indexer token handshake — so the login hands
+// the identity straight to this cache (seed()), and the wallet is unlocked from the
+// first screen with no extra popup. A page that did NOT log in this session (a silently
+// restored session, a reload) starts locked, and its first action derives (unlock()).
+// Either way, later actions in the same page session reuse the identity — only the
+// transaction popup remains.
 //
 // What ends the hold:
 //   - lock() — logout/disconnect, and the injected wallet's accountsChanged event.
@@ -96,6 +100,29 @@ export class KeyCache {
     this.disarm = null;
     if (!this.held) return;
     this.held = null;
+    this.notify();
+  }
+
+  /**
+   * Take an identity the LOGIN just derived (App.connectWallet signs the token
+   * handshake with it) so the wallet is unlocked without a second popup.
+   *
+   * It goes through the same session check `unlock` applies to a freshly derived key:
+   * an identity that is not `sessionPubkey`'s is refused and nothing is held. The
+   * account is the one connect just returned — a later switch fires accountsChanged,
+   * which locks, and `unlock` re-checks the account on every use anyway.
+   *
+   * The seeded key is an ordinary hold: same idle deadline, same wipe, same lock().
+   */
+  seed(identity: WalletIdentity, account: string, sessionPubkey: string): void {
+    assertSessionIdentity(identity.compressedPubkey, sessionPubkey);
+    this.held = {
+      identity,
+      account: account.toLowerCase(),
+      sessionPubkey,
+      lastUsedAt: this.deps.now(),
+    };
+    this.rearm();
     this.notify();
   }
 
