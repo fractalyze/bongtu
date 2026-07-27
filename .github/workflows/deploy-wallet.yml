@@ -60,7 +60,7 @@ jobs:
       - name: Build locally and deploy prebuilt output
         run: |
           cd /home/a41/bongtu-deploy/apps/wallet-web
-          # The clone is linked once, out of band, to jun-7346s-projects/bongtu-wallet
+          # The clone is linked once, out of band, to fractalyze/bongtu-wallet
           # (its .vercel/ is untracked and survives the reset --hard above).
           # pull refreshes project settings; build runs Vite against the monorepo
           # (installCommand "" in vercel.json — deps come from npm ci above).
@@ -69,6 +69,6 @@ jobs:
           vercel deploy --prebuilt --prod
       - name: Verify production serves the app and the indexer rewrite
         run: |
-          curl -fsS -o /dev/null -w 'root %{http_code}\n' https://bongtu-wallet.vercel.app/
-          curl -fsS https://bongtu-wallet.vercel.app/indexer/health | grep -q '"ok": *true'
+          curl -fsS -o /dev/null -w 'root %{http_code}\n' https://bongtu-wallet-orcin.vercel.app/
+          curl -fsS https://bongtu-wallet-orcin.vercel.app/indexer/health | grep -q '"ok": *true'
           echo "wallet + /indexer rewrite healthy"
