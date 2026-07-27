@@ -3,7 +3,7 @@
 //
 // Adapter pattern (the same seam discipline §6 locks for ProvingRequest in
 // proving.ts): the indexer's routes type their RESPONSE BODIES against these
-// shapes (server adapter), and admin-web / wallet-web import the client instead
+// shapes (server adapter), and payroll-web / wallet-web import the client instead
 // of hand-copied types (consumer adapters). Adding a field to /events is a
 // one-type change here that tsc propagates to the route and both apps; silent
 // wire drift becomes a type error instead of a runtime surprise.
@@ -18,7 +18,8 @@
 // exact function the indexer route checks with — closing the auth loop inside
 // one repo (test/indexerApi.test.ts).
 
-import { signNotesAuth, notesAuthMessage, packSignature } from "./eddsa.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { signNotesAuth, notesAuthMessage, viewTokenAuthMessage, packSignature } from "./eddsa.js";
 import { unpackPubkey } from "./pubkey.js";
 import type { FieldInput } from "./babyjub.js";
 
@@ -229,4 +230,143 @@ export function buildHistoryUrl(
 /** Fetch a signed /history URL (from `buildHistoryUrl`) into the owner's feed. */
 export function fetchHistory(url: string): Promise<HistoryItem[]> {
   return getJson<HistoryItem[]>(url);
+}
+
+// --- view tokens (arbiter-mode /auth) --------------------------------------------
+//
+// The persistence half of the read-auth protocol: prove key ownership ONCE over a
+// server-drawn challenge, get back an opaque expiring token, and read /notes +
+// /history with `?token=` afterwards — no private key needed for later reads. The
+// server half (challenge store, HMAC token mint/verify) lives in the indexer's
+// api/viewtoken.ts; this is the ONE client-side implementation, tested against the
+// indexer's own service in apps/indexer/test/viewtoken.test.ts.
+
+/** What POST /auth returns: the opaque token + its unix-seconds expiry. */
+export interface ViewToken {
+  token: string;
+  exp: number;
+}
+
+/** What GET /auth/challenge returns. `hostBindings` are the origin digests the
+ *  SERVER will accept (its PUBLIC_URL list — a wallet can be served from more than
+ *  one domain, e.g. the custom domain plus preview deploys). Advisory here: the
+ *  client still signs the binding it computes itself, and only uses the list to
+ *  turn a PUBLIC_URL misconfiguration into a readable error instead of a bare 401
+ *  at redemption. */
+export interface ViewChallenge {
+  challenge: string;
+  expiresAt: number;
+  hostBindings: string[];
+}
+
+/** The challenge is 31 random bytes rendered as a decimal (viewtoken.ts), i.e.
+ *  1 <= challenge < 2^248 — comfortably below the field prime. */
+const CHALLENGE_BYTES = 31;
+const CHALLENGE_MAX_EXCLUSIVE = 1n << BigInt(8 * CHALLENGE_BYTES);
+
+/**
+ * Refuse to sign anything that is not a well-formed challenge. A signature is a
+ * blank cheque over whatever preimage the server chose, so the client checks the
+ * shape ITSELF rather than trusting the server: decimal digits only, no leading
+ * zero, nonzero, and inside the 31-byte range the issuer draws from. A server
+ * that hands back an out-of-range or non-decimal "challenge" is malfunctioning or
+ * hostile — either way we stop before the key is used.
+ */
+export function assertValidChallenge(challenge: unknown): bigint {
+  if (typeof challenge !== "string" || !/^[1-9][0-9]{0,77}$/.test(challenge)) {
+    throw new Error(`indexer returned a malformed challenge (expected a positive decimal): ${JSON.stringify(challenge)}`);
+  }
+  const v = BigInt(challenge);
+  if (v >= CHALLENGE_MAX_EXCLUSIVE) {
+    throw new Error(`indexer returned an out-of-range challenge (expected < 2^${8 * CHALLENGE_BYTES})`);
+  }
+  return v;
+}
+
+/**
+ * The field element that pins a view-token signature to ONE indexer origin:
+ * the first 31 bytes of sha256(origin), as a decimal string.
+ *
+ * `origin` is scheme + host + port of the URL the caller is actually talking to
+ * (path, query and trailing slash dropped, lowercased) — so `http://host:8600`
+ * and `http://host:8600/notes` bind identically, while a different host or scheme
+ * never can. Both halves compute this from the URL THEY see: the wallet from the
+ * indexer base it dials, the indexer from PUBLIC_URL. That asymmetry is the
+ * anti-relay property (see viewTokenAuthMessage).
+ *
+ * A RELATIVE base (the wallet's default `/indexer`, a same-origin reverse proxy)
+ * resolves against the page origin — which is genuinely the origin the browser
+ * talks to, and therefore what the indexer's PUBLIC_URL must name in a proxied
+ * deployment. Outside a browser there is no page, so it resolves against
+ * localhost.
+ */
+export function viewTokenHostBinding(url: string): string {
+  const pageOrigin = (globalThis as { location?: { origin?: string } }).location?.origin;
+  const u = new URL(trim(url), pageOrigin ?? "http://localhost");
+  const digest = sha256(new TextEncoder().encode(u.origin.toLowerCase()));
+  let x = 0n;
+  for (const b of digest.slice(0, CHALLENGE_BYTES)) x = (x << 8n) | BigInt(b);
+  return x.toString();
+}
+
+/**
+ * Run the /auth handshake for an owner: GET a challenge, sign it with the SAME
+ * EdDSA-Poseidon primitive the signed queries use but over the DOMAIN-SEPARATED,
+ * HOST-BOUND tuple (viewTokenAuthMessage: Poseidon(ownerPub.x, ownerPub.y,
+ * challenge, hostBinding, VIEWTOKEN_DOMAIN_TAG)), POST the signature back, return
+ * the issued token. The private key is used transiently here and never leaves the
+ * call.
+ *
+ * `hostBinding` is computed from `indexerUrl` — the origin THIS client dialled —
+ * never from the server's advertised list, so a hostile indexer relaying a real
+ * server's challenge collects a signature the real server rejects. The advertised
+ * list is only checked for membership, to fail loudly (and before signing) on a
+ * server whose PUBLIC_URL does not match how clients reach it.
+ */
+export async function obtainViewToken(
+  indexerUrl: string,
+  ownerCompressed: string,
+  ownerPrivateKey: FieldInput,
+  fetchFn: typeof fetch = fetch,
+): Promise<ViewToken> {
+  const owner = ownerCompressed.trim();
+  const pub = unpackPubkey(owner); // validates the compressed pubkey
+  const base = trim(indexerUrl);
+  const chRes = await fetchFn(`${base}/auth/challenge?owner=${encodeURIComponent(owner)}`);
+  const chText = await chRes.text();
+  if (!chRes.ok) throw new Error(`${base}/auth/challenge -> ${chRes.status}: ${chText.slice(0, 300)}`);
+  const advertised = JSON.parse(chText) as Partial<ViewChallenge>;
+  const challengeValue = assertValidChallenge(advertised.challenge);
+  const challenge = challengeValue.toString();
+  const hostBinding = viewTokenHostBinding(indexerUrl);
+  const accepted = Array.isArray(advertised.hostBindings) ? advertised.hostBindings : [];
+  if (!accepted.includes(hostBinding)) {
+    throw new Error(
+      `${base}/auth/challenge does not accept the origin this wallet reaches it on — ` +
+        `set the indexer's PUBLIC_URL to it (need ${hostBinding}, server accepts ${JSON.stringify(accepted)})`,
+    );
+  }
+  const sig = packSignature(signNotesAuth(ownerPrivateKey, viewTokenAuthMessage(pub, challengeValue, hostBinding)));
+  const res = await fetchFn(`${base}/auth`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ owner, challenge, sig }),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`${base}/auth -> ${res.status}: ${text.slice(0, 300)}`);
+  return JSON.parse(text) as ViewToken;
+}
+
+/** The token-authenticated `GET /notes` URL (no key material involved). */
+export function buildNotesTokenUrl(indexerUrl: string, ownerCompressed: string, token: string): string {
+  const owner = ownerCompressed.trim();
+  unpackPubkey(owner); // validates the compressed pubkey
+  return `${trim(indexerUrl)}/notes?owner=${encodeURIComponent(owner)}&token=${encodeURIComponent(token)}`;
+}
+
+/** The token-authenticated `GET /history` URL — mirrors buildNotesTokenUrl. */
+export function buildHistoryTokenUrl(indexerUrl: string, ownerCompressed: string, token: string): string {
+  const owner = ownerCompressed.trim();
+  unpackPubkey(owner); // validates the compressed pubkey
+  return `${trim(indexerUrl)}/history?owner=${encodeURIComponent(owner)}&token=${encodeURIComponent(token)}`;
 }

@@ -6,6 +6,7 @@
 
 import type { ReactNode } from "react";
 import type { CircuitDownloadView } from "../hooks.js";
+import { downloadOnceSubtitle } from "../format.js";
 
 function mb(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1);
@@ -20,9 +21,9 @@ export function DownloadProgress({ view }: { view: CircuitDownloadView }): React
       role="status"
       aria-live="polite"
     >
-      <div className="flex justify-between items-baseline gap-2">
-        <span className="text-sm font-semibold">Setting up your wallet</span>
-        <span className="text-xs text-muted">one-time download</span>
+      <div className="flex flex-col gap-0.5">
+        <span className="text-sm font-semibold">Loading the privacy engine</span>
+        <span className="text-xs text-muted">{downloadOnceSubtitle(view.total)}</span>
       </div>
       <div className="h-1.5 rounded-full bg-surface-2 overflow-hidden">
         <div

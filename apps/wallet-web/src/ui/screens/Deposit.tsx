@@ -17,13 +17,12 @@ import { DEFAULTS } from "../../config.js";
 import { ensureCircuitAssets, prewarmProver } from "../../lib/prove.js";
 import { runDeposit, type DepositStage, type DepositOutcome } from "../../lib/depositFlow.js";
 import { readTokenState, walletErrorMessage } from "../../lib/metamask.js";
-import { FAUCET_AMOUNT } from "../../lib/faucet.js";
 import { useWallet } from "../App.js";
-import { navigate, useCircuitDownload, useElapsedSeconds } from "../hooks.js";
+import { useCircuitDownload, useElapsedSeconds } from "../hooks.js";
 import { formatKkrw, parseKkrw } from "../../lib/money.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
-import { SuccessMark } from "../components/SuccessMark.js";
-import { StagedProgress, type StagedStep } from "../components/StagedProgress.js";
+import { SuccessPanel } from "../components/SuccessPanel.js";
+import { StagedProgress, withUnlock, type StagedStep } from "../components/StagedProgress.js";
 import { DownloadProgress } from "../components/DownloadProgress.js";
 import { AmountInput, Button, ErrorBanner, Field, LinkButton, TestnetTag } from "../components/controls.js";
 import { MintModal } from "../components/MintModal.js";
@@ -47,11 +46,14 @@ function amountError(raw: string, balance: bigint | null): string | null {
 }
 
 export function Deposit(): ReactNode {
-  const { identity, connection, refresh } = useWallet();
+  const { session, connection, wallet, refreshAfterAction, syncing } = useWallet();
 
   const [amount, setAmount] = useState("");
   const [phase, setPhase] = useState<Phase>("form");
   const [stage, setStage] = useState<DepositStage>("approve");
+  // Whether THIS run needs the unlock signature — the flow tells us by reporting
+  // "unlock" first, and the step list grows a step to match.
+  const [unlocking, setUnlocking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<DepositOutcome | null>(null);
   const [tokenBalance, setTokenBalance] = useState<bigint | null>(null);
@@ -103,18 +105,27 @@ export function Deposit(): ReactNode {
   const willApprove = allowance === null || amountWei <= 0n || allowance < amountWei;
 
   async function submit(): Promise<void> {
-    if (!identity || !connection) return;
+    if (!connection || !session) return;
     setPhase("running");
     setError(null);
+    setUnlocking(false);
     try {
+      // The spending key comes from the wallet's lock INSIDE runDeposit — this
+      // component never holds it. The session pubkey rides along so the flow can
+      // refuse a key that isn't this session's.
       const res = await runDeposit(
-        { identity, connection },
+        { connection, sessionPubkey: session.compressedPubkey },
         { amount: amountWei.toString() },
-        (s) => setStage(s),
+        (s) => {
+          if (s === "unlock") setUnlocking(true);
+          setStage(s);
+        },
       );
       setOutcome(res);
       setPhase("done");
-      void refresh();
+      // Poll until the indexer reflects this tx (not fire-and-forget: one refresh
+      // here would usually read the pre-action state).
+      void refreshAfterAction(res.txHash);
     } catch (e) {
       setError(walletErrorMessage(e));
       setPhase("form");
@@ -124,28 +135,13 @@ export function Deposit(): ReactNode {
   // --- success ---------------------------------------------------------------
   if (phase === "done" && outcome) {
     return (
-      <div className="flex flex-col gap-4.5 px-4.5 pt-4.5 pb-6.5">
-        <ScreenHeader title="Deposit" />
-        <div className="flex flex-col items-center gap-2.5 text-center pt-4.5">
-          <SuccessMark />
-          <h2 className="mt-1.5 text-xl font-bold">Deposit complete</h2>
-          <p className="text-[1.8rem] [font-weight:750] my-0.5 tabular-nums">
-            {review} <span className="text-[0.62em] font-semibold text-muted ml-1">kKRW</span>
-          </p>
-          <a
-            className="text-primary no-underline text-[0.9rem] font-semibold"
-            href={outcome.explorerUrl}
-            target="_blank"
-            rel="noreferrer"
-          >
-            View on explorer
-          </a>
-          <p className="text-muted text-[0.82rem] mt-0.5 mb-2.5">Now in your private balance.</p>
-          <Button variant="primary" block className="mt-2" onClick={() => navigate("home")}>
-            Done
-          </Button>
-        </div>
-      </div>
+      <SuccessPanel
+        title="Deposit"
+        headline="Deposit completed"
+        amount={review}
+        explorerUrl={outcome.explorerUrl}
+        syncing={syncing}
+      />
     );
   }
 
@@ -158,7 +154,12 @@ export function Deposit(): ReactNode {
           <div className="text-center text-[1.9rem] [font-weight:750] py-2 tabular-nums">
             {review} <span className="text-[0.62em] font-semibold text-muted ml-1">kKRW</span>
           </div>
-          <StagedProgress stage={stage} elapsed={elapsed} steps={DEPOSIT_STEPS} />
+          <StagedProgress
+            stage={stage}
+            elapsed={elapsed}
+            steps={unlocking ? withUnlock(DEPOSIT_STEPS) : DEPOSIT_STEPS}
+            walletName={wallet.name}
+          />
         </div>
       </div>
     );
@@ -185,12 +186,12 @@ export function Deposit(): ReactNode {
               GIWA · chain {DEFAULTS.chainId}
             </dd>
           </dl>
-          <p className="text-sm text-muted">
-            Everything happens on your device — your keys never leave it.{" "}
-            {willApprove
-              ? "This needs two transactions: first approve the pool to pull this amount, then shield it."
-              : ""}
-          </p>
+          {willApprove && (
+            <p className="text-sm text-muted">
+              This needs two transactions: first approve the pool to pull this amount, then
+              shield it.
+            </p>
+          )}
           <DownloadProgress view={download} />
           <div className="flex gap-2.5">
             <Button variant="ghost" className="flex-1" onClick={() => setPhase("form")}>
@@ -202,7 +203,7 @@ export function Deposit(): ReactNode {
               disabled={download.active}
               onClick={submit}
             >
-              {download.active ? "Setting up…" : "Confirm"}
+              {download.active ? "Preparing…" : "Confirm"}
             </Button>
           </div>
         </div>
@@ -251,9 +252,10 @@ export function Deposit(): ReactNode {
                     <TestnetTag />
                     <span className="text-[0.9rem] font-semibold">First, get test kKRW</span>
                   </div>
+                  {/* No amount here: the mint dialog's amount is freeform, and the
+                      prefill is a starting point, not an offer. */}
                   <p className="text-sm text-muted">
-                    Mint {formatKkrw(FAUCET_AMOUNT)} free test kKRW (you pay only gas), then
-                    deposit it here.
+                    Mint free test kKRW (you pay only gas), then deposit it here.
                   </p>
                   <Button variant="primary" block disabled={!connection} onClick={() => setMintOpen(true)}>
                     Get Test kKRW
@@ -297,7 +299,7 @@ export function Deposit(): ReactNode {
                   setPhase("confirm");
                 }}
               >
-                Review
+                Continue
               </Button>
             )}
           </>

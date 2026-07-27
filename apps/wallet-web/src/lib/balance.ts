@@ -1,10 +1,11 @@
 // Balance: sum the wallet's UNSPENT notes (SPEC §7 public app). ONE path:
-// signed `GET /notes` against an arbiter-mode indexer. The arbiter has already
-// decrypted every op's authority envelope into a per-owner note directory with a
-// `spent` flag; the wallet proves control of its key (EdDSA-Poseidon read-auth)
-// and reads its own row. O(own notes). Balance requires that indexer to be
-// reachable — there is no fallback (decision 2026-07-25, architecture-review #17b:
-// the product scenario depends on the indexer).
+// `GET /notes` against an arbiter-mode indexer (view-token auth in the app —
+// App.tsx builds the URLs; the one-shot key-signed form covers indexers without
+// /auth at connect time). The arbiter has already decrypted every op's authority
+// envelope into a per-owner note directory with a `spent` flag; the wallet reads
+// its own row. O(own notes). Balance requires that indexer to be reachable —
+// there is no fallback (decision 2026-07-25, architecture-review #17b: the
+// product scenario depends on the indexer).
 //
 // `trialDecryptEvents` + `sumUnspent` below are NOT called by any wallet balance
 // path. They remain here as the tested discovery primitive for the SPEC §7/§11-7
@@ -23,12 +24,7 @@ import {
   ecdhSharedSecret,
 } from "@bongtu/core/note";
 import type { WalletIdentity } from "./derive.js";
-import {
-  buildNotesUrl,
-  fetchNotes,
-  type OwnerNote,
-  type FeedEvent,
-} from "./indexerClient.js";
+import { type FeedEvent } from "./indexerClient.js";
 
 /** Anything with a decimal value and a spent flag sums the same way. */
 export interface UnspentSummable {
@@ -125,17 +121,3 @@ export function trialDecryptEvents(
   return found;
 }
 
-// --- network orchestration (thin; the pure cores above carry the logic) ----------
-
-export interface BalanceResult {
-  balance: bigint;
-  notes: OwnerNote[];
-  source: "notes";
-}
-
-/** The wallet's balance path: signed /notes against an arbiter-mode indexer. */
-export async function balanceViaNotes(indexerUrl: string, identity: WalletIdentity): Promise<BalanceResult> {
-  const url = buildNotesUrl(indexerUrl, identity.compressedPubkey, identity.keypair.formattedPrivateKey);
-  const notes = await fetchNotes(url);
-  return { balance: sumUnspent(notes), notes, source: "notes" };
-}

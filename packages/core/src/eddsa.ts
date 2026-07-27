@@ -54,6 +54,41 @@ export function notesAuthMessage(ownerPub: PointInput, timestamp: FieldInput): b
   return poseidonN([BigInt(ownerPub[0]), BigInt(ownerPub[1]), BigInt(timestamp)]);
 }
 
+/**
+ * Domain tag mixed into every VIEW-TOKEN challenge signature — a distinct nonzero
+ * constant (ascii "bongtu/viewtoken/v1" read as a big-endian integer, 19 bytes, so
+ * comfortably in-field). Its job is domain separation: without it the challenge
+ * signature is shape-identical to a `notesAuthMessage(pub, ts)` signature, so a
+ * legacy signed-query signature captured off the wire could be redeemed at POST
+ * /auth for a 24h token (and vice versa). With the tag AND the wider arity, the two
+ * preimages can never collide, so neither message type verifies as the other.
+ */
+export const VIEWTOKEN_DOMAIN_TAG = 0x626f6e6774752f76696577746f6b656e2f7631n;
+
+/**
+ * The field element a POST /auth challenge redemption signs:
+ *   Poseidon(ownerPub.x, ownerPub.y, challenge, hostBinding, VIEWTOKEN_DOMAIN_TAG).
+ *
+ * `hostBinding` is a field-sized digest of the indexer origin the signer is
+ * ACTUALLY talking to (`viewTokenHostBinding` in indexerApi.ts). Binding it stops
+ * challenge relay: a hostile indexer can proxy a live server's challenge, but the
+ * victim signs the HOSTILE origin's binding, and the real server verifies against
+ * its OWN binding — so the relayed signature never redeems.
+ */
+export function viewTokenAuthMessage(
+  ownerPub: PointInput,
+  challenge: FieldInput,
+  hostBinding: FieldInput,
+): bigint {
+  return poseidonN([
+    BigInt(ownerPub[0]),
+    BigInt(ownerPub[1]),
+    BigInt(challenge),
+    BigInt(hostBinding),
+    VIEWTOKEN_DOMAIN_TAG,
+  ]);
+}
+
 /** Sign a field-element message with a BabyJubJub private scalar. Deterministic. */
 export function signNotesAuth(privateKey: FieldInput, msg: FieldInput): Signature {
   const s = BigInt(privateKey);

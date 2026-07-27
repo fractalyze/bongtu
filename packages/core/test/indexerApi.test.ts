@@ -11,8 +11,20 @@ import assert from "node:assert/strict";
 
 import { deriveKeypair } from "../src/note.js";
 import { packPubkey, unpackPubkey } from "../src/pubkey.js";
-import { notesAuthMessage, parseSignature, signNotesAuth, verifyNotesAuth, packSignature } from "../src/eddsa.js";
-import { buildNotesUrl, buildHistoryUrl } from "../src/indexerApi.js";
+import {
+  notesAuthMessage,
+  viewTokenAuthMessage,
+  parseSignature,
+  signNotesAuth,
+  verifyNotesAuth,
+  packSignature,
+} from "../src/eddsa.js";
+import {
+  buildNotesUrl,
+  buildHistoryUrl,
+  assertValidChallenge,
+  viewTokenHostBinding,
+} from "../src/indexerApi.js";
 
 const OWNER_SCALAR = 424242424242424242424242n;
 
@@ -111,4 +123,47 @@ test("buildHistoryUrl signs the SAME (pub, ts) message as buildNotesUrl (only th
 
 test("buildHistoryUrl rejects a malformed compressed owner pubkey (client-side 400 guard)", () => {
   assert.throws(() => buildHistoryUrl("http://localhost:8600", "0x1234", 1n));
+});
+
+// --- view-token binding primitives (the client half of POST /auth) ---------------
+
+test("viewTokenHostBinding canonicalises to the ORIGIN, in-field", () => {
+  const base = viewTokenHostBinding("https://Wallet.Example:443/indexer/");
+  // scheme+host+port only: path, trailing slash, case and the default port all drop
+  // out, so one deployment cannot disagree with itself over cosmetic URL spellings.
+  assert.equal(base, viewTokenHostBinding("https://wallet.example"));
+  assert.equal(base, viewTokenHostBinding("https://wallet.example/notes?owner=x"));
+  // …while anything an attacker could control does change it.
+  assert.notEqual(base, viewTokenHostBinding("http://wallet.example"));
+  assert.notEqual(base, viewTokenHostBinding("https://wallet.example:8443"));
+  assert.notEqual(base, viewTokenHostBinding("https://evil.example"));
+  // the digest is a decimal field element the Poseidon tuple can consume.
+  assert.match(base, /^[1-9][0-9]*$/);
+  assert.ok(BigInt(base) < 1n << 248n);
+});
+
+test("assertValidChallenge refuses anything the issuer would not have drawn", () => {
+  assert.equal(assertValidChallenge("12345"), 12345n);
+  const max = (1n << 248n) - 1n;
+  assert.equal(assertValidChallenge(max.toString()), max);
+  for (const bad of ["", "0", "007", "-1", "1.5", "0xff", "12ab", " 12", "1" + "0".repeat(80), null, 12345]) {
+    assert.throws(() => assertValidChallenge(bad), /challenge/, `accepted ${JSON.stringify(bad)}`);
+  }
+  assert.throws(() => assertValidChallenge((1n << 248n).toString()), /out-of-range/);
+});
+
+test("viewTokenAuthMessage is separated from notesAuthMessage by tag AND arity", () => {
+  const kp = deriveKeypair(OWNER_SCALAR);
+  const binding = viewTokenHostBinding("https://wallet.example");
+  const challenge = 987654321n;
+  const viewMsg = viewTokenAuthMessage(kp.publicKey, challenge, binding);
+  // Same (pub, challenge) under the legacy construction must hash elsewhere, or a
+  // scraped /notes signature would redeem for a 24h token.
+  assert.notEqual(viewMsg, notesAuthMessage(kp.publicKey, challenge));
+  // …and the binding is load-bearing: a different origin is a different message.
+  assert.notEqual(viewMsg, viewTokenAuthMessage(kp.publicKey, challenge, viewTokenHostBinding("https://evil.example")));
+  // A signature over one never verifies against the other.
+  const sig = signNotesAuth(kp.formattedPrivateKey, viewMsg);
+  assert.ok(verifyNotesAuth(kp.publicKey, viewMsg, sig));
+  assert.ok(!verifyNotesAuth(kp.publicKey, notesAuthMessage(kp.publicKey, challenge), sig));
 });

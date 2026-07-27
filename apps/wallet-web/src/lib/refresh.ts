@@ -1,0 +1,136 @@
+// Refresh policy + post-action refresh.
+//
+// Post-action refresh: after a deposit/transfer/withdraw confirms on-chain, the
+// arbiter indexer still has to POLL the chain before /notes and /history reflect
+// it (its tail poll is seconds behind the tx receipt). A single fire-and-forget
+// refresh() at that moment usually reads the PRE-action state and leaves the user
+// staring at a stale balance — so instead we poll until the action is visibly
+// reflected (bounded), then hand the fresh snapshot to the UI.
+//
+// Pure core + injected sleep/load so the loop is unit-tested in milliseconds
+// (test/refresh.test.ts); App.tsx wires the real token-authed fetches.
+
+import type { OwnerNote, HistoryItem } from "./indexerClient.js";
+
+/** One consistent read of the owner's indexer state. */
+export interface OwnerSnapshot {
+  notes: OwnerNote[];
+  history: HistoryItem[];
+}
+
+// --- refresh policy (what a refresh may do, and what a failed read means) ---------
+
+/** What the app is allowed to do for a refresh right now. */
+export type RefreshPlan =
+  /** the session holds a view token: issue the token-authed reads. */
+  | { kind: "read" }
+  /** no token to read with: keep whatever is on screen and say so. */
+  | { kind: "notice"; message: string };
+
+export const RECONNECT_NOTICE = "Reconnect to refresh your balance.";
+
+/**
+ * A tokenless session (the indexer had no /auth, so connect fell back to a
+ * one-shot key-signed load) has NOTHING to authenticate a later read with. Issuing
+ * one anyway returns 400/401 and the error path would wipe the balance the fallback
+ * just loaded — turning a working screen into an indexer-error screen on the first
+ * auto-refresh. So a tokenless refresh does not fetch at all.
+ */
+export function refreshPlan(session: { token: string } | null): RefreshPlan {
+  if (!session || session.token === "") return { kind: "notice", message: RECONNECT_NOTICE };
+  return { kind: "read" };
+}
+
+/** Why a token-authed read failed, and therefore what the app should do. */
+export type ReadFailure =
+  /** the token is dead (rotated secret / early expiry): log out, back to onboarding. */
+  | { kind: "expired"; message: string }
+  /** anything else: keep the session, show a retryable error. */
+  | { kind: "error"; message: string };
+
+export const EXPIRED_MESSAGE = "Your login expired — please reconnect.";
+
+/**
+ * Classify a failed owner read. Only a 401 is conclusive: the token path is the
+ * only auth these reads use, so the server rejecting it means the token is no
+ * longer valid — the app must return to onboarding rather than show a retry button
+ * that can only fail again. A 404/403 is the wrong-indexer case (a public-mode
+ * instance has no /notes at all) and anything else is a transport failure.
+ */
+export function classifyReadFailure(err: unknown, indexerUrl: string): ReadFailure {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/->\s*401/.test(msg)) return { kind: "expired", message: EXPIRED_MESSAGE };
+  if (/->\s*(404|403)/.test(msg)) {
+    return { kind: "error", message: "Can't load your balance right now. Check the indexer connection and retry." };
+  }
+  return {
+    kind: "error",
+    message: `Couldn't reach the indexer at ${indexerUrl}. Check it's running and the URL in Settings. (${msg})`,
+  };
+}
+
+/**
+ * Whether `cur` shows the action that produced `txHash`, relative to the
+ * pre-action `pre`. PURE. Three sufficient signals, any one accepts:
+ *   - the tx itself appears in the history feed (the precise signal — every op
+ *     kind lands a history item for its owner);
+ *   - the history feed grew past its pre-action length (covers a feed that
+ *     surfaces the op under a different hash, e.g. a multicall wrapper);
+ *   - the note set changed (a note created, spent, or removed) — the balance
+ *     consequence of the action, even if history lags.
+ */
+export function actionReflected(pre: OwnerSnapshot, cur: OwnerSnapshot, txHash: string): boolean {
+  const wanted = txHash.toLowerCase();
+  if (cur.history.some((h) => h.txHash.toLowerCase() === wanted)) return true;
+  if (cur.history.length > pre.history.length) return true;
+  if (cur.notes.length !== pre.notes.length) return true;
+  const preKeys = new Set(pre.notes.map((n) => `${n.commitment}:${n.spent}`));
+  return cur.notes.some((n) => !preKeys.has(`${n.commitment}:${n.spent}`));
+}
+
+export interface PollForActionOptions {
+  /** between polls (task-fixed 2–4s band; default 3s). */
+  intervalMs?: number;
+  /** total budget; polling stops after this even if never reflected (default 30s). */
+  capMs?: number;
+  /** injectable for tests (defaults to a real setTimeout sleep). */
+  sleep?: (ms: number) => Promise<void>;
+}
+
+export interface PollForActionResult {
+  /** true when a snapshot showed the action inside the budget. */
+  landed: boolean;
+  /** the freshest successful snapshot (null when every poll errored). */
+  last: OwnerSnapshot | null;
+}
+
+const realSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Poll `load` until `actionReflected(pre, snapshot, txHash)` or the cap runs out.
+ * A failing load (indexer hiccup) is skipped, not fatal — the next tick retries.
+ * Always returns the last good snapshot so the caller can render SOMETHING fresh
+ * even on a cap-out (the action may just be slow to index).
+ */
+export async function pollForAction(
+  load: () => Promise<OwnerSnapshot>,
+  pre: OwnerSnapshot,
+  txHash: string,
+  opts: PollForActionOptions = {},
+): Promise<PollForActionResult> {
+  const intervalMs = opts.intervalMs ?? 3000;
+  const capMs = opts.capMs ?? 30000;
+  const sleep = opts.sleep ?? realSleep;
+  let last: OwnerSnapshot | null = null;
+  for (let elapsed = 0; elapsed < capMs; elapsed += intervalMs) {
+    await sleep(intervalMs);
+    try {
+      const cur = await load();
+      last = cur;
+      if (actionReflected(pre, cur, txHash)) return { landed: true, last };
+    } catch {
+      // transient indexer failure — keep polling until the cap
+    }
+  }
+  return { landed: false, last };
+}

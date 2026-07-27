@@ -31,15 +31,27 @@ response bodies against them.
 | `GET /nullifiers` | `string[]` — the spent-nullifier set from events (public, key-free) |
 | `GET /health` | `{ ok, lastBlock, nextLeafIndex, batchSize, alarms, lastSuccessAt, lastError, lastErrorAt, consecutiveFailures }` — `ok` is false when the tail poll is persistently failing |
 | `GET /notes?owner=&ts=&sig=` | **arbiter mode only** (the route does not exist otherwise → 404): one owner's decrypted notes `[{ value, salt, leafIndex, commitment, txHash, spent }]` |
-| `GET /history?owner=&ts=&sig=` | **arbiter mode only** (else 404): one owner's activity feed `[{ kind, counterparty, amount, txHash, blockTimestamp, seq }]`, newest-first. `kind` ∈ `received`/`sent`/`withdraw`/`deposit`/`self` (`self` = a pure self-send transfer — every nonzero output back to the sender — listed once, no counterparty); `counterparty` is a compressed pubkey (or null); derived from the same decrypted envelopes as `/notes` — same bjj read-auth |
+| `GET /history?owner=&ts=&sig=` | **arbiter mode only** (else 404): one owner's activity feed `[{ kind, counterparty, amount, txHash, blockTimestamp, seq }]`, newest-first. `kind` ∈ `received`/`sent`/`withdraw`/`deposit`/`self` — a pure self-send (every nonzero output back to the sender) emits a `sent` **and** a `received` row, both counterpartied to the sender's own key; `self` is read-only legacy, still served for rows stored before that pair landed. `counterparty` is a compressed pubkey (or null); derived from the same decrypted envelopes as `/notes` — same bjj read-auth |
+| `GET /auth/challenge?owner=` | **arbiter mode only**: `{ challenge, expiresAt }` — a single-use random field element (~2 min TTL) the owner signs to obtain a view token |
+| `POST /auth` `{owner, challenge, sig}` | **arbiter mode only**: `{ token, exp }` — an opaque HMAC view token (~24 h) after the signed challenge verifies; any failure is one undifferentiated 401 |
 
-`/notes` and `/history` share the same enforced read-auth: `owner` is the
-compressed bjj pubkey (`@bongtu/core/pubkey`), `sig` a bjj EdDSA-Poseidon signature
-over `Poseidon(ownerPub.x, ownerPub.y, ts)` checked against the queried key
-(`@bongtu/core/eddsa`), and `|now − ts| ≤ 300s` bounds replay. Malformed owner → 400;
-missing ts/sig → 400; wrong key or expired ts → 401. `buildNotesUrl` /
-`buildHistoryUrl` (`@bongtu/core/indexerApi`) are the one client-side implementation,
-headless-tested against the same verifier the routes use.
+`/notes` and `/history` share the same enforced read-auth, with TWO accepted
+proofs: (a) the signed query — `owner` is the compressed bjj pubkey
+(`@bongtu/core/pubkey`), `sig` a bjj EdDSA-Poseidon signature over
+`Poseidon(ownerPub.x, ownerPub.y, ts)` checked against the queried key
+(`@bongtu/core/eddsa`), and `|now − ts| ≤ 300s` bounds replay — or (b) a `token=`
+view token from `POST /auth` (same signature primitive, but over the
+domain-separated host-bound tuple `Poseidon(ownerPub.x, ownerPub.y, challenge,
+hostBinding, VIEWTOKEN_DOMAIN_TAG)` — so a `/notes` query signature can never be
+redeemed for a token, and a challenge relayed by a hostile indexer is signed
+against ITS origin and rejected here; minted as `HMAC(TOKEN_SECRET, owner‖exp)`,
+see `src/api/viewtoken.ts` and `PUBLIC_URL` below), which lets a wallet read
+WITHOUT re-holding its key. Tokens are view-only by
+construction — nothing else accepts them. Malformed owner → 400; no token and
+missing ts/sig → 400; wrong key, bad/expired token, or expired ts → 401.
+`buildNotesUrl` / `buildHistoryUrl` / `obtainViewToken` / `buildNotesTokenUrl` /
+`buildHistoryTokenUrl` (`@bongtu/core/indexerApi`) are the one client-side
+implementation, headless-tested against the same verifier the routes use.
 
 Routing is a plain ordered table (`src/api/router.ts`): each route is a pure function
 of the indexer + parsed params returning `{status, body}`; arbiter mode composes the
@@ -102,6 +114,8 @@ Env knobs (`src/index.ts`):
 | `PORT` | `8600` | HTTP port |
 | `POLL_MS` | `5000` | incremental re-ingest interval (`0` = off) |
 | `AUTHORITY_KEY` | unset | arbiter bjj private key → arbiter mode |
+| `TOKEN_SECRET` | generated per boot | HMAC secret for `/auth` view tokens (arbiter mode). When generated, boot warns that issued tokens reset on restart — set it to keep wallet logins across restarts |
+| `PUBLIC_URL` | loopback listen address | comma-separated origin(s) clients reach this indexer on. `/auth` signatures are bound to one of them, so **a wallet served through the same-origin `/indexer` proxy must list the WALLET's origin(s)**, not the indexer's (`https://bongtu.fractalyze.io,https://…vercel.app`). A wrong value is not fatal but silently drops every login to the tokenless path (balance loads once, then cannot refresh); boot prints what was resolved |
 | `DATABASE_URL` | **required** | Postgres connection string (persist + boot-resume). Unset → the service refuses to boot |
 | `LOG_CHUNK` | `50000` | getLogs chunk size in blocks — the one read-side tuning knob (auto-bisects on RPC range caps; `10000` suits rate-capped public RPC tail scanning) |
 

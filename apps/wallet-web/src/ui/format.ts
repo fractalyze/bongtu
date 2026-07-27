@@ -26,6 +26,18 @@ export function relativeTime(unixSeconds: number): string {
 }
 
 /**
+ * The download card's subtitle: sized from the REAL asset total when known
+ * (config.CIRCUIT_ASSET_BYTES via the live download view — the per-circuit
+ * bundles differ, so no hardcoded number), size-free while the total is still
+ * unknown (first render before the byte counts arrive).
+ */
+export function downloadOnceSubtitle(totalBytes: number | null): string {
+  const base = "Runs on your device — downloads once";
+  if (totalBytes === null || totalBytes <= 0) return base;
+  return `${base} (${Math.round(totalBytes / (1024 * 1024))} MB)`;
+}
+
+/**
  * Reject an obviously-bad recipient before proving (the pure spend.ts rejects it
  * too, but a 28 MB proof is a bad place to learn you fat-fingered a key).
  * decodeAddress is the one normalization point — it accepts base58check AND

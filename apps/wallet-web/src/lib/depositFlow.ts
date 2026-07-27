@@ -11,20 +11,24 @@
 // permissionless deposit tx).
 
 import { DEFAULTS } from "../config.js";
-import type { WalletIdentity } from "./derive.js";
 import type { Connection } from "./metamask.js";
-import { approveToken, assertPoolKemEpoch, readTokenState, submitDeposit } from "./metamask.js";
+import { approveToken, assertPoolKemEpoch, ensureChain, readTokenState, submitDeposit } from "./metamask.js";
+import { keyCache, type KeyCache } from "./keyCache.js";
 import { assertDepositAffordable, buildDepositRequest, freshDepositCrypto } from "./deposit.js";
 import { proveInBrowser } from "./prove.js";
 import { randField } from "./spendFlow.js";
 
-/** The three coarse stages a deposit passes through. "approve" is SKIPPED (no tx) when
- *  the pool allowance already covers V; "prove" is the multi-second in-browser proof. */
-export type DepositStage = "approve" | "prove" | "submit";
+/** The coarse stages a deposit passes through. "unlock" is the signature that hands
+ *  over the spending key and fires ONLY when the wallet is locked; "approve" is
+ *  SKIPPED (no tx) when the pool allowance already covers V; "prove" is the
+ *  multi-second in-browser proof. */
+export type DepositStage = "unlock" | "approve" | "prove" | "submit";
 
 export interface DepositContext {
-  identity: WalletIdentity;
   connection: Connection;
+  /** the logged-in session's compressed bjj pubkey — what the just-in-time
+   *  derivation must reproduce before any kKRW is shielded. */
+  sessionPubkey: string;
 }
 
 export interface DepositOutcome {
@@ -43,6 +47,9 @@ export interface RunDepositDeps {
   readTokenState: typeof readTokenState;
   approveToken: typeof approveToken;
   assertPoolKemEpoch: typeof assertPoolKemEpoch;
+  ensureChain: typeof ensureChain;
+  /** the wallet's lock — holds the spending key between actions (keyCache.ts). */
+  keyCache: KeyCache;
   proveInBrowser: typeof proveInBrowser;
   submitDeposit: typeof submitDeposit;
 }
@@ -50,22 +57,28 @@ const DEFAULT_DEPS: RunDepositDeps = {
   readTokenState,
   approveToken,
   assertPoolKemEpoch,
+  ensureChain,
+  keyCache,
   proveInBrowser,
   submitDeposit,
 };
 
 /**
  * Approve (if needed) → assemble the deposit witness → prove in-browser → submit the
- * permissionless deposit via MetaMask. `onStage` fires as each coarse stage begins. The
+ * permissionless deposit through the connected wallet. `onStage` fires as each coarse
+ * stage begins. The
  * approve stage submits an exact-V approve ONLY when the current pool allowance is below
  * V; otherwise it is a no-op tx-wise (the stage still fires so the UI shows it advancing).
  *
- * Before approving it rejects a deposit that exceeds the depositor's public kKRW balance
- * (assertDepositAffordable), so a doomed deposit fails fast instead of wasting an approve
- * tx + a multi-second proof on a safeTransferFrom that would revert.
+ * Guards run cheapest-first, all of them before the approve tx: the pool's KEM epoch
+ * (a view call), the depositor's public kKRW balance (assertDepositAffordable — a
+ * doomed deposit must not waste an approve tx and a multi-second proof on a
+ * safeTransferFrom that would revert), then the unlock, whose session-account check
+ * refuses a key that isn't this session's.
  *
  * Throws the same distinct errors the pure lib raises (non-positive amount, insufficient
- * balance) plus any MetaMask / RPC failure for the UI to show.
+ * balance) plus any wallet / RPC failure, because the UI shows the thrown message
+ * verbatim rather than mapping error codes of its own.
  */
 export async function runDeposit(
   ctx: DepositContext,
@@ -78,7 +91,17 @@ export async function runDeposit(
   const V = BigInt(amount);
   if (V <= 0n) throw new Error(`deposit amount must be positive, got ${V}`);
 
-  onStage("approve");
+  // Announce the signature stage up front when the wallet is locked, so the progress
+  // list never has to step backwards into a popup it didn't predict.
+  const locked = !io.keyCache.isUnlocked();
+  onStage(locked ? "unlock" : "approve");
+  // A silently-restored session may still sit on another chain — align it before
+  // the token reads and every tx below (silent when GIWA is already selected).
+  await io.ensureChain(ctx.connection);
+  // Verify the pool's arbiter KEM key hash FIRST: a pre-KEM or foreign-keyed pool
+  // can never accept this build's proof, so nothing below — not the approve tx, not
+  // the signature popup, not the multi-second proof — is worth spending on it.
+  await io.assertPoolKemEpoch(ctx.connection, DEFAULTS.pool);
   const { balance, allowance } = await io.readTokenState(
     ctx.connection,
     DEFAULTS.token,
@@ -88,6 +111,12 @@ export async function runDeposit(
   // Fail BEFORE the approve tx + proof if the public balance can't cover V (the pool's
   // safeTransferFrom would revert on-chain anyway).
   assertDepositAffordable(V, balance);
+  // The spending key comes from the in-memory lock: one signature the first time,
+  // reused after that (keyCache.ts). It resolves BEFORE the approve tx so that a
+  // mid-session account switch costs the user nothing — minting into a stranger's
+  // key must never be preceded by an approve the user paid gas for.
+  const identity = await io.keyCache.unlock(ctx.connection, ctx.sessionPubkey);
+  if (locked) onStage("approve");
   let approved = false;
   if (allowance < V) {
     await io.approveToken(ctx.connection, DEFAULTS.token, DEFAULTS.pool, V);
@@ -95,13 +124,8 @@ export async function runDeposit(
   }
 
   onStage("prove");
-  // Verify the pool's arbiter KEM key hash BEFORE encapsulating/proving: a
-  // pre-KEM or foreign-keyed pool fails here with a readable error instead of
-  // wasting the multi-second proof on a tx that reverts (or worse, shipping an
-  // envelope the arbiter cannot decapsulate).
-  await io.assertPoolKemEpoch(ctx.connection, DEFAULTS.pool);
   const crypto = freshDepositCrypto(randField);
-  const built = buildDepositRequest(ctx.identity, amount, crypto);
+  const built = buildDepositRequest(identity, amount, crypto);
   const calldata = await io.proveInBrowser(built.request, DEFAULTS.circuitBaseUrl);
 
   onStage("submit");

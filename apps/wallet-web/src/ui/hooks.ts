@@ -1,8 +1,11 @@
 // Tiny view hooks: hash-based routing (no router lib — the brief locks a single SPA),
 // an elapsed-seconds counter for the proving stage, and copy-with-feedback.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { copyText } from "../lib/clipboard.js";
+import { isWalletUnlocked, subscribeLock } from "../lib/keyCache.js";
+import { announcedWallet, subscribeWallets, walletDiscoveryVersion } from "../lib/eip6963.js";
+import { describeWallet, type WalletDescription } from "../lib/walletBrand.js";
 import { subscribeCircuitDownload, type CircuitDownloadState } from "../lib/prove.js";
 
 export type Route = "home" | "receive" | "send" | "withdraw" | "deposit" | "activity" | "settings";
@@ -28,6 +31,29 @@ export function useHashRoute(): Route {
 /** Navigate to a screen (updates the hash; the hook above reacts). */
 export function navigate(route: Route): void {
   window.location.hash = route === "home" ? "#/" : `#/${route}`;
+}
+
+/** Whether the wallet is holding the spending key (keyCache.ts). Repaints on every
+ *  unlock and every drop — including the idle wipe, whose timer notifies as it
+ *  fires, so the header flips to Locked at that moment rather than at next use. */
+export function useWalletUnlocked(): boolean {
+  // Server snapshot: a wallet that has not run yet is locked.
+  return useSyncExternalStore(subscribeLock, isWalletUnlocked, () => false);
+}
+
+/**
+ * Which wallet the user is on — brand, display name and icon for `injected` (the raw
+ * EIP-1193 object). Re-renders when a late EIP-6963 announcement arrives, so a name
+ * that lands after first paint still reaches the copy that interpolates it.
+ */
+export function useWalletDescription(injected: unknown): WalletDescription {
+  const discovered = useSyncExternalStore(subscribeWallets, walletDiscoveryVersion, () => 0);
+  return useMemo(
+    () => describeWallet(injected, announcedWallet(injected)),
+    // `discovered` is the announcement counter: not read here, but a new
+    // announcement is exactly when this description can change.
+    [injected, discovered],
+  );
 }
 
 /** Seconds since `active` became true; resets to 0 when inactive. Drives the

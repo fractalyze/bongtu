@@ -93,6 +93,16 @@ function defaultCacheStorage(): CacheStorageLike {
   return cs;
 }
 
+// The no-cache fallback: never hits, swallows puts. Downloads still work — the
+// banner just returns on the next visit instead of never. Used when Cache Storage
+// is unavailable (non-secure context, hard privacy mode) or refuses writes
+// (QuotaExceededError on a full device) — caching is an optimisation, not a
+// requirement, so neither may break proving.
+const NOOP_CACHE: CacheLike = {
+  match: () => Promise.resolve(undefined),
+  put: () => Promise.resolve(),
+};
+
 /**
  * Delete every stale `bongtu-circuits-*` bucket, keeping only `version`'s. Returns
  * the deleted names. Safe to call before every prefetch (a no-op once warm).
@@ -121,7 +131,12 @@ async function cachedFetch(
   const doFetch = deps.fetchFn ?? fetch;
   const res = await doFetch(url);
   if (!res.ok) throw new Error(`asset ${url} -> ${res.status} (is the circuit wasm/zkey served at ${new URL(url, "http://x").pathname}?)`);
-  await cache.put(url, res.clone());
+  try {
+    await cache.put(url, res.clone());
+  } catch {
+    // QuotaExceededError (or any storage refusal): keep going without the cache —
+    // this download still succeeds; the next visit just re-downloads.
+  }
   if (!deps.onProgress || !res.body) return res.arrayBuffer();
 
   // The pinned decoded size wins over Content-Length: the CDN's header is
@@ -161,15 +176,21 @@ export async function prefetchCircuitAssets(
   version: string = CIRCUITS_VERSION,
   deps: PrefetchDeps = {},
 ): Promise<CircuitAssets> {
-  const cs = deps.cacheStorage ?? defaultCacheStorage();
-  const depsWithCs: PrefetchDeps = { ...deps, cacheStorage: cs };
-  await evictStaleCaches(version, depsWithCs);
-  const cache = await cs.open(cacheNameFor(version));
+  // Any Cache Storage failure at setup (API absent, open refused) degrades to the
+  // no-cache path instead of blocking proving.
+  let cache: CacheLike = NOOP_CACHE;
+  try {
+    const cs = deps.cacheStorage ?? defaultCacheStorage();
+    await evictStaleCaches(version, { ...deps, cacheStorage: cs });
+    cache = await cs.open(cacheNameFor(version));
+  } catch {
+    cache = NOOP_CACHE;
+  }
   const base = circuitBaseUrl.replace(/\/$/, "");
   const expected = CIRCUIT_ASSET_BYTES[circuit];
   const [wasm, zkey] = await Promise.all([
-    cachedFetch(cache, `${base}/${circuit}.wasm`, expected.wasm, depsWithCs),
-    cachedFetch(cache, `${base}/${circuit}.zkey`, expected.zkey, depsWithCs),
+    cachedFetch(cache, `${base}/${circuit}.wasm`, expected.wasm, deps),
+    cachedFetch(cache, `${base}/${circuit}.zkey`, expected.zkey, deps),
   ]);
   return { wasm, zkey };
 }

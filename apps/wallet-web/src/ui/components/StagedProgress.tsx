@@ -7,6 +7,7 @@
 // the elapsed-clock and confirm notes below stay stage-key driven and flow-agnostic.
 
 import type { ReactNode } from "react";
+import { NEUTRAL_WALLET_NAME } from "../../lib/walletBrand.js";
 import { IconCheck } from "./icons.js";
 
 export interface StagedStep {
@@ -14,11 +15,18 @@ export interface StagedStep {
   label: string;
 }
 
-const SPEND_STEPS: StagedStep[] = [
+export const SPEND_STEPS: StagedStep[] = [
   { key: "assemble", label: "Assembling" },
   { key: "prove", label: "Proving" },
   { key: "submit", label: "Submitting" },
 ];
+
+/** The same steps with the wallet-unlock signature in front. Screens switch to this
+ *  only when a flow actually reports the "unlock" stage — a run that reuses the key
+ *  already held never shows a step the user isn't asked to do. */
+export function withUnlock(steps: StagedStep[]): StagedStep[] {
+  return [{ key: "unlock", label: "Unlocking" }, ...steps];
+}
 
 const STEP_STATE = {
   done: "text-ink",
@@ -35,10 +43,13 @@ export function StagedProgress({
   stage,
   elapsed,
   steps = SPEND_STEPS,
+  walletName = NEUTRAL_WALLET_NAME,
 }: {
   stage: string;
   elapsed: number;
   steps?: StagedStep[];
+  /** The connected wallet's own name for the unlock line — never a hardcoded brand. */
+  walletName?: string;
 }): ReactNode {
   const active = steps.findIndex((s) => s.key === stage);
   return (
@@ -62,6 +73,11 @@ export function StagedProgress({
           );
         })}
       </ol>
+      {stage === "unlock" && (
+        <p className="text-sm text-muted text-center">
+          Confirm in {walletName} to unlock your wallet…
+        </p>
+      )}
       {stage === "prove" && (
         <p className="text-sm text-muted text-center">
           Preparing your private transaction… usually 5–20 seconds

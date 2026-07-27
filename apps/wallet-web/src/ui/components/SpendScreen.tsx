@@ -1,7 +1,7 @@
 // The shared Send (transfer) / Withdraw screen. Both are a 2-in spend that proves in
-// the browser and submits via MetaMask; the ONLY difference is transfer needs a
-// recipient pubkey and withdraw does not. Keeping them one component means the
-// validate → confirm → staged-prove → success flow lives in exactly one place.
+// the browser and submits through the connected wallet; the ONLY difference is
+// transfer needs a recipient pubkey and withdraw does not. Keeping them one component
+// means the validate → confirm → staged-prove → success flow lives in exactly one place.
 //
 // Amounts: the form takes DECIMAL kKRW (parseKkrw, ≤6 fraction digits, 2^100 belt) and
 // converts to raw wei at the UI edge — the flow/witness layer still receives raw wei
@@ -18,12 +18,12 @@ import { ensureCircuitAssets, prewarmProver } from "../../lib/prove.js";
 import { walletErrorMessage } from "../../lib/metamask.js";
 import { runSpend, type SpendStage, type SpendOutcome } from "../../lib/spendFlow.js";
 import { useWallet } from "../App.js";
-import { navigate, useCircuitDownload, useElapsedSeconds } from "../hooks.js";
+import { useCircuitDownload, useElapsedSeconds } from "../hooks.js";
 import { formatKkrw, parseKkrw } from "../../lib/money.js";
 import { recipientError } from "../format.js";
 import { ScreenHeader } from "./ScreenHeader.js";
-import { StagedProgress } from "./StagedProgress.js";
-import { SuccessMark } from "./SuccessMark.js";
+import { SPEND_STEPS, StagedProgress, withUnlock } from "./StagedProgress.js";
+import { SuccessPanel } from "./SuccessPanel.js";
 import { DownloadProgress } from "./DownloadProgress.js";
 import { AmountInput, Button, ErrorBanner, Field, TextInput } from "./controls.js";
 
@@ -38,13 +38,17 @@ function amountError(raw: string, balance: bigint | null): string | null {
 }
 
 export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactNode {
-  const { identity, connection, indexerUrl, notes, balance, refresh } = useWallet();
+  const { session, connection, wallet, indexerUrl, notes, balance, refreshAfterAction, syncing } =
+    useWallet();
   const isTransfer = kind === "transfer";
 
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
   const [phase, setPhase] = useState<Phase>("form");
   const [stage, setStage] = useState<SpendStage>("assemble");
+  // Whether THIS run needs the unlock signature — the flow tells us by reporting
+  // "unlock" first, and the step list grows a step to match.
+  const [unlocking, setUnlocking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<SpendOutcome | null>(null);
   const download = useCircuitDownload(kind);
@@ -59,7 +63,7 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
     void prewarmProver();
   }, [kind]);
 
-  const rcptErr = isTransfer && identity ? recipientError(recipient, identity.compressedPubkey) : null;
+  const rcptErr = isTransfer && session ? recipientError(recipient, session.compressedPubkey) : null;
   const amtErr = amountError(amount, balance);
   // Guard on a KNOWN balance: until /notes loads (balance===null) amountError can't
   // catch over-spend, so don't let the user start a proof that would revert on-chain.
@@ -75,21 +79,30 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
   const review = formatKkrw(amountWei);
 
   async function submit(): Promise<void> {
-    if (!identity || !connection) return;
+    if (!connection || !session) return;
     setPhase("running");
     setError(null);
+    setUnlocking(false);
     try {
+      // The spending key comes from the wallet's lock INSIDE runSpend — this
+      // component never holds it. The session pubkey rides along so the flow can
+      // refuse a key that isn't this session's.
       const res = await runSpend(
         kind,
-        { identity, connection, indexerUrl, notes },
+        { connection, indexerUrl, notes, sessionPubkey: session.compressedPubkey },
         // The flow/witness layer only ever sees the canonical hex form — base58
         // stops at this edge.
         { to: isTransfer ? decodeAddress(recipient.trim()) : undefined, amount: amountWei.toString() },
-        (s) => setStage(s),
+        (s) => {
+          if (s === "unlock") setUnlocking(true);
+          setStage(s);
+        },
       );
       setOutcome(res);
       setPhase("done");
-      void refresh();
+      // Poll until the indexer reflects this tx (not fire-and-forget: one refresh
+      // here would usually read the pre-action state).
+      void refreshAfterAction(res.txHash);
     } catch (e) {
       setError(walletErrorMessage(e));
       setPhase("form");
@@ -99,29 +112,13 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
   // --- success ---------------------------------------------------------------
   if (phase === "done" && outcome) {
     return (
-      <div className="flex flex-col gap-4.5 px-4.5 pt-4.5 pb-6.5">
-        <ScreenHeader title={title} />
-        <div className="flex flex-col items-center gap-2.5 text-center pt-4.5">
-          <SuccessMark />
-          <h2 className="mt-1.5 text-xl font-bold">
-            {isTransfer ? "Payment sent" : "Withdrawal sent"}
-          </h2>
-          <p className="text-[1.8rem] [font-weight:750] my-0.5 tabular-nums">
-            {review} <span className="text-[0.62em] font-semibold text-muted ml-1">kKRW</span>
-          </p>
-          <a
-            className="text-primary no-underline text-[0.9rem] font-semibold"
-            href={outcome.explorerUrl}
-            target="_blank"
-            rel="noreferrer"
-          >
-            View on explorer
-          </a>
-          <Button variant="primary" block className="mt-2" onClick={() => navigate("home")}>
-            Done
-          </Button>
-        </div>
-      </div>
+      <SuccessPanel
+        title={title}
+        headline={isTransfer ? "Payment sent" : "Withdrawal sent"}
+        amount={review}
+        explorerUrl={outcome.explorerUrl}
+        syncing={syncing}
+      />
     );
   }
 
@@ -134,7 +131,12 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
           <div className="text-center text-[1.9rem] [font-weight:750] py-2 tabular-nums">
             {review} <span className="text-[0.62em] font-semibold text-muted ml-1">kKRW</span>
           </div>
-          <StagedProgress stage={stage} elapsed={elapsed} />
+          <StagedProgress
+            stage={stage}
+            elapsed={elapsed}
+            steps={unlocking ? withUnlock(SPEND_STEPS) : SPEND_STEPS}
+            walletName={wallet.name}
+          />
         </div>
       </div>
     );
@@ -160,18 +162,11 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
                 </dd>
               </>
             )}
-            <dt className="text-muted text-sm">{isTransfer ? "From" : "Source"}</dt>
-            <dd className="text-right text-[0.9rem] [overflow-wrap:anywhere]">
-              Your private balance
-            </dd>
             <dt className="text-muted text-sm">Network</dt>
             <dd className="text-right text-[0.9rem] [overflow-wrap:anywhere]">
               GIWA · chain {DEFAULTS.chainId}
             </dd>
           </dl>
-          <p className="text-sm text-muted">
-            Everything happens on your device — your keys never leave it.
-          </p>
           <DownloadProgress view={download} />
           <div className="flex gap-2.5">
             <Button variant="ghost" className="flex-1" onClick={() => setPhase("form")}>
@@ -183,7 +178,7 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
               disabled={download.active}
               onClick={submit}
             >
-              {download.active ? "Setting up…" : "Confirm"}
+              {download.active ? "Preparing…" : "Confirm"}
             </Button>
           </div>
         </div>
@@ -242,7 +237,7 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
             setPhase("confirm");
           }}
         >
-          Review
+          Continue
         </Button>
       </div>
     </div>

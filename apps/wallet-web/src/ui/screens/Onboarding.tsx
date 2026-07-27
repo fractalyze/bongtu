@@ -1,5 +1,6 @@
 // First run: a compact centered hero, three one-line steps, and a single Connect
-// CTA. Connecting is ONE flow — MetaMask connect, the deterministic
+// CTA, named after whichever wallet is installed (walletBrand.ts). Connecting is ONE
+// flow — the wallet connect, the deterministic
 // eth_signTypedData_v4 signature, and bjj key derivation happen back to back
 // (App.connectWallet), so the user sees one button and lands on Home with a key.
 // Copy is deliberately short and non-technical (locked after a diagram round —
@@ -13,7 +14,8 @@ import { EnvelopeLogo, IconDeposit, IconSend, IconWallet } from "../components/i
 import { Button, ErrorBanner, TestnetTag } from "../components/controls.js";
 
 export function Onboarding(): ReactNode {
-  const { connectWallet, connecting, connectError } = useWallet();
+  const { wallet, connectWallet, connecting, connectError } = useWallet();
+  const connectLabel = wallet.named ? `Connect ${wallet.name}` : "Connect Wallet";
   return (
     <div className="px-5.5 py-6.5 flex flex-col justify-center gap-4 flex-1 bg-bg">
       {/* flex-col, not inline flow: an inline logo span sits on the text baseline
@@ -66,7 +68,7 @@ export function Onboarding(): ReactNode {
 
       {hasInjectedWallet() ? (
         <Button variant="primary" size="lg" block onClick={connectWallet} disabled={connecting}>
-          {connecting ? "Connecting…" : "Connect Wallet"}
+          {connecting ? "Connecting…" : connectLabel}
         </Button>
       ) : (
         // No injected provider (plain mobile browser, or desktop without the

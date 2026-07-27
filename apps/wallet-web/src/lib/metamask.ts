@@ -52,7 +52,7 @@ interface Eip1193 {
 }
 function ethereum(): Eip1193 {
   const eth = (globalThis as { ethereum?: Eip1193 }).ethereum;
-  if (!eth) throw new Error("no injected wallet found (install/enable MetaMask)");
+  if (!eth) throw new Error("No wallet extension found — install or enable one, then reload.");
   return eth;
 }
 
@@ -152,6 +152,69 @@ export async function connect(): Promise<Connection> {
   const signer = provider.getSigner();
   const address = await signer.getAddress();
   return { address, provider, signer };
+}
+
+/**
+ * SILENT reconnect for a stored session: `eth_accounts` (never a popup — it only
+ * reports already-authorised accounts) and a match against the session's account.
+ * Returns null when there is no injected wallet, no authorised account, or the
+ * selected account changed — the caller then falls back to the normal connect
+ * flow. Deliberately does NOT switch chains here (that can prompt); the action
+ * flows call `ensureChain` before anything chain-dependent.
+ */
+export async function reconnect(expectedAddress: string): Promise<Connection | null> {
+  if (!hasInjectedWallet()) return null;
+  const eth = ethereum();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const provider = new ethers.providers.Web3Provider(eth as any, "any");
+  let accounts: string[];
+  try {
+    accounts = (await provider.send("eth_accounts", [])) as string[];
+  } catch {
+    return null;
+  }
+  const addr = accounts?.[0];
+  if (!addr || addr.toLowerCase() !== expectedAddress.toLowerCase()) return null;
+  return { address: addr, provider, signer: provider.getSigner() };
+}
+
+/**
+ * The account the injected wallet has selected RIGHT NOW, lowercased (`eth_accounts`
+ * — a report of already-authorised accounts, never a popup); null when none is
+ * authorised or the call fails. `connection.address` is frozen at connect time, so
+ * this is the only honest answer to "whose key would a derivation produce?" after a
+ * mid-session account switch.
+ */
+export async function currentAccount(connection: Connection): Promise<string | null> {
+  try {
+    const accounts = (await connection.provider.send("eth_accounts", [])) as string[];
+    return accounts?.[0]?.toLowerCase() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+interface AccountEvents {
+  on?(event: string, handler: () => void): void;
+  removeListener?(event: string, handler: () => void): void;
+}
+
+/** Run `handler` whenever the injected wallet switches accounts; returns an
+ *  unsubscribe. No-op where nothing is injected (plain mobile browser). */
+export function onAccountsChanged(handler: () => void): () => void {
+  const eth = (globalThis as { ethereum?: AccountEvents }).ethereum;
+  if (!eth?.on) return () => {};
+  eth.on("accountsChanged", handler);
+  return () => eth.removeListener?.("accountsChanged", handler);
+}
+
+/** Put an existing connection's wallet on GIWA Sepolia (silent when the chain is
+ *  already added+selected). The action flows call this before reading token state
+ *  or submitting — a silently-reconnected session may still sit on another chain. */
+export async function ensureChain(connection: Connection): Promise<void> {
+  // The raw EIP-1193 provider sits under the ethers Web3Provider.
+  const eth = (connection.provider?.provider ?? ethereum()) as Eip1193;
+  await ensureGiwaChain(eth);
 }
 
 /**

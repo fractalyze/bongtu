@@ -20,6 +20,9 @@ export {
   buildHistoryUrl,
   fetchHistory,
   fetchHealth,
+  obtainViewToken,
+  buildNotesTokenUrl,
+  buildHistoryTokenUrl,
   type OwnerNote,
   type FeedEvent,
   type Head,
@@ -27,4 +30,5 @@ export {
   type HistoryItem,
   type HistoryKind,
   type Health,
+  type ViewToken,
 } from "@bongtu/core/indexerApi";

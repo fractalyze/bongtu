@@ -19,6 +19,16 @@
 //                              arbiter mode once the pool is in a KEM epoch
 //                              (the boot guard refuses to serve without it).
 //                              Never logged, never in a response.
+//   TOKEN_SECRET               HMAC secret for /auth view tokens (arbiter mode).
+//                              Generated per boot when absent (warned: issued
+//                              tokens then reset on restart).
+//   PUBLIC_URL                 comma-separated origin(s) clients reach this
+//                              indexer on — what /auth signatures are bound to.
+//                              Behind the wallet's same-origin /indexer proxy that
+//                              is the WALLET's origin, not the indexer's; getting
+//                              it wrong makes every login fall back to the
+//                              tokenless (no-persistence) path. Defaults to the
+//                              loopback listen address.
 //
 // Read-only on-chain: opens no wallet, sends no transactions. In arbiter mode it
 // holds the arbiter private key in memory ONLY — never logged, never in a response.
@@ -57,8 +67,13 @@ async function main(): Promise<void> {
   console.log(`ingested to head: root=${hd.root} nextLeafIndex=${hd.nextLeafIndex} events=${ix.store.allEvents().length} alarms=${ix.store.getAlarms().length}`);
 
   const api = await startApi(ix, port);
-  const arbiterEndpoints = ix.arbiterMode ? " /notes?owner=" : "";
+  const arbiterEndpoints = ix.arbiterMode ? " /notes?owner= /history?owner= /auth" : "";
   console.log(`API listening on :${api.port} (GET /head /events /path/:i /alarms /health /nullifiers${arbiterEndpoints})`);
+  if (ix.arbiterMode) {
+    // Printed because a PUBLIC_URL that does not match how wallets actually reach
+    // this indexer degrades logins silently (tokenless, no persistence).
+    console.log(`view-token origins (PUBLIC_URL): ${api.publicUrls.join(", ")}`);
+  }
 
   // Incremental tail: the scheduler + retry/cursor policy live in Indexer
   // (pollOnce/startTailPolling); /health projects the recorded poll state.

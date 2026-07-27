@@ -40,6 +40,7 @@ import { poseidon2, poseidonN } from "@bongtu/core/poseidon";
 import { ecdhSharedSecret, poseidonDecrypt } from "@bongtu/core/note";
 import { packPubkey } from "@bongtu/core/pubkey";
 import { signNotesAuth, notesAuthMessage, packSignature } from "@bongtu/core/eddsa";
+import { obtainViewToken } from "@bongtu/core/indexerApi";
 import { ImtTree } from "@bongtu/core/imt";
 import { Indexer } from "../src/ingest.js";
 import { parseKemKey } from "../src/chain.js";
@@ -242,6 +243,27 @@ async function runArbiter(sc: any): Promise<void> {
     ok(histWrong.status === 401, "wrong-key signature over recipient#0's /history → 401");
     const histNoAuth = await get(abase, `/history?owner=${packPubkey([BigInt(r0.owner[0]), BigInt(r0.owner[1])])}`);
     ok(histNoAuth.status === 400, "GET /history with owner but no ts/sig → 400");
+
+    // ---- View tokens (SPEC §6b + api/viewtoken.ts): the challenge → sign → token
+    // handshake over REAL HTTP, then the token authorising both reads WITHOUT the
+    // key — the wallet's login-persistence path. The signed-query assertions above
+    // already proved backward compat holds alongside.
+    step("ARBITER /auth — view token round-trip authorises /notes + /history; tampered token 401");
+    const r0Compressed = packPubkey([BigInt(r0.owner[0]), BigInt(r0.owner[1])]);
+    const vt = await obtainViewToken(abase, r0Compressed, BigInt(sc.recipient0PrivateKey));
+    ok(vt.token.length > 0 && vt.exp > Math.floor(Date.now() / 1000), "POST /auth issued a token with a future exp");
+    const tn = await get(abase, `/notes?owner=${r0Compressed}&token=${encodeURIComponent(vt.token)}`);
+    ok(tn.status === 200 && !!noteAt(tn.body as unknown[], r0.leafIndex), "token-authed /notes 200 with recipient#0's note (no sig/ts)");
+    const th = await get(abase, `/history?owner=${r0Compressed}&token=${encodeURIComponent(vt.token)}`);
+    ok(th.status === 200 && (th.body as unknown[]).length === 3, "token-authed /history 200 with the same 3 items");
+    const tampered = vt.token.slice(0, -1) + (vt.token.endsWith("0") ? "1" : "0");
+    const tBad = await get(abase, `/notes?owner=${r0Compressed}&token=${encodeURIComponent(tampered)}`);
+    ok(tBad.status === 401, "tampered token → 401");
+    const tWrongOwner = await get(
+      abase,
+      `/notes?owner=${packPubkey([BigInt(pay.owner[0]), BigInt(pay.owner[1])])}&token=${encodeURIComponent(vt.token)}`,
+    );
+    ok(tWrongOwner.status === 401, "recipient#0's token on the payee's owner → 401");
 
     // ARBITER /path into the disburse batch now serves a REAL path folding to root.
     step("ARBITER /path — within-batch leaf now servable (ledger filled the batch)");

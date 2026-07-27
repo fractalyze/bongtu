@@ -21,6 +21,7 @@ import { DEFAULTS, testnetFromEnv } from "../src/config.js";
 import { deriveIdentityFromSignature } from "../src/lib/derive.js";
 import { FAUCET_AMOUNT } from "../src/lib/faucet.js";
 import { assertDepositAffordable } from "../src/lib/deposit.js";
+import { KeyCache } from "../src/lib/keyCache.js";
 import {
   runDeposit,
   type DepositContext,
@@ -29,13 +30,42 @@ import {
 
 const SIG = "0x" + "a1".repeat(32) + "b2".repeat(32) + "1c";
 
+// The identity the fixed signature derives — the session pubkey every context below
+// claims, so the flow's account-binding check passes unless a test breaks it.
+const SESSION_PUBKEY = deriveIdentityFromSignature(SIG).compressedPubkey;
+
+const ACCOUNT = "0x0000000000000000000000000000000000000001";
+
 // A stand-in connection: runDeposit only reads `.address` here (the I/O it would perform
 // on `.provider`/`.signer` is injected as fakes), so an empty provider/signer is fine.
-function fakeContext(): DepositContext {
+function fakeContext(sessionPubkey: string = SESSION_PUBKEY): DepositContext {
   return {
-    identity: deriveIdentityFromSignature(SIG),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    connection: { address: "0x0000000000000000000000000000000000000001", provider: {}, signer: {} } as any,
+    connection: { address: ACCOUNT, provider: {}, signer: {} } as any,
+    sessionPubkey,
+  };
+}
+
+// A locked wallet whose unlock returns the fixed-signature identity instead of popping
+// a real MetaMask signature. `onDerive` counts the popups the user would have seen.
+function fakeKeyCache(onDerive: () => void = () => {}): KeyCache {
+  return new KeyCache({
+    derive: async () => {
+      onDerive();
+      return deriveIdentityFromSignature(SIG);
+    },
+    currentAccount: async () => ACCOUNT,
+    arm: () => () => {},
+  });
+}
+
+// The MetaMask edges every flow test injects: chain alignment is a no-op and the
+// spending key comes from a fake lock (keyCache.ts).
+function fakeWalletDeps(): Partial<RunDepositDeps> {
+  return {
+    ensureChain: async () => {},
+    assertPoolKemEpoch: async () => {},
+    keyCache: fakeKeyCache(),
   };
 }
 
@@ -63,10 +93,13 @@ const DUMMY_CALLDATA: Calldata = {
   pub: [],
 };
 
-test("runDeposit rejects V > balance BEFORE approving or proving", async () => {
+test("runDeposit rejects V > balance BEFORE approving, key-deriving, or proving", async () => {
   let approveCalls = 0;
   let proveCalls = 0;
+  let deriveCalls = 0;
   const deps: Partial<RunDepositDeps> = {
+    ...fakeWalletDeps(),
+    keyCache: fakeKeyCache(() => deriveCalls++),
     readTokenState: async () => ({ balance: 100n, allowance: 0n }),
     approveToken: async () => {
       approveCalls++;
@@ -87,14 +120,25 @@ test("runDeposit rejects V > balance BEFORE approving or proving", async () => {
   );
   assert.equal(approveCalls, 0, "no approve tx may be emitted for a doomed deposit");
   assert.equal(proveCalls, 0, "no proof may be generated for a doomed deposit");
+  assert.equal(deriveCalls, 0, "no key derivation (signature popup) for a doomed deposit");
 });
 
-test("runDeposit happy path threads approve → kem-guard → prove → submit when affordable", async () => {
+test("runDeposit happy path threads kem-guard → unlock → approve → prove → submit when affordable", async () => {
   let approveCalls = 0;
   let proveCalls = 0;
   let kemGuardCalls = 0;
+  let deriveCalls = 0;
   const stages: string[] = [];
   const deps: Partial<RunDepositDeps> = {
+    ...fakeWalletDeps(),
+    keyCache: fakeKeyCache(() => {
+      // The unlock signature appears only after the kem guard, and before any tx —
+      // an account switch must not cost the user an approve.
+      assert.equal(kemGuardCalls, 1, "the wallet unlocks AFTER the kem guard");
+      assert.equal(approveCalls, 0, "the wallet unlocks BEFORE the approve tx");
+      assert.equal(proveCalls, 0, "the wallet unlocks BEFORE the proof");
+      deriveCalls++;
+    }),
     readTokenState: async () => ({ balance: 1_000n, allowance: 0n }), // allowance < V => approve
     approveToken: async () => {
       approveCalls++;
@@ -115,16 +159,21 @@ test("runDeposit happy path threads approve → kem-guard → prove → submit w
   const out = await runDeposit(fakeContext(), { amount: "500" }, (s) => stages.push(s), deps);
   assert.equal(approveCalls, 1, "an exact-V approve is sent when allowance < V");
   assert.equal(kemGuardCalls, 1, "the pool's arbiter KEM key hash was checked");
+  assert.equal(deriveCalls, 1, "exactly ONE signature to unlock a locked wallet");
   assert.equal(proveCalls, 1);
   assert.equal(out.approved, true);
   assert.equal(out.amount, "500");
   assert.equal(out.txHash, "0xdeposit");
-  assert.deepEqual(stages, ["approve", "prove", "submit"]);
+  assert.deepEqual(stages, ["unlock", "approve", "prove", "submit"]);
 });
 
 test("runDeposit refuses when the pool's KEM epoch rejects this build's key", async () => {
   let proveCalls = 0;
   const deps: Partial<RunDepositDeps> = {
+    ...fakeWalletDeps(),
+    keyCache: fakeKeyCache(() => {
+      throw new Error("no key derivation may happen against an unverified key");
+    }),
     readTokenState: async () => ({ balance: 1_000n, allowance: 500n }),
     assertPoolKemEpoch: async () => {
       throw new Error("on-chain arbiter KEM key hash 0x11 does not match this build's ARBITER_KEM_PK");

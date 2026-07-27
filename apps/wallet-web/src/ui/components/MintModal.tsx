@@ -2,8 +2,10 @@
 // the connected wallet. The deployed kKRW is MockERC20 whose `mint` is permissionless
 // (no backend faucet service or operator key) — the user pays their own GIWA gas, so a
 // zero-gas account is pre-checked and told plainly (with the GIWA faucet link) instead
-// of failing inside MetaMask with an opaque object. Prefilled with the standard faucet
-// amount but editable; on a confirmed mint the caller refreshes its token state.
+// of failing inside the wallet with an opaque object. The amount is prefilled with the
+// standard faucet amount and freely editable; on a confirmed mint the caller refreshes
+// its token state and the dialog switches to its completion view (MintSuccess), so the
+// Mint button cannot be pressed twice for one visit.
 
 import { useState } from "react";
 import type { ReactNode } from "react";
@@ -16,8 +18,30 @@ import {
   type Connection,
 } from "../../lib/metamask.js";
 import { groupAmountInput, parseKkrw } from "../../lib/money.js";
+import { ExplorerLink } from "./ExplorerLink.js";
 import { Modal } from "./Modal.js";
 import { AmountInput, Button, ErrorBanner, Field, TestnetTag } from "./controls.js";
+
+/** The dialog after a confirmed mint: what happened, where to look, and the way out —
+ *  no second Mint button. Its own component so the completed state renders (and
+ *  gates) without a live transaction. */
+export function MintSuccess({
+  explorerUrl,
+  onClose,
+}: {
+  explorerUrl: string;
+  onClose: () => void;
+}): ReactNode {
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-sm">Test kKRW added to your account.</p>
+      <ExplorerLink href={explorerUrl} />
+      <Button variant="primary" block onClick={onClose}>
+        Close
+      </Button>
+    </div>
+  );
+}
 
 export function MintModal({
   connection,
@@ -50,7 +74,7 @@ export function MintModal({
     setTxUrl(null);
     try {
       // The mint is permissionless but still a tx: an account with ZERO gas ETH
-      // fails inside MetaMask with an opaque object — say it plainly instead.
+      // fails inside the wallet with an opaque object — say it plainly instead.
       if ((await readGasBalance(connection)) === 0n) {
         throw new Error(
           "This account has no GIWA Sepolia ETH to pay gas — get a little ETH onto GIWA Sepolia first, then mint.",
@@ -76,33 +100,24 @@ export function MintModal({
       ariaLabel="Get Test kKRW"
       onClose={onClose}
     >
-      <div className="flex flex-col gap-3">
-        <p className="text-sm text-muted">
-          Mint free test kKRW to this account (you pay only gas), then deposit it here.
-        </p>
-        <Field label="Amount (kKRW)" error={amount.trim() ? amtErr : null}>
-          <AmountInput value={amount} onValueChange={setAmount} disabled={pending} />
-        </Field>
-        {error && <ErrorBanner message={error} />}
-        {txUrl && (
-          <a
-            className="text-primary no-underline text-[0.9rem] font-semibold"
-            href={txUrl}
-            target="_blank"
-            rel="noreferrer"
+      {txUrl ? (
+        <MintSuccess explorerUrl={txUrl} onClose={onClose} />
+      ) : (
+        <div className="flex flex-col gap-3">
+          <Field label="Amount (kKRW)" error={amount.trim() ? amtErr : null}>
+            <AmountInput value={amount} onValueChange={setAmount} disabled={pending} />
+          </Field>
+          {error && <ErrorBanner message={error} />}
+          <Button
+            variant="primary"
+            block
+            disabled={pending || !connection || !!amtErr}
+            onClick={() => void mint()}
           >
-            Minted — view on explorer
-          </a>
-        )}
-        <Button
-          variant="primary"
-          block
-          disabled={pending || !connection || !!amtErr}
-          onClick={() => void mint()}
-        >
-          {pending ? "Minting…" : "Mint"}
-        </Button>
-      </div>
+            {pending ? "Minting…" : "Mint"}
+          </Button>
+        </div>
+      )}
     </Modal>
   );
 }

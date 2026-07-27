@@ -8,12 +8,12 @@ import { ScreenHeader } from "../components/ScreenHeader.js";
 import { ReceivePanel } from "../components/ReceivePanel.js";
 
 export function Receive(): ReactNode {
-  const { identity } = useWallet();
+  const { session } = useWallet();
   return (
     <div className="flex flex-col gap-4.5 px-4.5 pt-4.5 pb-6.5">
       <ScreenHeader title="Receive" />
       {/* The QR / copy surface carries the base58check form; hex stays internal. */}
-      <ReceivePanel pubkey={identity ? encodeAddress(identity.compressedPubkey) : ""} />
+      <ReceivePanel pubkey={session ? encodeAddress(session.compressedPubkey) : ""} />
     </div>
   );
 }

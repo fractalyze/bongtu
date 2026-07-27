@@ -1,9 +1,9 @@
 // Headless gates for the UI-edge money layer (src/lib/money.ts) — the ONLY place raw
 // wei becomes a human kKRW string and back. Locked policy under test:
 //
-//   (1) FORMAT — raw / 10^18, ALWAYS exactly 6 fraction digits (trailing zeros kept),
-//       TRUNCATED beyond 6 (never rounded), thousands grouping on the integer part,
-//       BigInt string math only (dust below 10^12 wei must render 0.000000, not 1e-7).
+//   (1) FORMAT — raw / 10^18, up to 6 fraction digits TRUNCATED beyond 6 (never
+//       rounded) with trailing zeros trimmed, thousands grouping on the integer part,
+//       BigInt string math only (dust below 10^12 wei must render 0, not 1e-7).
 //   (2) PARSE — decimal input with at most 6 fraction digits to exact raw wei;
 //       >6 digits / garbage / empty rejected with clear messages; the circuit
 //       CheckPositive belt (note value < 2^100 wei) enforced BEFORE proving.
@@ -34,10 +34,18 @@ function parsedWei(input: string): bigint {
 // ============================ (1) FORMAT ====================================
 
 test("formatKkrw: the locked example vectors", () => {
-  assert.equal(formatKkrw(1_000_000n * WEI), "1,000,000.000000");
-  assert.equal(formatKkrw(15n * 10n ** 17n), "1.500000"); // 1.5e18
-  assert.equal(formatKkrw(10n ** 11n), "0.000000"); // 1e11 wei dust floors to zero
-  assert.equal(formatKkrw(0n), "0.000000");
+  assert.equal(formatKkrw(1_000_000n * WEI), "1,000,000");
+  assert.equal(formatKkrw(15n * 10n ** 17n), "1.5"); // 1.5e18
+  assert.equal(formatKkrw(10n ** 11n), "0"); // 1e11 wei dust floors to zero
+  assert.equal(formatKkrw(0n), "0");
+});
+
+test("formatKkrw trims trailing zeros and the dangling point", () => {
+  assert.equal(formatKkrw(1_000n * WEI), "1,000"); // not "1,000.000000"
+  assert.equal(formatKkrw(1_000n * WEI + 5n * 10n ** 17n), "1,000.5"); // not "1,000.500000"
+  // an interior zero is significant — only the TRAILING run goes.
+  assert.equal(formatKkrw(WEI + 10n ** 12n), "1.000001");
+  assert.equal(formatKkrw(WEI + 105n * 10n ** 13n), "1.00105");
 });
 
 test("formatKkrw truncates beyond 6 decimals — never rounds", () => {
@@ -49,14 +57,14 @@ test("formatKkrw truncates beyond 6 decimals — never rounds", () => {
   assert.equal(formatKkrw(WEI - 1n), "0.999999");
 });
 
-test("formatKkrw groups the integer part and keeps trailing zeros", () => {
-  assert.equal(formatKkrw(1_234_567_890n * WEI), "1,234,567,890.000000");
-  assert.equal(formatKkrw(1_000n * WEI + 5n * 10n ** 17n), "1,000.500000");
-  assert.equal(formatKkrw(123n * WEI), "123.000000");
+test("formatKkrw groups the integer part", () => {
+  assert.equal(formatKkrw(1_234_567_890n * WEI), "1,234,567,890");
+  assert.equal(formatKkrw(1_234n * WEI + 5n * 10n ** 17n), "1,234.5");
+  assert.equal(formatKkrw(123n * WEI), "123");
 });
 
 test("formatKkrw accepts decimal-string raw values (indexer amounts are strings)", () => {
-  assert.equal(formatKkrw((250n * WEI).toString()), "250.000000");
+  assert.equal(formatKkrw((250n * WEI).toString()), "250");
 });
 
 // ============================ (2) PARSE =====================================
@@ -79,7 +87,7 @@ test("parseKkrw: commas must be strict 3-digit grouping — a decimal-comma habi
 });
 
 test("formatKkrw renders negative values with a leading minus", () => {
-  assert.equal(formatKkrw(-15n * 10n ** 17n), "-1.500000");
+  assert.equal(formatKkrw(-15n * 10n ** 17n), "-1.5");
 });
 
 test("parseKkrw: up to 6 fraction digits parse to exact raw wei", () => {
@@ -103,7 +111,7 @@ test("parseKkrw rejects empty and garbage input", () => {
 });
 
 test("parseKkrw round-trips with formatKkrw exactly (canonical strings)", () => {
-  for (const s of ["1,000,000.000000", "1.500000", "0.000001", "123.456789", "0.000000"]) {
+  for (const s of ["1,000,000", "1.5", "0.000001", "123.456789", "0"]) {
     assert.equal(formatKkrw(parsedWei(s)), s);
     assert.equal(parsedWei(formatKkrw(parsedWei(s))), parsedWei(s));
   }
@@ -172,13 +180,13 @@ test("groupAmountInput: output never trips parseKkrw's comma-grouping rule", () 
 test("allowanceLabel: MaxUint256 reads Unlimited, ordinary values are formatted", () => {
   assert.equal(allowanceLabel(MAX_UINT256), "Unlimited");
   assert.equal(MAX_UINT256, (1n << 256n) - 1n);
-  assert.equal(allowanceLabel(0n), "0.000000");
-  assert.equal(allowanceLabel(1_000_000n * WEI), "1,000,000.000000");
-  // one below MaxUint is NOT unlimited — it renders under the 6-decimal policy
+  assert.equal(allowanceLabel(0n), "0");
+  assert.equal(allowanceLabel(1_000_000n * WEI), "1,000,000");
+  // one below MaxUint is NOT unlimited — it renders under the same display policy
   // (huge, but a finite grouped number — never the raw 78-digit integer).
   const nearMax = allowanceLabel(MAX_UINT256 - 1n);
   assert.notEqual(nearMax, "Unlimited");
-  assert.match(nearMax, /^[\d,]+\.\d{6}$/);
+  assert.match(nearMax, /^[\d,]+(\.\d{1,6})?$/);
 });
 
 test("amountCaretIndex: caret lands after the same significant char across regrouping", () => {

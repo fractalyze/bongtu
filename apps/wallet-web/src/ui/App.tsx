@@ -1,26 +1,56 @@
 // The wallet shell: a mobile-width vertical frame centered on the page, holding all
-// runtime state (connection, derived identity, indexer URL, balance/notes/history) in
-// one React context and switching screens on the hash route. There is NO local-journal
+// runtime state (connection, session, indexer URL, balance/notes/history) in one
+// React context and switching screens on the hash route. There is NO local-journal
 // fallback (locked decision): balance + activity come only from the arbiter-mode
-// indexer's signed /notes and /history.
+// indexer's /notes and /history.
+//
+// KEY-CUSTODY RULE (user-mandated): the bjj private key NEVER enters React state or
+// browser storage. Connect derives it transiently (one signature), trades it for a
+// VIEW-ONLY indexer token, and drops it; the persisted record (session.ts) is only
+// { eoa address, compressed pubkey, token, exp }. Actions take the key from the
+// wallet's in-memory lock (keyCache.ts), which this shell drops on sign-out and on
+// an account switch in the connected wallet; a page load starts locked because
+// nothing persists it.
+//
+// A stored unexpired session restores SILENTLY on load: eth_accounts (no popup)
+// must still report the same account, then balance+activity load via the token —
+// no signature popup until the user actually deposits/sends/withdraws.
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { DEFAULTS } from "../config.js";
+import { deriveIdentityFromSignature, keyDerivationTypedData } from "../lib/derive.js";
 import {
-  keyDerivationTypedData,
-  deriveIdentityFromSignature,
-  type WalletIdentity,
-} from "../lib/derive.js";
-import { connect, signKeyDerivation, walletErrorMessage, type Connection } from "../lib/metamask.js";
-import { balanceViaNotes } from "../lib/balance.js";
+  connect,
+  onAccountsChanged,
+  reconnect,
+  signKeyDerivation,
+  walletErrorMessage,
+  type Connection,
+} from "../lib/metamask.js";
+import { keyCache } from "../lib/keyCache.js";
+import { startWalletDiscovery } from "../lib/eip6963.js";
+import { injectedFrom, type WalletDescription } from "../lib/walletBrand.js";
+import { sumUnspent } from "../lib/balance.js";
 import {
+  buildNotesUrl,
   buildHistoryUrl,
+  buildNotesTokenUrl,
+  buildHistoryTokenUrl,
+  obtainViewToken,
+  fetchNotes,
   fetchHistory,
   type OwnerNote,
   type HistoryItem,
 } from "../lib/indexerClient.js";
-import { useHashRoute, navigate } from "./hooks.js";
+import { clearSession, loadSession, saveSession, type StoredSession } from "../lib/session.js";
+import {
+  classifyReadFailure,
+  pollForAction,
+  refreshPlan,
+  type OwnerSnapshot,
+} from "../lib/refresh.js";
+import { useHashRoute, navigate, useWalletDescription } from "./hooks.js";
 import { Onboarding } from "./screens/Onboarding.js";
 import { Home } from "./screens/Home.js";
 import { Receive } from "./screens/Receive.js";
@@ -33,7 +63,11 @@ import { Settings } from "./screens/Settings.js";
 
 export interface WalletContextValue {
   connection: Connection | null;
-  identity: WalletIdentity | null;
+  /** which wallet the user is on — brand, display name, icon. Detected live from the
+   *  injected provider, so a silently-restored session identifies it too. */
+  wallet: WalletDescription;
+  /** the logged-in session: account, receive pubkey, view token. NO key material. */
+  session: StoredSession | null;
   indexerUrl: string;
   setIndexerUrl: (url: string) => void;
 
@@ -42,14 +76,21 @@ export interface WalletContextValue {
   notes: OwnerNote[];
   history: HistoryItem[];
   loading: boolean;
+  /** true while a post-action poll waits for the indexer to reflect the action. */
+  syncing: boolean;
   /** friendly message when the indexer isn't arbiter-mode / is unreachable (else null). */
   dataError: string | null;
+  /** calm, non-error note about the data on screen (e.g. a tokenless session that
+   *  cannot refresh). Never clears the balance the way dataError does. */
+  dataNotice: string | null;
 
   connecting: boolean;
   connectError: string | null;
   connectWallet: () => Promise<void>;
   disconnect: () => void;
   refresh: () => Promise<void>;
+  /** post-action refresh: poll until `txHash` is reflected, then apply the data. */
+  refreshAfterAction: (txHash: string) => Promise<void>;
 }
 
 const WalletContext = createContext<WalletContextValue | null>(null);
@@ -61,66 +102,134 @@ export function useWallet(): WalletContextValue {
   return ctx;
 }
 
-// A signed /notes or /history against a PUBLIC (non-arbiter) indexer 404s/401s; an
-// unreachable one throws a network error. Both become a friendly, non-crashing state.
-function friendlyIndexerError(err: unknown, indexerUrl: string): string {
-  const msg = err instanceof Error ? err.message : String(err);
-  if (/->\s*(404|401|403)/.test(msg)) {
-    return `Can't load your balance right now. Check the indexer connection and retry.`;
-  }
-  return `Couldn't reach the indexer at ${indexerUrl}. Check it's running and the URL in Settings. (${msg})`;
-}
-
 export function App(): ReactNode {
   const route = useHashRoute();
 
   const [connection, setConnection] = useState<Connection | null>(null);
-  const [identity, setIdentity] = useState<WalletIdentity | null>(null);
+  const [session, setSession] = useState<StoredSession | null>(null);
   const [indexerUrl, setIndexerUrl] = useState<string>(DEFAULTS.indexerUrl);
 
   const [balance, setBalance] = useState<bigint | null>(null);
   const [notes, setNotes] = useState<OwnerNote[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
+  const [dataNotice, setDataNotice] = useState<string | null>(null);
 
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
 
+  // Ask every installed wallet to announce itself once, then describe the one in use.
+  // Before a connection exists the page's injected wallet is the subject — that is
+  // what Onboarding names its Connect button after.
+  useEffect(startWalletDiscovery, []);
+  const wallet = useWalletDescription(
+    injectedFrom(connection, (globalThis as { ethereum?: unknown }).ethereum),
+  );
+
+  // One loader for every read path: /notes drives the balance; /history is
+  // best-effort on top (an older indexer without it keeps the balance working).
+  const loadOwnerData = useCallback(
+    async (notesUrl: string, historyUrl: string): Promise<OwnerSnapshot> => {
+      const ns = await fetchNotes(notesUrl);
+      let hs: HistoryItem[] = [];
+      try {
+        hs = await fetchHistory(historyUrl);
+      } catch {
+        hs = [];
+      }
+      return { notes: ns, history: hs };
+    },
+    [],
+  );
+
+  const applySnapshot = useCallback((snap: OwnerSnapshot): void => {
+    setBalance(sumUnspent(snap.notes));
+    setNotes(snap.notes);
+    setHistory(snap.history);
+  }, []);
+
+  // Drop the login and every owner-derived value. Used by the Disconnect button and
+  // by a dead token (a 401 on the only auth these reads have).
+  const endSession = useCallback((reason: string | null): void => {
+    keyCache.lock(); // signing out drops the spending key too, not just the token
+    clearSession();
+    setConnection(null);
+    setSession(null);
+    setBalance(null);
+    setNotes([]);
+    setHistory([]);
+    setDataError(reason);
+    setDataNotice(null);
+    navigate("home");
+  }, []);
+
   const refresh = useCallback(async (): Promise<void> => {
-    if (!identity) return;
+    if (!session) return;
+    const plan = refreshPlan(session);
+    if (plan.kind === "notice") {
+      // No token to read with: keep the snapshot already on screen (refresh.ts).
+      setDataNotice(plan.message);
+      setDataError(null);
+      return;
+    }
     setLoading(true);
     setDataError(null);
+    setDataNotice(null);
     try {
-      const { balance: bal, notes: ns } = await balanceViaNotes(indexerUrl, identity);
-      setBalance(bal);
-      setNotes(ns);
-      // History is best-effort on top of a working /notes: if only /history is missing
-      // (older indexer) keep the balance and just show an empty activity feed.
-      try {
-        const url = buildHistoryUrl(
-          indexerUrl,
-          identity.compressedPubkey,
-          identity.keypair.formattedPrivateKey,
-        );
-        setHistory(await fetchHistory(url));
-      } catch {
-        setHistory([]);
-      }
+      // Reads authenticate with the VIEW token only — no key, no signature popup.
+      const snap = await loadOwnerData(
+        buildNotesTokenUrl(indexerUrl, session.compressedPubkey, session.token),
+        buildHistoryTokenUrl(indexerUrl, session.compressedPubkey, session.token),
+      );
+      applySnapshot(snap);
     } catch (e) {
+      const failure = classifyReadFailure(e, indexerUrl);
+      if (failure.kind === "expired") {
+        endSession(failure.message); // back to onboarding — retrying can only 401 again
+        return;
+      }
       setBalance(null);
       setNotes([]);
       setHistory([]);
-      setDataError(friendlyIndexerError(e, indexerUrl));
+      setDataError(failure.message);
     } finally {
       setLoading(false);
     }
-  }, [identity, indexerUrl]);
+  }, [session, indexerUrl, loadOwnerData, applySnapshot, endSession]);
 
-  // Auto-load whenever the identity or indexer changes (after connect, or a settings edit).
+  // Auto-load whenever the session or indexer changes (after connect/restore, or a
+  // settings edit).
   useEffect(() => {
-    if (identity) void refresh();
-  }, [identity, indexerUrl, refresh]);
+    if (session) void refresh();
+  }, [session, indexerUrl, refresh]);
+
+  // A held spending key belongs to ONE wallet account, so a switch drops it at the
+  // moment it happens — the flows re-check anyway, this just makes the header honest
+  // (and re-locks a wallet whose owner walked away from the account).
+  useEffect(() => onAccountsChanged(() => keyCache.lock()), []);
+
+  // SILENT restore on first load: a stored unexpired session + the same authorised
+  // account (eth_accounts, no popup) puts the user straight on Home; anything else
+  // (expired token, account changed, storage empty) falls through to Onboarding.
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current) return; // StrictMode double-mount guard
+    restored.current = true;
+    const stored = loadSession();
+    if (!stored) return;
+    void (async () => {
+      const conn = await reconnect(stored.eoaAddress);
+      if (!conn) {
+        // account changed or no longer authorised — require a fresh connect.
+        clearSession();
+        return;
+      }
+      setConnection(conn);
+      setSession(stored);
+    })();
+  }, []);
 
   const connectWallet = useCallback(async (): Promise<void> => {
     setConnecting(true);
@@ -129,47 +238,100 @@ export function App(): ReactNode {
       const conn = await connect();
       const typed = keyDerivationTypedData(DEFAULTS.chainId, DEFAULTS.pool, DEFAULTS.keyVersion);
       const sig = await signKeyDerivation(conn, typed);
+      // The identity (bjj keypair) lives only inside THIS function: it signs the
+      // token handshake, then goes out of scope. Only key-free fields survive.
       const id = deriveIdentityFromSignature(sig);
+      let sess: StoredSession;
+      try {
+        const vt = await obtainViewToken(indexerUrl, id.compressedPubkey, id.keypair.formattedPrivateKey);
+        sess = { eoaAddress: conn.address, compressedPubkey: id.compressedPubkey, token: vt.token, exp: vt.exp };
+        saveSession(sess); // the ONLY persisted record: address + pubkey + view token
+      } catch {
+        // Indexer without /auth (older build) or unreachable: log in for this page
+        // only (tokenless sessions are never persisted — loadSession drops them),
+        // and load the data ONCE with a key-signed query before the key drops.
+        sess = { eoaAddress: conn.address, compressedPubkey: id.compressedPubkey, token: "", exp: 0 };
+        try {
+          applySnapshot(
+            await loadOwnerData(
+              buildNotesUrl(indexerUrl, id.compressedPubkey, id.keypair.formattedPrivateKey),
+              buildHistoryUrl(indexerUrl, id.compressedPubkey, id.keypair.formattedPrivateKey),
+            ),
+          );
+        } catch {
+          // Nothing loaded and nothing left to load with — the tokenless refresh
+          // notice is what the user will see once the session state lands.
+        }
+      }
       setConnection(conn);
-      setIdentity(id);
+      setSession(sess);
       navigate("home");
     } catch (e) {
       setConnectError(walletErrorMessage(e));
     } finally {
       setConnecting(false);
     }
-  }, []);
+  }, [indexerUrl, loadOwnerData, applySnapshot]);
 
-  const disconnect = useCallback((): void => {
-    setConnection(null);
-    setIdentity(null);
-    setBalance(null);
-    setNotes([]);
-    setHistory([]);
-    setDataError(null);
-    navigate("home");
-  }, []);
+  const disconnect = useCallback((): void => endSession(null), [endSession]);
+
+  // Post-action refresh: the indexer tails the chain on a poll, so the moment a tx
+  // confirms /notes may still show the PRE-action state. Poll (3s, ≤30s) until the
+  // action is reflected (its tx in /history, or the note set changed), applying the
+  // freshest snapshot either way. `syncing` lets success screens say the balance is
+  // still catching up.
+  const refreshAfterAction = useCallback(
+    async (txHash: string): Promise<void> => {
+      if (refreshPlan(session).kind === "notice") {
+        await refresh(); // tokenless (or logged out): nothing to poll with
+        return;
+      }
+      if (!session) return;
+      setSyncing(true);
+      try {
+        const load = (): Promise<OwnerSnapshot> =>
+          loadOwnerData(
+            buildNotesTokenUrl(indexerUrl, session.compressedPubkey, session.token),
+            buildHistoryTokenUrl(indexerUrl, session.compressedPubkey, session.token),
+          );
+        const { last } = await pollForAction(load, { notes, history }, txHash);
+        if (last) {
+          applySnapshot(last);
+          setDataError(null);
+        } else {
+          await refresh(); // every poll failed — fall back to the plain path + its error
+        }
+      } finally {
+        setSyncing(false);
+      }
+    },
+    [session, indexerUrl, notes, history, loadOwnerData, applySnapshot, refresh],
+  );
 
   const value = useMemo<WalletContextValue>(
     () => ({
       connection,
-      identity,
+      wallet,
+      session,
       indexerUrl,
       setIndexerUrl,
       balance,
       notes,
       history,
       loading,
+      syncing,
       dataError,
+      dataNotice,
       connecting,
       connectError,
       connectWallet,
       disconnect,
       refresh,
+      refreshAfterAction,
     }),
     [
-      connection, identity, indexerUrl, balance, notes, history, loading, dataError,
-      connecting, connectError, connectWallet, disconnect, refresh,
+      connection, wallet, session, indexerUrl, balance, notes, history, loading, syncing, dataError,
+      dataNotice, connecting, connectError, connectWallet, disconnect, refresh, refreshAfterAction,
     ],
   );
 
@@ -177,7 +339,7 @@ export function App(): ReactNode {
     <WalletContext.Provider value={value}>
       <div className="min-h-full flex justify-center items-stretch p-[clamp(0px,3vw,28px)]">
         <div className="w-full max-w-[420px] bg-bg border border-border rounded-[clamp(0px,3vw,20px)] shadow-[0_8px_28px_-18px_rgba(17,24,39,0.18)] overflow-hidden flex flex-col min-h-[min(760px,calc(100vh-56px))]">
-          {identity ? <Router route={route} /> : <Onboarding />}
+          {session ? <Router route={route} /> : <Onboarding />}
         </div>
       </div>
     </WalletContext.Provider>

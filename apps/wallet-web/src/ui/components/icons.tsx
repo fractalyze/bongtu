@@ -21,6 +21,9 @@ import {
   RiCloseLine,
   RiExternalLinkLine,
   RiArrowLeftLine,
+  RiRefreshLine,
+  RiLockLine,
+  RiLockUnlockLine,
 } from "@remixicon/react";
 
 interface IconProps {
@@ -35,6 +38,20 @@ export function EnvelopeLogo({ size = 28, className }: IconProps): ReactNode {
 
 export function IconGear({ size = 20 }: IconProps): ReactNode {
   return <RiSettings3Line size={size} aria-hidden="true" />;
+}
+
+/** Manual balance refresh (Home header). `className` lets the caller spin it. */
+export function IconRefresh({ size = 20, className }: IconProps): ReactNode {
+  return <RiRefreshLine size={size} className={className} aria-hidden="true" />;
+}
+
+/** The two faces of the spending lock (Home header chip). */
+export function IconLock({ size = 14 }: IconProps): ReactNode {
+  return <RiLockLine size={size} aria-hidden="true" />;
+}
+
+export function IconUnlock({ size = 14 }: IconProps): ReactNode {
+  return <RiLockUnlockLine size={size} aria-hidden="true" />;
 }
 
 export function IconLink({ size = 16 }: IconProps): ReactNode {

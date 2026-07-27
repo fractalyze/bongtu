@@ -11,38 +11,36 @@ import { encodeAddress } from "@bongtu/core/pubkey";
 import { useWallet } from "../App.js";
 import { navigate } from "../hooks.js";
 import { DEFAULTS } from "../../config.js";
-import { walletBrand } from "../../lib/walletBrand.js";
 import { shortenPubkey } from "../format.js";
 import { BalanceCard } from "../components/BalanceCard.js";
 import { ActivityList } from "../components/ActivityList.js";
 import { StatusChip } from "../components/StatusChip.js";
+import { LockChip } from "../components/LockChip.js";
 import { ReceiveModal } from "../components/ReceiveModal.js";
+import { WalletMark } from "../components/WalletMark.js";
 import { Button, IconButton, TestnetTag } from "../components/controls.js";
 import {
   EnvelopeLogo,
   IconGear,
   IconLink,
-  IconWallet,
+  IconRefresh,
   IconSend,
   IconWithdraw,
   IconDeposit,
-  MetaMaskFox,
 } from "../components/icons.js";
 
 // Home shows the head of the feed; the full flat list lives at #/activity.
 const RECENT_COUNT = 4;
 
 export function Home(): ReactNode {
-  const { identity, connection, balance, history, loading, dataError, indexerUrl, refresh } =
+  const { session, connection, wallet, balance, history, loading, syncing, dataError, dataNotice, indexerUrl, refresh } =
     useWallet();
 
   // Receive is a modal over Home (primary path — the #/receive route is a deep link).
   const [receiveOpen, setReceiveOpen] = useState(false);
 
-  if (!identity) return null;
-
-  // The raw injected EIP-1193 provider sits under the ethers Web3Provider.
-  const brand = connection ? walletBrand(connection.provider?.provider) : "unknown";
+  if (!session) return null;
+  const refreshing = loading || syncing;
 
   return (
     <div className="flex flex-col gap-3 px-4.5 pt-4.5 pb-6.5">
@@ -53,7 +51,17 @@ export function Home(): ReactNode {
           {DEFAULTS.testnet && <TestnetTag />}
         </div>
         <div className="flex items-center gap-2">
+          <LockChip walletName={wallet.name} />
           <StatusChip indexerUrl={indexerUrl} />
+          {/* manual refresh — the SAME path the post-action poll lands on; spins
+              (and refuses re-entry) while any load is running */}
+          <IconButton
+            aria-label="Refresh balance"
+            disabled={refreshing}
+            onClick={() => void refresh()}
+          >
+            <IconRefresh className={refreshing ? "animate-spin" : undefined} />
+          </IconButton>
           <IconButton aria-label="Settings" onClick={() => navigate("settings")}>
             <IconGear />
           </IconButton>
@@ -64,7 +72,7 @@ export function Home(): ReactNode {
         balance={balance}
         loading={loading}
         // Users only ever see (and copy) the base58check form; hex stays internal.
-        pubkey={encodeAddress(identity.compressedPubkey)}
+        pubkey={encodeAddress(session.compressedPubkey)}
         onOpenReceive={() => setReceiveOpen(true)}
       />
 
@@ -74,7 +82,10 @@ export function Home(): ReactNode {
           aria-label="Connected wallet"
         >
           <IconLink size={16} />
-          {brand === "metamask" ? <MetaMaskFox size={18} /> : <IconWallet size={16} />}
+          <WalletMark wallet={wallet} />
+          {/* Name it only when we actually know which wallet it is — "your wallet"
+              next to the address would be noise, not information. */}
+          {wallet.named && <span className="text-[0.8rem]">{wallet.name}</span>}
           <span className="relative inline-flex group">
             <span
               className="font-mono text-[0.78rem] rounded-md focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2"
@@ -141,16 +152,20 @@ export function Home(): ReactNode {
           </Button>
         </div>
       ) : (
-        <ActivityList
-          history={history.slice(0, RECENT_COUNT)}
-          loading={loading}
-          explorerBase={DEFAULTS.explorer}
-          onViewAll={() => navigate("activity")}
-        />
+        <>
+          {/* Calm strip, not the warn banner: the data below is real, just frozen. */}
+          {dataNotice && <p className="text-muted text-[0.85rem] px-0.5">{dataNotice}</p>}
+          <ActivityList
+            history={history.slice(0, RECENT_COUNT)}
+            loading={loading}
+            explorerBase={DEFAULTS.explorer}
+            onViewAll={() => navigate("activity")}
+          />
+        </>
       )}
 
       {receiveOpen && (
-        <ReceiveModal pubkey={encodeAddress(identity.compressedPubkey)} onClose={() => setReceiveOpen(false)} />
+        <ReceiveModal pubkey={encodeAddress(session.compressedPubkey)} onClose={() => setReceiveOpen(false)} />
       )}
     </div>
   );

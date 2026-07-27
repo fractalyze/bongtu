@@ -6,7 +6,8 @@
 
 const WEI_PER_KKRW = 10n ** 18n;
 
-/** Display fraction digits: ALWAYS exactly 6, truncated (floored), trailing zeros kept. */
+/** Display/input fraction digits: at most 6, truncated (floored) on display, and the
+ *  hard cap on what parseKkrw accepts. */
 const DISPLAY_FRACTION_DIGITS = 6;
 
 /** Circuit CheckPositive belt: every note value is range-checked below 2^100, so any
@@ -50,17 +51,22 @@ export function amountCaretIndex(formatted: string, significantBefore: number): 
 }
 
 /**
- * Render raw wei as whole kKRW: integer part thousands-grouped, then exactly 6
- * fraction digits TRUNCATED beyond the 6th (never rounded — rounding could display
- * more than the user actually holds). 1e11 wei of dust renders "0.000000".
+ * Render raw wei as whole kKRW: integer part thousands-grouped, then up to 6 fraction
+ * digits TRUNCATED beyond the 6th (never rounded — rounding could display more than
+ * the user actually holds). Trailing zeros and a then-dangling point are dropped, so a
+ * whole amount reads "1,000" and a half one "1,000.5"; 1e11 wei of dust renders "0".
  */
 export function formatKkrw(raw: string | bigint): string {
   let v = typeof raw === "bigint" ? raw : BigInt(raw);
   const neg = v < 0n;
   if (neg) v = -v;
   const whole = (v / WEI_PER_KKRW).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  const frac = (v % WEI_PER_KKRW).toString().padStart(18, "0").slice(0, DISPLAY_FRACTION_DIGITS);
-  return `${neg ? "-" : ""}${whole}.${frac}`;
+  const frac = (v % WEI_PER_KKRW)
+    .toString()
+    .padStart(18, "0")
+    .slice(0, DISPLAY_FRACTION_DIGITS)
+    .replace(/0+$/, "");
+  return `${neg ? "-" : ""}${whole}${frac ? `.${frac}` : ""}`;
 }
 
 export type ParsedKkrw = { ok: true; wei: bigint } | { ok: false; error: string };

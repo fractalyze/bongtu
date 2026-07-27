@@ -1,7 +1,8 @@
 // Settings: read-only deployment facts (pool, token, chain, arbiter key version) plus
 // the ONE editable knob — the indexer URL the balance/history/health reads point at —
 // and Disconnect. Editing the indexer URL re-runs the balance load (App effect keys on
-// indexerUrl). Disconnect drops the derived key from memory (it was never persisted).
+// indexerUrl). Disconnect is the logout: it clears the stored login record (view token
+// only — the spending key is never in state or storage; session.ts).
 
 import { useId, useState } from "react";
 import type { ReactNode } from "react";
@@ -88,7 +89,7 @@ function Row({
 }
 
 export function Settings(): ReactNode {
-  const { identity, indexerUrl, setIndexerUrl, disconnect } = useWallet();
+  const { session, indexerUrl, setIndexerUrl, disconnect } = useWallet();
   const [draft, setDraft] = useState(indexerUrl);
   const dirty = draft.trim() !== indexerUrl;
 
@@ -130,15 +131,15 @@ export function Settings(): ReactNode {
           <Row label="Batch size" value={String(DEFAULTS.batchSize)} />
           <Row label="Key version" value={DEFAULTS.keyVersion} />
           <Row label="Arbiter key" full={DEFAULTS.arbiterPubKey[0]} mono />
-          {identity && <Row label="Your address" full={encodeAddress(identity.compressedPubkey)} mono />}
+          {session && <Row label="Your address" full={encodeAddress(session.compressedPubkey)} mono />}
         </div>
 
         <Button variant="danger" block onClick={disconnect}>
           Disconnect
         </Button>
         <p className="text-xs text-muted">
-          Disconnecting clears your key from this device. Reconnect anytime — your key is
-          re-derived from your wallet signature.
+          Disconnecting signs you out and clears the saved login on this device. Reconnect
+          anytime — your key is re-derived from your wallet signature.
         </p>
       </div>
     </div>

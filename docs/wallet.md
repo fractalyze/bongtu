@@ -1,6 +1,6 @@
 # Wallet
 
-`apps/wallet-web` is the self-custody public app: MetaMask in, a BabyJubJub spending key derived on
+`apps/wallet-web` is the self-custody public app: an injected wallet in, a BabyJubJub spending key derived on
 the fly, notes read from an arbiter indexer, and transfer / withdraw / deposit proved **in the
 browser**. It imports `@bongtu/core` source directly, so every commitment, nullifier and
 Poseidon-sponge ciphertext it builds is byte-identical to what the provers prove and the contract
@@ -8,7 +8,7 @@ verifies. Run commands and the test layout are owned by `apps/wallet-web/README.
 
 ## Key derivation
 
-There is no seed and no persisted private key. The spending key is a pure function of a MetaMask
+There is no seed and no persisted private key. The spending key is a pure function of a wallet
 signature over a domain-separated EIP-712 struct (`src/lib/derive.ts`, `src/lib/metamask.ts`):
 
 ```
@@ -30,13 +30,54 @@ spending key — which `personal_sign` would.
 Consequences worth stating plainly:
 
 - **The signature *is* the spending key.** Anyone who can make the account sign this exact struct
-  reconstructs the bjj key. v1 assumes an EOA with deterministic ECDSA (MetaMask); ERC-4337 accounts
+  reconstructs the bjj key. v1 assumes an EOA with deterministic ECDSA (any injected EIP-1193 wallet); ERC-4337 accounts
   need a different derivation.
 - **`keyVersion` is a rotation lever.** It sits in the EIP-712 domain, so bumping it rotates every
   derived key — and orphans every note held under the old one. It is pinned per deployment in
   `src/config.ts`; never change it casually.
 - The exact struct bytes are consensus for the user's identity: editing `name`, `version` or the
   message text rotates everybody's key.
+
+## Signing in, and the lock
+
+Two different secrets, two different lifetimes.
+
+**Viewing** runs on a view token. Connecting derives the key once, signs a challenge with it, and
+trades that for an HMAC token from the indexer (`/auth/challenge` + `/auth/token`, see
+`docs/indexer.md`); the token and the compressed pubkey are all that reach `localStorage`
+(`src/lib/session.ts`). Balance and activity read with the token alone — no key, no popup — so a
+returning visit restores silently as long as the wallet still reports the same account.
+
+**Spending** runs on the key itself, held by `src/lib/keyCache.ts` — the wallet's *lock*, and the
+only place the bjj private key lives between actions. It is memory-only: never storage, never React
+state, gone on reload. The first send/withdraw/deposit after a page load derives it (one signature,
+shown as an "Unlocking" stage); later actions reuse it, so they cost only the transaction popup. The
+hold ends on sign-out, on a wallet account switch, and after 10 idle minutes — enforced twice,
+by a timer that also flips the header's Locked/Unlocked chip, and by a timestamp check at use time
+that a throttled background tab cannot skip.
+
+A held key belongs to exactly one wallet account. If the selected account changes, the wallet
+refuses the action outright (`ACCOUNT_MISMATCH_MESSAGE`) rather than derive and spend under a
+stranger's key — and when a held key already proves the mismatch, it refuses without a popup.
+
+## Which wallet the UI shows
+
+Any injected EIP-1193 wallet works, so nothing may be drawn or named as MetaMask by default
+(`src/lib/walletBrand.ts`, `src/lib/eip6963.ts`). Identification has two sources:
+
+- **Vendor flags** on the injected object decide the *brand*. Order matters: nearly every wallet
+  also sets `isMetaMask: true` so that MetaMask-era dapps keep working, so the vendor's own flag
+  (`isRabby`, `isOkxWallet`, `isCoinbaseWallet`, …) is tested first and `isMetaMask` last. Testing
+  `isMetaMask` first is what showed the fox to everyone.
+- **EIP-6963 announcements** supply the wallet's own display name and icon, which is the only way to
+  name a wallet this app has never heard of. Announced names are length-capped and stripped of
+  control characters, and only `data:image/*` icons are used — a remote icon URL would report every
+  render back to the vendor.
+
+What cannot be identified is called "your wallet" in copy and drawn with the generic wallet glyph;
+the MetaMask fox is drawn only for a provider that identified itself as MetaMask. Nothing about the
+brand is persisted: a silently-restored session re-detects it, because `reconnect()` wraps the same
+injected object the announcement came from.
 
 ## Proving in the browser
 
@@ -113,7 +154,7 @@ The flow approves the ERC-20 for exactly `V` (skipped when the allowance already
 pre-checks affordability before spending a proof on a doomed deposit.
 
 **Faucet.** The deployed kKRW is `MockERC20`, whose `mint(to, amount)` is fully permissionless, so a
-first-time user self-mints test tokens from their own MetaMask and pays their own gas. The button is
+first-time user self-mints test tokens from their own wallet and pays their own gas. The button is
 offered exactly when the public kKRW balance is zero (`src/lib/faucet.ts`, `FAUCET_AMOUNT =
 1_000_000` raw units). This is a mock-token affordance and does not exist on a production token.
 

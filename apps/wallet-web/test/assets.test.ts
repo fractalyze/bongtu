@@ -271,3 +271,56 @@ test("CIRCUIT_ASSET_BYTES matches the assets actually served from public/circuit
     }
   }
 });
+
+// --- (4) storage-failure fallback (device cache must never block proving) ---------
+
+test("a QuotaExceeded put falls back to no-cache: bytes still returned, next run re-downloads", async () => {
+  class QuotaCache extends FakeCache {
+    override async put(): Promise<void> {
+      throw new DOMException("quota exceeded", "QuotaExceededError");
+    }
+  }
+  class QuotaCacheStorage extends FakeCacheStorage {
+    override async open(): Promise<CacheLike> {
+      return new QuotaCache();
+    }
+  }
+  const cs = new QuotaCacheStorage();
+  let fetches = 0;
+  const fetchFn = async (): Promise<Response> => {
+    fetches++;
+    return bytesResponse(4);
+  };
+  const { wasm, zkey } = await prefetchCircuitAssets("deposit", "/circuits", "88542b90", {
+    cacheStorage: cs,
+    fetchFn,
+  });
+  assert.equal(wasm.byteLength, 4, "the download still succeeds when the cache write fails");
+  assert.equal(zkey.byteLength, 4);
+  assert.equal(fetches, 2, "both assets were fetched despite the failed cache writes");
+  // the un-cacheable state just re-downloads (banner returns) — never throws.
+  await prefetchCircuitAssets("deposit", "/circuits", "88542b90", { cacheStorage: cs, fetchFn });
+  assert.equal(fetches, 4, "no cache means the next prefetch re-downloads");
+});
+
+test("a broken Cache Storage (open throws) degrades to plain downloads", async () => {
+  const cs: CacheStorageLike = {
+    open: async () => {
+      throw new Error("cache storage unavailable");
+    },
+    keys: async () => {
+      throw new Error("cache storage unavailable");
+    },
+    delete: async () => false,
+  };
+  let fetches = 0;
+  const { wasm } = await prefetchCircuitAssets("deposit", "/circuits", "88542b90", {
+    cacheStorage: cs,
+    fetchFn: async () => {
+      fetches++;
+      return bytesResponse(6);
+    },
+  });
+  assert.equal(wasm.byteLength, 6, "proving assets still arrive with no cache at all");
+  assert.equal(fetches, 2);
+});

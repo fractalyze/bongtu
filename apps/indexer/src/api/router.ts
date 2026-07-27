@@ -20,6 +20,11 @@
 //   GET /history?owner=&ts=&sig= -> [{ kind, counterparty, amount, txHash,
 //                               blockTimestamp, seq }]  (ARBITER MODE ONLY; same
 //                               bjj read-auth as /notes; newest-first)
+//   GET /auth/challenge?owner= -> { challenge, expiresAt, hostBindings }
+//                                                           (ARBITER MODE ONLY)
+//   POST /auth {owner,challenge,sig} -> { token, exp }       (ARBITER MODE ONLY;
+//                               the token then authorises /notes + /history via
+//                               ?token= instead of ts/sig — see api/viewtoken.ts)
 //
 // All endpoints serve INGESTED state (the MirrorTree is asserted against the
 // contract per insert and at every scanned head), so the API stays mutually
@@ -36,7 +41,7 @@
 // (ciphertext, roots, paths) and never holds or returns any user private key —
 // trial-decrypt is the wallet's job (SPEC §7 client-side-decrypt model).
 
-import { createServer, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Indexer } from "../ingest.js";
 import { head } from "./routes/head.js";
 import { events } from "./routes/events.js";
@@ -46,12 +51,19 @@ import { health } from "./routes/health.js";
 import { nullifiers } from "./routes/nullifiers.js";
 import { notes } from "./routes/notes.js";
 import { history } from "./routes/history.js";
+import { authChallenge, authRedeem } from "./routes/auth.js";
+import { resolvePublicUrls, resolveTokenSecret, ViewTokenService } from "./viewtoken.js";
 
 /** What a route handler receives: the indexer + the parsed request, no HTTP types. */
 export interface RouteContext {
   ix: Indexer;
+  /** view-token issue/verify (api/viewtoken.ts) — one service per server, and
+   *  null in public mode, which has no token-authed route to serve. */
+  tokens: ViewTokenService | null;
   params: string[]; // regex capture groups (e.g. the /path/:leafIndex digits)
   query: URLSearchParams;
+  /** parsed JSON request body (POST routes only; undefined when absent/empty). */
+  body?: unknown;
 }
 /** What a route handler returns: an HTTP status + a JSON-serialisable body. */
 export interface RouteResult {
@@ -79,12 +91,34 @@ function writeJson(res: ServerResponse, status: number, body: unknown, headers?:
   res.end(s);
 }
 
+// POST bodies are small JSON structs (/auth is 3 short strings); cap well above
+// that so a runaway body cannot balloon memory.
+const MAX_BODY_BYTES = 64 * 1024;
+
+async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_BODY_BYTES) throw new Error(`request body exceeds ${MAX_BODY_BYTES} bytes`);
+    chunks.push(chunk as Buffer);
+  }
+  const text = Buffer.concat(chunks).toString("utf8").trim();
+  if (text === "") return undefined;
+  return JSON.parse(text); // malformed JSON -> throw (mapped to 400 below)
+}
+
 /** Build (but do not start) the request handler for an Indexer. The route set is
- *  fixed at build time: arbiter mode adds /notes, so an unauthorised indexer can
- *  never serve a user's decrypted notes even by request-path (the route is absent). */
-export function makeHandler(ix: Indexer) {
-  const activeRoutes = ix.arbiterMode ? [...routes, notes, history] : routes;
-  return (req: { url?: string; method?: string }, res: ServerResponse): void => {
+ *  fixed at build time: arbiter mode adds /notes + /history + the /auth token
+ *  endpoints, so an unauthorised indexer can never serve a user's decrypted notes
+ *  even by request-path (the routes are absent). `tokens` is injectable for tests;
+ *  the default draws the secret from TOKEN_SECRET (generated-if-absent, warned) —
+ *  and ONLY in arbiter mode, since public mode has no route that takes a token and
+ *  would otherwise warn about a TOKEN_SECRET it has no use for. */
+export function makeHandler(ix: Indexer, tokens?: ViewTokenService | null) {
+  const activeRoutes = ix.arbiterMode ? [...routes, notes, history, authChallenge, authRedeem] : routes;
+  const svc = tokens !== undefined ? tokens : ix.arbiterMode ? new ViewTokenService(resolveTokenSecret()) : null;
+  return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
       const pathname = url.pathname;
@@ -98,8 +132,18 @@ export function makeHandler(ix: Indexer) {
           if (m) params = m.slice(1);
         }
         if (params === null) continue;
-        const { status, body, headers } = route.handle({ ix, params, query: url.searchParams });
-        return writeJson(res, status, body, headers);
+        // Only a matched POST route pays the body read; a malformed body is the
+        // CALLER's error (400), never the catch-all 500.
+        let body: unknown;
+        if (req.method === "POST") {
+          try {
+            body = await readJsonBody(req);
+          } catch (e) {
+            return writeJson(res, 400, { error: `bad request body: ${(e as Error).message}` });
+          }
+        }
+        const { status, body: resBody, headers } = route.handle({ ix, tokens: svc, params, query: url.searchParams, body });
+        return writeJson(res, status, resBody, headers);
       }
       return writeJson(res, 404, { error: "not found", path: pathname });
     } catch (e) {
@@ -108,16 +152,28 @@ export function makeHandler(ix: Indexer) {
   };
 }
 
-/** Start the API server on `port`; resolves with a stop() closer. */
-export function startApi(ix: Indexer, port: number): Promise<{ port: number; stop: () => Promise<void> }> {
-  const handler = makeHandler(ix);
-  const server = createServer((req, res) => handler(req, res));
+/** Start the API server on `port`; resolves with the bound port, the view-token
+ *  origins it will accept, and a stop() closer. The handler is built INSIDE the
+ *  listen callback because the PUBLIC_URL fallback needs the actually-bound port
+ *  (callers pass 0 for an ephemeral one); no request can arrive before then. */
+export function startApi(
+  ix: Indexer,
+  port: number,
+): Promise<{ port: number; publicUrls: string[]; stop: () => Promise<void> }> {
+  let handler: ReturnType<typeof makeHandler> | null = null;
+  const server = createServer((req, res) => void handler?.(req, res));
   return new Promise((resolve) => {
     server.listen(port, () => {
       const addr = server.address();
       const actual = typeof addr === "object" && addr ? addr.port : port;
+      const publicUrls = resolvePublicUrls(process.env, actual);
+      handler = makeHandler(
+        ix,
+        ix.arbiterMode ? new ViewTokenService(resolveTokenSecret(), { publicUrls }) : null,
+      );
       resolve({
         port: actual,
+        publicUrls,
         stop: () => new Promise((r) => server.close(() => r())),
       });
     });
