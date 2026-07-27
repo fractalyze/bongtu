@@ -1,11 +1,13 @@
 // Headless gates for the PURE /history row mapping (src/lib/activity.ts) the
 // activity feed keys its copy and amount sign on. Locked policy under test:
 //
-//   (1) every wire HistoryKind — including "self" (a pure self-send, U-Y2 /
-//       fractalyze/bongtu#1) — has a verb, in plain words (no note/UTXO jargon);
+//   (1) every wire HistoryKind — including "self", which the indexer no longer
+//       emits (a pure self-send is now a sent+received pair) but which older
+//       stored rows still carry — has a verb, in plain words (no note/UTXO jargon);
 //   (2) DIRECTION — received/deposit are "in" (+, green), sent/withdraw are
 //       "out" (-), and "self" is "none": the balance did not change, so the
-//       amount must render unsigned, never as a gain or a loss.
+//       amount must render unsigned, never as a gain or a loss. A modern
+//       self-send therefore renders as a matched -X / +X pair that nets to zero.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -23,8 +25,15 @@ test("every /history kind has a plain-words verb", () => {
   }
 });
 
-test("self-send reads as an internal move, not a payment", () => {
+test("the legacy 'self' row still reads as an internal move, not a payment", () => {
   assert.equal(ACTIVITY_VERB.self, "Moved within your balance");
+});
+
+test("a self-send pair nets to zero in the rendered direction", () => {
+  // Both rows carry the same amount, and the signs cancel — which is what makes
+  // the pair a truthful replacement for the single neutral 'self' row.
+  assert.equal(activityDirection("sent"), "out");
+  assert.equal(activityDirection("received"), "in");
 });
 
 test("direction: in for received/deposit, out for sent/withdraw, none for self", () => {

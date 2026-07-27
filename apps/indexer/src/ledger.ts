@@ -68,7 +68,9 @@ export interface EnvelopeAlarm {
   expected: string; // decimal
 }
 
-/** The kind of a per-owner activity item, as served by GET /history. */
+/** The kind of a per-owner activity item, as served by GET /history. "self" is
+ *  LEGACY — rows written before a pure self-send became a sent+received pair still
+ *  carry it, so readers must keep handling it, but nothing emits it any more. */
 export type HistoryKind = "received" | "sent" | "withdraw" | "deposit" | "self";
 
 /**
@@ -79,8 +81,8 @@ export type HistoryKind = "received" | "sent" | "withdraw" | "deposit" | "self";
  *     a transfer);
  *   - "sent":     a transfer whose spent input was the owner's (counterparty =
  *     the payee, amount = what left them);
- *   - "self":     a transfer whose every nonzero output came back to the owner
- *     (a pure self-send; counterparty null, amount = the payment output);
+ *   - "self":     only ever read, never written: a pure self-send is a "sent" +
+ *     "received" pair, both owned by and addressed to the sender;
  *   - "withdraw": the owner unshielded (counterparty null, amount = unshielded);
  *   - "deposit":  the owner's own deposit output (counterparty null).
  * `counterparty` is a COMPRESSED bjj pubkey hex (never a raw x,y pair). Wire shape
@@ -293,9 +295,12 @@ export function deriveOp(
  *     predates self-send (SPEC §6b was written when the circuit still rejected
  *     duplicate output owners), so a PURE self-send — every nonzero output back
  *     to the sender, legal since the §11-8 v1.1 per-output nonce — would erase
- *     the op from the feed entirely (fractalyze/bongtu#1). That case emits
- *     exactly ONE "self" item instead: counterparty null, amount = the payment
- *     slot (output 0 — a consolidation merge carries the whole merged sum there).
+ *     the op from the feed entirely (fractalyze/bongtu#1). That case emits a
+ *     "sent" AND a "received", both owned by the sender with the sender as
+ *     counterparty, amount = the payment slot (output 0 — a consolidation merge
+ *     carries the whole merged sum there). A matched pair nets to zero and reads
+ *     like every other row, where the older single "self" item needed its own
+ *     verb and its own neutral amount styling in every client.
  *   - disburse: each non-self output → "received" (counterparty = the employer
  *     input owner). Only a cross-checked batch contributes.
  *   - withdraw: the input owner unshielded inputs − change → "withdraw".
@@ -325,12 +330,15 @@ function deriveHistory(op: OpEnvelope, env: ParsedEnvelope, disburseCrossChecks:
       const sender = env.inputs[0].owner;
       // A pure self-send has NO non-self output, so the change suppression below
       // would erase the op from the owner's feed entirely (fractalyze/bongtu#1):
-      // emit one "self" item instead, amount = the payment slot (output 0).
+      // emit the "sent"/"received" pair instead, amount = the payment slot.
       const nonzero = env.outputs.filter((o) => o.value !== 0n);
       if (nonzero.length > 0 && nonzero.every((o) => sameOwner(o.owner, sender))) {
         // nonzero[0], not outputs[0]: a hand-built tx can put 0 in the payment
         // slot; the wallet's shapes (payment at 0, merge sum at 0) are unchanged.
-        out.push({ owner: sender, kind: "self", counterparty: null, amount: nonzero[0].value });
+        // "sent" is pushed first, so in the seq-DESC feed the pair reads
+        // received-above-sent, matching the newest-last emission order.
+        out.push({ owner: sender, kind: "sent", counterparty: sender, amount: nonzero[0].value });
+        out.push({ owner: sender, kind: "received", counterparty: sender, amount: nonzero[0].value });
         return out;
       }
       for (const o of env.outputs) {

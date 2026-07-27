@@ -65,15 +65,17 @@ export interface OwnerNote {
   spent: boolean;
 }
 
-/** The kind of a `GET /history` activity item (arbiter-mode per-owner feed). */
+/** The kind of a `GET /history` activity item (arbiter-mode per-owner feed).
+ *  "self" is only ever read: rows stored before a pure self-send became a
+ *  sent+received pair still carry it, so clients must keep rendering it. */
 export type HistoryKind = "received" | "sent" | "withdraw" | "deposit" | "self";
 
 /** One `GET /history` activity item as the arbiter mode serves it: the owner's
  *  view of an op the ledger decrypted. `counterparty` is a COMPRESSED bjj pubkey
  *  hex (the other party — sender for "received", payee for "sent") or null for
- *  a "deposit"/"withdraw"/"self" ("self" = a pure self-send transfer: every
- *  nonzero output came back to the owner, so there IS no other party).
- *  `amount` is what moved for the owner (decimal). */
+ *  a "deposit"/"withdraw"/"self". A pure self-send (every nonzero output back to
+ *  the owner) is a "sent" + "received" pair whose counterparty is the owner's own
+ *  key. `amount` is what moved for the owner (decimal). */
 export interface HistoryItem {
   kind: HistoryKind;
   counterparty: string | null; // compressed bjj pubkey hex, or null

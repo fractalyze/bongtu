@@ -316,7 +316,7 @@ async function main(): Promise<void> {
     "U3 'received' 15 from the employer",
   );
 
-  step("SELF-SEND: a pure A→A transfer yields exactly ONE 'self' item (fractalyze/bongtu#1)");
+  step("SELF-SEND: a pure A→A transfer yields a matched 'sent' + 'received' pair (fractalyze/bongtu#1)");
   {
     const simS = makeSim();
     const ixS = makeIndexer(true);
@@ -324,30 +324,38 @@ async function main(): Promise<void> {
     const sDep1 = note(U1, 0n, 6002n);
     // The wallet A→A shape (legal since the §11-8 v1.1 per-output nonce):
     // payment slot (output 0) 12 back to U1, change (output 1) 18 back to U1.
-    // Without the 'self' branch the change-suppression rule would erase the op.
+    // Without this branch the change-suppression rule would erase the op.
     const sPay = note(U1, 12n, 6003n);
     const sChg = note(U1, 18n, 6004n);
     ixS.applyLogs([
       ...simS.deposit("0xsdep", sDep0, sDep1, 690000000000000000007n, 661n),
       ...simS.transfer("0xself", sDep0, note(U1, 0n, 6005n), sPay, sChg, 691000000000000000009n, 662n, [401n, 0n]),
     ]);
+    const self = packPubkey(U1.publicKey);
     const h = ixS.ledger!.historyOf(U1.publicKey[0], U1.publicKey[1]);
-    const selfs = h.filter((x) => x.kind === "self");
-    ok(selfs.length === 1, "exactly one 'self' item for the pure self-send");
-    ok(selfs[0].amount === "12", "'self' amount == the payment slot (output 0), not the sum and not the change");
-    ok(selfs[0].counterparty === null, "'self' carries no counterparty");
-    ok(selfs[0].txHash === "0xself", "'self' item carries the self-send tx");
-    ok(!h.some((x) => x.kind === "received" || x.kind === "sent"), "the self-send yields no received/sent pair");
+    const pair = h.filter((x) => x.txHash === "0xself");
+    ok(pair.length === 2, "the pure self-send yields exactly two items");
+    // The feed is seq-DESC and the drafts are emitted sent-then-received, so the
+    // NEWER (higher-seq) 'received' sorts above the 'sent'. That order is pinned.
+    ok(pair[0].kind === "received" && pair[1].kind === "sent", "the pair reads received-above-sent in the seq-desc feed");
+    ok(pair.every((x) => x.amount === "12"), "both carry the payment slot (output 0), not the sum and not the change");
+    ok(pair.every((x) => x.counterparty === self), "both name the sender's OWN key as counterparty");
+    ok(!h.some((x) => x.kind === "self"), "the legacy 'self' kind is never emitted any more");
 
     // The consolidation-merge shape (U-Y1's producer): both real inputs, output 0
-    // = the merged sum, output 1 = 0 — 'self' carries the WHOLE merged amount.
+    // = the merged sum, output 1 = 0 — the pair carries the WHOLE merged amount.
     const sMerged = note(U1, 30n, 6006n);
     ixS.applyLogs(
       simS.transfer("0xmerge", sPay, sChg, sMerged, note(U1, 0n, 6007n), 692000000000000000003n, 663n, [402n, 403n]),
     );
     const h2 = ixS.ledger!.historyOf(U1.publicKey[0], U1.publicKey[1]);
-    const merged = h2.filter((x) => x.kind === "self" && x.txHash === "0xmerge");
-    ok(merged.length === 1 && merged[0].amount === "30", "a consolidation merge yields one 'self' item == the merged sum");
+    const merged = h2.filter((x) => x.txHash === "0xmerge");
+    ok(merged.length === 2, "a consolidation merge yields the same two-item pair");
+    ok(merged.every((x) => x.amount === "30"), "the pair carries the merged sum");
+    ok(
+      merged.some((x) => x.kind === "sent") && merged.some((x) => x.kind === "received"),
+      "one of each kind, both owned by the merger",
+    );
     const notesS = ixS.ledger!.notesOf(U1.publicKey[0], U1.publicKey[1]);
     ok(notesS.filter((n) => !n.spent && n.value !== "0").length === 1, "after the merge exactly one live nonzero note remains");
   }
