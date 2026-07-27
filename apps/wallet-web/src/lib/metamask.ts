@@ -9,9 +9,12 @@ import { ethers } from "ethers";
 import type { KeyDerivationTypedData } from "./derive.js";
 import type { Calldata } from "@bongtu/core/proving";
 import {
+  CHAIN_ID,
+  EXPLORER_BASE,
   GIWA_GAS_FLOOR_GWEI,
   POOL_ABI_FRAGMENTS,
   ERC20_ABI_FRAGMENTS,
+  RPC_URL,
   arbiterKemPkGuardError,
   explorerTxUrl,
   isPreKemProbeError,
@@ -61,11 +64,42 @@ export interface Connection {
   signer: any;
 }
 
-/** Connect MetaMask and return the selected account + ethers signer. */
+// EIP-3085/3326 params for GIWA Sepolia, derived from the ONE network module so a
+// chain move cannot fork the wallet's idea of the chain from the sdk's.
+const GIWA_CHAIN_HEX = "0x" + CHAIN_ID.toString(16);
+const GIWA_CHAIN_PARAMS = {
+  chainId: GIWA_CHAIN_HEX,
+  chainName: "GIWA Sepolia (Testnet)",
+  rpcUrls: [RPC_URL],
+  blockExplorerUrls: [EXPLORER_BASE],
+  nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
+};
+
+/**
+ * Put the injected wallet on GIWA Sepolia: switch if MetaMask already knows the
+ * chain, otherwise register it (EIP-3085 error 4902) and switch. Without this a
+ * user connected on any other network would sign txs that go nowhere — the pool
+ * only exists on GIWA.
+ */
+async function ensureGiwaChain(eth: Eip1193): Promise<void> {
+  try {
+    await eth.request({ method: "wallet_switchEthereumChain", params: [{ chainId: GIWA_CHAIN_HEX }] });
+  } catch (e) {
+    if ((e as { code?: number } | null)?.code !== 4902) throw e;
+    // MetaMask auto-switches after add, but not every injected wallet does.
+    await eth.request({ method: "wallet_addEthereumChain", params: [GIWA_CHAIN_PARAMS] });
+    await eth.request({ method: "wallet_switchEthereumChain", params: [{ chainId: GIWA_CHAIN_HEX }] });
+  }
+}
+
+/** Connect MetaMask on GIWA Sepolia (auto add/switch) and return the selected
+ *  account + ethers signer. */
 export async function connect(): Promise<Connection> {
+  const eth = ethereum();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const provider = new ethers.providers.Web3Provider(ethereum() as any, "any");
+  const provider = new ethers.providers.Web3Provider(eth as any, "any");
   await provider.send("eth_requestAccounts", []);
+  await ensureGiwaChain(eth);
   const signer = provider.getSigner();
   const address = await signer.getAddress();
   return { address, provider, signer };

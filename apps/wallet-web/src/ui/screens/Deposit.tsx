@@ -56,6 +56,7 @@ export function Deposit(): ReactNode {
   const [allowance, setAllowance] = useState<bigint | null>(null);
   const [faucetPending, setFaucetPending] = useState(false);
   const [faucetTxUrl, setFaucetTxUrl] = useState<string | null>(null);
+  const [showFaucet, setShowFaucet] = useState(false);
   const download = useCircuitDownload("deposit");
 
   const elapsed = useElapsedSeconds(phase === "running" && stage === "prove");
@@ -231,86 +232,108 @@ export function Deposit(): ReactNode {
           revealed.
         </p>
 
-        <div className="deposit-avail" aria-live="polite">
-          <span className="deposit-avail-label">You can deposit</span>
-          <span className="deposit-avail-amount">
-            {tokenBalance === null ? "—" : formatKkrw(tokenBalance)}{" "}
-            <span className="unit">kKRW</span>
-          </span>
-        </div>
-
-        {noTokens ? (
-          <div className="faucet faucet-hero">
-            <div className="faucet-head">
-              <span className="testnet-tag">Testnet</span>
-              <span className="faucet-title">First, get test kKRW</span>
-            </div>
-            <p className="hint">
-              Mint {formatKkrw(FAUCET_AMOUNT)} free test kKRW (you pay only gas), then deposit
-              it here.
-            </p>
-            <button
-              className="btn btn-primary btn-block"
-              disabled={faucetPending || !connection}
-              onClick={() => void getTestTokens()}
-            >
-              {faucetPending ? "Minting test kKRW…" : "Get test kKRW"}
-            </button>
-            {faucetTxUrl && (
-              <a className="success-link" href={faucetTxUrl} target="_blank" rel="noreferrer">
-                Minted — view on explorer
-              </a>
-            )}
-          </div>
+        {download.active ? (
+          // The one-time key download IS the screen: no inputs, no buttons, just
+          // the filling bar — everything the user could press needs these assets.
+          <DownloadProgress view={download} />
         ) : (
           <>
-            <label className="field">
-              <span className="field-label">Amount (kKRW)</span>
-              <input
-                className="input"
-                inputMode="decimal"
-                placeholder="0.00"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value.replace(/[^\d.,]/g, ""))}
-              />
-              {amount.trim() && amtErr && <span className="field-err">{amtErr}</span>}
-            </label>
-
-            <div className="faucet">
-              <div className="faucet-head">
-                <span className="testnet-tag">Testnet</span>
-                <span className="faucet-title">Need more test kKRW?</span>
-              </div>
-              <button
-                className="btn btn-ghost btn-block"
-                disabled={faucetPending || !connection}
-                onClick={() => void getTestTokens()}
-              >
-                {faucetPending ? "Minting test kKRW…" : `Mint ${formatKkrw(FAUCET_AMOUNT)} test kKRW`}
-              </button>
-              {faucetTxUrl && (
-                <a className="success-link" href={faucetTxUrl} target="_blank" rel="noreferrer">
-                  Minted — view on explorer
-                </a>
-              )}
+            <div className="deposit-avail" aria-live="polite">
+              <span className="deposit-avail-label">You can deposit</span>
+              <span className="deposit-avail-amount">
+                {tokenBalance === null ? "—" : formatKkrw(tokenBalance)}{" "}
+                <span className="unit">kKRW</span>
+              </span>
             </div>
+
+            {noTokens ? (
+              <div className="faucet faucet-hero">
+                <div className="faucet-head">
+                  <span className="testnet-tag">Testnet</span>
+                  <span className="faucet-title">First, get test kKRW</span>
+                </div>
+                <p className="hint">
+                  Mint {formatKkrw(FAUCET_AMOUNT)} free test kKRW (you pay only gas), then
+                  deposit it here.
+                </p>
+                <button
+                  className="btn btn-primary btn-block"
+                  disabled={faucetPending || !connection}
+                  onClick={() => void getTestTokens()}
+                >
+                  {faucetPending ? "Minting test kKRW…" : "Get test kKRW"}
+                </button>
+                {faucetTxUrl && (
+                  <a className="success-link" href={faucetTxUrl} target="_blank" rel="noreferrer">
+                    Minted — view on explorer
+                  </a>
+                )}
+              </div>
+            ) : (
+              <>
+                <label className="field">
+                  <span className="field-label">Amount (kKRW)</span>
+                  <input
+                    className="input"
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value.replace(/[^\d.,]/g, ""))}
+                  />
+                  {amount.trim() && amtErr && <span className="field-err">{amtErr}</span>}
+                </label>
+
+                {/* With a balance the faucet is a side path — one extra tap keeps
+                    it from outweighing the amount form. */}
+                {showFaucet ? (
+                  <div className="faucet">
+                    <div className="faucet-head">
+                      <span className="testnet-tag">Testnet</span>
+                      <span className="faucet-title">Get more test kKRW</span>
+                    </div>
+                    <button
+                      className="btn btn-ghost btn-block"
+                      disabled={faucetPending || !connection}
+                      onClick={() => void getTestTokens()}
+                    >
+                      {faucetPending
+                        ? "Minting test kKRW…"
+                        : `Mint ${formatKkrw(FAUCET_AMOUNT)} test kKRW`}
+                    </button>
+                    {faucetTxUrl && (
+                      <a
+                        className="success-link"
+                        href={faucetTxUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Minted — view on explorer
+                      </a>
+                    )}
+                  </div>
+                ) : (
+                  <button className="link-btn faucet-more" onClick={() => setShowFaucet(true)}>
+                    Need more test kKRW?
+                  </button>
+                )}
+              </>
+            )}
+
+            {error && <div className="banner banner-err">{error}</div>}
+
+            {!noTokens && (
+              <button
+                className="btn btn-primary btn-block"
+                disabled={!formValid}
+                onClick={() => {
+                  setError(null);
+                  setPhase("confirm");
+                }}
+              >
+                Review deposit
+              </button>
+            )}
           </>
-        )}
-
-        {error && <div className="banner banner-err">{error}</div>}
-        <DownloadProgress view={download} />
-
-        {!noTokens && (
-          <button
-            className="btn btn-primary btn-block"
-            disabled={!formValid || download.active}
-            onClick={() => {
-              setError(null);
-              setPhase("confirm");
-            }}
-          >
-            {download.active ? "Preparing keys…" : "Review deposit"}
-          </button>
         )}
       </div>
     </div>

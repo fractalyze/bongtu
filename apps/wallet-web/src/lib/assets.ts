@@ -21,7 +21,7 @@
 // eviction + hit/miss behaviour is unit-tested with an in-memory fake — no browser
 // (test/assets.test.ts). This is the genuinely NEW behaviour this unit adds.
 
-import { CIRCUITS_VERSION } from "../config.js";
+import { CIRCUITS_VERSION, CIRCUIT_ASSET_BYTES } from "../config.js";
 
 /** The shared family prefix every circuit-asset bucket carries. Eviction keeps the
  *  current version's bucket and deletes the rest of this family; unrelated caches
@@ -109,7 +109,12 @@ export async function evictStaleCaches(version: string, deps: PrefetchDeps = {})
 // single-use, so we `put` a clone and read the bytes from the original — via a
 // streaming reader when progress is wanted (per-chunk onProgress with the
 // Content-Length total), else the plain arrayBuffer path.
-async function cachedFetch(cache: CacheLike, url: string, deps: PrefetchDeps): Promise<ArrayBuffer> {
+async function cachedFetch(
+  cache: CacheLike,
+  url: string,
+  expectedTotal: number | null,
+  deps: PrefetchDeps,
+): Promise<ArrayBuffer> {
   const hit = await cache.match(url);
   if (hit) return hit.arrayBuffer();
   deps.onDownloadStart?.(url);
@@ -119,8 +124,11 @@ async function cachedFetch(cache: CacheLike, url: string, deps: PrefetchDeps): P
   await cache.put(url, res.clone());
   if (!deps.onProgress || !res.body) return res.arrayBuffer();
 
+  // The pinned decoded size wins over Content-Length: the CDN's header is
+  // missing on some assets and counts COMPRESSED bytes on others, while the
+  // reader below counts decoded bytes.
   const totalHeader = res.headers.get("content-length");
-  const total = totalHeader ? Number(totalHeader) : null;
+  const total = expectedTotal ?? (totalHeader ? Number(totalHeader) : null);
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
   let received = 0;
@@ -158,9 +166,10 @@ export async function prefetchCircuitAssets(
   await evictStaleCaches(version, depsWithCs);
   const cache = await cs.open(cacheNameFor(version));
   const base = circuitBaseUrl.replace(/\/$/, "");
+  const expected = CIRCUIT_ASSET_BYTES[circuit];
   const [wasm, zkey] = await Promise.all([
-    cachedFetch(cache, `${base}/${circuit}.wasm`, depsWithCs),
-    cachedFetch(cache, `${base}/${circuit}.zkey`, depsWithCs),
+    cachedFetch(cache, `${base}/${circuit}.wasm`, expected.wasm, depsWithCs),
+    cachedFetch(cache, `${base}/${circuit}.zkey`, expected.zkey, depsWithCs),
   ]);
   return { wasm, zkey };
 }

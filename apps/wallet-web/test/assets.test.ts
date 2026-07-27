@@ -13,6 +13,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   cacheNameFor,
@@ -22,6 +25,7 @@ import {
   type CacheLike,
   type CacheStorageLike,
 } from "../src/lib/assets.js";
+import { CIRCUIT_ASSET_BYTES } from "../src/config.js";
 
 // --- in-memory fake of the browser Cache Storage surface the prefetch uses --------
 
@@ -233,7 +237,9 @@ test("cold prefetch streams progress (received grows, total = Content-Length); w
   assert.equal(zkey.byteLength, 32, "streamed chunks reassemble to the full zkey");
   const zk = progress.filter((p) => p.url === "/circuits/transfer.zkey");
   assert.deepEqual(zk.map((p) => p.received), [16, 32], "received grows per chunk");
-  assert.ok(zk.every((p) => p.total === 32), "total mirrors Content-Length");
+  // The pinned decoded size beats Content-Length (the CDN strips it on some
+  // assets and reports compressed bytes on others) — the bar always has a total.
+  assert.ok(zk.every((p) => p.total === CIRCUIT_ASSET_BYTES.transfer.zkey), "total is the pinned size");
 
   // warm second run: cache hit, zero progress events
   const warm: string[] = [];
@@ -245,4 +251,23 @@ test("cold prefetch streams progress (received grows, total = Content-Length); w
     onProgress: (p) => warm.push(p.url),
   });
   assert.deepEqual(warm, [], "a cache hit reports no progress");
+});
+
+test("CIRCUIT_ASSET_BYTES matches the assets actually served from public/circuits", () => {
+  // The pinned sizes are the progress bar's denominator; a circuit regen that
+  // forgets to re-pin them shows a wrong percentage with no other symptom. The
+  // assets are gitignored (only the dev/deploy box has them), so absence — the
+  // CI case — is a skip, not a pass.
+  const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "public", "circuits");
+  for (const circuit of ["transfer", "withdraw", "deposit"] as const) {
+    for (const kind of ["wasm", "zkey"] as const) {
+      const p = join(dir, `${circuit}.${kind}`);
+      if (!existsSync(p)) continue;
+      assert.equal(
+        statSync(p).size,
+        CIRCUIT_ASSET_BYTES[circuit][kind],
+        `${circuit}.${kind} size drifted from CIRCUIT_ASSET_BYTES — re-pin alongside CIRCUITS_VERSION`,
+      );
+    }
+  }
 });

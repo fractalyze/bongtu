@@ -14,7 +14,6 @@ import { walletBrand } from "../../lib/walletBrand.js";
 import { shortenPubkey } from "../format.js";
 import { BalanceCard } from "../components/BalanceCard.js";
 import { ActivityList } from "../components/ActivityList.js";
-import { ConceptFlow } from "../components/ConceptFlow.js";
 import { StatusChip } from "../components/StatusChip.js";
 import { ReceiveModal } from "../components/ReceiveModal.js";
 import {
@@ -49,6 +48,7 @@ export function Home(): ReactNode {
         <div className="brand">
           <EnvelopeLogo size={26} />
           <span className="brand-name">bongtu</span>
+          <span className="testnet-tag">Testnet</span>
         </div>
         <div className="home-head-right">
           <StatusChip indexerUrl={indexerUrl} />
@@ -81,11 +81,12 @@ export function Home(): ReactNode {
       )}
 
       {/* A LOADED zero balance means Send/Withdraw can only fail — replace all
-          three actions with the one move that works: the diagram + Deposit.
-          Never over a spinner or a data error (balance unknown there). */}
+          three actions with the one move that works: Deposit. Never over a
+          spinner or a data error (balance unknown there). */}
       {!loading && !dataError && balance === 0n ? (
         <section className="get-started">
-          <ConceptFlow />
+          <p className="get-started-title">Deposit kKRW to get started</p>
+          <p className="hint">Deposited kKRW becomes private — then send and withdraw freely.</p>
           <button className="btn btn-primary btn-block" onClick={() => navigate("deposit")}>
             Deposit kKRW
           </button>

@@ -186,6 +186,19 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
   }
 
   // --- form ------------------------------------------------------------------
+  // The one-time key download IS the screen (no inputs/buttons until it lands):
+  // everything the user could press here needs these assets anyway.
+  if (download.active) {
+    return (
+      <div className="screen">
+        <ScreenHeader title={title} />
+        <div className="spend-body">
+          <DownloadProgress view={download} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="screen">
       <ScreenHeader title={title} />
@@ -222,17 +235,16 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
         </label>
 
         {error && <div className="banner banner-err">{error}</div>}
-        <DownloadProgress view={download} />
 
         <button
           className="btn btn-primary btn-block"
-          disabled={!formValid || download.active}
+          disabled={!formValid}
           onClick={() => {
             setError(null);
             setPhase("confirm");
           }}
         >
-          {download.active ? "Preparing keys…" : `Review ${title.toLowerCase()}`}
+          Review {title.toLowerCase()}
         </button>
       </div>
     </div>

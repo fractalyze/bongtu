@@ -61,4 +61,16 @@ export const DEFAULTS = {
 //   cat public/circuits/transfer.zkey public/circuits/withdraw.zkey circuits/out/deposit.zkey | sha256sum | cut -c1-8
 export const CIRCUITS_VERSION = "ca05ab9f";
 
+// Exact byte sizes of the served proving assets — the download progress bar's
+// denominator. Needed because the CDN strips/deflates Content-Length on some
+// assets (br-compressed wasm), which would leave the bar indeterminate; these
+// are the DECODED sizes, matching what the streaming reader counts. Re-pin
+// alongside CIRCUITS_VERSION whenever a zkey/wasm changes:
+//   stat -c "%n %s" public/circuits/*
+export const CIRCUIT_ASSET_BYTES: Record<"transfer" | "withdraw" | "deposit", { wasm: number; zkey: number }> = {
+  transfer: { wasm: 3924403, zkey: 28903136 },
+  withdraw: { wasm: 3881862, zkey: 24869572 },
+  deposit: { wasm: 3364023, zkey: 6776800 },
+};
+
 export { H, B } from "@bongtu/core/network";
