@@ -139,6 +139,15 @@ swaps the four verifier addresses and mints the first hybrid epoch in the same t
 implementation swap, because old proofs and new verifiers disagree on public count and no window may
 exist between them.
 
+`initializeV3` (`reinitializer(3)`) is the self-send migration payload (U-X3): a **verifier-only**
+swap of `transferVerifier` and nothing else. The witness shape and the 37 publics are unchanged —
+only the transfer verifying key moves — so no epoch is minted, since an epoch boundary tells the
+indexer and the wallets that arbiter key material changed, and none did. `reinitializer(3)` only
+requires version < 3, so the payload would also run on a pool that never took V2 and would then put
+`initializeV2` permanently out of reach; the V2-then-V3 ordering is enforced by
+`deploy/UpgradeSelfSend.s.sol`, whose pre-flight reads the initializer version from storage and
+refuses anything below 2.
+
 ## Proxy and wiring
 
 The pool is deployed behind a **UUPS (ERC-1967) proxy**. The implementation constructor only calls

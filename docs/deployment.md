@@ -9,17 +9,22 @@ into `packages/core/src/network.ts` so both web apps read one set of constants.
 | role | address |
 |---|---|
 | BongtuPool — ERC-1967 proxy, the canonical pool | `0x93365980784ef504613EF5822ce1289CF858Fc10` |
-| BongtuPool implementation | `0xc975d2897bA961c11Eb8EB86f2654272a5b6b631` |
+| BongtuPool implementation | `0x91fb94B656BE4eb86eD0Cdf4f172f620c61d21f7` |
 | Poseidon-v1 hasher | `0xaA7778c778C83cE5655d5F217bDfE7782e01Bc50` |
 | DepositVerifier | `0x71F42727670Ad93685665b437711531156E57624` |
 | WithdrawVerifier | `0xBA13CB6c005291aa33b7f68A3ABC26002562A9A7` |
 | Disburse256Verifier (`disburseVerifier`) | `0x378439670AbD2C497443D21113727fa4827b47ea` |
-| TransferVerifier | `0x550A32693d1B6855247d96ef5Ec4512B6095CD99` |
+| TransferVerifier | `0x36B39D3d7ED00EC892a448F7C1a230D35C28B21f` |
 | mock kKRW (ERC-20) | `0x17A89cC5FF3395Bb01464c9E422749CcDbFa8C3f` |
 | owner / deployer | `0xe92a97e645351268F3d60d5a27EB842A5b293058` |
 
+`deploy/addresses.91342.json` is canonical — the table above is a convenience copy of it, and
+`packages/core/test/network.test.ts` holds the module constants to the file field-for-field. When
+the two disagree, the JSON is right.
+
 `batchSize` is 256. The **proxy** is the address to integrate against; the implementation and the
-four verifiers changed in the 2026-07-27 hybrid upgrade below and will change again on the next
+four verifiers changed in the 2026-07-27 hybrid upgrade below (and the implementation plus
+`TransferVerifier` again in the self-send upgrade after it) and will change again on the next
 circuit edit. The live pool is canonical and is not redeployed for new work — a circuit change ships
 as a UUPS `upgradeToAndCall` ([contracts.md](contracts.md#proxy-and-wiring)).
 
@@ -66,6 +71,18 @@ key would under-record every envelope, and serving with the wrong one would stam
 operation as tampered ([indexer.md](indexer.md#the-kem-boot-guard)). `docker-compose.yml` forwards
 the variable; like `AUTHORITY_KEY` it is never logged and never serialized.
 
+## The self-send upgrade
+
+A second UUPS upgrade followed the PQ migration, for the U-X3 transfer circuit (§11-8 v1.1: receiver
+ciphertext `i` is encrypted under `encryptionNonce + i`, which makes a transfer to yourself
+provable). Its payload is `initializeV3` — a **verifier-only** swap: the new `TransferVerifier`
+plus the new implementation, and **no epoch**, because no arbiter key material changed. `deposit`,
+`withdraw` and `disburse` keep the verifiers the PQ upgrade installed.
+
+`deploy/UpgradeSelfSend.s.sol` is the reusable form. It refuses to run on a pool that has not taken
+`initializeV2` first: `reinitializer(3)` would accept a never-V2 pool and burn the version past 2,
+stranding it on its pre-PQ verifiers with no way back.
+
 ## Chain facts
 
 | fact | value |
@@ -89,10 +106,13 @@ the faucet grant. `packages/core/src/network.ts` exports
 |---|---|
 | `deploy/Deploy.s.sol` | deploys Poseidon + 4 verifiers + (optionally) a mock kKRW + the pool implementation + an `ERC1967Proxy` whose constructor runs `initialize` atomically; writes `addresses.<chainid>.json` |
 | `deploy/UpgradePq.s.sol` | the UUPS migration of an already-deployed pool to the hybrid PQ implementation: deploys the four regenerated verifiers + the new impl, then one `upgradeToAndCall` whose `initializeV2` payload swaps the verifier addresses and mints the epoch carrying both keys; rewrites the verifier/impl entries in `addresses.<chainid>.json` |
+| `deploy/UpgradeSelfSend.s.sol` | the UUPS migration to the self-send transfer circuit: deploys the regenerated `TransferVerifier` + the new impl, then one `upgradeToAndCall` whose `initializeV3` payload swaps only that verifier and mints no epoch; pre-flight asserts the pool is already V2 |
+| `deploy/AddressBook.sol` | the field list of `addresses.<chainid>.json`, declared once, with a read + merge-write the three scripts above share (each names only the fields it changes) |
 | `deploy/Smoke.s.sol` | a real `deposit` against the deployed pool using the committed proof fixture |
 | `deploy/deploy_local.sh` | anvil + Deploy + getter read-back + Smoke — the local gate |
 | `deploy/giwa_disburse256.ts` | the live 256-recipient disburse runner (rebuild mirror → deposit → prover service → `disburseWithCiphertexts` → measure L2 gas and L1 data fee) |
 | `deploy/e2e_m0.sh`, `deploy/e2e_orchestrator.ts` | the cross-circuit spend-cycle end-to-end on a local anvil |
+| `deploy/upload_circuits.sh` | uploads the wallet's proving assets (wasm + zkey) to the Vercel Blob store under a `CIRCUITS_VERSION` path, refusing assets whose zkey hash misses the pin in the wallet's `config.ts` |
 
 Environment knobs and the exact GIWA invocation are in `deploy/README.md`. Two facts that are easy
 to lose and expensive to rediscover:

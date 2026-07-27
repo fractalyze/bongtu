@@ -20,7 +20,7 @@ enforced four-op auditor disclosure.
 | | address |
 |---|---|
 | BongtuPool (proxy, B=256) | [`0x93365980784ef504613EF5822ce1289CF858Fc10`](https://sepolia-explorer.giwa.io/address/0x93365980784ef504613EF5822ce1289CF858Fc10) |
-| BongtuPool impl (hybrid PQ, epoch 1) | [`0xc975d2897bA961c11Eb8EB86f2654272a5b6b631`](https://sepolia-explorer.giwa.io/address/0xc975d2897bA961c11Eb8EB86f2654272a5b6b631) |
+| BongtuPool impl (hybrid PQ epoch 1 + self-send) | [`0x91fb94B656BE4eb86eD0Cdf4f172f620c61d21f7`](https://sepolia-explorer.giwa.io/address/0x91fb94B656BE4eb86eD0Cdf4f172f620c61d21f7) |
 
 Verified on-chain through the proxy: `B()==256`, `disburseCiphertextLen==2054` (disclosure enforced), a real
 envelope-carrying `deposit`. Measured: warm 256-disburse GPU proof **~0.47s** (2.80M constraints); the
