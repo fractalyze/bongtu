@@ -11,6 +11,7 @@ import { StagedProgress, type StagedStep } from "./StagedProgress.js";
 import { DownloadProgress } from "./DownloadProgress.js";
 import { ScreenHeader } from "./ScreenHeader.js";
 import { Button } from "./controls.js";
+import { IconShieldCheck, IconWallet } from "./icons.js";
 import type { CircuitDownloadView } from "../hooks.js";
 
 function Panel({ title, children }: { title: string; children: ReactNode }): ReactNode {
@@ -75,18 +76,44 @@ export function RunningPanel({
 /** The confirm sheet: the amount, the action's own detail rows, an optional note about
  *  what confirming will cost, and the Cancel / Confirm pair. Confirm stays disabled
  *  while the proving assets are still streaming in. */
-/** The one-glance direction of a confirm: two pills and an arrow ("kKRW in your
- *  account" -> "Private balance"). Replaces the old From/To definition-list rows,
- *  which read like a form rather than a picture. */
-export function FlowHint({ from, to }: { from: string; to: string }): ReactNode {
+/** The one-glance direction of a confirm, drawn rather than listed (grill decision
+ *  2026-07-28, variant A): two icon cards — wallet = Public kKRW, shield = Private
+ *  kKRW, the private side tinted as the protected one — joined by a dashed arrow
+ *  whose dashes flow in the direction of the money. Deposit shields, withdraw
+ *  unshields; the cards swap sides accordingly. */
+export function FlowHint({ direction }: { direction: "shield" | "unshield" }): ReactNode {
+  const publicCard = (
+    <span className="flex flex-col items-center gap-1.5 bg-surface border border-border rounded-xl px-4 py-3 min-w-[104px]">
+      <IconWallet size={22} className="text-primary" />
+      <span className="text-[0.8rem] font-semibold text-muted">Public kKRW</span>
+    </span>
+  );
+  const privateCard = (
+    <span className="flex flex-col items-center gap-1.5 bg-pos-bg border border-[#cfe5d6] rounded-xl px-4 py-3 min-w-[104px]">
+      <IconShieldCheck size={22} className="text-pos" />
+      <span className="text-[0.8rem] font-semibold text-pos">Private kKRW</span>
+    </span>
+  );
+  const [from, to] =
+    direction === "shield" ? [publicCard, privateCard] : [privateCard, publicCard];
+  const label =
+    direction === "shield" ? "Public kKRW to Private kKRW" : "Private kKRW to Public kKRW";
   return (
-    <div
-      className="flex items-center justify-center gap-2 text-[0.82rem] text-muted"
-      aria-label={`${from} to ${to}`}
-    >
-      <span className="px-2.5 py-1 rounded-full bg-surface border border-border">{from}</span>
-      <span aria-hidden="true" className="text-ink font-semibold">&rarr;</span>
-      <span className="px-2.5 py-1 rounded-full bg-surface border border-border">{to}</span>
+    <div className="flex items-center justify-center gap-3" aria-label={label}>
+      {from}
+      <svg viewBox="0 0 64 24" className="w-16 h-6 flex-none" aria-hidden="true">
+        <line
+          x1="2"
+          y1="12"
+          x2="50"
+          y2="12"
+          className="stroke-border-strong animate-flow-dash"
+          strokeWidth="2"
+          strokeDasharray="6 5"
+        />
+        <polygon points="50,6 62,12 50,18" className="fill-border-strong" />
+      </svg>
+      {to}
     </div>
   );
 }

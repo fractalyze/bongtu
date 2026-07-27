@@ -21,6 +21,7 @@ import {
   RiExternalLinkLine,
   RiArrowLeftLine,
   RiLockLine,
+  RiShieldCheckLine,
   RiLockUnlockLine,
 } from "@remixicon/react";
 
@@ -53,8 +54,8 @@ export function IconLink({ size = 16 }: IconProps): ReactNode {
 }
 
 /** Generic wallet — the connected-wallet fallback when the provider brand is unknown. */
-export function IconWallet({ size = 16 }: IconProps): ReactNode {
-  return <RiWallet3Line size={size} aria-hidden="true" />;
+export function IconWallet({ size = 16, className }: IconProps): ReactNode {
+  return <RiWallet3Line size={size} className={className} aria-hidden="true" />;
 }
 
 export function IconSend({ size = 18 }: IconProps): ReactNode {
@@ -162,4 +163,8 @@ export function WalletConnectMark({ size = 18, className }: IconProps): ReactNod
       />
     </svg>
   );
+}
+
+export function IconShieldCheck({ size = 20, className }: IconProps): ReactNode {
+  return <RiShieldCheckLine size={size} className={className} />;
 }

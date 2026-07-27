@@ -119,7 +119,7 @@ export function Deposit(): ReactNode {
       <ConfirmPanel
         title="Deposit"
         amount={review}
-        hint={<FlowHint from="kKRW in your account" to="Private balance" />}
+        hint={<FlowHint direction="shield" />}
         note={
           willApprove ? (
             <p className="text-sm text-muted">

@@ -44,6 +44,7 @@
   --animate-dl-sweep: dl-sweep 1.2s ease-in-out infinite;
   --animate-check-pop: check-pop 0.28s ease-out;
   --animate-desc-in: desc-in 0.22s ease-out;
+  --animate-flow-dash: flow-dash 0.9s linear infinite;
 }
 
 /* A finished step's check settles in with a small overshoot. */
@@ -61,6 +62,12 @@
   }
 }
 /* The active step's one-line explanation slides open under it. */
+/* The FlowHint arrow's dashes travel in the money's direction. */
+@keyframes flow-dash {
+  to {
+    stroke-dashoffset: -11;
+  }
+}
 @keyframes desc-in {
   from {
     opacity: 0;

@@ -14,7 +14,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { ActivityList } from "../src/ui/components/ActivityList.js";
-import { ConfirmPanel, RunningPanel } from "../src/ui/components/ActionPanels.js";
+import { ConfirmPanel, FlowHint, RunningPanel } from "../src/ui/components/ActionPanels.js";
 import { ExplorerLink } from "../src/ui/components/ExplorerLink.js";
 import { LockChip } from "../src/ui/components/LockChip.js";
 import { MintModal, MintSuccess } from "../src/ui/components/MintModal.js";
@@ -82,6 +82,26 @@ test("the success screen never shows a loading indicator (the tx is done)", () =
   );
   assert.doesNotMatch(html, /Updating your balance/);
   assert.doesNotMatch(html, /animate-spin/);
+});
+
+test("the confirm sheets draw the shield direction, not a From/To list", () => {
+  // Variant A (grill 2026-07-28): wallet card = Public kKRW, shield card =
+  // Private kKRW, dashes flowing between. Deposit shields; withdraw unshields.
+  const shield = renderToStaticMarkup(h(FlowHint, { direction: "shield" }));
+  assert.match(shield, /aria-label="Public kKRW to Private kKRW"/);
+  const unshield = renderToStaticMarkup(h(FlowHint, { direction: "unshield" }));
+  assert.match(unshield, /aria-label="Private kKRW to Public kKRW"/);
+  for (const html of [shield, unshield]) {
+    assert.match(html, /Public kKRW/);
+    assert.match(html, /Private kKRW/);
+    assert.match(html, /animate-flow-dash/);
+  }
+  const deposit = readFileSync(`${UI_DIR}screens/Deposit.tsx`, "utf8");
+  const spend = readFileSync(`${UI_DIR}screens/SpendScreen.tsx`, "utf8");
+  assert.match(deposit, /direction="shield"/);
+  assert.match(spend, /direction="unshield"/);
+  assert.doesNotMatch(deposit, />From</);
+  assert.doesNotMatch(deposit, />To</);
 });
 
 test("the success headlines are the corrected ones", () => {

@@ -192,7 +192,7 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
         amount={review}
         hint={
           !isTransfer && !merging ? (
-            <FlowHint from="Private balance" to="kKRW in your account" />
+            <FlowHint direction="unshield" />
           ) : undefined
         }
         note={
