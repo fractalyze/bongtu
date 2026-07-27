@@ -22,9 +22,13 @@ set -uo pipefail
 
 cd "$(dirname "$0")"
 
-CIRCOM='/lib64/ld-linux-x86-64.so.2 /usr/local/bin/circom'
-NODE=/home/a41/.nvm/versions/node/v22.17.1/bin/node
-ZETO=/home/a41/Workspace/research/disclosure-poc/zeto/zkp/circuits
+# Overridable toolchain (same pattern as prove_all.sh / deploy/e2e_m0.sh): CI and
+# fresh machines export CIRCOM, NODE, ZETO, CIRCOMLIB; the defaults are this dev
+# box (docs/toolchain.md). CIRCOM may be a multi-word command (ld-linux shim).
+CIRCOM="${CIRCOM:-/lib64/ld-linux-x86-64.so.2 /usr/local/bin/circom}"
+NODE="${NODE:-$(command -v node || echo /home/a41/.nvm/versions/node/v22.17.1/bin/node)}"
+ZETO="${ZETO:-/home/a41/Workspace/research/disclosure-poc/zeto/zkp/circuits}"
+CIRCOMLIB="${CIRCOMLIB:-$ZETO/node_modules}"
 
 mkdir -p out inputs
 # circom's generated generate_witness.js is CommonJS; the repo root is ESM, so mark
@@ -41,7 +45,7 @@ compile_if_missing() {
   if [ ! -f "out/${name}_js/${name}.wasm" ]; then
     echo "-- compiling $name (wasm missing)"
     $CIRCOM "$name.circom" --r1cs --wasm --sym -o out/ \
-        -l "$ZETO" -l "$ZETO/node_modules" -l lib \
+        -l "$ZETO" -l "$CIRCOMLIB" -l lib \
         || { echo "FATAL: $name compile failed"; exit 1; }
   fi
 }

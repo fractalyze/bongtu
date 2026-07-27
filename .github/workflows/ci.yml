@@ -34,7 +34,13 @@
 #                        on this path), runs prove_all.sh, gates
 #                        `git diff --exit-code circuits/verifiers` (drift can
 #                        only appear when circuits change = exactly the miss
-#                        path), and saves circuits/out (~266 MB). The full pot22
+#                        path), runs the three CIRCUIT SOUNDNESS gates
+#                        (test_zero_leaf_unsat.sh, assert_attacks_throw.ts,
+#                        auditor_decrypt_check.ts), and saves circuits/out
+#                        (~266 MB). The miss path is exactly when a circuit or a
+#                        witness generator changed — the cache key hashes both,
+#                        so those gates cannot be skipped by a stale artifact.
+#                        The full pot22
 #                        ptau is required (not a smaller one): the committed
 #                        contracts/src/verifiers/*.sol derive from a pot22
 #                        groth16 setup, and `snarkjs groth16 setup` is
@@ -237,7 +243,13 @@ jobs:
         run: grep -E '^[A-Z0-9_]+=' .github/ci-pins.env >> "$GITHUB_ENV"
       - name: compute artifact cache key
         id: key
-        run: echo "key=circuits-out-v1-${{ hashFiles('.github/ci-pins.env', 'circuits/**/*.circom', 'circuits/lib/**', 'circuits/prove_all.sh') }}" >> "$GITHUB_OUTPUT"
+        # The key must cover everything that decides what circuits/out CONTAINS —
+        # including the witness INPUTS. The generators (circuits/gen_*.ts,
+        # fixture_lib.ts) and the @bongtu/core primitives they build notes with
+        # produce the committed inputs/*.json that the soundness gates below
+        # consume, so a change there with unchanged .circom sources would
+        # otherwise hit a stale cache and skip both the rebuild and those gates.
+        run: echo "key=circuits-out-v1-${{ hashFiles('.github/ci-pins.env', 'circuits/**/*.circom', 'circuits/lib/**', 'circuits/prove_all.sh', 'circuits/gen_*.ts', 'circuits/fixture_lib.ts', 'packages/core/src/**') }}" >> "$GITHUB_OUTPUT"
       - name: check for cached circuits/out (lookup only — dependents restore it)
         id: outcache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -336,6 +348,21 @@ jobs:
         # a diff here means someone updated circuits without recommitting them.
         if: steps.outcache.outputs.cache-hit != 'true'
         run: git diff --exit-code circuits/verifiers
+
+      - name: circuit soundness gates (zero-leaf belt, value belt + kemBinding, auditor decrypt)
+        # The three gates that prove the security properties the product claims:
+        # the zero-commitment belt makes SMT->IMT mint-from-nothing unsatisfiable
+        # for all three spending circuits; the value belt + kemBinding tamper legs
+        # convict a forged padded input or a re-bound envelope; the auditor gate
+        # proves every hybrid envelope opens under the arbiter key material alone.
+        # They run here because this is where the toolchain (pinned circom, ZETO,
+        # extdeps) and a freshly built circuits/out both exist — and BEFORE the
+        # cache save, so a failing build never becomes the cached artifact.
+        if: steps.outcache.outputs.cache-hit != 'true'
+        run: |
+          bash circuits/test_zero_leaf_unsat.sh
+          npx tsx circuits/assert_attacks_throw.ts
+          npx tsx circuits/auditor_decrypt_check.ts
 
       - name: save circuits/out artifact cache
         if: steps.outcache.outputs.cache-hit != 'true'
