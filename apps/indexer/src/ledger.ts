@@ -284,7 +284,8 @@ export function deriveOp(
  * is what the notes were built from). Zero-value notes (pads, residues, zero
  * change) contribute nothing. Semantics per SPEC §6b / LedgerHistoryItem:
  *   - deposit:  each of the depositor's own outputs → "deposit".
- *   - transfer: the input owner is the sender; each non-self output → a "received"
+ *   - transfer / transfer10 (same rule, N = 2 or 10): the input owner is the
+ *     sender; each non-self output → a "received"
  *     for its owner (counterparty = sender) AND a matching "sent" for the sender
  *     (counterparty = that payee). Both outputs can be independent payees, so a
  *     split payment yields two "sent" items, never one merged item. A self output
@@ -320,10 +321,12 @@ export function deriveHistory(op: OpEnvelope, env: ParsedEnvelope, disburseCross
       }
       return out;
     }
-    case "transfer": {
-      // transfer is 2-out with INDEPENDENT output owners, so both outputs can be
-      // distinct non-self payees: emit one "received" AND one matching "sent" per
-      // non-self output — never collapse a split payment into a single item.
+    case "transfer":
+    case "transfer10": {
+      // transfer is N-out with INDEPENDENT output owners, so every output can be
+      // a distinct non-self payee: emit one "received" AND one matching "sent" per
+      // non-self output — never collapse a split payment into a single item. The
+      // arity-10 circuit differs only in N, so it derives identically.
       const sender = env.inputs[0].owner;
       // A pure self-send has NO non-self output, so the change suppression below
       // would erase the op from the owner's feed entirely (fractalyze/bongtu#1):

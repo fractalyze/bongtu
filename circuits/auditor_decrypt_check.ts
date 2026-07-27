@@ -18,9 +18,9 @@
 //   3. NEGATIVES: a WRONG kemSs decrypts to garbage, and the LEGACY ECDH-only
 //      key (the raw shared point) no longer decrypts a hybrid envelope;
 //   4. FIXTURE envelopes: every committed fixture proof's envelope decrypts
-//      (deposit/withdraw/transfer publics carry the ciphertext; the disburse
-//      arities carry only kemBinding on-chain, so their KEM leg is checked via
-//      binding == Poseidon(3) over the decapsulated limbs).
+//      (deposit/withdraw/transfer/transfer10 publics carry the ciphertext; the
+//      disburse arities carry only kemBinding on-chain, so their KEM leg is
+//      checked via binding == Poseidon(3) over the decapsulated limbs).
 //
 //   npx tsx auditor_decrypt_check.ts   # exits 0 iff all assertions hold
 //
@@ -365,19 +365,120 @@ async function checkTransferSelfSend(): Promise<void> {
   eq(m[13], outSalts[1], "authority envelope: recovered output1 salt");
 }
 
+// --- TRANSFER10 self-merge (arity 10, every output to ONE owner) -------------
+
+async function checkTransfer10SelfMerge(): Promise<void> {
+  console.log("\n=== TRANSFER10 self-merge (10 inputs -> 1 note, all 10 outputs one owner) ===");
+  // The extreme duplicate-owner case: ten outputs, one key, one ephemeral ECDH
+  // key. Under a shared nonce every pair of them would be a two-time pad; under
+  // encryptionNonce + i each must open independently.
+  const owner: Keypair = deriveKeypair(77770002n);
+  const inValues = Array.from({ length: 10 }, (_, i) => BigInt(100 * (i + 1))); // 5500
+  const inSalts = Array.from({ length: 10 }, (_, i) => 820001n + BigInt(i));
+  const inCommits = inValues.map((v, i) => commitment(v, inSalts[i], owner.publicKey));
+  const { root, pathElements, leafIndices } = membership(inCommits);
+  const outValues = Array.from({ length: 10 }, (_, i) => (i === 0 ? 5500n : 0n));
+  const outSalts = Array.from({ length: 10 }, (_, i) => 830001n + BigInt(i));
+  const outCommits = outValues.map((v, i) => commitment(v, outSalts[i], owner.publicKey));
+
+  const ecdhPrivateKey = 78787878787878787878787n;
+  const encryptionNonce = 949494949494n;
+  const kem = encap("bongtu/gate/kem/encap/transfer10-selfmerge");
+
+  const pub = await prove("transfer10", {
+    nullifiers: inValues.map((v, i) => nullifier(v, inSalts[i], owner.formattedPrivateKey)),
+    inputCommitments: inCommits,
+    inputValues: inValues,
+    inputSalts: inSalts,
+    inputOwnerPrivateKey: owner.formattedPrivateKey,
+    root,
+    pathElements,
+    leafIndices,
+    enabled: Array.from({ length: 10 }, () => 1n),
+    outputCommitments: outCommits,
+    outputValues: outValues,
+    outputSalts: outSalts,
+    outputOwnerPublicKeys: Array.from({ length: 10 }, () => owner.publicKey),
+    ecdhPrivateKey,
+    kemSs: kem.kemSs,
+    encryptionNonce,
+    authorityPublicKey: AUTHORITY.publicKey,
+  });
+  ok(pub.length === 141, `transfer10 publics length == 141 (got ${pub.length})`);
+
+  // chain-carried: ecdhPublicKey = pub[0..1]; receiver ct_i = pub[2+4i .. 5+4i];
+  // outputCommitments = pub[128..137].
+  const ecdhPublicKey: [bigint, bigint] = [pub[0], pub[1]];
+  const shared = ecdhSharedSecret(owner.formattedPrivateKey, ecdhPublicKey);
+  let allOpened = true;
+  for (let i = 0; i < 10; i++) {
+    const ct = pub.slice(2 + 4 * i, 2 + 4 * i + 4);
+    const [v, s] = poseidonDecrypt(ct, shared, BigInt(encryptionNonce) + BigInt(i), 2);
+    allOpened =
+      allOpened && v === outValues[i] && s === outSalts[i] && commitment(v, s, owner.publicKey) === pub[128 + i];
+  }
+  ok(allOpened, "all 10 receiver ciphertexts open with nonce+i and rebuild pub[128+i]");
+
+  // NEGATIVE: one shared nonce cannot open them all — ct_1 under the base nonce
+  // is garbage, which is exactly the two-time pad §11-8 v1.1 removed.
+  const [vw, sw] = poseidonDecrypt(pub.slice(6, 10), shared, encryptionNonce, 2);
+  ok(
+    commitment(vw, sw, owner.publicKey) !== pub[129],
+    "shared (un-offset) nonce on ct_1: garbage does NOT rebuild the commitment",
+  );
+
+  // AUDITOR: one envelope over all 10 inputs + all 10 outputs, plain nonce.
+  const ssArb = decap(kem.kemCiphertext);
+  eq(binding(ssArb), pub[106], "kemBinding (pub[106]) == Poseidon(3)(TAG_BIND, Decaps limbs)");
+  const ecdh = ecdhSharedSecret(AUTHORITY.formattedPrivateKey, ecdhPublicKey);
+  const m = poseidonDecrypt(pub.slice(42, 42 + 64), hybridKey([ecdh[0], ecdh[1]], ssArb), encryptionNonce, 62);
+  // layout: [inOwner(2), (inVal,inSalt)*10, (outOwner)*10, (outVal,outSalt)*10]
+  eq(m[0], owner.publicKey[0], "authority envelope: recovered input owner pub.x");
+  let inputsOk = true;
+  for (let i = 0; i < 10; i++) {
+    inputsOk = inputsOk && m[2 + 2 * i] === inValues[i] && m[3 + 2 * i] === inSalts[i];
+  }
+  ok(inputsOk, "authority envelope: all 10 spent (value, salt) pairs recovered");
+  let outputsOk = true;
+  for (let i = 0; i < 10; i++) {
+    outputsOk =
+      outputsOk &&
+      m[22 + 2 * i] === owner.publicKey[0] &&
+      m[42 + 2 * i] === outValues[i] &&
+      m[43 + 2 * i] === outSalts[i];
+  }
+  ok(outputsOk, "authority envelope: all 10 created (owner, value, salt) triples recovered");
+}
+
 // --- FIXTURE envelopes (the committed prove_all.sh proofs) -------------------
 
 const rd = (p: string): any => JSON.parse(readFileSync(p, "utf8"));
 
-// Per-circuit fixture geometry: where the envelope lives in the publics, the
-// plaintext length, and the fixture_lib kemDraw label (encap randomness).
+// Per-fixture geometry: where ecdhPublicKey / the authority envelope / the
+// kemBinding live in the publics, the plaintext length, and — for the transfer
+// arities, which publish per-recipient ciphertext — where the receiver run and
+// the output commitments start. `ctAt < 0` means the envelope rides off-proof.
 const FIXTURES = [
-  { name: "deposit", ctAt: 3, ctLen: 10, bindAt: 13, nPub: 19, plainLen: 8 },
-  { name: "withdraw", ctAt: 3, ctLen: 13, bindAt: 16, nPub: 26, plainLen: 10 },
-  { name: "transfer", ctAt: 10, ctLen: 16, bindAt: 26, nPub: 37, plainLen: 14 },
-  { name: "disburse", ctAt: -1, ctLen: 0, bindAt: 4, nPub: 11, plainLen: 0 },
-  { name: "disburse256", ctAt: -1, ctLen: 0, bindAt: 4, nPub: 11, plainLen: 0 },
+  { name: "deposit", ecdhAt: 1, ctAt: 3, ctLen: 10, bindAt: 13, nPub: 19, plainLen: 8, nOut: 0, ocAt: -1 },
+  { name: "withdraw", ecdhAt: 1, ctAt: 3, ctLen: 13, bindAt: 16, nPub: 26, plainLen: 10, nOut: 0, ocAt: -1 },
+  { name: "transfer", ecdhAt: 0, ctAt: 10, ctLen: 16, bindAt: 26, nPub: 37, plainLen: 14, nOut: 2, ocAt: 32 },
+  { name: "transfer10", ecdhAt: 0, ctAt: 42, ctLen: 64, bindAt: 106, nPub: 141, plainLen: 62, nOut: 10, ocAt: 128 },
+  { name: "transfer10_consolidate", ecdhAt: 0, ctAt: 42, ctLen: 64, bindAt: 106, nPub: 141, plainLen: 62, nOut: 10, ocAt: 128 },
+  { name: "disburse", ecdhAt: 1, ctAt: -1, ctLen: 0, bindAt: 4, nPub: 11, plainLen: 0, nOut: 0, ocAt: -1 },
+  { name: "disburse256", ecdhAt: 1, ctAt: -1, ctLen: 0, bindAt: 4, nPub: 11, plainLen: 0, nOut: 0, ocAt: -1 },
 ] as const;
+
+// Fixture output owners are drawn from a small fixed set (the sender and the
+// index-derived receivers), restated here — this file mirrors, never imports.
+// Looking the owner up by pubkey keeps the receiver-side check independent of
+// which slot each fixture happens to assign to whom.
+const FIXTURE_KEYS: Keypair[] = [
+  deriveKeypair(2736030358979909402780800718157159386076813972158567259200215660948447373041n - 12345n),
+  ...Array.from({ length: 16 }, (_, j) => deriveKeypair(1000000007n + BigInt(j) * 1000003n)),
+];
+function fixtureKeyFor(ownerPub: [bigint, bigint]): Keypair | undefined {
+  return FIXTURE_KEYS.find((k) => k.publicKey[0] === ownerPub[0] && k.publicKey[1] === ownerPub[1]);
+}
 
 /** The fixture envelope plaintext, restated from the input json (hand-rolled
  *  layout mirror of the circuits, NOT the envelope codec). */
@@ -423,7 +524,7 @@ async function checkFixtureEnvelopes(): Promise<void> {
       continue;
     }
     const ct = pub.slice(f.ctAt, f.ctAt + f.ctLen);
-    const ecdhPub: [bigint, bigint] = f.name === "transfer" ? [pub[0], pub[1]] : [pub[1], pub[2]];
+    const ecdhPub: [bigint, bigint] = [pub[f.ecdhAt], pub[f.ecdhAt + 1]];
     const ecdh = ecdhSharedSecret(AUTHORITY.formattedPrivateKey, ecdhPub);
     const m = poseidonDecrypt(ct, hybridKey([ecdh[0], ecdh[1]], ssArb), BigInt(inp.encryptionNonce), f.plainLen);
     const want = fixturePlaintext(f.name, inp);
@@ -431,20 +532,29 @@ async function checkFixtureEnvelopes(): Promise<void> {
     for (let i = 0; i < want.length; i++) all = all && m[i] === want[i];
     ok(all, `${f.name}: FULL envelope decrypt matches all ${want.length} plaintext fields`);
 
-    // Transfer only (§11-8 v1.1): receiver ciphertext i opens with nonce + i —
-    // fixture receiver scalars restated from fixture_lib (mirror, not import).
-    if (f.name === "transfer") {
-      for (let i = 0; i < 2; i++) {
-        const rcpt = deriveKeypair(1000000007n + BigInt(i) * 1000003n);
-        const rct = pub.slice(2 + 4 * i, 2 + 4 * i + 4);
-        const rShared = ecdhSharedSecret(rcpt.formattedPrivateKey, ecdhPub);
-        const [v, slt] = poseidonDecrypt(rct, rShared, BigInt(inp.encryptionNonce) + BigInt(i), 2);
-        eq(
-          commitment(v, slt, rcpt.publicKey),
-          pub[32 + i],
-          `transfer fixture: receiver ct_${i} (nonce+${i}) rebuilds outputCommitment pub[${32 + i}]`,
-        );
+    // Transfer arities only (§11-8 v1.1): receiver ciphertext i opens with
+    // nonce + i, under the key of whichever fixture owner holds output i.
+    let receiversOk = true;
+    for (let i = 0; i < f.nOut; i++) {
+      const ownerPub: [bigint, bigint] = [
+        BigInt(inp.outputOwnerPublicKeys[i][0]),
+        BigInt(inp.outputOwnerPublicKeys[i][1]),
+      ];
+      const rcpt = fixtureKeyFor(ownerPub);
+      if (!rcpt) {
+        receiversOk = false;
+        continue;
       }
+      const rct = pub.slice(2 + 4 * i, 2 + 4 * i + 4);
+      const rShared = ecdhSharedSecret(rcpt.formattedPrivateKey, ecdhPub);
+      const [v, slt] = poseidonDecrypt(rct, rShared, BigInt(inp.encryptionNonce) + BigInt(i), 2);
+      receiversOk = receiversOk && commitment(v, slt, rcpt.publicKey) === pub[f.ocAt + i];
+    }
+    if (f.nOut > 0) {
+      ok(
+        receiversOk,
+        `${f.name}: all ${f.nOut} receiver ciphertexts (nonce+i) rebuild their outputCommitments`,
+      );
     }
   }
 }
@@ -453,6 +563,7 @@ async function main(): Promise<void> {
   await checkDeposit();
   await checkWithdraw();
   await checkTransferSelfSend();
+  await checkTransfer10SelfMerge();
   await checkFixtureEnvelopes();
   console.log(
     `\n${failures === 0

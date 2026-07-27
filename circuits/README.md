@@ -1,6 +1,6 @@
 # bongtu circuits
 
-The circom toolchain: the four bongtu circuits, their vendored Zeto bases, the
+The circom toolchain: the bongtu circuits, their vendored Zeto bases, the
 deterministic witness-input generators, and the CPU prove pipeline that gates every
 change. Each circuit embeds IMT depth-32 membership (Poseidon-v1) and an in-circuit
 authority envelope encrypted to the arbiter key. What each circuit must enforce and
@@ -14,6 +14,7 @@ belts); per-file Zeto provenance and the deliberate modifications are in
 |---|---|---|
 | `deposit.circom` | 0-in / 2-out | stock Zeto Deposit(2) checks + authority envelope over the minted notes |
 | `transfer.circom` | 2-in / 2-out | small non-repudiation base; ciphertext rides in the public signals |
+| `transfer10.circom` | 10-in / 10-out | the same base at arity 10: consolidate up to ten notes (or pay ten payees) in one tx. 261,683 constraints — 319 short of spilling from 2^18 to 2^19 |
 | `withdraw.circom` | 2-in / 1-out | withdraw_nullifier rebased onto the IMT + authority envelope over inputs + change |
 | `disburse.circom` | 1-in / 16-out | dev-loop batch disburse: subtree gadget (depth-4), `disclosureHash`, authority encryption at seconds-per-iteration scale |
 | `disburse256.circom` | 1-in / 256-out | the production headline circuit (~2.79M constraints); same vendored base as `disburse.circom` at depth-8 |
@@ -26,12 +27,18 @@ still resolve from external checkouts via `-l` (paths below).
 ## Build + prove (the U2 gate)
 
 ```sh
-cd circuits && bash prove_all.sh    # 4x "snarkJS: OK" and exit 0
+cd circuits && bash prove_all.sh              # 6x "snarkJS: OK" and exit 0
+cd circuits && bash prove_all.sh transfer10   # one circuit only (targeted regen)
 ```
 
-For each of deposit / disburse / transfer / withdraw: compile → `groth16 setup`
-(pot22) → export vkey + solidity verifier → witness from the generated input →
-prove → verify. The toolchain is env-overridable (`CIRCOM`, `SNARKJS`, `NODE`,
+For each of deposit / disburse / transfer / transfer10 / withdraw: compile →
+`groth16 setup` (pot22) → export vkey + solidity verifier → witness from the
+generated input → prove → verify. transfer10 carries a second fixture
+(`transfer10_consolidate`, all ten input slots real) proved against the same
+zkey, so the gate has six legs over five circuits. `groth16 setup` is
+deterministic given (r1cs, ptau), so re-running one circuit reproduces its
+committed verifier byte-for-byte and leaves the others' fixtures valid.
+The toolchain is env-overridable (`CIRCOM`, `SNARKJS`, `NODE`,
 `ZETO`, `CIRCOMLIB`, `PTAU`) with this dev box's defaults; the exact paths and
 per-step invocations are owned by [`docs/toolchain.md`](../docs/toolchain.md). CI
 runs the same script with pinned downloads and gates
@@ -57,10 +64,10 @@ helpers through `fixture_lib.ts`, and write committed JSON into `inputs/`:
 
 | generator | writes |
 |---|---|
-| `gen_inputs.ts` | the four satisfying M0 inputs (`deposit/disburse/transfer/withdraw.json`) from real `ImtTree` membership witnesses |
+| `gen_inputs.ts` | the satisfying inputs (`deposit/disburse/transfer/withdraw.json`, plus `transfer10.json` — 4 real + 6 padded inputs — and `transfer10_consolidate.json` — all 10 real, merged into one self-owned note) from real `ImtTree` membership witnesses |
 | `gen_disburse256_input.ts` | `disburse256.json` — the production 1×256 input; also the prover service's boot warm-up proof |
-| `gen_attack_inputs.ts` | `withdraw_mint/attack/padded.json` — the §5.2 value-belt attack vectors |
-| `gen_zero_leaf_inputs.ts` / `gen_disburse_zero_leaf.ts` | the zero-commitment-belt attack vectors for transfer/withdraw and the disburse base |
+| `gen_attack_inputs.ts` | `withdraw_mint/attack/padded.json` + `transfer10_attack.json` — the §5.2 value-belt attack vectors |
+| `gen_zero_leaf_inputs.ts` / `gen_disburse_zero_leaf.ts` | the zero-commitment-belt attack vectors for transfer/transfer10/withdraw and the disburse base |
 
 ## Security gates
 
@@ -69,7 +76,7 @@ scripts fail loudly if a belt regresses (the exploits they close are documented 
 `.dev/spec-decisions.md` §5.2 and `docs/zeto-derivation.md`):
 
 ```sh
-bash test_zero_leaf_unsat.sh          # zero-commitment belt UNSAT for all 3 spending circuits
+bash test_zero_leaf_unsat.sh          # zero-commitment belt UNSAT for all 4 spending circuits
 npx tsx assert_attacks_throw.ts       # value belt: mint/attack THROW, padded SUCCEEDS
 npx tsx auditor_decrypt_check.ts      # deposit/withdraw envelopes decrypt with the arbiter key alone
 ```

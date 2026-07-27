@@ -1,8 +1,8 @@
-// Extra withdraw fixtures for the U3 soundness tests (SPEC §5.2).
+// Extra value-belt fixtures for the U3 soundness tests (SPEC §5.2).
 //
-// Writes three withdraw witness inputs that the committed prove_all.sh does NOT
-// produce, all built from the SHARED fixture_lib.ts material (same SENDER /
-// AUTHORITY / salt derivation as gen_inputs.ts by construction):
+// Writes four witness inputs that the committed prove_all.sh does NOT produce,
+// all built from the SHARED fixture_lib.ts material (same SENDER / AUTHORITY /
+// salt derivation as gen_inputs.ts by construction):
 //
 //   withdraw_mint.json    -- the TRUE mint-from-nothing vector: a fabricated input
 //       {nullifier=0, commitment=0, value=X, enabled=0} + a zero output => out=X.
@@ -20,15 +20,20 @@
 //       note with nullifier[1]=0, enabled[1]=0. (1-0)*0 = 0 satisfies the belt,
 //       so it PROVES and the contract injects enabled[1]=0, matching => ACCEPTED.
 //
+//   transfer10_attack.json -- the same value-carrying disabled slot at arity 10,
+//       where legitimate disabled pads are the norm rather than the exception.
+//       Also UNSATISFIABLE — `generate_witness` MUST THROW.
+//
 //   npx tsx gen_attack_inputs.ts
 
 import { commitment, nullifier } from "@bongtu/core/note";
-import type { WithdrawInput } from "@bongtu/core/proving";
+import type { Transfer10Input, WithdrawInput } from "@bongtu/core/proving";
 
 import {
   AUTHORITY,
   ECDH_SK,
   ENCRYPTION_NONCE,
+  H,
   SENDER,
   kemDraw,
   membership,
@@ -144,7 +149,56 @@ function genPadded(): WithdrawInput {
   };
 }
 
+// --- transfer10 attack: a value-carrying input in a DISABLED slot -----------
+// The arity-10 twin of genAttack. At arity 2 a value-carrying disabled slot is
+// conspicuous; at arity 10 most slots are legitimately disabled pads, so this is
+// where a value belt that only guarded the first slots would let a spend inflate
+// itself. Slot 4 carries 500 at enabled=0, so CheckSum totals 1500 against 1000
+// of real inputs — `(1 - enabled[4]) * inputValues[4] = 500 != 0` must make the
+// witness unsatisfiable. The honest transfer10 fixture (6 zero-value disabled
+// pads) is the positive control that the belt does not reject real padding.
+function genTransfer10Attack(): Transfer10Input {
+  const N = 10;
+  const real = [400n, 300n, 200n, 100n]; // enabled, 1000 total
+  const smuggled = 500n; // slot 4: value-carrying but enabled=0
+  const inValues = [...real, smuggled];
+  const inSalts = inValues.map((_, i) => salt(40 + i));
+  const inCommits = inValues.map((v, i) => commitment(v, inSalts[i], SENDER.publicKey));
+  const { root, pathElements, leafIndices } = membership(inCommits);
+
+  // Pads occupy the tail: zero value, zero nullifier, nonzero value-0 commitment.
+  const nPad = N - inValues.length;
+  const padSalts = Array.from({ length: nPad }, (_, i) => salt(80 + i));
+  const zerosPath = Array.from({ length: H }, () => 0n);
+
+  const outValues = Array.from({ length: N }, (_, i) => (i === 0 ? 1500n : 0n)); // inflated
+  const owners = Array.from({ length: N }, (_, i) =>
+    i === 0 ? receiver(0).publicKey : SENDER.publicKey,
+  );
+
+  return {
+    nullifiers: [
+      ...inValues.map((v, i) => nullifier(v, inSalts[i], SENDER.formattedPrivateKey)),
+      ...padSalts.map(() => 0n),
+    ],
+    inputCommitments: [...inCommits, ...padSalts.map((s) => commitment(0n, s, SENDER.publicKey))],
+    inputValues: [...inValues, ...padSalts.map(() => 0n)],
+    inputSalts: [...inSalts, ...padSalts],
+    inputOwnerPrivateKey: SENDER.formattedPrivateKey,
+    root,
+    pathElements: [...pathElements, ...padSalts.map(() => zerosPath)],
+    leafIndices: [...leafIndices, ...padSalts.map(() => 0n)],
+    enabled: [1n, 1n, 1n, 1n, 0n, ...padSalts.map(() => 0n)], // slot 4 skipped though value-carrying
+    outputCommitments: outValues.map((v, i) => commitment(v, salt(50 + i), owners[i])),
+    outputValues: outValues,
+    outputSalts: outValues.map((_, i) => salt(50 + i)),
+    outputOwnerPublicKeys: owners,
+    ...authEnvelope("transfer10_attack"),
+  };
+}
+
 write("withdraw_mint", genMint());
 write("withdraw_attack", genAttack());
 write("withdraw_padded", genPadded());
+write("transfer10_attack", genTransfer10Attack());
 console.log("mint/attack/padded input generation OK");

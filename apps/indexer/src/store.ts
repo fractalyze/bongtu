@@ -17,8 +17,10 @@
 import type { PoolClient } from "pg";
 import type { DisclosureResult } from "./disclosure.js";
 
-/** Kind of note-bearing pool operation a feed entry came from. */
-export type EventKind = "deposit" | "transfer" | "disburse" | "withdraw";
+/** Kind of note-bearing pool operation a feed entry came from. Mirrors the wire
+ *  vocabulary in @bongtu/core/indexerApi; `transfer10` is the arity-10 transfer
+ *  circuit (10-in / 10-out). */
+export type EventKind = "deposit" | "transfer" | "transfer10" | "disburse" | "withdraw";
 
 /**
  * A contiguous run of ciphertext field elements inside a feed entry's

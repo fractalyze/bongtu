@@ -18,6 +18,7 @@ import type { Point } from "@bongtu/core/babyjub";
 import type {
   DepositInput,
   DisburseInput,
+  Transfer10Input,
   TransferInput,
   WithdrawInput,
 } from "@bongtu/core/proving";
@@ -26,6 +27,7 @@ import {
   AUTHORITY,
   ECDH_SK,
   ENCRYPTION_NONCE,
+  H,
   SENDER,
   kemDraw,
   membership,
@@ -126,6 +128,113 @@ function genTransfer(): TransferInput {
   };
 }
 
+// --- transfer10 (10-in / 10-out), ZetoTransferSmall(10,10,32) ---------------
+
+// Padding convention, mirrored from the wallet's spend assembler: an unused
+// input slot carries nullifier 0, value 0, enabled 0, a zeros path and a
+// NONZERO value-0 commitment owned by the sender (a zero commitment at
+// enabled=0 would be legal but pointless, and at enabled=1 the §5.2 belt
+// forbids it outright). An unused output slot is a real value-0 note.
+const ZEROS_PATH = Array.from({ length: H }, () => 0n);
+
+function padInput(i: number): {
+  nullifier: bigint;
+  commitment: bigint;
+  value: bigint;
+  salt: bigint;
+} {
+  const s = salt(80 + i);
+  return { nullifier: 0n, commitment: commitment(0n, s, SENDER.publicKey), value: 0n, salt: s };
+}
+
+/** Build a transfer10 witness input from `inValues` real inputs (padded out to
+ *  10) and `outputs` real outputs (padded out to 10 with value-0 self notes).
+ *  Value conservation is asserted here, not left to the circuit to discover. */
+function transfer10(
+  label: string,
+  inValues: bigint[],
+  inSaltBase: number,
+  outputs: { value: bigint; owner: Point }[],
+  outSaltBase: number,
+): Transfer10Input {
+  const N = 10;
+  if (inValues.length > N || outputs.length > N) throw new Error("transfer10 arity is 10");
+
+  const inSalts = inValues.map((_, i) => salt(inSaltBase + i));
+  const inCommits = inValues.map((v, i) => commitment(v, inSalts[i], SENDER.publicKey));
+  const { root, pathElements, leafIndices } = membership(inCommits);
+
+  const pads = Array.from({ length: N - inValues.length }, (_, i) => padInput(i));
+  const allNullifiers = [
+    ...inValues.map((v, i) => nullifier(v, inSalts[i], SENDER.formattedPrivateKey)),
+    ...pads.map((p) => p.nullifier),
+  ];
+
+  // Unused output slots: value-0 notes back to the sender. Duplicate output
+  // owners are SAFE here (§11-8 v1.1 per-output nonce) and unavoidable at this
+  // arity — hence no assertDistinctOwnerPubkeys, unlike the disburse fixture.
+  const outAll = [
+    ...outputs,
+    ...Array.from({ length: N - outputs.length }, () => ({ value: 0n, owner: SENDER.publicKey })),
+  ];
+  const outSalts = outAll.map((_, i) => salt(outSaltBase + i));
+
+  const inSum = inValues.reduce((a, v) => a + v, 0n);
+  const outSum = outAll.reduce((a, o) => a + o.value, 0n);
+  if (inSum !== outSum) throw new Error(`${label}: value not conserved (${inSum} != ${outSum})`);
+
+  return {
+    nullifiers: allNullifiers,
+    inputCommitments: [...inCommits, ...pads.map((p) => p.commitment)],
+    inputValues: [...inValues, ...pads.map((p) => p.value)],
+    inputSalts: [...inSalts, ...pads.map((p) => p.salt)],
+    inputOwnerPrivateKey: SENDER.formattedPrivateKey,
+    ecdhPrivateKey: BigInt(ECDH_SK),
+    root,
+    pathElements: [...pathElements, ...pads.map(() => ZEROS_PATH)],
+    leafIndices: [...leafIndices, ...pads.map(() => 0n)],
+    enabled: [...inValues.map(() => 1n), ...pads.map(() => 0n)],
+    outputCommitments: outAll.map((o, i) => commitment(o.value, outSalts[i], o.owner)),
+    outputValues: outAll.map((o) => o.value),
+    outputSalts: outSalts,
+    outputOwnerPublicKeys: outAll.map((o) => o.owner),
+    kemSs: kemDraw(label).kemSs,
+    encryptionNonce: ENCRYPTION_NONCE,
+    authorityPublicKey: AUTHORITY.publicKey,
+  };
+}
+
+/** The canonical partly-filled case: 4 real inputs + 6 pads, 2 real outputs
+ *  (payment + change) + 8 zero pads — the shape a wallet produces when it picks
+ *  four notes to cover one payment. */
+function genTransfer10(): Transfer10Input {
+  return transfer10(
+    "transfer10",
+    [400n, 300n, 200n, 100n], // 1000 spendable
+    40,
+    [
+      { value: 700n, owner: receiver(0).publicKey }, // payment
+      { value: 300n, owner: SENDER.publicKey }, // change
+    ],
+    50,
+  );
+}
+
+/** The full-arity consolidation: all 10 input slots real, merged into ONE
+ *  self-owned output (the remaining 9 are value-0 self notes). Every output
+ *  owner is the same key — the duplicate-owner case the shared-nonce circuits
+ *  ban and the per-output nonce makes safe. */
+function genTransfer10Consolidate(): Transfer10Input {
+  const inValues = Array.from({ length: 10 }, (_, i) => BigInt(100 * (i + 1))); // 5500
+  return transfer10(
+    "transfer10_consolidate",
+    inValues,
+    60,
+    [{ value: 5500n, owner: SENDER.publicKey }],
+    70,
+  );
+}
+
 // --- withdraw (2-in / 1-out), CheckNullifiersInputsOutputsValueIMT(2,1,32) --
 
 function genWithdraw(): WithdrawInput {
@@ -164,5 +273,7 @@ function genWithdraw(): WithdrawInput {
 write("deposit", genDeposit());
 write("disburse", genDisburse());
 write("transfer", genTransfer());
+write("transfer10", genTransfer10());
+write("transfer10_consolidate", genTransfer10Consolidate());
 write("withdraw", genWithdraw());
 console.log("input generation OK");

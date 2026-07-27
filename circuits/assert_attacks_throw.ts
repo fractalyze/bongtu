@@ -1,13 +1,16 @@
 // U3 soundness gate (SPEC §5.2): prove the value-belt closes mint-from-nothing
 // at the CIRCUIT level. Regenerates the attack/padded fixtures, then asserts:
 //
-//   withdraw_mint    (nf=0,  value=X, enabled=0) -> generate_witness THROWS
-//   withdraw_attack  (nf!=0, value=X, enabled=0) -> generate_witness THROWS
-//   withdraw_padded  (nf=0,  value=0, enabled=0) -> generate_witness SUCCEEDS
+//   withdraw_mint     (nf=0,  value=X, enabled=0)      -> generate_witness THROWS
+//   withdraw_attack   (nf!=0, value=X, enabled=0)      -> generate_witness THROWS
+//   transfer10_attack (nf!=0, value=X, enabled=0 in a  -> generate_witness THROWS
+//                      padded slot at arity 10)
+//   withdraw_padded   (nf=0,  value=0, enabled=0)      -> generate_witness SUCCEEDS
+//   transfer10        (6 zero-value disabled pads)     -> generate_witness SUCCEEDS
 //
-// The two throwing fixtures fail on the belt constraint
-// `(1 - enabled[i]) * inputValues[i] === 0` in CheckNullifiersInputsOutputsValueIMT.
-// Requires out/withdraw_js (compile withdraw first, e.g. via prove_all.sh).
+// The throwing fixtures fail on the belt constraint
+// `(1 - enabled[i]) * inputValues[i] === 0` in the spending base.
+// Requires out/{withdraw,transfer10}_js (compile them first, e.g. via prove_all.sh).
 //
 // PLUS the PQ-envelope binding gate (pq-envelope-design.md §2/§6): for every
 // proved fixture in out/, TAMPERING the kemBinding public signal makes
@@ -25,14 +28,16 @@ import { loadSnarkjs } from "@bongtu/core/extern";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = join(HERE, "out");
-const WASM = join(OUT, "withdraw_js", "withdraw.wasm");
-const GENWIT = join(OUT, "withdraw_js", "generate_witness.js");
+const wasmOf = (c: string): string => join(OUT, `${c}_js`, `${c}.wasm`);
+const genwitOf = (c: string): string => join(OUT, `${c}_js`, "generate_witness.js");
 const inp = (n: string): string => join(HERE, "inputs", `${n}.json`);
 const wtns = (n: string): string => join(OUT, `${n}.wtns`);
 
-if (!existsSync(WASM)) {
-  console.error(`FATAL: ${WASM} missing — compile withdraw first (bash prove_all.sh).`);
-  process.exit(1);
+for (const c of ["withdraw", "transfer10"]) {
+  if (!existsSync(wasmOf(c))) {
+    console.error(`FATAL: ${wasmOf(c)} missing — compile ${c} first (bash prove_all.sh).`);
+    process.exit(1);
+  }
 }
 
 // circom's generate_witness.js is CommonJS; the repo root is an ESM package, so
@@ -50,10 +55,10 @@ interface WitnessResult {
   out: string;
 }
 
-function witness(name: string): WitnessResult {
+function witness(circuit: string, name: string): WitnessResult {
   try {
     // generate_witness.js is snarkjs-emitted plain CommonJS — run it with node directly.
-    execFileSync(process.execPath, [GENWIT, WASM, inp(name), wtns(name)], {
+    execFileSync(process.execPath, [genwitOf(circuit), wasmOf(circuit), inp(name), wtns(name)], {
       stdio: ["ignore", "pipe", "pipe"],
     });
     return { ok: true, out: "" };
@@ -64,47 +69,61 @@ function witness(name: string): WitnessResult {
 }
 
 let failures = 0;
-const BELT = "CheckNullifiersInputsOutputsValueIMT";
 
-for (const name of ["withdraw_mint", "withdraw_attack"]) {
-  const r = witness(name);
+// Each throwing fixture, with the spending base whose belt assertion must name it.
+const MUST_THROW: [circuit: string, fixture: string, belt: string][] = [
+  ["withdraw", "withdraw_mint", "CheckNullifiersInputsOutputsValueIMT"],
+  ["withdraw", "withdraw_attack", "CheckNullifiersInputsOutputsValueIMT"],
+  ["transfer10", "transfer10_attack", "ZetoTransferSmall"],
+];
+
+for (const [circuit, name, belt] of MUST_THROW) {
+  const r = witness(circuit, name);
   if (r.ok) {
     console.error(`FAIL: ${name} generated a witness but the value-belt should make it UNSATISFIABLE`);
     failures++;
-  } else if (!r.out.includes("Assert Failed") || !r.out.includes(BELT)) {
+  } else if (!r.out.includes("Assert Failed") || !r.out.includes(belt)) {
     console.error(`FAIL: ${name} threw, but not on the belt assertion. Output:\n${r.out}`);
     failures++;
   } else {
-    console.log(`OK: ${name} witness-gen THROWS on the value-belt (Assert Failed in ${BELT})`);
+    console.log(`OK: ${name} witness-gen THROWS on the value-belt (Assert Failed in ${belt})`);
   }
 }
 
-{
-  const r = witness("withdraw_padded");
+// Positive controls: a zero-value disabled slot must still prove, at both arities.
+for (const [circuit, name] of [
+  ["withdraw", "withdraw_padded"],
+  ["transfer10", "transfer10"],
+]) {
+  const r = witness(circuit, name);
   if (!r.ok) {
-    console.error(`FAIL: withdraw_padded (a genuine zero-value pad) must satisfy the belt. Output:\n${r.out}`);
+    console.error(`FAIL: ${name} (genuine zero-value pads) must satisfy the belt. Output:\n${r.out}`);
     failures++;
   } else {
-    console.log("OK: withdraw_padded witness-gen SUCCEEDS (zero-value pad satisfies the belt)");
+    console.log(`OK: ${name} witness-gen SUCCEEDS (zero-value pads satisfy the belt)`);
   }
 }
 
 // --- PQ kemBinding tamper gate ---------------------------------------------
-// kemBinding public-signal index per circuit (pq-envelope-design.md §3 layouts).
-const KEM_BINDING_AT: Record<string, number> = {
-  deposit: 13,
-  withdraw: 16,
-  transfer: 26,
-  disburse: 4,
-  disburse256: 4,
-};
+// kemBinding public-signal index per proof fixture (pq-envelope-design.md §3
+// layouts), with the circuit whose vkey verifies it — transfer10 carries two
+// fixtures against one vkey.
+const KEM_BINDING_AT: [fixture: string, circuit: string, at: number][] = [
+  ["deposit", "deposit", 13],
+  ["withdraw", "withdraw", 16],
+  ["transfer", "transfer", 26],
+  ["transfer10", "transfer10", 106],
+  ["transfer10_consolidate", "transfer10", 106],
+  ["disburse", "disburse", 4],
+  ["disburse256", "disburse256", 4],
+];
 
 async function kemBindingTamperGate(): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const snarkjs: any = loadSnarkjs();
   const rd = (p: string): any => JSON.parse(readFileSync(p, "utf8"));
-  for (const [name, at] of Object.entries(KEM_BINDING_AT)) {
-    const vkeyP = join(OUT, `${name}.vkey.json`);
+  for (const [name, circuit, at] of KEM_BINDING_AT) {
+    const vkeyP = join(OUT, `${circuit}.vkey.json`);
     const pubP = join(OUT, `${name}.public.json`);
     const proofP = join(OUT, `${name}.proof.json`);
     if (!existsSync(vkeyP) || !existsSync(pubP) || !existsSync(proofP)) {

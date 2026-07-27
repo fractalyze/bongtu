@@ -21,11 +21,11 @@
 // assertion string then names the spending base template. The shared material
 // (SENDER / AUTHORITY / zeros path) comes from fixture_lib.ts. Run through tsx:
 //
-//   npx tsx gen_zero_leaf_inputs.ts   # writes inputs/{transfer,withdraw}_zero_leaf.json
+//   npx tsx gen_zero_leaf_inputs.ts   # writes inputs/{transfer,transfer10,withdraw}_zero_leaf.json
 
 import { commitment, nullifier } from "@bongtu/core/note";
 import type { Point } from "@bongtu/core/babyjub";
-import type { TransferInput, WithdrawInput } from "@bongtu/core/proving";
+import type { Transfer10Input, TransferInput, WithdrawInput } from "@bongtu/core/proving";
 
 import {
   AUTHORITY,
@@ -93,6 +93,43 @@ function genTransferZeroLeaf(): TransferInput {
   };
 }
 
+// --- transfer10 (10-in / 10-out): the exploit hides in a PADDED slot ---------------
+// At arity 10 most slots are padding on a typical spend, so slot 0 is the LEAST
+// interesting place to look: the exploit sits at slot 7, surrounded by genuine
+// disabled pads, and the belt must still reject it. (The belt is a per-slot
+// loop, so a slot-0-only fixture would leave nine unproven slots.)
+const EXPLOIT_SLOT = 7;
+
+function genTransfer10ZeroLeaf(): Transfer10Input {
+  const N = 10;
+  const slot = <T>(exploit: T, pad: T): T[] =>
+    Array.from({ length: N }, (_, i) => (i === EXPLOIT_SLOT ? exploit : pad));
+
+  // Every output but the first is a value-0 self note, so CheckSum's equality
+  // holds at sum == X and the ONLY unsatisfiable constraint is the belt.
+  const outValues = Array.from({ length: N }, (_, i) => (i === 0 ? X : 0n));
+  const owners: Point[] = Array.from({ length: N }, (_, i) => receiver(i % 2).publicKey);
+  return {
+    nullifiers: slot(exploitInput0.nullifier, padInput1.nullifier),
+    inputCommitments: slot(exploitInput0.commitment, padInput1.commitment),
+    inputValues: slot(exploitInput0.value, padInput1.value),
+    inputSalts: slot(exploitInput0.salt, padInput1.salt),
+    inputOwnerPrivateKey: SENDER.formattedPrivateKey,
+    ecdhPrivateKey: BigInt(ECDH_SK),
+    root: ZERO_ROOT,
+    pathElements: slot(exploitInput0.path, padInput1.path),
+    leafIndices: slot(exploitInput0.leafIndex, padInput1.leafIndex),
+    enabled: slot(1n, 0n), // slot 7 enabled at a zero commitment => UNSATISFIABLE
+    outputCommitments: outValues.map((v, i) => commitment(v, salt(i), owners[i])),
+    outputValues: outValues,
+    outputSalts: outValues.map((_, i) => salt(i)),
+    outputOwnerPublicKeys: owners,
+    kemSs: kemDraw("transfer10_zero_leaf").kemSs,
+    encryptionNonce: ENCRYPTION_NONCE,
+    authorityPublicKey: AUTHORITY.publicKey,
+  };
+}
+
 // --- withdraw (2-in / 1-out): out = sumInputs - sumOutputs = X ---------------------
 function genWithdrawZeroLeaf(): WithdrawInput {
   const outValues = [0n]; // out = (X + 0) - 0 = X paid from nothing
@@ -122,5 +159,6 @@ function genWithdrawZeroLeaf(): WithdrawInput {
 }
 
 write("transfer_zero_leaf", genTransferZeroLeaf());
+write("transfer10_zero_leaf", genTransfer10ZeroLeaf());
 write("withdraw_zero_leaf", genWithdrawZeroLeaf());
 console.log("zero-leaf exploit input generation OK");

@@ -25,12 +25,14 @@
 
 import type { FieldInput, PointInput } from "./babyjub.js";
 
-/** Proving backend. deposit/transfer/withdraw prove on CPU (snarkjs); disburse (1×256,
- *  ~2.79M constraints) proves on GPU (rabbitsnark, via the prover/ service). */
+/** Proving backend. deposit/transfer/transfer10/withdraw prove on CPU (snarkjs);
+ *  disburse (1×256, ~2.79M constraints) proves on GPU (rabbitsnark, via the
+ *  prover/ service). */
 export type Backend = "cpu" | "gpu";
 
-/** The four v1 circuits (SPEC §4). */
-export type Circuit = "deposit" | "transfer" | "withdraw" | "disburse";
+/** The v1 circuits (SPEC §4) plus `transfer10`, the arity-10 instantiation of the
+ *  transfer base. */
+export type Circuit = "deposit" | "transfer" | "transfer10" | "withdraw" | "disburse";
 
 // ---------------------------------------------------------------------------
 // Per-circuit witness inputs (the exact circom `main` input objects).
@@ -70,6 +72,35 @@ export interface TransferInput {
   outputValues: FieldInput[]; // length 2
   outputSalts: FieldInput[]; // length 2
   outputOwnerPublicKeys: PointInput[]; // length 2 (duplicates allowed: per-output nonce)
+  kemSs: FieldInput[]; // [2] LE-uint128 limbs of the ML-KEM-768 shared secret (hybrid envelope key, @bongtu/core/kem)
+  encryptionNonce: FieldInput;
+  authorityPublicKey: PointInput;
+}
+
+/** transfer10 (10-in / 10-out): the SAME base as transfer (`ZetoTransferSmall`) at
+ *  arity 10 — 261,683 constraints, 141 public signals. It exists so one tx can
+ *  consolidate up to ten notes instead of chaining 2-in self-sends, and can fan
+ *  out to ten payees. Every field is the transfer field at length 10: unused
+ *  input slots are padded (nullifier=0, value=0, enabled=0, zeros path, a
+ *  nonzero value-0 commitment) and unused output slots carry value 0. Receiver
+ *  ciphertext i is encrypted under encryptionNonce + i (§11-8 v1.1), so
+ *  duplicate output owners are fine — a self-merge, where every output is the
+ *  sender's own key, is the headline use. */
+export interface Transfer10Input {
+  nullifiers: FieldInput[]; // length 10 (0 for a padded input)
+  inputCommitments: FieldInput[]; // length 10
+  inputValues: FieldInput[]; // length 10
+  inputSalts: FieldInput[]; // length 10
+  inputOwnerPrivateKey: FieldInput; // one owner spends every real input
+  ecdhPrivateKey: FieldInput;
+  root: FieldInput; // membership root (a live pool root)
+  pathElements: FieldInput[][]; // [10][H] merkle siblings
+  leafIndices: FieldInput[]; // [10]
+  enabled: FieldInput[]; // [10] 0/1 (contract re-derives, but the witness needs it)
+  outputCommitments: FieldInput[]; // length 10
+  outputValues: FieldInput[]; // length 10
+  outputSalts: FieldInput[]; // length 10
+  outputOwnerPublicKeys: PointInput[]; // length 10 (duplicates allowed: per-output nonce)
   kemSs: FieldInput[]; // [2] LE-uint128 limbs of the ML-KEM-768 shared secret (hybrid envelope key, @bongtu/core/kem)
   encryptionNonce: FieldInput;
   authorityPublicKey: PointInput;
@@ -130,6 +161,7 @@ export interface DisburseInput {
 export type ProvingRequest =
   | { circuit: "deposit"; input: DepositInput; backend?: Backend }
   | { circuit: "transfer"; input: TransferInput; backend?: Backend }
+  | { circuit: "transfer10"; input: Transfer10Input; backend?: Backend }
   | { circuit: "withdraw"; input: WithdrawInput; backend?: Backend }
   | { circuit: "disburse"; input: DisburseInput; backend?: Backend };
 
@@ -137,6 +169,7 @@ export type ProvingRequest =
 export interface CircuitInputs {
   deposit: DepositInput;
   transfer: TransferInput;
+  transfer10: Transfer10Input;
   withdraw: WithdrawInput;
   disburse: DisburseInput;
 }

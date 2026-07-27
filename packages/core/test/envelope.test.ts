@@ -40,6 +40,7 @@ import {
   deriveKeypair,
   commitment,
   poseidonEncrypt,
+  poseidonDecrypt,
   ecdhSharedSecret,
 } from "../src/note.js";
 import type { Point } from "../src/babyjub.js";
@@ -442,6 +443,21 @@ function envFor(kind: OpKind, B: number): ParsedEnvelope {
           { owner: kp(880006n), value: 440n, salt: 660009n },
         ],
       };
+    case "transfer10":
+      // Every output to ONE owner (the self-merge): duplicates are legal at this
+      // arity (§11-8 v1.1 per-output nonce) and the codec must carry them.
+      return {
+        inputs: Array.from({ length: 10 }, (_, i) => ({
+          owner: sender,
+          value: BigInt(i) * 100n,
+          salt: 661000n + BigInt(i),
+        })),
+        outputs: Array.from({ length: 10 }, (_, i) => ({
+          owner: sender,
+          value: i === 0 ? 4500n : 0n,
+          salt: 662000n + BigInt(i),
+        })),
+      };
     case "disburse":
       return {
         inputs: [{ owner: sender, value: 4950n, salt: 660010n }],
@@ -454,12 +470,12 @@ function envFor(kind: OpKind, B: number): ParsedEnvelope {
   }
 }
 
-test("round-trip: build -> encrypt -> parse == original fields (all four kinds)", () => {
+test("round-trip: build -> encrypt -> parse == original fields (every op kind)", () => {
   const B = 16;
   const ecdhPriv = 313373133731337n;
   const ecdhPub = deriveKeypair(ecdhPriv).publicKey;
   const nonce = 121212121212n;
-  for (const kind of ["deposit", "withdraw", "transfer", "disburse"] as OpKind[]) {
+  for (const kind of ["deposit", "withdraw", "transfer", "transfer10", "disburse"] as OpKind[]) {
     const env = envFor(kind, B);
     const plain = buildAuthorityPlaintext(kind, env);
     assert.equal(plain.length, envelopePlaintextLen(kind, B), `${kind} plaintext length`);
@@ -531,6 +547,151 @@ test("builder rejects shapes no circuit produces", () => {
     outputs: env.outputs,
   };
   assert.throws(() => buildAuthorityPlaintext("transfer", twoOwners), /share ONE owner/);
+});
+
+// =============================================================================
+// transfer10 (10-in / 10-out): the arity-10 instantiation of the transfer base
+// =============================================================================
+
+test("transfer10 envelope sizes: 62 plaintext fields -> 64 ciphertext elements", () => {
+  // The circuit publishes cipherTextAuthority[64]; the plaintext is
+  // 2 (shared input owner) + 2*10 (input value,salt) + 4*10 (output owner,value,salt).
+  assert.equal(envelopePlaintextLen("transfer10", 0), 62);
+  assert.equal(envelopePlaintextLen("transfer10", 0), 2 + 2 * 10 + 4 * 10);
+  assert.equal(authorityCiphertextLen("transfer10", 0), 64);
+  // B is a disburse-only parameter: transfer10's arity is fixed by the circuit.
+  assert.equal(envelopePlaintextLen("transfer10", 256), 62);
+});
+
+test("transfer10 layout: the field order the circuit encrypts, at arity 10", () => {
+  const kp = (s: bigint): Point => deriveKeypair(s).publicKey;
+  const sender = kp(551001n);
+  const env: ParsedEnvelope = {
+    inputs: Array.from({ length: 10 }, (_, i) => ({
+      owner: sender,
+      value: 10n + BigInt(i),
+      salt: 100n + BigInt(i),
+    })),
+    outputs: Array.from({ length: 10 }, (_, i) => ({
+      owner: kp(552000n + BigInt(i)),
+      value: 200n + BigInt(i),
+      salt: 300n + BigInt(i),
+    })),
+  };
+  const p = buildAuthorityPlaintext("transfer10", env);
+  assert.equal(p.length, 62);
+  assert.deepEqual([p[0], p[1]], sender, "fields 0..1 are the shared input owner");
+  for (let i = 0; i < 10; i++) {
+    assert.equal(p[2 + 2 * i], env.inputs[i].value, `input ${i} value at ${2 + 2 * i}`);
+    assert.equal(p[3 + 2 * i], env.inputs[i].salt, `input ${i} salt at ${3 + 2 * i}`);
+    assert.equal(p[22 + 2 * i], env.outputs[i].owner[0], `output ${i} owner.x at ${22 + 2 * i}`);
+    assert.equal(p[23 + 2 * i], env.outputs[i].owner[1], `output ${i} owner.y at ${23 + 2 * i}`);
+    assert.equal(p[42 + 2 * i], env.outputs[i].value, `output ${i} value at ${42 + 2 * i}`);
+    assert.equal(p[43 + 2 * i], env.outputs[i].salt, `output ${i} salt at ${43 + 2 * i}`);
+  }
+});
+
+test("transfer10 builder rejects wrong arity and a mismatched input owner in ANY slot", () => {
+  const full = envFor("transfer10", 0);
+  assert.throws(
+    () => buildAuthorityPlaintext("transfer10", { inputs: full.inputs, outputs: full.outputs.slice(0, 9) }),
+    /exactly 10 outputs/,
+  );
+  assert.throws(
+    () => buildAuthorityPlaintext("transfer10", { inputs: full.inputs.slice(0, 4), outputs: full.outputs }),
+    /exactly 10 inputs/,
+  );
+  // The shared-owner check must cover every slot, not just the first two: one
+  // circuit inputOwnerPrivateKey means input 7 cannot belong to someone else.
+  const oddSlot: ParsedEnvelope = {
+    inputs: full.inputs.map((n, i) =>
+      i === 7 ? { ...n, owner: deriveKeypair(553007n).publicKey } : n,
+    ),
+    outputs: full.outputs,
+  };
+  assert.throws(() => buildAuthorityPlaintext("transfer10", oddSlot), /share ONE owner/);
+});
+
+test("transfer10 fixture parity: the committed witness input agrees with the sdk", () => {
+  // circuits/inputs/transfer10.json is what the committed proof was generated
+  // from, so the codec and the note primitives must agree with it field for field.
+  const inp = JSON.parse(
+    readFileSync(join(ROOT, "circuits", "inputs", "transfer10.json"), "utf8"),
+  ) as Record<string, string[] | string[][] | string>;
+  const arr = (k: string): bigint[] => (inp[k] as string[]).map(BigInt);
+  const owners = (inp.outputOwnerPublicKeys as unknown as string[][]).map(
+    (p) => [BigInt(p[0]), BigInt(p[1])] as Point,
+  );
+
+  const inValues = arr("inputValues");
+  const outValues = arr("outputValues");
+  const outSalts = arr("outputSalts");
+  const enabled = arr("enabled");
+  assert.equal(inValues.length, 10);
+  assert.equal(outValues.length, 10);
+
+  // commitment equality: recomputing every output commitment with the sdk
+  // reproduces the witness input the circuit hashed.
+  const outCommits = arr("outputCommitments");
+  for (let i = 0; i < 10; i++) {
+    assert.equal(commitment(outValues[i], outSalts[i], owners[i]), outCommits[i], `output ${i}`);
+  }
+  // conservation: CheckSum is an equality over ALL 10 slots, pads included.
+  assert.equal(
+    inValues.reduce((a, v) => a + v, 0n),
+    outValues.reduce((a, v) => a + v, 0n),
+  );
+  // the §5.2 value belt on the fixture's own padding: enabled=0 ⟹ value=0.
+  for (let i = 0; i < 10; i++) {
+    if (enabled[i] === 0n) assert.equal(inValues[i], 0n, `padded slot ${i} must carry value 0`);
+  }
+
+  // The envelope over this fixture is the 62-field layout, and it round-trips.
+  const inOwner = deriveKeypair(BigInt(inp.inputOwnerPrivateKey as string)).publicKey;
+  const inSalts = arr("inputSalts");
+  const env: ParsedEnvelope = {
+    inputs: inValues.map((v, i) => ({ owner: inOwner, value: v, salt: inSalts[i] })),
+    outputs: outValues.map((v, i) => ({ owner: owners[i], value: v, salt: outSalts[i] })),
+  };
+  const plain = buildAuthorityPlaintext("transfer10", env);
+  assert.equal(plain.length, envelopePlaintextLen("transfer10", 0));
+  const ecdhPriv = 616161616161616n;
+  const nonce = BigInt(inp.encryptionNonce as string);
+  const ct = poseidonEncrypt(plain, ecdhSharedSecret(ecdhPriv, AUTHORITY.publicKey), nonce);
+  assert.equal(ct.length, authorityCiphertextLen("transfer10", 0));
+  const parsed = parseEnvelope(
+    AUTHORITY.formattedPrivateKey,
+    deriveKeypair(ecdhPriv).publicKey,
+    nonce,
+    ct,
+    "transfer10",
+    0,
+  );
+  assert.deepEqual(parsed, env);
+});
+
+test("per-output nonces keep ten same-owner ciphertexts independent (§11-8 v1.1)", () => {
+  // What the circuit relies on for duplicate output owners: ONE ephemeral key
+  // and ten notes, each sponge keyed by encryptionNonce + i. Under the shared
+  // nonce the notes would share a keystream; under nonce+i each opens only at
+  // its own offset.
+  const owner = deriveKeypair(554001n);
+  const ecdhPriv = 626262626262626n;
+  const shared = ecdhSharedSecret(ecdhPriv, owner.publicKey);
+  const base = 909090909090n;
+  const notes = Array.from({ length: 10 }, (_, i) => [500n + BigInt(i), 700n + BigInt(i)]);
+
+  const cts = notes.map((n, i) => poseidonEncrypt(n, shared, base + BigInt(i)));
+  notes.forEach((n, i) => {
+    assert.deepEqual(poseidonDecrypt(cts[i], shared, base + BigInt(i), 2), n, `note ${i} at nonce+${i}`);
+  });
+  for (let i = 1; i < 10; i++) {
+    assert.notDeepEqual(
+      poseidonDecrypt(cts[i], shared, base, 2),
+      notes[i],
+      `note ${i} must NOT open under the un-offset nonce`,
+    );
+  }
 });
 
 test("kemPkFromSecret: the FIPS 203 dk embeds its ek at offset 1152", () => {

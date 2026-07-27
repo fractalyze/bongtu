@@ -337,7 +337,7 @@ jobs:
           fi
           echo "PTAU=$PTAU_FILE" >> "$GITHUB_ENV"
 
-      - name: build + CPU-prove the 4 small circuits (prove_all.sh)
+      - name: build + CPU-prove the small circuits (prove_all.sh)
         if: steps.outcache.outputs.cache-hit != 'true'
         run: |
           export SNARKJS="node --max-old-space-size=6144 $BONGTU_NODE_MODULES/.bin/snarkjs"

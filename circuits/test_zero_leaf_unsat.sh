@@ -3,10 +3,12 @@
 #
 # Proves the zero-commitment belt `enabled[i] * IsZero(inputCommitments[i]) === 0`
 # closes the SMT->IMT zero-leaf mint-from-nothing at the CIRCUIT level, for ALL
-# THREE spending circuits (transfer + withdraw permissionless, disburse caller-gated),
-# while leaving honest spends provable.
+# FOUR spending circuits (transfer + transfer10 + withdraw permissionless,
+# disburse caller-gated), while leaving honest spends provable. transfer10 puts
+# its exploit in a middle slot (7 of 10), where a per-slot belt is easiest to
+# get wrong.
 #
-# For each of transfer, withdraw:
+# For each spending circuit:
 #   <name>_zero_leaf  (commitment=0, value=X, enabled=1, fresh nullifier, genuine
 #                      zeros-membership) -> generate_witness MUST THROW on the belt
 #                      (Assert Failed, in the spending base template);
@@ -62,10 +64,17 @@ run_witness() {
   fi
 }
 
-declare -A TEMPLATE=( [transfer]="ZetoTransferSmall" [withdraw]="CheckNullifiersInputsOutputsValueIMT" [disburse]="Zeto" )
+# Template name the belt assertion must be reported from. transfer10 shares
+# transfer's template because it is the same base at arity 10.
+declare -A TEMPLATE=(
+  [transfer]="ZetoTransferSmall"
+  [transfer10]="ZetoTransferSmall"
+  [withdraw]="CheckNullifiersInputsOutputsValueIMT"
+  [disburse]="Zeto"
+)
 failures=0
 
-for name in transfer withdraw disburse; do
+for name in transfer transfer10 withdraw disburse; do
   compile_if_missing "$name"
   tmpl="${TEMPLATE[$name]}"
 
@@ -101,7 +110,7 @@ echo ""
 echo "======================================================================"
 if [ "$failures" -eq 0 ]; then
   echo "ZERO-LEAF BELT GATE: PASS — the zero-commitment mint-from-nothing is"
-  echo "unsatisfiable at witness-gen for transfer, withdraw AND disburse; honest spends prove."
+  echo "unsatisfiable at witness-gen for transfer, transfer10, withdraw AND disburse; honest spends prove."
   exit 0
 else
   echo "ZERO-LEAF BELT GATE: FAIL ($failures)"

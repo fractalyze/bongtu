@@ -5,6 +5,12 @@
 # so a ProvingRequest assembled by the TS apps deserializes here unchanged. Keep
 # the two files in sync; a field added there must be added here.
 #
+# One deliberate omission: the TS `Circuit` union also has "transfer10" (10-in /
+# 10-out). This service holds only the GPU disburse zkey, and transfer10 proves
+# in-browser on CPU like transfer/withdraw/deposit, so there is no variant for it
+# here — an unknown tag is rejected at validation, which is the right answer for
+# a circuit this service cannot prove. Add one only if it ever gets a zkey.
+#
 # Field elements arrive as decimal strings (JSON has no bigint; the TS side
 # stringifies) or small ints; points are [x, y] pairs. The §11-8 two-time-pad
 # guard (a DISBURSE batch's output owners must be DISTINCT, because all B outputs

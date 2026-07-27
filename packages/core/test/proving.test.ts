@@ -17,6 +17,7 @@ import type {
   DepositInput,
   DisburseInput,
   ProvingRequest,
+  Transfer10Input,
 } from "../src/proving.js";
 import { deriveKeypair, commitment } from "../src/note.js";
 
@@ -76,6 +77,46 @@ test("a disburse ProvingRequest keeps its [1][H] membership arrays through JSON"
   assert.equal(wire.input.pathElements.length, 1);
   assert.equal(wire.input.pathElements[0].length, H);
   assert.equal(wire.input.enabled[0], "1");
+});
+
+test("a transfer10 ProvingRequest keeps all ten [10][H] slots and duplicate owners", () => {
+  const H = 32;
+  const kp = deriveKeypair(414141414141414141n);
+  const ten = <T>(f: (i: number) => T): T[] => Array.from({ length: 10 }, (_, i) => f(i));
+  const values = ten((i) => BigInt(10 * i));
+  const salts = ten((i) => 900n + BigInt(i));
+  const input: Transfer10Input = {
+    nullifiers: ten((i) => (i < 4 ? 100n + BigInt(i) : 0n)), // 4 real, 6 padded
+    inputCommitments: ten((i) => commitment(values[i], salts[i], kp.publicKey)),
+    inputValues: values,
+    inputSalts: salts,
+    inputOwnerPrivateKey: 4n,
+    ecdhPrivateKey: 5n,
+    root: 6n,
+    pathElements: ten(() => new Array<bigint>(H).fill(0n)),
+    leafIndices: ten((i) => BigInt(i)),
+    enabled: ten((i) => (i < 4 ? 1n : 0n)),
+    outputCommitments: ten((i) => 700n + BigInt(i)),
+    outputValues: ten((i) => (i === 0 ? 450n : 0n)),
+    outputSalts: ten((i) => 800n + BigInt(i)),
+    // every output to ONE owner: the self-merge shape the per-output nonce allows.
+    outputOwnerPublicKeys: ten(() => kp.publicKey),
+    kemSs: [15n, 16n],
+    encryptionNonce: 12n,
+    authorityPublicKey: [13n, 14n],
+  };
+  const req: ProvingRequest = { circuit: "transfer10", input, backend: "cpu" };
+  const wire = JSON.parse(JSON.stringify(toWire(req))) as ProvingRequest;
+  assert.equal(wire.circuit, "transfer10");
+  if (wire.circuit !== "transfer10") throw new Error("unreachable"); // narrows the union
+  assert.equal(wire.input.pathElements.length, 10);
+  assert.equal(wire.input.pathElements[9].length, H);
+  assert.equal(wire.input.nullifiers[9], "0");
+  assert.equal(wire.input.enabled[3], "1");
+  assert.equal(wire.input.enabled[4], "0");
+  assert.equal(wire.input.outputOwnerPublicKeys.length, 10);
+  assert.deepEqual(wire.input.outputOwnerPublicKeys[9], wire.input.outputOwnerPublicKeys[0]);
+  assert.equal(BigInt(wire.input.inputCommitments[0] as string), input.inputCommitments[0]);
 });
 
 test("Calldata is the exportSolidityCallData shape the pool submitters splat", () => {

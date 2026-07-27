@@ -37,8 +37,10 @@ export { assertValidChallenge, viewTokenHostBinding, CHALLENGE_BYTES } from "./e
 
 // --- wire shapes (what the indexer serves; what the apps consume) ---------------
 
-/** Kind of note-bearing pool operation a feed entry came from. */
-export type EventKind = "deposit" | "transfer" | "withdraw" | "disburse";
+/** Kind of note-bearing pool operation a feed entry came from. Same vocabulary
+ *  as the envelope codec's `OpKind`, which is what an envelope alarm is keyed
+ *  by — `transfer10` is the arity-10 transfer circuit (10-in / 10-out). */
+export type EventKind = "deposit" | "transfer" | "transfer10" | "withdraw" | "disburse";
 
 /** GET /events disclosure verdict vocabulary (full detail lives on /alarms): a
  *  passing disclosureHash chain, a proven tamper, or the two publication gaps

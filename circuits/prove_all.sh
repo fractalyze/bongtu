@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
 # bongtu M0 Unit U2 gate (spec §4, .dev/milestone-m0.md Done#2).
 #
-# For each of the 4 circuits: compile -> groth16 setup (pot22) -> export vkey +
-# solidity verifier -> generate_witness from the JS-produced input.json ->
-# groth16 prove -> groth16 verify. Prints "[INFO] snarkJS: OK" four times and
-# exits 0 when all four verify. Verifier .sol files are copied into verifiers/
+# For each circuit: compile -> groth16 setup (pot22) -> export vkey + solidity
+# verifier -> generate_witness from the JS-produced input.json -> groth16 prove
+# -> groth16 verify. Prints "[INFO] snarkJS: OK" once per fixture and exits 0
+# when all of them verify. Verifier .sol files are copied into verifiers/
 # (committed; they feed U3). Reports r1cs constraint + public-signal counts.
 #
-#   cd circuits && bash prove_all.sh
+# A circuit may carry EXTRA fixtures beyond its same-named one (transfer10 has
+# both the partly-filled spend and the 10-input consolidation); those reuse the
+# circuit's zkey and count as their own gate legs.
+#
+#   cd circuits && bash prove_all.sh                # all circuits
+#   cd circuits && bash prove_all.sh transfer10     # just one (targeted regen)
 #
 # Not idempotency-fragile: out/ is regenerated each run; .zkey/.wtns/.r1cs are
-# gitignored.
+# gitignored. `groth16 setup` is deterministic for a given (r1cs, ptau), so a
+# re-run reproduces the committed verifiers byte-for-byte — regenerating one
+# circuit cannot invalidate another circuit's committed proof fixtures.
 set -uo pipefail
 
 cd "$(dirname "$0")"
@@ -35,13 +42,47 @@ echo '{ "type": "commonjs" }' > out/package.json
 echo "== regenerating input fixtures =="
 $NODE --import tsx gen_inputs.ts || { echo "FATAL: input generation failed"; exit 1; }
 
-CIRCUITS=(deposit disburse transfer withdraw)
+ALL_CIRCUITS=(deposit disburse transfer transfer10 withdraw)
+if [ "$#" -gt 0 ]; then CIRCUITS=("$@"); else CIRCUITS=("${ALL_CIRCUITS[@]}"); fi
+
+# Fixtures proved against a circuit's zkey ON TOP of its same-named one.
+extra_fixtures() {
+  case "$1" in
+    transfer10) echo "transfer10_consolidate" ;;
+    *) echo "" ;;
+  esac
+}
+
 declare -A PASS
+LEGS=()
 OK_COUNT=0
+
+# witness -> prove -> verify one fixture against <circuit>.zkey. Records PASS
+# under the FIXTURE name, so each fixture is its own line in the summary.
+run_fixture() {
+  local circuit="$1" fixture="$2"
+
+  echo "-- generate witness ($fixture)"
+  $NODE "out/${circuit}_js/generate_witness.js" "out/${circuit}_js/$circuit.wasm" "inputs/$fixture.json" "out/$fixture.wtns" \
+      || { echo "$fixture: witness generation FAILED"; return; }
+
+  echo "-- groth16 prove ($fixture)"
+  $SNARKJS groth16 prove "out/$circuit.zkey" "out/$fixture.wtns" "out/$fixture.proof.json" "out/$fixture.public.json" \
+      || { echo "$fixture: prove FAILED"; return; }
+
+  echo "-- public signal count: $($NODE -e "console.log(require('./out/$fixture.public.json').length)")"
+
+  echo "-- groth16 verify ($fixture)"
+  if $SNARKJS groth16 verify "out/$circuit.vkey.json" "out/$fixture.public.json" "out/$fixture.proof.json"; then
+    PASS[$fixture]=1
+    OK_COUNT=$((OK_COUNT+1))
+  else
+    echo "$fixture: verify FAILED"
+  fi
+}
 
 run_circuit() {
   local name="$1"
-  PASS[$name]=0
   echo ""
   echo "======================================================================"
   echo "== $name"
@@ -64,24 +105,20 @@ run_circuit() {
   $SNARKJS zkey export solidityverifier "out/$name.zkey" "out/${name}_verifier.sol" || { echo "$name: sol export FAILED"; return; }
   cp "out/${name}_verifier.sol" "verifiers/${name}_verifier.sol"
 
-  echo "-- generate witness"
-  $NODE "out/${name}_js/generate_witness.js" "out/${name}_js/$name.wasm" "inputs/$name.json" "out/$name.wtns" \
-      || { echo "$name: witness generation FAILED"; return; }
-
-  echo "-- groth16 prove"
-  $SNARKJS groth16 prove "out/$name.zkey" "out/$name.wtns" "out/$name.proof.json" "out/$name.public.json" \
-      || { echo "$name: prove FAILED"; return; }
-
-  echo "-- public signal count: $($NODE -e "console.log(require('./out/$name.public.json').length)")"
-
-  echo "-- groth16 verify"
-  if $SNARKJS groth16 verify "out/$name.vkey.json" "out/$name.public.json" "out/$name.proof.json"; then
-    PASS[$name]=1
-    OK_COUNT=$((OK_COUNT+1))
-  else
-    echo "$name: verify FAILED"
-  fi
+  for fixture in "$name" $(extra_fixtures "$name"); do
+    run_fixture "$name" "$fixture"
+  done
 }
+
+# Register every expected leg up front, so a circuit that dies at compile still
+# shows its fixtures as FAILED instead of vanishing from the summary.
+for c in "${CIRCUITS[@]}"; do
+  for f in "$c" $(extra_fixtures "$c"); do
+    PASS[$f]=0
+    LEGS+=("$f")
+  done
+done
+TOTAL=${#LEGS[@]}
 
 for c in "${CIRCUITS[@]}"; do
   run_circuit "$c"
@@ -91,12 +128,12 @@ echo ""
 echo "======================================================================"
 echo "== SUMMARY"
 echo "======================================================================"
-for c in "${CIRCUITS[@]}"; do
-  if [ "${PASS[$c]}" -eq 1 ]; then echo "  [x] $c  VERIFIED"; else echo "  [ ] $c  FAILED"; fi
+for f in "${LEGS[@]}"; do
+  if [ "${PASS[$f]}" -eq 1 ]; then echo "  [x] $f  VERIFIED"; else echo "  [ ] $f  FAILED"; fi
 done
-echo "  verified $OK_COUNT / 4"
+echo "  verified $OK_COUNT / $TOTAL"
 
-if [ "$OK_COUNT" -eq 4 ]; then
+if [ "$OK_COUNT" -eq "$TOTAL" ]; then
   echo "U2 GATE: PASS"
   exit 0
 else
