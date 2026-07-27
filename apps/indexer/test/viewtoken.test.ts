@@ -329,8 +329,8 @@ test("end-to-end relay: a hostile indexer proxying a live challenge gains nothin
 // ============================ (4) READ-AUTH ==================================
 
 /** Drive the shared read-auth exactly as the router hands it to a route. */
-const authorize = (tokens: ViewTokenService | null, query: string): OwnerAuth =>
-  authorizeOwner({ ix: fakeIx, tokens, params: [], query: new URLSearchParams(query) });
+const authorize = (tokens: ViewTokenService | null, query: string, nowSeconds?: number): OwnerAuth =>
+  authorizeOwner({ ix: fakeIx, tokens, params: [], query: new URLSearchParams(query) }, nowSeconds);
 
 /** "ok" or the status the caller would have sent — the whole verdict in one value. */
 const verdict = (a: OwnerAuth): number | "ok" => (a.ok ? "ok" : a.denied.status);
@@ -370,8 +370,10 @@ test("read-auth: both proofs are accepted and every failing shape keeps its stat
   assert.equal(verdict(authorize(svc, `owner=${ownerCompressed}&ts=1.5&sig=0x00`)), 400, "ts not integer seconds");
   assert.equal(verdict(authorize(svc, `owner=${ownerCompressed}&ts=${now}&sig=0xzz`)), 400, "malformed sig");
   assert.equal(verdict(authorize(svc, signedQuery(OTHER, now))), 401, "signature by the wrong key");
-  assert.equal(verdict(authorize(svc, signedQuery(OWNER, now - 400))), 401, "ts outside the 300s replay window");
-  assert.equal(verdict(authorize(svc, signedQuery(OWNER, now - 299))), "ok", "…and inside it still passes");
+  // Window BOUNDARY with an injected clock — a wall-clock version drifts out of
+  // the window on a slow runner (this exact test flaked on CI before injection).
+  assert.equal(verdict(authorize(svc, signedQuery(OWNER, now - 301), now)), 401, "ts one second outside the 300s replay window");
+  assert.equal(verdict(authorize(svc, signedQuery(OWNER, now - 300), now)), "ok", "…and the boundary second still passes");
   assert.equal(
     verdict(authorize(svc, `owner=${otherCompressed}&token=${encodeURIComponent(issued.token)}`)),
     401,

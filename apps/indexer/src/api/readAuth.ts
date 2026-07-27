@@ -50,8 +50,16 @@ export type OwnerAuth = { ok: true; pub: Point } | { ok: false; denied: RouteRes
 /**
  * Authorise a read of ONE owner's feed. Returns the unpacked owner pubkey the
  * caller proved control of, or the ready-made 400/401 the route returns verbatim.
+ *
+ * `nowSeconds` is injectable so the replay-window BOUNDARY is testable
+ * deterministically — a wall-clock boundary test drifts out of the window on a
+ * slow CI runner (seconds pass between building the query and checking it).
+ * Routes always use the default.
  */
-export function authorizeOwner({ tokens, query }: RouteContext): OwnerAuth {
+export function authorizeOwner(
+  { tokens, query }: RouteContext,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): OwnerAuth {
   const owner = query.get("owner");
   if (!owner) {
     return { ok: false, denied: bad({ error: "owner query param required: a compressed bjj pubkey (32-byte hex)" }) };
@@ -96,7 +104,7 @@ export function authorizeOwner({ tokens, query }: RouteContext): OwnerAuth {
   }
 
   // Replay window (server clock, in the ROUTE only — never in workflow scripts).
-  const now = Math.floor(Date.now() / 1000);
+  const now = nowSeconds;
   if (Math.abs(now - ts) > WINDOW_SECONDS) {
     return { ok: false, denied: unauthorized(`timestamp outside the ${WINDOW_SECONDS}s replay window (|now-ts| too large)`) };
   }
