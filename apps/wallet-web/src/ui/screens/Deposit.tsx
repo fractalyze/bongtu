@@ -30,7 +30,7 @@ import { AmountInput, Button, ErrorBanner, Field, LinkButton, TestnetTag } from 
 import { MintModal } from "../components/MintModal.js";
 
 export function Deposit(): ReactNode {
-  const { session, connection, wallet, refreshAfterAction, syncing } = useWallet();
+  const { session, connection, wallet, refreshAfterAction } = useWallet();
 
   const [amount, setAmount] = useState("");
   const [tokenBalance, setTokenBalance] = useState<bigint | null>(null);
@@ -95,7 +95,6 @@ export function Deposit(): ReactNode {
         headline="Deposit completed"
         amount={review}
         explorerUrl={action.outcome.explorerUrl}
-        syncing={syncing}
       />
     );
   }

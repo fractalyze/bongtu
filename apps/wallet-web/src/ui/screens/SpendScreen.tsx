@@ -74,7 +74,7 @@ function MergePrompt({
 }
 
 export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactNode {
-  const { session, connection, wallet, indexerUrl, notes, balance, refreshAfterAction, syncing } =
+  const { session, connection, wallet, indexerUrl, notes, balance, refreshAfterAction } =
     useWallet();
   const isTransfer = kind === "transfer";
 
@@ -164,7 +164,6 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
         headline={merging ? "Notes merged" : isTransfer ? "Payment sent" : "Withdrawal sent"}
         amount={review}
         explorerUrl={action.outcome.explorerUrl}
-        syncing={syncing}
         doneLabel={merging ? `Back to ${isTransfer ? "Send" : "Withdraw"}` : "Done"}
         onDone={merging ? leaveMerge : undefined}
       />

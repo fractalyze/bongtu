@@ -55,7 +55,6 @@ test("SuccessPanel shows the headline, the amount and an explorer link with its 
       headline: "Deposit completed",
       amount: "1,000",
       explorerUrl: TX_URL,
-      syncing: false,
     }),
   );
   assert.match(html, /Deposit completed/);
@@ -69,17 +68,20 @@ test("SuccessPanel shows the headline, the amount and an explorer link with its 
   assert.doesNotMatch(html, /Now in your private balance/);
 });
 
-test("SuccessPanel says the balance is catching up only while syncing", () => {
-  const syncing = renderToStaticMarkup(
+test("the success screen never shows a loading indicator (the tx is done)", () => {
+  // A spinner on a success screen reads as "not actually done" (user feedback
+  // 2026-07-28). The post-action refresh still runs; the HOME sync dot owns its
+  // visibility. The success screen states only the finished fact.
+  const html = renderToStaticMarkup(
     h(SuccessPanel, {
       title: "Send",
       headline: "Payment sent",
       amount: "5",
       explorerUrl: TX_URL,
-      syncing: true,
     }),
   );
-  assert.match(syncing, /Updating your balance/);
+  assert.doesNotMatch(html, /Updating your balance/);
+  assert.doesNotMatch(html, /animate-spin/);
 });
 
 test("the success headlines are the corrected ones", () => {

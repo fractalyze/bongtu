@@ -14,7 +14,6 @@ export function SuccessPanel({
   headline,
   amount,
   explorerUrl,
-  syncing,
   doneLabel = "Done",
   onDone,
 }: {
@@ -25,7 +24,6 @@ export function SuccessPanel({
   amount: string;
   explorerUrl: string;
   /** true while the post-action poll waits for the indexer to catch up. */
-  syncing: boolean;
   doneLabel?: string;
   /** Where the button goes. Defaults home; a merge overrides it to hand the user
    *  back to the payment they were making when they were sent to merge. */
@@ -41,13 +39,6 @@ export function SuccessPanel({
           {amount} <span className="text-[0.62em] font-semibold text-muted ml-1">kKRW</span>
         </p>
         <ExplorerLink href={explorerUrl} />
-        {syncing && (
-          <span
-            role="status"
-            aria-label="Updating your balance"
-            className="mt-1 inline-block size-4 rounded-full border-2 border-border border-t-primary animate-spin"
-          />
-        )}
         <Button
           variant="primary"
           block
