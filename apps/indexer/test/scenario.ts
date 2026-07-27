@@ -214,7 +214,8 @@ export async function runScenario(): Promise<ScenarioResult> {
   const chgCommit = commitment(chgVal, sChg, RCPTS[0].publicKey);
   const padCommitT = commitment(0n, sPadT, RCPTS[0].publicKey);
   {
-    assertDistinctOwnerPubkeys([PAYEE.publicKey, RCPTS[0].publicKey]);
+    // no distinct-owner guard: transfer's per-output nonce (§11-8 v1.1, U-X3)
+    // made duplicate output owners safe; the guard remains disburse-only
     const { siblings } = oracle.merklePath(honestStart);
     const zeros: bigint[] = new Array(H).fill(0n);
     const { a, b, c, pub } = await prove("transfer", {

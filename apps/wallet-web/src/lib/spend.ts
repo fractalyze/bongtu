@@ -21,7 +21,6 @@ import {
   deriveKeypair,
   commitment,
   nullifier,
-  assertDistinctOwnerPubkeys,
 } from "@bongtu/core/note";
 import { ml_kem768, kemSsToLimbs, kemHexToBytes, kemBytesToHex } from "@bongtu/core/kem";
 import { ARBITER_KEM_PK } from "@bongtu/core/network";
@@ -319,11 +318,14 @@ function assembleInputs(
 /**
  * Assemble a transfer ProvingRequest: spend 1–2 of the wallet's notes, pay
  * `recipientCompressed` `amount`, send the change back to the wallet. Value is
- * conserved (sum(real inputs) == amount + change), and the two output owners
- * (recipient, wallet) must be distinct — a self-pay would be a two-time pad (§11-8).
+ * conserved (sum(real inputs) == amount + change). The two output owners MAY
+ * coincide (a self-send): the transfer circuit encrypts receiver ciphertext i
+ * under encryptionNonce + i (§11-8 v1.1, U-X3), so duplicate owners no longer
+ * share a keystream — the old two-time-pad rejection applies only to the
+ * shared-nonce disburse path.
  *
- * Throws on: a bad input count, a malformed recipient pubkey, amount <= 0, amount
- * exceeding the input total, a self-transfer, or a wrong-length path.
+ * Throws on: a bad input count, a malformed recipient pubkey, amount <= 0,
+ * amount exceeding the input total, or a wrong-length path.
  */
 export function buildTransferRequest(
   identity: WalletIdentity,
@@ -350,8 +352,9 @@ export function buildTransferRequest(
   }
   const changeVal = ins.inputTotal - payVal;
 
+  // Fixed output order, mirrored by the circuit's per-output nonces: output 0 =
+  // payment (recipient), output 1 = change (wallet). recipient == self is legal.
   const outputOwnerPublicKeys: Point[] = [payee, self.publicKey];
-  assertDistinctOwnerPubkeys(outputOwnerPublicKeys); // recipient != self (§11-8)
   const payeeSalt = BigInt(crypto.payeeSalt);
   const changeSalt = BigInt(crypto.changeSalt);
   const outputValues = [payVal, changeVal];

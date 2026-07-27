@@ -397,6 +397,19 @@
     },
     {
       "type": "function",
+      "name": "initializeV3",
+      "inputs": [
+        {
+          "name": "_transferVerifier",
+          "type": "address",
+          "internalType": "contract ITransferVerifier"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
       "name": "initialized",
       "inputs": [],
       "outputs": [

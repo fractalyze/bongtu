@@ -51,10 +51,10 @@ export interface DepositInput {
 }
 
 /** transfer (2-in / 2-out): IMT membership + nullifiers; ciphertext rides as public
- *  signals (small base, no subtree gadget / disclosureHash). All outputs share one
- *  ephemeral key + nonce, so output owner pubkeys must be distinct (§11-8 two-time-pad
- *  guard — the prover MUST reject duplicates). A padded input carries nullifier=0,
- *  value=0, enabled=0, pathElements=zeros. */
+ *  signals (small base, no subtree gadget / disclosureHash). Receiver ciphertext i is
+ *  encrypted under encryptionNonce + i (§11-8 v1.1), so duplicate output owners are
+ *  fine — self-send is allowed. A padded input carries nullifier=0, value=0,
+ *  enabled=0, pathElements=zeros. */
 export interface TransferInput {
   nullifiers: FieldInput[]; // length 2 (0 for a padded input)
   inputCommitments: FieldInput[]; // length 2
@@ -69,7 +69,7 @@ export interface TransferInput {
   outputCommitments: FieldInput[]; // length 2
   outputValues: FieldInput[]; // length 2
   outputSalts: FieldInput[]; // length 2
-  outputOwnerPublicKeys: PointInput[]; // length 2 (must be distinct)
+  outputOwnerPublicKeys: PointInput[]; // length 2 (duplicates allowed: per-output nonce)
   kemSs: FieldInput[]; // [2] LE-uint128 limbs of the ML-KEM-768 shared secret (hybrid envelope key, @bongtu/core/kem)
   encryptionNonce: FieldInput;
   authorityPublicKey: PointInput;

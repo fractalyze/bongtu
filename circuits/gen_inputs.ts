@@ -99,6 +99,9 @@ function genTransfer(): TransferInput {
 
   const outValues = [600n, 400n]; // sum 1000 == 700 + 300
   const owners: Point[] = [receiver(0).publicKey, receiver(1).publicKey];
+  // Fixture hygiene, not a protocol rule (transfer allows duplicates since §11-8
+  // v1.1): the canonical fixture stays distinct-recipient so auditor_decrypt_check
+  // exercises two different recipient keys and regen stays byte-stable.
   assertDistinctOwnerPubkeys(owners);
   const outCommits = outValues.map((v, i) => commitment(v, salt(i), owners[i]));
 

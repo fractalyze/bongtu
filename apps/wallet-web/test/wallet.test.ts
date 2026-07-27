@@ -198,6 +198,74 @@ test("trial-decrypt discovers exactly the wallet's notes from the /events feed",
   assert.equal(sumUnspent(found), 0n);
 });
 
+test("trial-decrypt recovers BOTH notes of a per-output-nonce self-send AND a legacy shared-nonce change note", () => {
+  const wallet = deriveIdentityFromSignature(SIG);
+  const ecdhPriv = 710000000000000000009n;
+  const nonce = 121212121212n;
+  const ephemeralPub = deriveKeypair(ecdhPriv).publicKey;
+  const shared = ecdhSharedSecret(ecdhPriv, wallet.keypair.publicKey);
+
+  // POST-upgrade self-send: ct_i encrypted under nonce + i (the circuit's
+  // §11-8 v1.1 derivation), both outputs owned by the wallet.
+  const pay = { value: 60n, salt: 8100001n };
+  const chg = { value: 40n, salt: 8100002n };
+  const ctPay = poseidonEncrypt([pay.value, pay.salt], shared, nonce);
+  const ctChg = poseidonEncrypt([chg.value, chg.salt], shared, nonce + 1n);
+  const payCommit = commitment(pay.value, pay.salt, wallet.keypair.publicKey);
+  const chgCommit = commitment(chg.value, chg.salt, wallet.keypair.publicKey);
+  const selfSendEv: FeedEvent = {
+    seq: 0,
+    txHash: "0xself",
+    blockNumber: 2,
+    kind: "transfer",
+    epoch: 0,
+    ecdhPublicKey: [ephemeralPub[0].toString(), ephemeralPub[1].toString()],
+    encryptionNonce: nonce.toString(),
+    slices: [
+      { offset: 0, elts: 4, leafIndex: 10 },
+      { offset: 4, elts: 4, leafIndex: 11 },
+    ],
+    ciphertext: [...ctPay, ...ctChg].map((x) => x.toString()),
+  };
+
+  // PRE-upgrade history: a change note at ctIndex 1 encrypted under the PLAIN
+  // shared nonce (the old circuit) must keep decrypting.
+  const legacy = { value: 77n, salt: 8100003n };
+  const ctLegacy0 = poseidonEncrypt([5n, 5n], ecdhSharedSecret(ecdhPriv, deriveKeypair(1234567n).publicKey), nonce);
+  const ctLegacy1 = poseidonEncrypt([legacy.value, legacy.salt], shared, nonce);
+  const legacyCommit = commitment(legacy.value, legacy.salt, wallet.keypair.publicKey);
+  const legacyEv: FeedEvent = {
+    seq: 1,
+    txHash: "0xlegacy",
+    blockNumber: 1,
+    kind: "transfer",
+    epoch: 0,
+    ecdhPublicKey: [ephemeralPub[0].toString(), ephemeralPub[1].toString()],
+    encryptionNonce: nonce.toString(),
+    slices: [
+      { offset: 0, elts: 4, leafIndex: 20 },
+      { offset: 4, elts: 4, leafIndex: 21 },
+    ],
+    ciphertext: [...ctLegacy0, ...ctLegacy1].map((x) => x.toString()),
+  };
+
+  const leafCommitments = new Map<number, string>([
+    [10, payCommit.toString()],
+    [11, chgCommit.toString()],
+    [21, legacyCommit.toString()],
+  ]);
+  const found = trialDecryptEvents([selfSendEv, legacyEv], wallet, {
+    leafCommitments,
+    spentNullifiers: new Set(),
+  });
+  assert.equal(found.length, 3, "both self-send notes + the legacy change note are discovered");
+  const byLeaf = new Map(found.map((n) => [n.leafIndex, n]));
+  assert.equal(byLeaf.get(10)?.value, "60");
+  assert.equal(byLeaf.get(11)?.value, "40");
+  assert.equal(byLeaf.get(21)?.value, "77");
+  assert.equal(sumUnspent(found), 177n);
+});
+
 // ============================ (3) SPEND WITNESS ==============================
 
 // A live-tree fixture: the wallet's two notes are leaves 1 and 2 of the tree.
@@ -288,10 +356,19 @@ test("transfer: single input note pads input[1] (enabled=[1,0], value 0)", () =>
   assert.equal(outSum, 1000n); // 250 paid + 750 change
 });
 
-test("transfer: rejects a self-pay (two-time pad) and an over-spend", () => {
+test("transfer: accepts a self-pay (per-output nonce, §11-8 v1.1) and rejects an over-spend", () => {
   const f = fixture([1000n]);
-  const selfPay = f.wallet.compressedPubkey; // paying yourself collides the two output owners
-  assert.throws(() => buildTransferRequest(f.wallet, f.inputs, f.memberships, selfPay, "10", f.crypto), /duplicate|distinct/i);
+  const selfPay = f.wallet.compressedPubkey; // both output owners == the wallet — legal since U-X3
+  const { request, meta } = buildTransferRequest(f.wallet, f.inputs, f.memberships, selfPay, "10", f.crypto);
+  const inp = request.input;
+  const self = f.wallet.keypair.publicKey;
+  // both outputs are the wallet's, with distinct salts -> distinct commitments
+  assert.deepEqual((inp.outputOwnerPublicKeys as [string, string][])[0], [self[0].toString(), self[1].toString()]);
+  assert.deepEqual((inp.outputOwnerPublicKeys as [string, string][])[1], [self[0].toString(), self[1].toString()]);
+  assert.equal(inp.outputCommitments[0], commitment(10n, BigInt(f.crypto.payeeSalt!), self).toString());
+  assert.equal(inp.outputCommitments[1], commitment(990n, BigInt(f.crypto.changeSalt), self).toString());
+  assert.notEqual(inp.outputCommitments[0], inp.outputCommitments[1]);
+  assert.equal(meta.changeValue, "990");
   assert.throws(() => buildTransferRequest(f.wallet, f.inputs, f.memberships, f.recipient, "5000", f.crypto), /exceeds/i);
 });
 
@@ -459,7 +536,7 @@ test("walletErrorMessage: provider error objects render as words, never [object 
 // The UI edge accepts base58check OR legacy hex and normalizes via the core
 // decodeAddress before anything below (witness building) sees the value.
 
-test("recipientError: accepts base58check and legacy hex, rejects tampered/self", () => {
+test("recipientError: accepts base58check, legacy hex AND the wallet's own address; rejects tampered", () => {
   const f = fixture([1000n]);
   const self = f.wallet.compressedPubkey;
   const b58 = encodeAddress(f.recipient);
@@ -475,9 +552,9 @@ test("recipientError: accepts base58check and legacy hex, rejects tampered/self"
   assert.equal(recipientError("", self), "Enter a recipient.");
   assert.equal(recipientError("junk", self), "That doesn't look like a valid bongtu address.");
 
-  // Self-send is caught in EITHER encoding (two-time pad, §11-8).
-  assert.equal(recipientError(self, self), "You can't send to your own address.");
-  assert.equal(recipientError(encodeAddress(self), self), "You can't send to your own address.");
+  // Self-send is allowed in EITHER encoding (per-output nonce, §11-8 v1.1).
+  assert.equal(recipientError(self, self), null, "own address (hex) must be accepted");
+  assert.equal(recipientError(encodeAddress(self), self), null, "own address (base58) must be accepted");
 });
 
 test("spend path: a base58 recipient normalized via decodeAddress builds the identical request", () => {

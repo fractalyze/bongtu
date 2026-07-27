@@ -71,7 +71,7 @@ async function selectSpendInputs(
  * Select notes → assemble the witness → prove in-browser → submit via MetaMask, for a
  * transfer (needs `to`) or a withdraw (no recipient). `onStage` fires as each coarse
  * stage begins. Throws the same distinct errors the pure libs raise (insufficient
- * balance, needs-more-than-2-notes, self-pay, membership-stale, …) for the UI to show.
+ * balance, needs-more-than-2-notes, membership-stale, …) for the UI to show.
  */
 export async function runSpend(
   kind: "transfer" | "withdraw",

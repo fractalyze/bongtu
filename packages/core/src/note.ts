@@ -108,9 +108,13 @@ export function poseidonDecrypt(ciphertext: FieldInput[], key: PointInput, nonce
   return message.slice(0, length);
 }
 
-// SPEC §4 / §11-8 two-time-pad guard: all outputs of a transfer/batch share ONE
-// ephemeral key + ONE encryptionNonce, so two outputs to the same owner pubkey
-// leak c1 - c2 = m1 - m2. The prover MUST reject duplicate output owner pubkeys.
+// SPEC §4 / §11-8 two-time-pad guard for the SHARED-nonce encryptors: all
+// outputs of a disburse batch share ONE ephemeral key + ONE encryptionNonce, so
+// two outputs to the same owner pubkey leak c1 - c2 = m1 - m2. The prover MUST
+// reject duplicate output owner pubkeys there. TRANSFER is exempt since U-X3:
+// its circuit derives a per-output receiver nonce (encryptionNonce + i, the
+// §11-8 v1.1 structural fix), so a self-send no longer reuses a keystream and
+// spend.ts deliberately does NOT call this for its 2 outputs.
 export function assertDistinctOwnerPubkeys(publicKeys: PointInput[]): void {
   const seen = new Set<string>();
   for (const pk of publicKeys) {

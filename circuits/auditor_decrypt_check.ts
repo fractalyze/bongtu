@@ -290,6 +290,81 @@ async function checkWithdraw(): Promise<void> {
   ok(mLegacy[0] !== sender.publicKey[0], "legacy ECDH-only key: recovered field is garbage");
 }
 
+// --- transfer self-send (§11-8 v1.1 per-output receiver nonce) ---------------
+
+async function checkTransferSelfSend(): Promise<void> {
+  console.log("\n=== TRANSFER self-send (receiver ct_i decrypts with nonce + i) ===");
+  // ONE owner on both outputs — the exact witness the shared-nonce circuit
+  // banned as a two-time pad. Under per-output nonces it must prove AND both
+  // notes must be independently recoverable by that owner.
+  const owner: Keypair = deriveKeypair(77770001n);
+  const inValues = [900n, 100n];
+  const inSalts = [810001n, 810002n];
+  const inCommits = inValues.map((v, i) => commitment(v, inSalts[i], owner.publicKey));
+  const { root, pathElements, leafIndices } = membership(inCommits);
+  const outValues = [750n, 250n]; // payment (out 0) + change (out 1), both to self
+  const outSalts = [810003n, 810004n];
+  const outCommits = outValues.map((v, i) => commitment(v, outSalts[i], owner.publicKey));
+
+  const ecdhPrivateKey = 56565656565656565656565n;
+  const encryptionNonce = 929292929292n;
+  const kem = encap("bongtu/gate/kem/encap/transfer-selfsend");
+
+  const pub = await prove("transfer", {
+    nullifiers: inValues.map((v, i) => nullifier(v, inSalts[i], owner.formattedPrivateKey)),
+    inputCommitments: inCommits,
+    inputValues: inValues,
+    inputSalts: inSalts,
+    inputOwnerPrivateKey: owner.formattedPrivateKey,
+    root,
+    pathElements,
+    leafIndices,
+    enabled: [1n, 1n],
+    outputCommitments: outCommits,
+    outputValues: outValues,
+    outputSalts: outSalts,
+    outputOwnerPublicKeys: [owner.publicKey, owner.publicKey],
+    ecdhPrivateKey,
+    kemSs: kem.kemSs,
+    encryptionNonce,
+    authorityPublicKey: AUTHORITY.publicKey,
+  });
+  ok(pub.length === 37, `transfer publics length == 37 (got ${pub.length})`);
+
+  // chain-carried: ecdhPublicKey = pub[0..1]; receiver ct_i = pub[2+4i .. 5+4i].
+  const ecdhPublicKey: [bigint, bigint] = [pub[0], pub[1]];
+  const shared = ecdhSharedSecret(owner.formattedPrivateKey, ecdhPublicKey);
+  for (let i = 0; i < 2; i++) {
+    const ct = pub.slice(2 + 4 * i, 2 + 4 * i + 4);
+    const [v, s] = poseidonDecrypt(ct, shared, BigInt(encryptionNonce) + BigInt(i), 2);
+    eq(v, outValues[i], `self-send output ${i} value recovered with nonce+${i}`);
+    eq(s, outSalts[i], `self-send output ${i} salt recovered with nonce+${i}`);
+    eq(commitment(v, s, owner.publicKey), outCommits[i], `self-send output ${i} rebuilds its on-chain commitment`);
+  }
+
+  // NEGATIVE: the pre-v1.1 shared nonce no longer opens ct_1 (garbage out).
+  const ct1 = pub.slice(6, 10);
+  const [vWrong, sWrong] = poseidonDecrypt(ct1, shared, encryptionNonce, 2);
+  ok(
+    commitment(vWrong, sWrong, owner.publicKey) !== outCommits[1],
+    "shared (un-offset) nonce on ct_1: garbage does NOT rebuild the commitment",
+  );
+
+  // AUDITOR: the single authority envelope is untouched by the per-output
+  // receiver nonces — it still opens with the PLAIN nonce + hybrid key.
+  const ctAuth = pub.slice(10, 10 + 16);
+  const ssArb = decap(kem.kemCiphertext);
+  eq(binding(ssArb), pub[26], "kemBinding (pub[26]) == Poseidon(3)(TAG_BIND, Decaps limbs)");
+  const ecdh = ecdhSharedSecret(AUTHORITY.formattedPrivateKey, ecdhPublicKey);
+  const m = poseidonDecrypt(ctAuth, hybridKey([ecdh[0], ecdh[1]], ssArb), encryptionNonce, 14);
+  // layout: [inOwner(2), (inVal,inSalt)*2, (outOwner)*2, (outVal,outSalt)*2]
+  eq(m[0], owner.publicKey[0], "authority envelope: recovered input owner pub.x");
+  eq(m[10], outValues[0], "authority envelope: recovered output0 value");
+  eq(m[11], outSalts[0], "authority envelope: recovered output0 salt");
+  eq(m[12], outValues[1], "authority envelope: recovered output1 value");
+  eq(m[13], outSalts[1], "authority envelope: recovered output1 salt");
+}
+
 // --- FIXTURE envelopes (the committed prove_all.sh proofs) -------------------
 
 const rd = (p: string): any => JSON.parse(readFileSync(p, "utf8"));
@@ -355,12 +430,29 @@ async function checkFixtureEnvelopes(): Promise<void> {
     let all = true;
     for (let i = 0; i < want.length; i++) all = all && m[i] === want[i];
     ok(all, `${f.name}: FULL envelope decrypt matches all ${want.length} plaintext fields`);
+
+    // Transfer only (§11-8 v1.1): receiver ciphertext i opens with nonce + i —
+    // fixture receiver scalars restated from fixture_lib (mirror, not import).
+    if (f.name === "transfer") {
+      for (let i = 0; i < 2; i++) {
+        const rcpt = deriveKeypair(1000000007n + BigInt(i) * 1000003n);
+        const rct = pub.slice(2 + 4 * i, 2 + 4 * i + 4);
+        const rShared = ecdhSharedSecret(rcpt.formattedPrivateKey, ecdhPub);
+        const [v, slt] = poseidonDecrypt(rct, rShared, BigInt(inp.encryptionNonce) + BigInt(i), 2);
+        eq(
+          commitment(v, slt, rcpt.publicKey),
+          pub[32 + i],
+          `transfer fixture: receiver ct_${i} (nonce+${i}) rebuilds outputCommitment pub[${32 + i}]`,
+        );
+      }
+    }
   }
 }
 
 async function main(): Promise<void> {
   await checkDeposit();
   await checkWithdraw();
+  await checkTransferSelfSend();
   await checkFixtureEnvelopes();
   console.log(
     `\n${failures === 0

@@ -73,8 +73,9 @@ assembles the witness the same way `deploy/e2e_orchestrator.ts` does by hand, in
 - Spend 1–2 of the wallet's notes (a single note pads input[1] to `{nullifier:0,
   value:0, enabled:0}` — the §5.2 value belt forces the disabled input's value to 0).
 - **transfer**: pay the recipient `amount`, change back to self; `sum(inputs) == amount
-  + change`; the two output owners (recipient, self) must be **distinct** (a self-pay
-  is a two-time pad, §11-8).
+  + change`; the two output owners (recipient, self) MAY coincide — the circuit
+  encrypts receiver ciphertext `i` under `encryptionNonce + i` (§11-8 v1.1, U-X3),
+  so a self-pay is no longer a two-time pad.
 - **withdraw**: push `amount` of the underlying ERC-20; the circuit's `out` public =
   `sum(inputs) − sum(outputs) = amount`, change = total − amount (a full withdrawal
   leaves a value-0, non-zero-commitment change note).

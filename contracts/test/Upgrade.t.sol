@@ -180,6 +180,55 @@ contract UpgradeTest is Base {
         pool.initializeV2(ndv, nwv, ndsv, ntv, [ARB_X, ARB_Y], KEM_HASH_1);
     }
 
+    /// The self-send migration payload (UpgradeSelfSend.s.sol, U-X3): after the
+    /// PQ upgrade (initializeV2), upgradeToAndCall(impl, initializeV3(tv)) must
+    /// swap ONLY the transfer verifier — deposit/withdraw/disburse verifiers,
+    /// the arbiter key and the epoch all stay (the circuit change touches no key
+    /// material, so no epoch may be minted). reinitializer(3) burns the payload.
+    function testInitializeV3SwapsOnlyTransferVerifierAndMintsNoEpoch() public {
+        _buildState();
+        // reach the live pool's actual pre-V3 state: PQ migration first
+        IDepositVerifier ndv = new StubDepositVerifier();
+        IWithdrawVerifier nwv = new StubWithdrawVerifier();
+        IDisburseVerifier ndsv = new StubDisburseVerifier();
+        ITransferVerifier ntv = new StubTransferVerifier();
+        pool.upgradeToAndCall(
+            address(new BongtuPoolV2()),
+            abi.encodeCall(BongtuPool.initializeV2, (ndv, nwv, ndsv, ntv, [ARB_X, ARB_Y], KEM_HASH_1))
+        );
+        uint256 epochBefore = pool.currentEpoch();
+        bytes32 kemHashBefore = pool.arbiterKemPkHash(epochBefore);
+        (uint256 kxBefore, uint256 kyBefore) = pool.currentArbiterKey();
+
+        ITransferVerifier v3tv = new StubTransferVerifier();
+        BongtuPoolV2 v3 = new BongtuPoolV2();
+        pool.upgradeToAndCall(address(v3), abi.encodeCall(BongtuPool.initializeV3, (v3tv)));
+
+        assertEq(address(pool.transferVerifier()), address(v3tv), "transfer verifier not swapped");
+        assertEq(address(pool.depositVerifier()), address(ndv), "deposit verifier must not change");
+        assertEq(address(pool.withdrawVerifier()), address(nwv), "withdraw verifier must not change");
+        assertEq(address(pool.disburseVerifier()), address(ndsv), "disburse verifier must not change");
+        assertEq(pool.currentEpoch(), epochBefore, "initializeV3 must mint NO epoch");
+        assertEq(pool.arbiterKemPkHash(epochBefore), kemHashBefore, "kem pk hash must not change");
+        (uint256 kx, uint256 ky) = pool.currentArbiterKey();
+        assertEq(kx, kxBefore, "arbiter key x must not change");
+        assertEq(ky, kyBefore, "arbiter key y must not change");
+        assertTrue(pool.nullifierUsed(SPENT_NF), "pre-upgrade state lost across initializeV3");
+
+        // run-once: reinitializer(3) is consumed
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        pool.initializeV3(v3tv);
+    }
+
+    function testInitializeV3RejectsZeroVerifier() public {
+        _buildState();
+        BongtuPoolV2 v3 = new BongtuPoolV2();
+        vm.expectRevert(BongtuPool.ZeroVerifier.selector);
+        pool.upgradeToAndCall(
+            address(v3), abi.encodeCall(BongtuPool.initializeV3, (ITransferVerifier(address(0))))
+        );
+    }
+
     function testNonOwnerUpgradeReverts() public {
         BongtuPoolV2 v2 = new BongtuPoolV2();
         address stranger = address(0xBEEF);

@@ -343,6 +343,21 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         _rotateArbiter(arbiterKey, kemPkHash);
     }
 
+    /// @notice The self-send migration payload (U-X3, §11-8 v1.1): the transfer
+    ///         circuit moved to a per-output receiver nonce (encryptionNonce + i),
+    ///         which changes ONLY the transfer verifying key — same witness shape,
+    ///         same 37 publics, same arbiter key material. So this swaps ONLY the
+    ///         transfer verifier and mints NO epoch (an epoch boundary signals a
+    ///         key change to the indexer/wallets; there is none here). Atomic with
+    ///         the impl swap via upgradeToAndCall, same as initializeV2. Note
+    ///         reinitializer(3) only requires version < 3, so this payload would
+    ///         also run on a never-V2 pool; the V2-then-V3 ordering is pinned by
+    ///         the deploy scripts (the payload itself reads no V2 state).
+    function initializeV3(ITransferVerifier _transferVerifier) external onlyOwner reinitializer(3) {
+        if (address(_transferVerifier) == address(0)) revert ZeroVerifier();
+        transferVerifier = _transferVerifier;
+    }
+
     /// @notice Append an epoch and emit its index; the arbiter pubkey is read
     ///         from storage at execution (never calldata) so a sender cannot
     ///         encrypt to their own key and silently kill non-repudiation.

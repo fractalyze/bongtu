@@ -17,6 +17,9 @@
 //   TRANSFER  2-in/2-out : recipient #0 spends the batch note (enabled=1) + a
 //                          PADDED input (enabled=0, value=0) -> payment + change
 //   WITHDRAW  2-in/1-out : recipient #0 withdraws the change note -> ERC20 out
+//   SELF-SEND 2-in/2-out : the payee transfers its payment note TO ITSELF —
+//                          both outputs one owner; each on-chain receiver ct_i
+//                          decrypts with nonce + i (§11-8 v1.1, U-X3)
 //   CONSERVE  ERC20 deposited == ERC20 withdrawn + value still shielded; every
 //                          emitted disburse ciphertext decrypts to a real leaf
 //
@@ -280,7 +283,8 @@ async function main(): Promise<void> {
   const padCommitT = commitment(0n, sPadT, R0.publicKey); // padded input note (value 0)
   {
     ok(chgVal > 0n, `transfer split: payment ${payVal} + change ${chgVal} == value_0 ${recoveredValue0}`);
-    assertDistinctOwnerPubkeys([PAYEE.publicKey, R0.publicKey]);
+    // no distinct-owner guard: transfer's per-output nonce (§11-8 v1.1) made
+    // duplicate owners safe — the SELF-SEND leg below exercises exactly that
     const idx0 = B;
     const { siblings } = oracle.merklePath(idx0);
     const zeros: bigint[] = new Array(H).fill(0n);
@@ -359,6 +363,84 @@ async function main(): Promise<void> {
     ok(await pool.nullifierUsed(dec(nfChange)), "withdraw marked the change-note nullifier");
   }
 
+  // ================= TRANSFER TO SELF (U-X3, §11-8 v1.1) ==================
+  step("SELF-SEND (2-in/2-out): PAYEE pays PAYEE — per-output receiver nonce");
+  // fresh per-tx crypto, scalars/labels disjoint from every leg above
+  const ECDH_SELF = 850000000000000000011n;
+  const NONCE_SELF = 555555555555n;
+  const KEM_SELF = kemDraw("m0/transfer-self");
+  const sSelfPay = 987000001n;
+  const sSelfChg = 987000002n;
+  const sSelfPad = 987000003n;
+  const nfPayment = nullifier(payVal, sPay, PAYEE.formattedPrivateKey);
+  const selfPayVal = 25n;
+  const selfChgVal = payVal - selfPayVal;
+  const selfPayCommit = commitment(selfPayVal, sSelfPay, PAYEE.publicKey);
+  const selfChgCommit = commitment(selfChgVal, sSelfChg, PAYEE.publicKey);
+  {
+    ok(selfChgVal > 0n, `self-send split: ${selfPayVal} + ${selfChgVal} == payment note ${payVal}`);
+    // BOTH outputs owned by PAYEE — the witness the shared-nonce circuit banned
+    // as a two-time pad; per-output nonces (ct_i under nonce+i) make it safe.
+    const idxPay = 32; // the transfer leg's payment output leaf
+    const { siblings } = oracle.merklePath(idxPay);
+    const zeros: bigint[] = new Array(H).fill(0n);
+    const input = {
+      nullifiers: [nfPayment, 0n],
+      inputCommitments: [payCommit, commitment(0n, sSelfPad, PAYEE.publicKey)],
+      inputValues: [payVal, 0n],
+      inputSalts: [sPay, sSelfPad],
+      inputOwnerPrivateKey: PAYEE.formattedPrivateKey,
+      ecdhPrivateKey: ECDH_SELF,
+      root: oracle.getRoot(),
+      pathElements: [siblings, zeros],
+      leafIndices: [BigInt(idxPay), 0n],
+      enabled: [1n, 0n],
+      outputCommitments: [selfPayCommit, selfChgCommit],
+      outputValues: [selfPayVal, selfChgVal],
+      outputSalts: [sSelfPay, sSelfChg],
+      outputOwnerPublicKeys: [PAYEE.publicKey, PAYEE.publicKey],
+      kemSs: KEM_SELF.kemSs,
+      encryptionNonce: NONCE_SELF,
+      authorityPublicKey: AUTHORITY.publicKey,
+    };
+    const { a, b, c, pub } = await prove("transfer", input);
+    oracle.appendLeaf(selfPayCommit); // leaf 35
+    oracle.appendLeaf(selfChgCommit); // leaf 36
+    const rcpt = await (await pool.transfer(a, b, c, pub, kemCtHex(KEM_SELF.kemCiphertext))).wait();
+    await matchRoot("after self-send(2 outputs, one owner)");
+    ok(await pool.nullifierUsed(dec(nfPayment)), "self-send marked the payment-note nullifier");
+
+    // recover BOTH notes from the ON-CHAIN Transferred event only: ct_i + nonce+i
+    let tev: any = null;
+    for (const log of rcpt.logs) {
+      try { const p = pool.interface.parseLog(log); if (p.name === "Transferred") tev = p; } catch { continue; }
+    }
+    ok(tev !== null, "self-send emitted Transferred");
+    const ephPub: [bigint, bigint] = [tev.args.ecdhPublicKey[0].toBigInt(), tev.args.ecdhPublicKey[1].toBigInt()];
+    const evNonce: bigint = tev.args.encryptionNonce.toBigInt();
+    const evCts: bigint[][] = [
+      tev.args.encryptedValuesForReceiver0.map((x: any) => x.toBigInt()),
+      tev.args.encryptedValuesForReceiver1.map((x: any) => x.toBigInt()),
+    ];
+    const sharedSelf = ecdhSharedSecret(PAYEE.formattedPrivateKey, ephPub);
+    const wantVals = [selfPayVal, selfChgVal];
+    const wantCommits = [selfPayCommit, selfChgCommit];
+    for (let i = 0; i < 2; i++) {
+      const [v, s] = poseidonDecrypt(evCts[i], sharedSelf, evNonce + BigInt(i), 2);
+      ok(v === wantVals[i], `self-send ct_${i} (nonce+${i}) decrypts to value ${wantVals[i]}`);
+      ok(
+        poseidonN([v, s, PAYEE.publicKey[0], PAYEE.publicKey[1]]) === wantCommits[i],
+        `self-send ct_${i} rebuilds output commitment ${i} (both notes recovered by ONE owner)`,
+      );
+    }
+    // the pre-v1.1 shared nonce must NOT open ct_1 (distinct keystreams)
+    const [vBad, sBad] = poseidonDecrypt(evCts[1], sharedSelf, evNonce, 2);
+    ok(
+      poseidonN([vBad, sBad, PAYEE.publicKey[0], PAYEE.publicKey[1]]) !== selfChgCommit,
+      "shared (un-offset) nonce yields garbage on ct_1 — keystreams are distinct",
+    );
+  }
+
   // ===================== VALUE CONSERVATION (end to end) ==================
   step("VALUE CONSERVATION: deposited == withdrawn + still-shielded; all ciphertexts spendable");
   {
@@ -367,9 +449,11 @@ async function main(): Promise<void> {
       { v: V, nf: nfDepositV },                                  // deposit note(V) - spent (disburse)
       { v: 0n, nf: nullifier(0n, sD1, EMPLOYER.formattedPrivateKey) }, // deposit note(0) - unspent
       ...amounts.map((v, i) => ({ v, nf: nullifier(v, sR(i), RCPTS[i].formattedPrivateKey) })), // batch
-      { v: payVal, nf: nullifier(payVal, sPay, PAYEE.formattedPrivateKey) },       // payment - unspent
+      { v: payVal, nf: nullifier(payVal, sPay, PAYEE.formattedPrivateKey) },       // payment - spent (self-send)
       { v: chgVal, nf: nfChange },                               // change - spent (withdraw)
       { v: 0n, nf: nullifier(0n, sRes, R0.formattedPrivateKey) }, // residual - unspent
+      { v: selfPayVal, nf: nullifier(selfPayVal, sSelfPay, PAYEE.formattedPrivateKey) }, // self-send out0 - unspent
+      { v: selfChgVal, nf: nullifier(selfChgVal, sSelfChg, PAYEE.formattedPrivateKey) }, // self-send out1 - unspent
     ];
     let shielded = 0n;
     for (const n of notes) {

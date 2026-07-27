@@ -71,6 +71,13 @@ export interface TrialDecryptContext {
  * only attempt 4-element leaf-bearing slices. Decrypting with the wrong key yields
  * garbage whose rebuilt commitment will not match the on-chain leaf, so it is
  * dropped; the surviving notes are genuinely the wallet's.
+ *
+ * Per slice we try TWO nonces: the event nonce (pre-U-X3 history + disburse,
+ * which share one nonce across outputs) and nonce + ctIndex (the transfer
+ * circuit's §11-8 v1.1 per-output offset; ctIndex = the slice's position in the
+ * receiver run, offset/4). The commitment-vs-leaf acceptance already rejects
+ * every wrong-nonce garbage decrypt, so trying both is sound — old events keep
+ * decrypting and post-upgrade self-sends recover BOTH notes.
  */
 export function trialDecryptEvents(
   events: FeedEvent[],
@@ -88,26 +95,31 @@ export function trialDecryptEvents(
       if (slice.leafIndex == null || slice.elts !== 4) continue; // only per-recipient leaf envelopes
       const ct = ev.ciphertext.slice(slice.offset, slice.offset + slice.elts);
       if (ct.length !== 4) continue;
-      let value: bigint;
-      let salt: bigint;
-      try {
-        [value, salt] = poseidonDecrypt(ct.map((x) => BigInt(x)), shared, nonce, 2);
-      } catch {
-        continue;
+      const ctIndex = BigInt(slice.offset / 4);
+      const candidates = ctIndex === 0n ? [nonce] : [nonce, nonce + ctIndex];
+      for (const tryNonce of candidates) {
+        let value: bigint;
+        let salt: bigint;
+        try {
+          [value, salt] = poseidonDecrypt(ct.map((x) => BigInt(x)), shared, tryNonce, 2);
+        } catch {
+          continue;
+        }
+        const c = commitment(value, salt, keypair.publicKey);
+        const known = ctx.leafCommitments.get(slice.leafIndex);
+        if (known === undefined || BigInt(known) !== c) continue; // garbage decrypt or not our leaf
+        const nf = nullifier(value, salt, keypair.formattedPrivateKey);
+        found.push({
+          value: value.toString(),
+          salt: salt.toString(),
+          leafIndex: slice.leafIndex,
+          commitment: c.toString(),
+          nullifier: nf.toString(),
+          txHash: ev.txHash,
+          spent: ctx.spentNullifiers.has(nf.toString()),
+        });
+        break; // a leaf-matched decrypt is THE note; no second nonce can also match
       }
-      const c = commitment(value, salt, keypair.publicKey);
-      const known = ctx.leafCommitments.get(slice.leafIndex);
-      if (known === undefined || BigInt(known) !== c) continue; // garbage decrypt or not our leaf
-      const nf = nullifier(value, salt, keypair.formattedPrivateKey);
-      found.push({
-        value: value.toString(),
-        salt: salt.toString(),
-        leafIndex: slice.leafIndex,
-        commitment: c.toString(),
-        nullifier: nf.toString(),
-        txHash: ev.txHash,
-        spent: ctx.spentNullifiers.has(nf.toString()),
-      });
     }
   }
   return found;

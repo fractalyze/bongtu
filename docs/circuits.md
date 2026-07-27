@@ -148,11 +148,15 @@ only thing standing between a compromised discloser and a mint from a zero leaf.
 Two further invariants live outside the circuits and must be enforced by whoever assembles a
 witness:
 
-- **Distinct output owner pubkeys.** All outputs of a transfer or batch share one ephemeral key and
-  one `encryptionNonce`, so two outputs to the same owner leak `c1 − c2 = m1 − m2`.
-  `assertDistinctOwnerPubkeys` (`packages/core/src/note.ts`) rejects duplicates before proving.
-  deposit is exempt: both its outputs belong to the depositor and it publishes no per-recipient
-  ciphertext, only a single authority envelope over both.
+- **Distinct output owner pubkeys (disburse only).** All outputs of a disburse batch share one
+  ephemeral key and one `encryptionNonce`, so two outputs to the same owner leak
+  `c1 − c2 = m1 − m2`. `assertDistinctOwnerPubkeys` (`packages/core/src/note.ts`) rejects
+  duplicates before proving. transfer is exempt since U-X3 (§11-8 v1.1): its base encrypts
+  receiver ciphertext `i` under `encryptionNonce + i` in-circuit
+  (`encrypt-outputs-per-output-nonce.circom`), so duplicate owners — including a self-send — are
+  structurally safe, and receivers decrypt `ct_i` with `nonce + i`. deposit is exempt too: both
+  its outputs belong to the depositor and it publishes no per-recipient ciphertext, only a single
+  authority envelope over both.
 - **Non-zero output commitments.** Enforced on-chain (`ZeroOutputCommitment`), not in-circuit.
 
 ## Structure and `-l` resolution

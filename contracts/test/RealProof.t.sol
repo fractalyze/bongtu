@@ -154,6 +154,35 @@ contract RealProofTest is Base {
         assertTrue(pool.nullifierUsed(p[27]) && pool.nullifierUsed(p[28]), "transfer nullifiers not marked");
     }
 
+    /// U-X3 (§11-8 v1.1): the per-output-nonce transfer circuit kept the witness
+    /// shape and 37-public count but changed the constraint system, so the vkey
+    /// baked into the regenerated TransferVerifier differs. The snapshotted
+    /// PRE-upgrade proof (transfer_pre_selfsend.json) must REJECT against it,
+    /// while the re-proven committed fixture ACCEPTS — the pair proves the
+    /// verifier swap is real, not a no-op recompile.
+    function testSelfSendTransferVerifierRejectsOldProofAcceptsNew() public {
+        TransferVerifier tv = new TransferVerifier();
+
+        string memory old = vm.readFile("test/fixtures/transfer_pre_selfsend.json");
+        uint256[] memory oa = vm.parseJsonUintArray(old, ".a");
+        uint256[] memory ob0 = vm.parseJsonUintArray(old, ".b[0]");
+        uint256[] memory ob1 = vm.parseJsonUintArray(old, ".b[1]");
+        uint256[] memory oc = vm.parseJsonUintArray(old, ".c");
+        uint256[] memory op = vm.parseJsonUintArray(old, ".pub");
+        uint[37] memory opub;
+        for (uint256 i = 0; i < 37; i++) opub[i] = op[i];
+        assertFalse(
+            tv.verifyProof([oa[0], oa[1]], [[ob0[0], ob0[1]], [ob1[0], ob1[1]]], [oc[0], oc[1]], opub),
+            "pre-upgrade (shared-nonce) transfer proof must fail the new verifier"
+        );
+
+        (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".transfer");
+        uint256[] memory p = _pub(".transfer");
+        uint[37] memory pub;
+        for (uint256 i = 0; i < 37; i++) pub[i] = p[i];
+        assertTrue(tv.verifyProof(a, b, c, pub), "re-proven per-output-nonce fixture must verify");
+    }
+
     function testWithdrawAccepts() public {
         BongtuPool pool = _freshPool(false);
         _seed(pool, ".withdraw");

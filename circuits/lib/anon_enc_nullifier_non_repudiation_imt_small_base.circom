@@ -21,18 +21,23 @@ pragma circom 2.2.2;
 //       emits — at this arity the ciphertext rides cheaply as public signals.
 //   (e) PQ hybrid envelope (.dev/pq-envelope-design.md §2): private input
 //       kemSs[2] (ML-KEM-768 shared-secret limbs), envelope key = tagged
-//       Poseidon(5) fold of ECDH x kemSs, new LAST output kemBinding.
+//       Poseidon(5) fold of ECDH x kemSs, new LAST output kemBinding;
+//   (f) §11-8 v1.1 per-output receiver nonce (U-X3): receiver ciphertext i is
+//       encrypted with encryptionNonce + i (EncryptOutputsPerOutputNonce), so
+//       both outputs may share an owner (transfer-to-self) without a two-time
+//       pad. TRANSFER ONLY — disburse keeps the shared nonce + its
+//       duplicate-recipient ban; the authority envelope keeps the plain nonce.
 //
 // Membership is the append-only IMT (check-imt-proof, depth `nLevels`).
-// Everything else (nullifiers, sum/positive checks, receiver + authority
-// Poseidon-sponge encryption) is unchanged from the zeto non-repudiation base.
+// Everything else (nullifiers, sum/positive checks, authority Poseidon-sponge
+// encryption) is unchanged from the zeto non-repudiation base.
 
 include "lib/check-positive.circom";
 include "lib/check-hashes.circom";
 include "lib/check-sum.circom";
 include "lib/check-nullifiers.circom";
 include "check-imt-proof.circom";   // vendored IMT membership (bongtu/circuits/lib, via -l lib)
-include "lib/encrypt-outputs.circom";
+include "encrypt-outputs-per-output-nonce.circom"; // vendored per-output-nonce receiver encryption (bongtu/circuits/lib, via -l lib)
 include "node_modules/circomlib/circuits/babyjub.circom";
 include "node_modules/circomlib/circuits/comparators.circom"; // IsZero for the §5.2 zero-commitment belt (also reached transitively via check-imt-proof)
 include "node_modules/circomlib/circuits/bitify.circom"; // Num2Bits (kemSs limb canonicalization)
@@ -128,7 +133,12 @@ template ZetoTransferSmall(nInputs, nOutputs, nLevels) {
   }
 
   // Receiver-decryptable ciphertext (public output — contract binds it directly).
-  (ecdhPublicKey, cipherTexts) <== EncryptOutputs(nOutputs)(ecdhPrivateKey <== ecdhPrivateKey, encryptionNonce <== encryptionNonce, commitmentInputs <== outAuxInputs);
+  // Fixed output order (the wallet builder pins it): output 0 = the PAYMENT
+  // note (recipient), output 1 = the CHANGE note (sender). Each receiver
+  // ciphertext i uses nonce encryptionNonce + i (§11-8 v1.1), so a self-send
+  // (payment owner == change owner) does not reuse a sponge keystream; the
+  // receiver decrypts ct_i with nonce + i.
+  (ecdhPublicKey, cipherTexts) <== EncryptOutputsPerOutputNonce(nOutputs)(ecdhPrivateKey <== ecdhPrivateKey, encryptionNonce <== encryptionNonce, commitmentInputs <== outAuxInputs);
 
   // Authority (non-repudiation) envelope.
   var sharedSecretAuthority[2];

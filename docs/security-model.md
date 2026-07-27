@@ -174,10 +174,12 @@ Present-tense, deliberate, and not fixed by anything in the tree today.
 - **Receiver ciphertexts are not post-quantum.** Only the authority envelope carries the hybrid key;
   per-recipient KEM is deferred on cost grounds. See the post-quantum section above for why the
   residual exposure needs an adversary who already holds recipient pubkeys.
-- **Two-time pad on duplicate output owners.** All outputs of a transfer or batch share one ephemeral
-  key and one nonce, so two outputs to the same owner would leak `m1 − m2`. This is mitigated by
-  assembly-time rejection (`assertDistinctOwnerPubkeys`), not by the constraint system. A
-  per-output-nonce construction would make it structural.
+- **Two-time pad on duplicate output owners (disburse only).** All outputs of a disburse batch share
+  one ephemeral key and one nonce, so two outputs to the same owner would leak `m1 − m2`. This is
+  mitigated by assembly-time rejection (`assertDistinctOwnerPubkeys`), not by the constraint system.
+  The transfer circuit closed this structurally (U-X3): receiver ciphertext `i` is encrypted under
+  `encryptionNonce + i` in-circuit, so duplicate output owners — including transfer-to-self — are
+  safe there and the assembly-time ban no longer applies to transfer.
 - **Discovery liveness depends on the indexer.** All ciphertext is on-chain and OP Stack posts it to
   L1, so the data is available; but reading it means `eth_getLogs` against an archive node or the
   bongtu indexer. Funds safety never depends on the indexer — a user who keeps their notes can spend

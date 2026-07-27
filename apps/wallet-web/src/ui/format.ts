@@ -25,29 +25,21 @@ export function relativeTime(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toLocaleDateString();
 }
 
-/** Normalise a compressed pubkey hex for equality (lowercase, 0x-prefixed). */
-export function normalizePubkey(hex: string): string {
-  const h = hex.trim().toLowerCase();
-  return h.startsWith("0x") ? h : "0x" + h;
-}
-
 /**
  * Reject an obviously-bad recipient before proving (the pure spend.ts rejects it
  * too, but a 28 MB proof is a bad place to learn you fat-fingered a key).
  * decodeAddress is the one normalization point — it accepts base58check AND
- * legacy hex, and its checksum catches typos; a self-send is a two-time pad (§11-8).
+ * legacy hex, and its checksum catches typos. Sending to your own address is
+ * allowed: the transfer circuit's per-output receiver nonce (§11-8 v1.1, U-X3)
+ * removed the two-time pad that used to make a self-send unsafe.
  */
-export function recipientError(raw: string, selfPubkey: string): string | null {
+export function recipientError(raw: string, _selfPubkey: string): string | null {
   const v = raw.trim();
   if (!v) return "Enter a recipient.";
-  let canonical: string;
   try {
-    canonical = decodeAddress(v);
+    decodeAddress(v);
   } catch {
     return "That doesn't look like a valid bongtu address.";
-  }
-  if (canonical === normalizePubkey(selfPubkey)) {
-    return "You can't send to your own address.";
   }
   return null;
 }

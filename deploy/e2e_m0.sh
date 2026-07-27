@@ -4,9 +4,10 @@
 # Full cross-circuit spend cycle on a LIVE anvil with REAL Groth16 proofs and a
 # GENUINE recipient trial-decrypt:
 #   deposit -> disburse(1x16) -> trial-decrypt a batch note -> transfer(real
-#   batch-note spend + padded enabled=0) -> withdraw, asserting contract.root ==
-#   ImtTree oracle root after every insert, the recipient note recovered from
-#   ciphertext (not memory), and end-to-end value conserved.
+#   batch-note spend + padded enabled=0) -> withdraw -> self-transfer (§11-8
+#   v1.1), asserting contract.root == ImtTree oracle root after every insert,
+#   the recipient note recovered from ciphertext (not memory), and end-to-end
+#   value conserved.
 #
 #   cd bongtu && bash deploy/e2e_m0.sh    # exits 0 iff every assertion holds
 #
