@@ -3,39 +3,29 @@
 // transfer needs a recipient pubkey and withdraw does not. Keeping them one component
 // means the validate → confirm → staged-prove → success flow lives in exactly one place.
 //
+// The phases themselves are not written here: useActionMachine owns form → confirm →
+// running → done (and the asset prefetch that rides along), and ActionPanels renders
+// the three phases every action screen shares. What stays below is what a SPEND is —
+// its recipient field, its amount field, and its confirm rows.
+//
 // Amounts: the form takes DECIMAL kKRW (parseKkrw, ≤6 fraction digits, 2^100 belt) and
 // converts to raw wei at the UI edge — the flow/witness layer still receives raw wei
 // strings, unchanged.
-//
-// On open we PREFETCH the circuit's wasm+zkey (the ~28 MB one-time download) and
-// pre-warm the bn128 curve, so the heavy I/O overlaps the user typing the amount.
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { decodeAddress, encodeAddress } from "@bongtu/core/pubkey";
 import { DEFAULTS } from "../../config.js";
-import { ensureCircuitAssets, prewarmProver } from "../../lib/prove.js";
-import { walletErrorMessage } from "../../lib/metamask.js";
-import { runSpend, type SpendStage, type SpendOutcome } from "../../lib/spendFlow.js";
+import { runSpend, type SpendOutcome } from "../../lib/spendFlow.js";
 import { useWallet } from "../App.js";
-import { useCircuitDownload, useElapsedSeconds } from "../hooks.js";
+import { useActionMachine } from "../actionMachine.js";
 import { formatKkrw, parseKkrw } from "../../lib/money.js";
-import { recipientError } from "../format.js";
+import { amountError, recipientError } from "../format.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
-import { SPEND_STEPS, StagedProgress, withUnlock } from "../components/StagedProgress.js";
+import { SPEND_STEPS } from "../components/StagedProgress.js";
 import { SuccessPanel } from "../components/SuccessPanel.js";
-import { DownloadProgress } from "../components/DownloadProgress.js";
+import { ConfirmPanel, DownloadingPanel, RunningPanel } from "../components/ActionPanels.js";
 import { AmountInput, Button, ErrorBanner, Field, TextInput } from "../components/controls.js";
-
-type Phase = "form" | "confirm" | "running" | "done";
-
-function amountError(raw: string, balance: bigint | null): string | null {
-  const p = parseKkrw(raw);
-  if (!p.ok) return p.error;
-  if (p.wei <= 0n) return "Amount must be greater than zero.";
-  if (balance !== null && p.wei > balance) return "Amount exceeds your balance.";
-  return null;
-}
 
 export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactNode {
   const { session, connection, wallet, indexerUrl, notes, balance, refreshAfterAction, syncing } =
@@ -44,24 +34,7 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
 
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
-  const [phase, setPhase] = useState<Phase>("form");
-  const [stage, setStage] = useState<SpendStage>("assemble");
-  // Whether THIS run needs the unlock signature — the flow tells us by reporting
-  // "unlock" first, and the step list grows a step to match.
-  const [unlocking, setUnlocking] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<SpendOutcome | null>(null);
-  const download = useCircuitDownload(kind);
-
-  const elapsed = useElapsedSeconds(phase === "running" && stage === "prove");
-
-  // Prefetch the circuit assets + warm the curve on open (best-effort, non-blocking).
-  // Progress/disable state comes from useCircuitDownload — the prove.ts registry —
-  // not from this call's promise, so a remount mid-download stays honest.
-  useEffect(() => {
-    void ensureCircuitAssets(kind, DEFAULTS.circuitBaseUrl).catch(() => {});
-    void prewarmProver();
-  }, [kind]);
+  const action = useActionMachine<SpendOutcome>({ circuit: kind, steps: SPEND_STEPS });
 
   const rcptErr = isTransfer ? recipientError(recipient) : null;
   const amtErr = amountError(amount, balance);
@@ -78,126 +51,86 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
   }, [amount]);
   const review = formatKkrw(amountWei);
 
-  async function submit(): Promise<void> {
+  function confirm(): void {
     if (!connection || !session) return;
-    setPhase("running");
-    setError(null);
-    setUnlocking(false);
-    try {
-      // The spending key comes from the wallet's lock INSIDE runSpend — this
-      // component never holds it. The session pubkey rides along so the flow can
-      // refuse a key that isn't this session's.
-      const res = await runSpend(
-        kind,
-        { connection, indexerUrl, notes, sessionPubkey: session.compressedPubkey },
-        // The flow/witness layer only ever sees the canonical hex form — base58
-        // stops at this edge.
-        { to: isTransfer ? decodeAddress(recipient.trim()) : undefined, amount: amountWei.toString() },
-        (s) => {
-          if (s === "unlock") setUnlocking(true);
-          setStage(s);
-        },
-      );
-      setOutcome(res);
-      setPhase("done");
-      // Poll until the indexer reflects this tx (not fire-and-forget: one refresh
-      // here would usually read the pre-action state).
-      void refreshAfterAction(res.txHash);
-    } catch (e) {
-      setError(walletErrorMessage(e));
-      setPhase("form");
-    }
+    // The spending key comes from the wallet's lock INSIDE runSpend — this component
+    // never holds it. The session pubkey rides along so the flow can refuse a key that
+    // isn't this session's.
+    void action.submit(
+      (onStage) =>
+        runSpend(
+          kind,
+          { connection, indexerUrl, notes, sessionPubkey: session.compressedPubkey },
+          // The flow/witness layer only ever sees the canonical hex form — base58
+          // stops at this edge.
+          {
+            to: isTransfer ? decodeAddress(recipient.trim()) : undefined,
+            amount: amountWei.toString(),
+          },
+          onStage,
+        ),
+      refreshAfterAction,
+    );
   }
 
   // --- success ---------------------------------------------------------------
-  if (phase === "done" && outcome) {
+  if (action.phase === "done" && action.outcome) {
     return (
       <SuccessPanel
         title={title}
         headline={isTransfer ? "Payment sent" : "Withdrawal sent"}
         amount={review}
-        explorerUrl={outcome.explorerUrl}
+        explorerUrl={action.outcome.explorerUrl}
         syncing={syncing}
       />
     );
   }
 
   // --- running ---------------------------------------------------------------
-  if (phase === "running") {
+  if (action.phase === "running") {
     return (
-      <div className="flex flex-col gap-4.5 px-4.5 pt-4.5 pb-6.5">
-        <ScreenHeader title={title} />
-        <div className="flex flex-col gap-4">
-          <div className="text-center text-[1.9rem] [font-weight:750] py-2 tabular-nums">
-            {review} <span className="text-[0.62em] font-semibold text-muted ml-1">kKRW</span>
-          </div>
-          <StagedProgress
-            stage={stage}
-            elapsed={elapsed}
-            steps={unlocking ? withUnlock(SPEND_STEPS) : SPEND_STEPS}
-            walletName={wallet.name}
-          />
-        </div>
-      </div>
+      <RunningPanel
+        title={title}
+        amount={review}
+        stage={action.stage}
+        elapsed={action.elapsed}
+        steps={action.steps}
+        walletName={wallet.name}
+      />
     );
   }
 
   // --- confirm ---------------------------------------------------------------
-  if (phase === "confirm") {
+  if (action.phase === "confirm") {
     return (
-      <div className="flex flex-col gap-4.5 px-4.5 pt-4.5 pb-6.5">
-        <ScreenHeader title={`Confirm ${title}`} />
-        <div className="flex flex-col gap-4">
-          <div className="text-center text-[1.9rem] [font-weight:750] py-2 tabular-nums">
-            {review} <span className="text-[0.62em] font-semibold text-muted ml-1">kKRW</span>
-          </div>
-          <dl className="grid grid-cols-[auto_1fr] gap-x-3.5 gap-y-2 p-3.5 bg-surface border border-border rounded-xl">
-            {isTransfer && (
-              <>
-                <dt className="text-muted text-sm">To</dt>
-                <dd className="font-mono text-right text-[0.9rem] [overflow-wrap:anywhere]">
-                  {/* canonical base58 regardless of which form was typed — what
-                      the user confirms is the address, not their keystrokes */}
-                  {encodeAddress(decodeAddress(recipient.trim()))}
-                </dd>
-              </>
-            )}
-            <dt className="text-muted text-sm">Network</dt>
-            <dd className="text-right text-[0.9rem] [overflow-wrap:anywhere]">
-              GIWA · chain {DEFAULTS.chainId}
+      <ConfirmPanel
+        title={title}
+        amount={review}
+        download={action.download}
+        onCancel={action.cancel}
+        onConfirm={confirm}
+      >
+        {isTransfer && (
+          <>
+            <dt className="text-muted text-sm">To</dt>
+            <dd className="font-mono text-right text-[0.9rem] [overflow-wrap:anywhere]">
+              {/* canonical base58 regardless of which form was typed — what
+                  the user confirms is the address, not their keystrokes */}
+              {encodeAddress(decodeAddress(recipient.trim()))}
             </dd>
-          </dl>
-          <DownloadProgress view={download} />
-          <div className="flex gap-2.5">
-            <Button variant="ghost" className="flex-1" onClick={() => setPhase("form")}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              className="flex-1"
-              disabled={download.active}
-              onClick={submit}
-            >
-              {download.active ? "Preparing…" : "Confirm"}
-            </Button>
-          </div>
-        </div>
-      </div>
+          </>
+        )}
+        <dt className="text-muted text-sm">Network</dt>
+        <dd className="text-right text-[0.9rem] [overflow-wrap:anywhere]">
+          GIWA · chain {DEFAULTS.chainId}
+        </dd>
+      </ConfirmPanel>
     );
   }
 
   // --- form ------------------------------------------------------------------
-  // The one-time key download IS the screen (no inputs/buttons until it lands):
-  // everything the user could press here needs these assets anyway.
-  if (download.active) {
-    return (
-      <div className="flex flex-col gap-4.5 px-4.5 pt-4.5 pb-6.5">
-        <ScreenHeader title={title} />
-        <div className="flex flex-col gap-4">
-          <DownloadProgress view={download} />
-        </div>
-      </div>
-    );
+  if (action.download.active) {
+    return <DownloadingPanel title={title} download={action.download} />;
   }
 
   return (
@@ -226,17 +159,9 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
           <AmountInput value={amount} onValueChange={setAmount} />
         </Field>
 
-        {error && <ErrorBanner message={error} />}
+        {action.error && <ErrorBanner message={action.error} />}
 
-        <Button
-          variant="primary"
-          block
-          disabled={!formValid}
-          onClick={() => {
-            setError(null);
-            setPhase("confirm");
-          }}
-        >
+        <Button variant="primary" block disabled={!formValid} onClick={action.review}>
           Continue
         </Button>
       </div>

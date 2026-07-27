@@ -14,6 +14,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { ActivityList } from "../src/ui/components/ActivityList.js";
+import { ConfirmPanel, RunningPanel } from "../src/ui/components/ActionPanels.js";
 import { ExplorerLink } from "../src/ui/components/ExplorerLink.js";
 import { LockChip } from "../src/ui/components/LockChip.js";
 import { MintModal, MintSuccess } from "../src/ui/components/MintModal.js";
@@ -309,6 +310,66 @@ test("nothing in the app can still set an indexer URL at runtime", () => {
   for (const { file, text } of uiSources()) {
     assert.doesNotMatch(text, /setIndexerUrl/, `${file} still wires the retired override`);
   }
+});
+
+// ======================= (8) THE SHARED ACTION PHASES =======================
+// The confirm sheet and the staged run are one component per phase (ActionPanels), so
+// their copy is a pure function of props — RENDERED assertions, not source scans.
+
+const IDLE_DOWNLOAD = { active: false, received: 0, total: null, etaSeconds: null };
+
+test("the confirm sheet names the action, shows the amount, and offers Cancel or Confirm", () => {
+  const html = renderToStaticMarkup(
+    h(ConfirmPanel, {
+      title: "Send",
+      amount: "1,000",
+      download: IDLE_DOWNLOAD,
+      onCancel: () => {},
+      onConfirm: () => {},
+      children: [h("dt", { key: "k" }, "To"), h("dd", { key: "v" }, "3abc…")],
+    }),
+  );
+  assert.match(html, /Confirm Send/);
+  assert.match(html, /1,000/);
+  assert.match(html, />To</, "the action's own rows land inside the detail list");
+  assert.match(html, />Cancel</);
+  assert.match(html, />Confirm</);
+  assert.doesNotMatch(html, /Preparing/);
+});
+
+test("Confirm waits while the proving assets are still streaming in", () => {
+  const html = renderToStaticMarkup(
+    h(ConfirmPanel, {
+      title: "Deposit",
+      amount: "5",
+      download: { active: true, received: 1024, total: null, etaSeconds: null },
+      onCancel: () => {},
+      onConfirm: () => {},
+      children: h("dt", null, "From"),
+    }),
+  );
+  assert.match(html, />Preparing…</);
+  assert.match(html, /disabled=""/, "and it cannot be pressed until they land");
+  assert.match(html, /Loading the privacy engine/, "the download says why the wait exists");
+});
+
+test("the running panel shows the amount in play and the stage the run has reached", () => {
+  const html = renderToStaticMarkup(
+    h(RunningPanel, {
+      title: "Withdraw",
+      amount: "250",
+      stage: "prove",
+      elapsed: 7,
+      steps: SPEND_STEPS,
+      walletName: "Rabby",
+    }),
+  );
+  assert.match(html, /Withdraw/);
+  assert.match(html, /250/);
+  assert.match(html, /Assembling/);
+  assert.match(html, /Proving/);
+  assert.match(html, /usually 5–20 seconds/, "never a promise of sub-5s");
+  assert.match(html, /· 7s/, "the honest elapsed clock");
 });
 
 test("no screen hardcodes a wallet brand in what the user reads", () => {

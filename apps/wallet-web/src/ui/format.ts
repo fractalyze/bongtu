@@ -1,7 +1,29 @@
-// Small presentation helpers (PURE, no React). Money formatting/parsing lives in
-// src/lib/money.ts (the single raw-wei <-> kKRW edge); these are the non-money bits.
+// Small presentation helpers (PURE, no React): what a form says about what the user
+// typed, and how a value reads on screen. Money formatting/PARSING itself lives in
+// src/lib/money.ts (the single raw-wei <-> kKRW edge) — amountError below only judges
+// what that parser returns.
 
 import { decodeAddress } from "@bongtu/core/pubkey";
+import { parseKkrw } from "../lib/money.js";
+
+/**
+ * Why an amount can't be spent yet, or null when it can: the parse rules (money.ts —
+ * ≤6 fraction digits, 2^100 belt), positivity, and the balance it must fit inside.
+ * `tooMuch` names WHICH balance — the private one for a spend, the account's public
+ * kKRW for a deposit. A null balance means "not loaded yet" and cannot judge: the
+ * screens keep their own Continue-button guard for that.
+ */
+export function amountError(
+  raw: string,
+  balance: bigint | null,
+  tooMuch = "Amount exceeds your balance.",
+): string | null {
+  const p = parseKkrw(raw);
+  if (!p.ok) return p.error;
+  if (p.wei <= 0n) return "Amount must be greater than zero.";
+  if (balance !== null && p.wei > balance) return tooMuch;
+  return null;
+}
 
 /** Shorten a compressed bjj pubkey / address for display: `0x05c818…1f96`. */
 export function shortenPubkey(hex: string): string {

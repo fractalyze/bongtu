@@ -21,6 +21,14 @@ export const SPEND_STEPS: StagedStep[] = [
   { key: "submit", label: "Submitting" },
 ];
 
+/** Deposit has no membership to assemble; the exact-V ERC-20 approve replaces the
+ *  spend's assemble stage (and is skipped when the allowance already covers V). */
+export const DEPOSIT_STEPS: StagedStep[] = [
+  { key: "approve", label: "Approving" },
+  { key: "prove", label: "Proving" },
+  { key: "submit", label: "Submitting" },
+];
+
 /** The same steps with the wallet-unlock signature in front. Screens switch to this
  *  only when a flow actually reports the "unlock" stage — a run that reuses the key
  *  already held never shows a step the user isn't asked to do. */
