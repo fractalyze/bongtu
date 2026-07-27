@@ -19,8 +19,12 @@ Whole-transaction `gasUsed` from the GIWA receipts of the end-to-end run against
 | `deposit` | 2,630,914 | 1.22e-7 ETH over 27,599 L1 gas | `0xa18ef3c12ae19fd06ba8eff1684b0d9610af861c8c5cb28cf4a539dc403521e1` |
 | `transfer` | 2,769,948 | 1.59e-7 ETH over 34,772 L1 gas | `0x7112ed922bc7a7c143f2fcd55a94dbf7a93fc89c5f204c8ddddc17814acddf1c` |
 | `withdraw` | 1,729,696 | 1.37e-7 ETH over 29,606 L1 gas | `0x174c28a654f59a4032e576f84cc7fc014a72ce57283fbe9a71ae6ad548ed4ba9` |
+| `transfer10` | 11,592,399 | (V4 pool, measured 2026-07-28) | `0x40c45cb9cb3e5d3df92277eacc3eb39c8c017261670f6ba3238926fef380d921` |
 
-All three at the pinned 0.005 gwei L2 price, so an operation costs ≈ 0.9–1.4e-5 ETH. Against the
+All at the pinned 0.005 gwei L2 price, so a 2-arity operation costs ≈ 0.9–1.4e-5 ETH.
+`transfer10`'s ~11.6M is the ten depth-32 leaf appends (~0.93M each — the Poseidon
+wall below), i.e. ~1.16M per consumed-or-created slot; a 3-note consolidation spend
+still beats three sequential 2×2 transfers on total gas and reveals one op, not three. Against the
 prior live measurements on the same pool pre-upgrade (2026-07-24: deposit ≈ 2.24M, transfer ≈ 2.48M,
 withdraw ≈ 1.28M) the hybrid delta is the 1088-byte `kemCiphertext` carried in calldata **and**
 re-emitted in the event, plus one extra Groth16 public input — the same double-pay lever flagged
