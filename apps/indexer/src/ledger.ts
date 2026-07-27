@@ -68,10 +68,8 @@ export interface EnvelopeAlarm {
   expected: string; // decimal
 }
 
-/** The kind of a per-owner activity item, as served by GET /history. "self" is
- *  LEGACY — rows written before a pure self-send became a sent+received pair still
- *  carry it, so readers must keep handling it, but nothing emits it any more. */
-export type HistoryKind = "received" | "sent" | "withdraw" | "deposit" | "self";
+/** The kind of a per-owner activity item, as served by GET /history. */
+export type HistoryKind = "received" | "sent" | "withdraw" | "deposit";
 
 /**
  * One entry of an owner's activity history (GET /history) — derived from the
@@ -80,8 +78,7 @@ export type HistoryKind = "received" | "sent" | "withdraw" | "deposit" | "self";
  *     (counterparty = the op's input owner: employer for a disburse, sender for
  *     a transfer);
  *   - "sent":     a transfer whose spent input was the owner's (counterparty =
- *     the payee, amount = what left them);
- *   - "self":     only ever read, never written: a pure self-send is a "sent" +
+ *     the payee, amount = what left them). A pure self-send is a "sent" +
  *     "received" pair, both owned by and addressed to the sender;
  *   - "withdraw": the owner unshielded (counterparty null, amount = unshielded);
  *   - "deposit":  the owner's own deposit output (counterparty null).
@@ -305,7 +302,7 @@ export function deriveOp(
  *     input owner). Only a cross-checked batch contributes.
  *   - withdraw: the input owner unshielded inputs − change → "withdraw".
  */
-function deriveHistory(op: OpEnvelope, env: ParsedEnvelope, disburseCrossChecks: boolean): DerivedHistory[] {
+export function deriveHistory(op: OpEnvelope, env: ParsedEnvelope, disburseCrossChecks: boolean): DerivedHistory[] {
   const out: DerivedHistory[] = [];
   switch (op.kind) {
     case "deposit":

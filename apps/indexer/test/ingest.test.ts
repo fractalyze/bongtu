@@ -312,9 +312,8 @@ async function main(): Promise<void> {
   ok(sentTo(U3) === "15", "employer 'sent' 15 to U3 (transfer#2, split payee B) — NOT merged into U2");
   ok(empSent.length === 3, "exactly three 'sent' items (12→U1, 5→U2, 15→U3), no collapsed item");
   // 2 deposits + 3 sent and NOTHING else: transfer#1's change (18 back to EMP)
-  // stays suppressed, and a normal transfer must never yield a 'self' item.
+  // stays suppressed.
   ok(empHist.length === 5, "employer history = 2 deposit + 3 sent — the self change is never listed");
-  ok(empHist.every((h) => h.kind !== "self"), "a normal transfer (with self change) yields NO 'self' item");
   const u3Hist = ix.ledger!.historyOf(U3.publicKey[0], U3.publicKey[1]);
   ok(
     u3Hist.some((h) => h.kind === "received" && h.amount === "15" && h.counterparty === packPubkey(EMP.publicKey)),
@@ -345,7 +344,6 @@ async function main(): Promise<void> {
     ok(pair[0].kind === "received" && pair[1].kind === "sent", "the pair reads received-above-sent in the seq-desc feed");
     ok(pair.every((x) => x.amount === "12"), "both carry the payment slot (output 0), not the sum and not the change");
     ok(pair.every((x) => x.counterparty === self), "both name the sender's OWN key as counterparty");
-    ok(!h.some((x) => x.kind === "self"), "the legacy 'self' kind is never emitted any more");
 
     // The consolidation-merge shape (U-Y1's producer): both real inputs, output 0
     // = the merged sum, output 1 = 0 — the pair carries the WHOLE merged amount.

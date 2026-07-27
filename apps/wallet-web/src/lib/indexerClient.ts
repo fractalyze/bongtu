@@ -14,7 +14,6 @@ export {
   getHead,
   getPath,
   getEvents,
-  getNullifiers,
   buildNotesUrl,
   fetchNotes,
   buildHistoryUrl,

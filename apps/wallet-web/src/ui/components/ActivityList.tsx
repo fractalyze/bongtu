@@ -18,21 +18,13 @@ import { ACTIVITY_VERB, activityDirection } from "../../lib/activity.js";
 import { formatKkrw } from "../../lib/money.js";
 import { relativeTime, shortenPubkey } from "../format.js";
 import { LinkButton } from "./controls.js";
-import {
-  IconReceived,
-  IconSend,
-  IconSelfSend,
-  IconDeposit,
-  IconWithdraw,
-  IconExternalLink,
-} from "./icons.js";
+import { IconReceived, IconSend, IconDeposit, IconWithdraw, IconExternalLink } from "./icons.js";
 
 // Kind icons mirror the Home action icons (send-plane / into-pool / out-of-pool) so
 // a feed row and the button that caused it read as the same gesture.
 const KIND_ICON: Record<HistoryKind, (props: { size?: number }) => ReactNode> = {
   received: IconReceived,
   sent: IconSend,
-  self: IconSelfSend,
   deposit: IconDeposit,
   withdraw: IconWithdraw,
 };
