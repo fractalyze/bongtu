@@ -15,7 +15,9 @@ export function Onboarding(): ReactNode {
   const { connectWallet, connecting, connectError } = useWallet();
   return (
     <div className="px-5.5 py-6.5 flex flex-col justify-center gap-4 flex-1 bg-bg">
-      <div className="text-center mb-2">
+      {/* flex-col, not inline flow: an inline logo span sits on the text baseline
+          and leaves descender space under the icon no margin utility removes. */}
+      <div className="text-center mb-2 flex flex-col items-center gap-0.5">
         <span className="inline-flex text-primary">
           <EnvelopeLogo size={52} />
         </span>

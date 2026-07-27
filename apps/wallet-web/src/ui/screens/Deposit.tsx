@@ -356,6 +356,16 @@ export function Deposit(): ReactNode {
             {error && (
               <div className="rounded-xl px-3.5 py-3 text-[0.88rem] flex gap-2.5 items-center justify-between flex-wrap border border-err-border bg-err-bg text-err">
                 {error}
+                {/GIWA Sepolia ETH/.test(error) && (
+                  <a
+                    className="font-semibold underline text-err"
+                    href={DEFAULTS.gasFaucet}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Get GIWA Sepolia ETH from the faucet
+                  </a>
+                )}
               </div>
             )}
 
