@@ -1421,6 +1421,11 @@
       "type": "error",
       "name": "ZeroOutputCommitment",
       "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "ZeroVerifier",
+      "inputs": []
     }
   ]
 }
