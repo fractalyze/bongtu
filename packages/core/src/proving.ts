@@ -45,6 +45,7 @@ export interface DepositInput {
   outputSalts: FieldInput[]; // length 2
   outputOwnerPublicKeys: PointInput[]; // length 2
   ecdhPrivateKey: FieldInput; // ephemeral key for the authority envelope
+  kemSs: FieldInput[]; // [2] LE-uint128 limbs of the ML-KEM-768 shared secret (hybrid envelope key, @bongtu/core/kem)
   encryptionNonce: FieldInput;
   authorityPublicKey: PointInput; // the pool's stored arbiter key
 }
@@ -69,6 +70,7 @@ export interface TransferInput {
   outputValues: FieldInput[]; // length 2
   outputSalts: FieldInput[]; // length 2
   outputOwnerPublicKeys: PointInput[]; // length 2 (must be distinct)
+  kemSs: FieldInput[]; // [2] LE-uint128 limbs of the ML-KEM-768 shared secret (hybrid envelope key, @bongtu/core/kem)
   encryptionNonce: FieldInput;
   authorityPublicKey: PointInput;
 }
@@ -90,6 +92,7 @@ export interface WithdrawInput {
   outputSalts: FieldInput[]; // length 1
   outputOwnerPublicKeys: PointInput[]; // length 1
   ecdhPrivateKey: FieldInput;
+  kemSs: FieldInput[]; // [2] LE-uint128 limbs of the ML-KEM-768 shared secret (hybrid envelope key, @bongtu/core/kem)
   encryptionNonce: FieldInput;
   authorityPublicKey: PointInput;
 }
@@ -113,6 +116,7 @@ export interface DisburseInput {
   outputValues: FieldInput[]; // length 256
   outputSalts: FieldInput[]; // length 256
   outputOwnerPublicKeys: PointInput[]; // length 256 (must be distinct)
+  kemSs: FieldInput[]; // [2] LE-uint128 limbs of the ML-KEM-768 shared secret (hybrid envelope key, @bongtu/core/kem)
   encryptionNonce: FieldInput;
   authorityPublicKey: PointInput;
 }

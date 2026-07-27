@@ -28,6 +28,7 @@ test("a bigint-built deposit ProvingRequest JSON round-trips to the same decimal
     outputSalts: [1n, 2n],
     outputOwnerPublicKeys: [kp.publicKey, kp.publicKey],
     ecdhPrivateKey: 7n,
+    kemSs: [15n, 16n],
     encryptionNonce: 42n,
     authorityPublicKey: kp.publicKey,
   };
@@ -64,6 +65,7 @@ test("a disburse ProvingRequest keeps its [1][H] membership arrays through JSON"
       [1n, 2n],
       [3n, 4n],
     ],
+    kemSs: [15n, 16n],
     encryptionNonce: 12n,
     authorityPublicKey: [13n, 14n],
   };

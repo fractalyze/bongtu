@@ -41,9 +41,14 @@ import {MockERC20} from "bongtu-test/mocks/MockERC20.sol";
 ///   DEPLOYER_KEY  (uint256 privkey)  default = anvil account 0
 ///   BATCH_SIZE    (uint256)          default = 256 (production)
 ///   ARBITER_KEY_X / ARBITER_KEY_Y    default = the disburse256 fixture's
-///                                    authorityPublicKey (pub[8..9]) so the
+///                                    authorityPublicKey (pub[9..10]) so the
 ///                                    committed REAL 256 disburse proof verifies
 ///                                    against the deployed pool's stored key.
+///   ARBITER_KEM_PK_HASH (bytes32)    default = keccak256 of the fixture arbiter
+///                                    ML-KEM-768 encapsulation key
+///                                    (realproofs.json .kemPublicKey) — the same
+///                                    keypair the committed fixtures' KEM
+///                                    ciphertexts were encapsulated to.
 ///
 /// Records every deployed address to `deploy/addresses.<chainid>.json` (forge also
 /// writes its canonical `broadcast/…/run-latest.json`).
@@ -64,6 +69,7 @@ contract Deploy is Script {
         uint256 batchSize;
         uint256 arbiterKeyX;
         uint256 arbiterKeyY;
+        bytes32 arbiterKemPkHash;
     }
 
     function run() external returns (Deployed memory d) {
@@ -72,6 +78,7 @@ contract Deploy is Script {
         (uint256 defAx, uint256 defAy) = _fixtureArbiterKey();
         d.arbiterKeyX = vm.envOr("ARBITER_KEY_X", defAx);
         d.arbiterKeyY = vm.envOr("ARBITER_KEY_Y", defAy);
+        d.arbiterKemPkHash = vm.envOr("ARBITER_KEM_PK_HASH", _fixtureKemPkHash());
         d.owner = vm.addr(deployerKey);
 
         console2.log("== bongtu B=256 deploy ==");
@@ -117,7 +124,8 @@ contract Deploy is Script {
                 ITransferVerifier(d.transferVerifier),
                 IERC20(d.token),
                 d.batchSize,
-                [d.arbiterKeyX, d.arbiterKeyY]
+                [d.arbiterKeyX, d.arbiterKeyY],
+                d.arbiterKemPkHash
             )
         );
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
@@ -138,6 +146,7 @@ contract Deploy is Script {
         require(pool.initialized(), "pool not initialized");
         (uint256 kx, uint256 ky) = pool.currentArbiterKey();
         require(kx == d.arbiterKeyX && ky == d.arbiterKeyY, "arbiter key not stored");
+        require(pool.arbiterKemPkHash(pool.currentEpoch()) == d.arbiterKemPkHash, "kem pk hash not stored");
     }
 
     /// @dev Deploy Poseidon-v1 from circomlibjs creation bytecode (same artifact
@@ -154,11 +163,19 @@ contract Deploy is Script {
     }
 
     /// @dev The documented default arbiter key: the disburse256 fixture's
-    ///      authorityPublicKey (public signals [8..9]), read straight from the
-    ///      committed fixture so it stays in lockstep with the real 256 proof.
+    ///      authorityPublicKey (public signals [9..10] post-PQ), read straight
+    ///      from the committed fixture so it stays in lockstep with the real 256 proof.
     function _fixtureArbiterKey() internal view returns (uint256 x, uint256 y) {
         uint256[] memory p = vm.parseJsonUintArray(vm.readFile("test/fixtures/disburse256.public.json"), "");
-        return (p[8], p[9]);
+        return (p[9], p[10]);
+    }
+
+    /// @dev Default arbiter KEM pk hash: keccak256 of the fixture ML-KEM-768
+    ///      encapsulation key (realproofs.json), the keypair every committed
+    ///      fixture kemCiphertext was encapsulated to — same lockstep rule as
+    ///      the bjj arbiter key above (design doc §3).
+    function _fixtureKemPkHash() internal view returns (bytes32) {
+        return keccak256(vm.parseJsonBytes(vm.readFile("test/fixtures/realproofs.json"), ".kemPublicKey"));
     }
 
     function _writeAddresses(Deployed memory d) internal {
@@ -168,6 +185,7 @@ contract Deploy is Script {
         vm.serializeUint(o, "batchSize", d.batchSize);
         vm.serializeUint(o, "arbiterKeyX", d.arbiterKeyX);
         vm.serializeUint(o, "arbiterKeyY", d.arbiterKeyY);
+        vm.serializeBytes32(o, "arbiterKemPkHash", d.arbiterKemPkHash);
         vm.serializeAddress(o, "poseidon", d.poseidon);
         vm.serializeAddress(o, "depositVerifier", d.depositVerifier);
         vm.serializeAddress(o, "withdrawVerifier", d.withdrawVerifier);

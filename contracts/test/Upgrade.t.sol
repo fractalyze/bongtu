@@ -40,6 +40,7 @@ contract UpgradeTest is Base {
     uint256 constant ARB_X = 101;
     uint256 constant ARB_Y = 202;
     uint256 constant SPENT_NF = uint256(0xBADC0FFEE);
+    bytes32 constant KEM_HASH_1 = keccak256("kem-pk-epoch-1");
 
     function setUp() public {
         poseidon = deployPoseidon();
@@ -58,19 +59,19 @@ contract UpgradeTest is Base {
     function _buildState() internal {
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = dummyABC();
 
-        uint[18] memory dpub;
+        uint[19] memory dpub;
         dpub[0] = 1000; // `out` tokens pulled from this contract
-        dpub[13] = 111; // oc0 (nonzero — real note)
-        dpub[14] = 222; // oc1
-        pool.deposit(a, b, c, dpub);
+        dpub[14] = 111; // oc0 (nonzero — real note)
+        dpub[15] = 222; // oc1
+        pool.deposit(a, b, c, dpub, dummyKemCt());
 
-        uint[36] memory tpub;
-        tpub[26] = SPENT_NF; // input nullifier 0 (real => enabled=1 injected)
-        tpub[27] = 0; // input nullifier 1 padded
-        tpub[28] = pool.root(); // membership root (known after the deposit)
-        tpub[31] = 333; // oc0 output
-        tpub[32] = 444; // oc1 output
-        pool.transfer(a, b, c, tpub);
+        uint[37] memory tpub;
+        tpub[27] = SPENT_NF; // input nullifier 0 (real => enabled=1 injected)
+        tpub[28] = 0; // input nullifier 1 padded
+        tpub[29] = pool.root(); // membership root (known after the deposit)
+        tpub[32] = 333; // oc0 output
+        tpub[33] = 444; // oc1 output
+        pool.transfer(a, b, c, tpub, dummyKemCt());
     }
 
     function testUpgradePreservesState() public {
@@ -100,6 +101,85 @@ contract UpgradeTest is Base {
         assertEq(pool.owner(), address(this), "owner not preserved");
     }
 
+    /// The design-doc §4 storage rule under an actual impl swap: arbiterKemPkHash
+    /// lives in the FIRST slot the V1 __gap reserved (gap 50 -> 49), after every
+    /// V1 slot. If any slot had shifted, the epoch-keyed mapping (or a neighbor
+    /// like disburseAllowed / the epochs array) would read garbage after the
+    /// upgrade — so we pin BOTH the kem hashes and their neighbors across the
+    /// swap, on a pool carrying real tree + epoch state.
+    function testUpgradePreservesKemPkHashAndGapNeighbors() public {
+        _buildState();
+        pool.rotateArbiter([uint256(303), uint256(404)], KEM_HASH_1); // epoch 1, both keys
+        pool.setDisburseAllowed(address(0xB0B), true); // neighbor slot before the V2 mapping
+
+        bytes32 h0Before = pool.arbiterKemPkHash(0); // epoch 0: Base's placeholder hash
+        assertTrue(h0Before != bytes32(0), "precondition: epoch 0 carries a nonzero hash");
+
+        BongtuPoolV2 v2 = new BongtuPoolV2();
+        pool.upgradeToAndCall(address(v2), "");
+
+        assertEq(BongtuPoolV2(address(pool)).version(), 2, "upgrade did not take");
+        assertEq(pool.arbiterKemPkHash(0), h0Before, "epoch 0 kem pk hash not preserved");
+        assertEq(pool.arbiterKemPkHash(1), KEM_HASH_1, "epoch 1 kem pk hash not preserved");
+        assertEq(pool.arbiterKemPkHash(2), bytes32(0), "unminted epoch must still read the pre-KEM marker 0");
+        (uint256 kx, uint256 ky) = pool.currentArbiterKey();
+        assertEq(kx, 303, "rotated arbiter key x not preserved");
+        assertEq(ky, 404, "rotated arbiter key y not preserved");
+        assertTrue(pool.disburseAllowed(address(0xB0B)), "disburseAllowed neighbor slot not preserved");
+        assertTrue(pool.nullifierUsed(SPENT_NF), "spent nullifier not preserved");
+    }
+
+    /// The migration payload the live pool's PQ upgrade uses (UpgradePq.s.sol):
+    /// upgradeToAndCall(impl, initializeV2(...)) must, in ONE tx, swap the four
+    /// verifier addresses AND mint a fresh epoch carrying both keys — atomicity
+    /// is what closes the partial-deploy window (old proofs vs new verifiers
+    /// fail on public count). reinitializer(2) then burns the payload: a second
+    /// call must revert.
+    function testInitializeV2RejectsZeroVerifier() public {
+        _buildState();
+        IWithdrawVerifier nwv = new StubWithdrawVerifier();
+        IDisburseVerifier ndsv = new StubDisburseVerifier();
+        ITransferVerifier ntv = new StubTransferVerifier();
+        BongtuPoolV2 v2 = new BongtuPoolV2();
+        vm.expectRevert(BongtuPool.ZeroVerifier.selector);
+        pool.upgradeToAndCall(
+            address(v2),
+            abi.encodeCall(
+                BongtuPool.initializeV2,
+                (IDepositVerifier(address(0)), nwv, ndsv, ntv, [ARB_X, ARB_Y], KEM_HASH_1)
+            )
+        );
+    }
+
+    function testUpgradeToAndCallInitializeV2SwapsVerifiersAndMintsEpoch() public {
+        _buildState();
+        IDepositVerifier ndv = new StubDepositVerifier();
+        IWithdrawVerifier nwv = new StubWithdrawVerifier();
+        IDisburseVerifier ndsv = new StubDisburseVerifier();
+        ITransferVerifier ntv = new StubTransferVerifier();
+
+        BongtuPoolV2 v2 = new BongtuPoolV2();
+        pool.upgradeToAndCall(
+            address(v2),
+            abi.encodeCall(BongtuPool.initializeV2, (ndv, nwv, ndsv, ntv, [ARB_X, ARB_Y], KEM_HASH_1))
+        );
+
+        assertEq(address(pool.depositVerifier()), address(ndv), "deposit verifier not swapped");
+        assertEq(address(pool.withdrawVerifier()), address(nwv), "withdraw verifier not swapped");
+        assertEq(address(pool.disburseVerifier()), address(ndsv), "disburse verifier not swapped");
+        assertEq(address(pool.transferVerifier()), address(ntv), "transfer verifier not swapped");
+        assertEq(pool.currentEpoch(), 1, "migration epoch not minted");
+        assertEq(pool.arbiterKemPkHash(1), KEM_HASH_1, "migration epoch kem pk hash not stored");
+        (uint256 kx, uint256 ky) = pool.currentArbiterKey();
+        assertEq(kx, ARB_X, "same-key rotation keyX");
+        assertEq(ky, ARB_Y, "same-key rotation keyY");
+        assertTrue(pool.nullifierUsed(SPENT_NF), "pre-upgrade state lost across initializeV2");
+
+        // run-once: reinitializer(2) is consumed
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        pool.initializeV2(ndv, nwv, ndsv, ntv, [ARB_X, ARB_Y], KEM_HASH_1);
+    }
+
     function testNonOwnerUpgradeReverts() public {
         BongtuPoolV2 v2 = new BongtuPoolV2();
         address stranger = address(0xBEEF);
@@ -110,7 +190,7 @@ contract UpgradeTest is Base {
 
     function testReinitializeReverts() public {
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        pool.initialize(poseidon, dv, wv, dsv, tv, IERC20(address(token)), B, [ARB_X, ARB_Y]);
+        pool.initialize(poseidon, dv, wv, dsv, tv, IERC20(address(token)), B, [ARB_X, ARB_Y], DUMMY_KEM_PK_HASH);
     }
 
     /// @dev The bare implementation is locked (`_disableInitializers` in the
@@ -119,6 +199,6 @@ contract UpgradeTest is Base {
     function testImplementationIsLocked() public {
         BongtuPool impl = new BongtuPool();
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        impl.initialize(poseidon, dv, wv, dsv, tv, IERC20(address(token)), B, [ARB_X, ARB_Y]);
+        impl.initialize(poseidon, dv, wv, dsv, tv, IERC20(address(token)), B, [ARB_X, ARB_Y], DUMMY_KEM_PK_HASH);
     }
 }

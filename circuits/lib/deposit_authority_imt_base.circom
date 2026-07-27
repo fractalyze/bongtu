@@ -21,14 +21,20 @@
 // verifying (BongtuPool.deposit), so a proof not encrypted to the current arbiter
 // key FAILS — publication is enforced, not merely conventional.
 //
+// PQ hybrid envelope (.dev/pq-envelope-design.md §2): the envelope key is no
+// longer the raw ECDH point but Poseidon(5)-folded with the ML-KEM-768 shared
+// secret limbs (private input kemSs[2]); kemBinding = Poseidon(3) over the limbs
+// is a NEW public output the arbiter checks against Decaps(kemCiphertext).
+//
 // Public-signal layout (circom orders outputs first in declaration order, then
 // public inputs in declaration order):
 //   [0]      out                     (output; = sum of output values)
 //   [1..2]   ecdhPublicKey[2]        (output)
 //   [3..12]  cipherTextAuthority[10] (output)
-//   [13..14] outputCommitments[2]    (public input)
-//   [15]     encryptionNonce         (public input)
-//   [16..17] authorityPublicKey[2]   (public input)  => 18 public signals total.
+//   [13]     kemBinding              (output)
+//   [14..15] outputCommitments[2]    (public input)
+//   [16]     encryptionNonce         (public input)
+//   [17..18] authorityPublicKey[2]   (public input)  => 19 public signals total.
 pragma circom 2.2.2;
 
 include "lib/check-positive.circom";
@@ -36,6 +42,8 @@ include "lib/check-hashes.circom";
 include "lib/ecdh.circom";
 include "lib/encrypt.circom";
 include "node_modules/circomlib/circuits/babyjub.circom";
+include "node_modules/circomlib/circuits/bitify.circom";
+include "node_modules/circomlib/circuits/poseidon.circom";
 
 template BongtuDepositAuthority(nOutputs) {
   // --- public input (via the top-level `public` list) ---
@@ -45,6 +53,8 @@ template BongtuDepositAuthority(nOutputs) {
   signal input outputSalts[nOutputs];
   signal input outputOwnerPublicKeys[nOutputs][2];
   signal input ecdhPrivateKey;
+  // ML-KEM-768 shared-secret limbs (LE-uint128 halves of ss; PRIVATE).
+  signal input kemSs[2];
   // --- public inputs (contract-injected / auditor-facing) ---
   signal input encryptionNonce;
   signal input authorityPublicKey[2];
@@ -61,6 +71,9 @@ template BongtuDepositAuthority(nOutputs) {
   }
   signal output ecdhPublicKey[2];
   signal output cipherTextAuthority[l + 1];
+  // LAST output so existing output indices are stable and every public-input
+  // index shifts by exactly +1 (pq-envelope-design.md §3).
+  signal output kemBinding;
 
   // stock deposit: outputs are positive, commitments hash correctly.
   CheckPositive(nOutputs)(outputValues <== outputValues);
@@ -86,6 +99,25 @@ template BongtuDepositAuthority(nOutputs) {
   var sharedSecretAuthority[2];
   (sharedSecretAuthority) = Ecdh()(privKey <== ecdhPrivateKey, pubKey <== authorityPublicKey);
 
+  // --- PQ hybrid key (pq-envelope-design.md §2) ---
+  // Canonical-encoding hygiene: each limb is a genuine 128-bit value.
+  component kemSsRange[2];
+  for (var i = 0; i < 2; i++) {
+    kemSsRange[i] = Num2Bits(128);
+    kemSsRange[i].in <== kemSs[i];
+  }
+  // Frozen domain-separation tags (sha256(ASCII) mod r):
+  //   TAG_K0 = sha256("bongtu/pq-envelope/v1/key0"), TAG_K1 = .../key1,
+  //   TAG_BIND = .../binding. Key derivation (arity 5) and binding (arity 3)
+  //   are separated by both tag and arity.
+  var TAG_K0 = 10398998902367040515226727887904115149378422647845688990538198988921570667720;
+  var TAG_K1 = 7025394518961265764175593663800963341053996587382265036146196548941915994055;
+  var TAG_BIND = 5518019128667894418081277213291049553290157756968653594844689494754896839788;
+  signal hybridKey[2];
+  hybridKey[0] <== Poseidon(5)([TAG_K0, sharedSecretAuthority[0], sharedSecretAuthority[1], kemSs[0], kemSs[1]]);
+  hybridKey[1] <== Poseidon(5)([TAG_K1, sharedSecretAuthority[0], sharedSecretAuthority[1], kemSs[0], kemSs[1]]);
+  kemBinding <== Poseidon(3)([TAG_BIND, kemSs[0], kemSs[1]]);
+
   var plainText[4 * nOutputs];
   var idx = 0;
   for (var i = 0; i < nOutputs; i++) {
@@ -101,5 +133,5 @@ template BongtuDepositAuthority(nOutputs) {
     idx++;
   }
 
-  cipherTextAuthority <== SymmetricEncrypt(4 * nOutputs)(plainText <== plainText, key <== sharedSecretAuthority, nonce <== encryptionNonce);
+  cipherTextAuthority <== SymmetricEncrypt(4 * nOutputs)(plainText <== plainText, key <== hybridKey, nonce <== encryptionNonce);
 }

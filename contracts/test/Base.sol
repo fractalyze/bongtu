@@ -16,6 +16,18 @@ import {MockERC20} from "./mocks/MockERC20.sol";
 abstract contract Base is Test {
     uint256 constant B = 16; // M0 disburse batch size
 
+    // Non-zero placeholder KEM pk hash for suites where the KEM epoch material
+    // is irrelevant (stub-verifier tree/enforcement tests); initialize rejects
+    // bytes32(0) — the pre-KEM marker is reserved for pre-upgrade epochs.
+    bytes32 constant DUMMY_KEM_PK_HASH = bytes32(uint256(1));
+
+    /// @dev A length-correct (1088-byte) KEM ciphertext blob: content is
+    ///      unchecked on-chain (design doc §2 — binding is arbiter-enforced),
+    ///      so stub-verifier suites can pass zeros.
+    function dummyKemCt() internal pure returns (bytes memory) {
+        return new bytes(1088);
+    }
+
     function deployPoseidon() internal returns (IPoseidon2) {
         bytes memory code = vm.parseBytes(vm.readFile("test/fixtures/poseidon2.hex"));
         address p;
@@ -26,7 +38,9 @@ abstract contract Base is Test {
         return IPoseidon2(p);
     }
 
-    /// @dev Pool impl behind a UUPS proxy, initialized in one tx with batch size B.
+    /// @dev Pool impl behind a UUPS proxy, initialized in one tx with batch size
+    ///      B and the placeholder KEM pk hash (suites asserting real KEM epoch
+    ///      material pass an explicit hash via {deployPoolWithBatch}).
     function deployPool(
         IPoseidon2 poseidon,
         IDepositVerifier dv,
@@ -36,10 +50,11 @@ abstract contract Base is Test {
         IERC20 token,
         uint256[2] memory arbiterKey
     ) internal returns (BongtuPool) {
-        return deployPoolWithBatch(poseidon, dv, wv, dsv, tv, token, B, arbiterKey);
+        return deployPoolWithBatch(poseidon, dv, wv, dsv, tv, token, B, arbiterKey, DUMMY_KEM_PK_HASH);
     }
 
-    /// @dev Same as {deployPool} but with an explicit batch size (e.g. B=256).
+    /// @dev Same as {deployPool} but with an explicit batch size (e.g. B=256)
+    ///      and an explicit arbiter KEM pk hash.
     function deployPoolWithBatch(
         IPoseidon2 poseidon,
         IDepositVerifier dv,
@@ -48,11 +63,12 @@ abstract contract Base is Test {
         ITransferVerifier tv,
         IERC20 token,
         uint256 batchSize,
-        uint256[2] memory arbiterKey
+        uint256[2] memory arbiterKey,
+        bytes32 kemPkHash
     ) internal returns (BongtuPool) {
         BongtuPool impl = new BongtuPool();
         bytes memory initData =
-            abi.encodeCall(BongtuPool.initialize, (poseidon, dv, wv, dsv, tv, token, batchSize, arbiterKey));
+            abi.encodeCall(BongtuPool.initialize, (poseidon, dv, wv, dsv, tv, token, batchSize, arbiterKey, kemPkHash));
         return BongtuPool(address(new ERC1967Proxy(address(impl), initData)));
     }
 

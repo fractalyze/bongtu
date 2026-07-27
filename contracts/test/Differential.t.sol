@@ -67,48 +67,48 @@ contract DifferentialTest is Base {
 
         // deposit(2): out=1000 (pulls tokens), appends the two output notes.
         {
-            uint[18] memory pub;
+            uint[19] memory pub;
             pub[0] = 1000;
-            pub[13] = depositLeaves[0];
-            pub[14] = depositLeaves[1];
+            pub[14] = depositLeaves[0];
+            pub[15] = depositLeaves[1];
             (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = dummyABC();
-            pool.deposit(a, b, c, pub);
+            pool.deposit(a, b, c, pub, dummyKemCt());
         }
 
         // transfer(2): 2 real nullifiers, appends the two output notes.
         {
-            uint[36] memory pub;
-            pub[26] = 111; // nullifier[0] (nonzero => enabled[0]=1)
-            pub[27] = 222; // nullifier[1]
-            pub[28] = pool.root(); // membership root (known: the live root)
-            pub[31] = transferLeaves[0];
-            pub[32] = transferLeaves[1];
+            uint[37] memory pub;
+            pub[27] = 111; // nullifier[0] (nonzero => enabled[0]=1)
+            pub[28] = 222; // nullifier[1]
+            pub[29] = pool.root(); // membership root (known: the live root)
+            pub[32] = transferLeaves[0];
+            pub[33] = transferLeaves[1];
             (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = dummyABC();
-            pool.transfer(a, b, c, pub);
+            pool.transfer(a, b, c, pub, dummyKemCt());
         }
 
         // disburse: pad the partial block to a B boundary, attach the subtree.
         // The plain disburse() is removed (§6b v2); publish a length-correct blob
         // (content unchecked on-chain — the differential test only cares about roots).
         {
-            uint[10] memory pub;
+            uint[11] memory pub;
             pub[3] = subtreeRoot;
-            pub[4] = 333; // nullifier (nonzero => enabled=1)
-            pub[5] = pool.root(); // membership root
+            pub[5] = 333; // nullifier (nonzero => enabled=1)
+            pub[6] = pool.root(); // membership root
             (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = dummyABC();
-            pool.disburseWithCiphertexts(a, b, c, pub, new uint256[](pool.disburseCiphertextLen()));
+            pool.disburseWithCiphertexts(a, b, c, pub, new uint256[](pool.disburseCiphertextLen()), dummyKemCt());
         }
 
         // withdraw(1) with a PADDED slot: nullifier[1]=0 => enabled[1]=0.
         {
-            uint[25] memory pub;
+            uint[26] memory pub;
             pub[0] = 50; // withdrawn amount (pushes tokens)
-            pub[16] = 444; // real nullifier
-            pub[17] = 0; // padded input (enabled derived to 0)
-            pub[18] = pool.root();
-            pub[21] = withdrawChange;
+            pub[17] = 444; // real nullifier
+            pub[18] = 0; // padded input (enabled derived to 0)
+            pub[19] = pool.root();
+            pub[22] = withdrawChange;
             (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = dummyABC();
-            pool.withdraw(a, b, c, pub);
+            pool.withdraw(a, b, c, pub, dummyKemCt());
         }
 
         // Collect every emitted insert root, in order, and compare 1:1.

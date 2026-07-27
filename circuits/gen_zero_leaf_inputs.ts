@@ -34,6 +34,7 @@ import {
   SENDER,
   ZERO_PATH,
   ZERO_ROOT,
+  kemDraw,
   receiver,
   salt,
   write,
@@ -86,6 +87,7 @@ function genTransferZeroLeaf(): TransferInput {
     outputValues: outValues,
     outputSalts: outValues.map((_, i) => salt(i)),
     outputOwnerPublicKeys: owners,
+    kemSs: kemDraw("transfer_zero_leaf").kemSs,
     encryptionNonce: ENCRYPTION_NONCE,
     authorityPublicKey: AUTHORITY.publicKey,
   };
@@ -113,6 +115,7 @@ function genWithdrawZeroLeaf(): WithdrawInput {
     // §6b v2 authority envelope inputs (present + valid so witness-gen fails on
     // the zero-commitment belt, not on a missing input).
     ecdhPrivateKey: BigInt(ECDH_SK),
+    kemSs: kemDraw("withdraw_zero_leaf").kemSs,
     encryptionNonce: ENCRYPTION_NONCE,
     authorityPublicKey: AUTHORITY.publicKey,
   };

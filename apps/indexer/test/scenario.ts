@@ -25,6 +25,7 @@
 
 import { ImtTree } from "@bongtu/core/imt";
 import { buildAuthorityPlaintext } from "@bongtu/core/envelope";
+import { hybridEnvelopeKey } from "@bongtu/core/kem";
 import {
   deriveKeypair, commitment, nullifier,
   poseidonEncrypt, ecdhSharedSecret, assertDistinctOwnerPubkeys,
@@ -37,7 +38,7 @@ import {
 // apps/indexer.
 import {
   RPC, H, GATE_B as B, dec, connectAnvil, deployStack, prove,
-  EMPLOYER, AUTHORITY, PAYEE, RCPTS,
+  EMPLOYER, AUTHORITY, PAYEE, RCPTS, kemDraw, kemCtHex,
   sD0, sD1, sR, sPay, sChg, sPadT, sPadW, sRes,
   amounts, V,
 } from "../../../deploy/lib/e2e_harness.js";
@@ -119,6 +120,14 @@ export async function runScenario(): Promise<ScenarioResult> {
   const ECDH_W = 950000000000000000021n;
   const ECDH_D3 = 970000000000000000011n;
   const NONCE_DEP = 555555555555n;
+  // fresh ML-KEM encapsulation per tx (design doc §6); labels disjoint from the
+  // orchestrator sibling's "m0/..." family, like the ECDH scalars above.
+  const KEM_DEP = kemDraw("scen/deposit");
+  const KEM_D1 = kemDraw("scen/disburse1");
+  const KEM_TRANSFER = kemDraw("scen/transfer");
+  const KEM_D2 = kemDraw("scen/disburse2");
+  const KEM_W = kemDraw("scen/withdraw");
+  const KEM_D3 = kemDraw("scen/disburse3");
   const NONCE_D1 = 111111111111n;
   const NONCE_TRANSFER = 222222222222n;
   const NONCE_D2 = 333333333333n;
@@ -146,11 +155,12 @@ export async function runScenario(): Promise<ScenarioResult> {
     const { a, b, c, pub } = await prove("deposit", {
       outputCommitments: [dNoteV, dNote0], outputValues: [V, 0n],
       outputSalts: [sD0, sD1], outputOwnerPublicKeys: [EMPLOYER.publicKey, EMPLOYER.publicKey],
-      ecdhPrivateKey: ECDH_DEP, encryptionNonce: NONCE_DEP, authorityPublicKey: AUTHORITY.publicKey,
+      ecdhPrivateKey: ECDH_DEP, kemSs: KEM_DEP.kemSs,
+      encryptionNonce: NONCE_DEP, authorityPublicKey: AUTHORITY.publicKey,
     });
     oracle.appendLeaf(dNoteV);
     oracle.appendLeaf(dNote0);
-    await (await pool.deposit(a, b, c, pub)).wait();
+    await (await pool.deposit(a, b, c, pub, kemCtHex(KEM_DEP.kemCiphertext))).wait();
   }
   const nfDepositV = nullifier(V, sD0, EMPLOYER.formattedPrivateKey);
 
@@ -167,18 +177,21 @@ export async function runScenario(): Promise<ScenarioResult> {
       inputOwnerPrivateKey: EMPLOYER.formattedPrivateKey, ecdhPrivateKey: ECDH_D1,
       root: oracle.getRoot(), pathElements: [siblings], leafIndices: [0n], enabled: [1n],
       outputCommitments: outCommits, outputValues: amounts, outputSalts: amounts.map((_, i) => sR(i)),
-      outputOwnerPublicKeys: rcptPubs, encryptionNonce: NONCE_D1, authorityPublicKey: AUTHORITY.publicKey,
+      outputOwnerPublicKeys: rcptPubs, kemSs: KEM_D1.kemSs,
+      encryptionNonce: NONCE_D1, authorityPublicKey: AUTHORITY.publicKey,
     });
     const rcptCts = amounts.map((v, i) =>
       poseidonEncrypt([v, sR(i)], ecdhSharedSecret(ECDH_D1, RCPTS[i].publicKey), NONCE_D1));
     const ctFlat = rcptCts.flat();
+    // hybrid envelope key (design doc §2): raw-ECDH would break disclosureHash
     const authCt = poseidonEncrypt(
       authorityPlain(EMPLOYER.publicKey, V, sD0, rcptPubs, amounts, amounts.map((_, i) => sR(i))),
-      ecdhSharedSecret(ECDH_D1, AUTHORITY.publicKey), NONCE_D1,
+      hybridEnvelopeKey(ecdhSharedSecret(ECDH_D1, AUTHORITY.publicKey), KEM_D1.kemSs), NONCE_D1,
     );
     oracle.attachSubtree(subtreeRoot, outCommits);
     // publish FULL ciphertext (receiver ++ authority) so the whole chain recomputes
-    await (await pool.disburseWithCiphertexts(a, b, c, pub, [...ctFlat, ...authCt].map(dec))).wait();
+    await (await pool.disburseWithCiphertexts(
+      a, b, c, pub, [...ctFlat, ...authCt].map(dec), kemCtHex(KEM_D1.kemCiphertext))).wait();
   }
   // Block boundary the arbiter test ingests up to for the spent=false snapshot:
   // anvil mines one block per tx, so this precedes the transfer that spends @16.
@@ -204,11 +217,12 @@ export async function runScenario(): Promise<ScenarioResult> {
       root: oracle.getRoot(), pathElements: [siblings, zeros], leafIndices: [BigInt(honestStart), 0n],
       enabled: [1n, 0n], outputCommitments: [payCommit, chgCommit], outputValues: [payVal, chgVal],
       outputSalts: [sPay, sChg], outputOwnerPublicKeys: [PAYEE.publicKey, RCPTS[0].publicKey],
+      kemSs: KEM_TRANSFER.kemSs,
       encryptionNonce: NONCE_TRANSFER, authorityPublicKey: AUTHORITY.publicKey,
     });
     oracle.appendLeaf(payCommit);
     oracle.appendLeaf(chgCommit);
-    await (await pool.transfer(a, b, c, pub)).wait();
+    await (await pool.transfer(a, b, c, pub, kemCtHex(KEM_TRANSFER.kemCiphertext))).wait();
   }
   const payLeaf = honestStart + B; // 32
   const chgLeaf = honestStart + B + 1; // 33
@@ -227,10 +241,11 @@ export async function runScenario(): Promise<ScenarioResult> {
       root: oracle.getRoot(), pathElements: [siblings, zeros], leafIndices: [BigInt(chgLeaf), 0n],
       enabled: [1n, 0n], outputCommitments: [resCommit], outputValues: [0n], outputSalts: [sRes],
       outputOwnerPublicKeys: [RCPTS[0].publicKey],
-      ecdhPrivateKey: ECDH_W, encryptionNonce: NONCE_W, authorityPublicKey: AUTHORITY.publicKey,
+      ecdhPrivateKey: ECDH_W, kemSs: KEM_W.kemSs,
+      encryptionNonce: NONCE_W, authorityPublicKey: AUTHORITY.publicKey,
     });
     oracle.appendLeaf(resCommit);
-    await (await pool.withdraw(a, b, c, pub)).wait();
+    await (await pool.withdraw(a, b, c, pub, kemCtHex(KEM_W.kemCiphertext))).wait();
   }
 
   // ---- disburse #2 (TAMPERED): note(0)@1 -> 16 zero-value recipients; emit corrupted ct ----
@@ -246,21 +261,23 @@ export async function runScenario(): Promise<ScenarioResult> {
       inputOwnerPrivateKey: EMPLOYER.formattedPrivateKey, ecdhPrivateKey: ECDH_D2,
       root: oracle.getRoot(), pathElements: [siblings], leafIndices: [1n], enabled: [1n],
       outputCommitments: outCommits2, outputValues: amounts2, outputSalts: amounts2.map((_, i) => sR2(i)),
-      outputOwnerPublicKeys: rcptPubs, encryptionNonce: NONCE_D2, authorityPublicKey: AUTHORITY.publicKey,
+      outputOwnerPublicKeys: rcptPubs, kemSs: KEM_D2.kemSs,
+      encryptionNonce: NONCE_D2, authorityPublicKey: AUTHORITY.publicKey,
     });
     const rcptCts2 = amounts2.map((v, i) =>
       poseidonEncrypt([v, sR2(i)], ecdhSharedSecret(ECDH_D2, RCPTS[i].publicKey), NONCE_D2));
     const ctFlat2 = rcptCts2.flat();
     const authCt2 = poseidonEncrypt(
       authorityPlain(EMPLOYER.publicKey, 0n, sD1, rcptPubs, amounts2, amounts2.map((_, i) => sR2(i))),
-      ecdhSharedSecret(ECDH_D2, AUTHORITY.publicKey), NONCE_D2,
+      hybridEnvelopeKey(ecdhSharedSecret(ECDH_D2, AUTHORITY.publicKey), KEM_D2.kemSs), NONCE_D2,
     );
     const full = [...ctFlat2, ...authCt2];
     // Flip a RECEIVER element: disclosureHash must break, but the authority
     // tail stays intact so the arbiter ledger can still open this batch.
     full[0] = BigInt(full[0]) + 1n;
     oracle.attachSubtree(subtreeRoot2, outCommits2);
-    await (await pool.disburseWithCiphertexts(a, b, c, pub, full.map(dec))).wait();
+    await (await pool.disburseWithCiphertexts(
+      a, b, c, pub, full.map(dec), kemCtHex(KEM_D2.kemCiphertext))).wait();
   }
 
   // ---- disburse #3 (AUTHORITY-TAMPERED): residue note(0)@34 -> 16 zero-value
@@ -284,19 +301,21 @@ export async function runScenario(): Promise<ScenarioResult> {
       inputOwnerPrivateKey: RCPTS[0].formattedPrivateKey, ecdhPrivateKey: ECDH_D3,
       root: oracle.getRoot(), pathElements: [siblings], leafIndices: [BigInt(resLeaf)], enabled: [1n],
       outputCommitments: outCommits3, outputValues: amounts3, outputSalts: amounts3.map((_, i) => sR3(i)),
-      outputOwnerPublicKeys: rcptPubs, encryptionNonce: NONCE_D3, authorityPublicKey: AUTHORITY.publicKey,
+      outputOwnerPublicKeys: rcptPubs, kemSs: KEM_D3.kemSs,
+      encryptionNonce: NONCE_D3, authorityPublicKey: AUTHORITY.publicKey,
     });
     const rcptCts3 = amounts3.map((v, i) =>
       poseidonEncrypt([v, sR3(i)], ecdhSharedSecret(ECDH_D3, RCPTS[i].publicKey), NONCE_D3));
     const ctFlat3 = rcptCts3.flat();
     const authCt3 = poseidonEncrypt(
       authorityPlain(RCPTS[0].publicKey, 0n, sRes, rcptPubs, amounts3, amounts3.map((_, i) => sR3(i))),
-      ecdhSharedSecret(ECDH_D3, AUTHORITY.publicKey), NONCE_D3,
+      hybridEnvelopeKey(ecdhSharedSecret(ECDH_D3, AUTHORITY.publicKey), KEM_D3.kemSs), NONCE_D3,
     );
     const full3 = [...ctFlat3, ...authCt3];
     full3[ctFlat3.length] = BigInt(full3[ctFlat3.length]) + 1n; // flip the FIRST AUTHORITY element
     oracle.attachSubtree(subtreeRoot3, outCommits3);
-    await (await pool.disburseWithCiphertexts(a, b, c, pub, full3.map(dec))).wait();
+    await (await pool.disburseWithCiphertexts(
+      a, b, c, pub, full3.map(dec), kemCtHex(KEM_D3.kemCiphertext))).wait();
   }
 
   // NOTE: §6b v2 removes the plain disburse() entry point, so a "withheld"

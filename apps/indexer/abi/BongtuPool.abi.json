@@ -33,6 +33,19 @@
     },
     {
       "type": "function",
+      "name": "KEM_CIPHERTEXT_LEN",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
       "name": "LOG_B",
       "inputs": [],
       "outputs": [
@@ -95,6 +108,25 @@
     },
     {
       "type": "function",
+      "name": "arbiterKemPkHash",
+      "inputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
       "name": "currentArbiterKey",
       "inputs": [],
       "outputs": [
@@ -145,8 +177,13 @@
         },
         {
           "name": "pub",
-          "type": "uint256[18]",
-          "internalType": "uint256[18]"
+          "type": "uint256[19]",
+          "internalType": "uint256[19]"
+        },
+        {
+          "name": "kemCiphertext",
+          "type": "bytes",
+          "internalType": "bytes"
         }
       ],
       "outputs": [],
@@ -231,13 +268,18 @@
         },
         {
           "name": "pub",
-          "type": "uint256[10]",
-          "internalType": "uint256[10]"
+          "type": "uint256[11]",
+          "internalType": "uint256[11]"
         },
         {
           "name": "receiverCiphertexts",
           "type": "uint256[]",
           "internalType": "uint256[]"
+        },
+        {
+          "name": "kemCiphertext",
+          "type": "bytes",
+          "internalType": "bytes"
         }
       ],
       "outputs": [],
@@ -305,6 +347,49 @@
           "name": "arbiterKey",
           "type": "uint256[2]",
           "internalType": "uint256[2]"
+        },
+        {
+          "name": "arbiterKemPkHash_",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "initializeV2",
+      "inputs": [
+        {
+          "name": "_depositVerifier",
+          "type": "address",
+          "internalType": "contract IDepositVerifier"
+        },
+        {
+          "name": "_withdrawVerifier",
+          "type": "address",
+          "internalType": "contract IWithdrawVerifier"
+        },
+        {
+          "name": "_disburseVerifier",
+          "type": "address",
+          "internalType": "contract IDisburseVerifier"
+        },
+        {
+          "name": "_transferVerifier",
+          "type": "address",
+          "internalType": "contract ITransferVerifier"
+        },
+        {
+          "name": "arbiterKey",
+          "type": "uint256[2]",
+          "internalType": "uint256[2]"
+        },
+        {
+          "name": "kemPkHash",
+          "type": "bytes32",
+          "internalType": "bytes32"
         }
       ],
       "outputs": [],
@@ -466,6 +551,11 @@
           "name": "newKey",
           "type": "uint256[2]",
           "internalType": "uint256[2]"
+        },
+        {
+          "name": "newKemPkHash",
+          "type": "bytes32",
+          "internalType": "bytes32"
         }
       ],
       "outputs": [],
@@ -523,8 +613,13 @@
         },
         {
           "name": "pub",
-          "type": "uint256[36]",
-          "internalType": "uint256[36]"
+          "type": "uint256[37]",
+          "internalType": "uint256[37]"
+        },
+        {
+          "name": "kemCiphertext",
+          "type": "bytes",
+          "internalType": "bytes"
         }
       ],
       "outputs": [],
@@ -595,8 +690,13 @@
         },
         {
           "name": "pub",
-          "type": "uint256[25]",
-          "internalType": "uint256[25]"
+          "type": "uint256[26]",
+          "internalType": "uint256[26]"
+        },
+        {
+          "name": "kemCiphertext",
+          "type": "bytes",
+          "internalType": "bytes"
         }
       ],
       "outputs": [],
@@ -655,6 +755,25 @@
           "type": "uint256",
           "indexed": false,
           "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "ArbiterKemPkHashSet",
+      "inputs": [
+        {
+          "name": "epoch",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "kemPkHash",
+          "type": "bytes32",
+          "indexed": false,
+          "internalType": "bytes32"
         }
       ],
       "anonymous": false
@@ -747,6 +866,18 @@
           "type": "uint256",
           "indexed": false,
           "internalType": "uint256"
+        },
+        {
+          "name": "kemBinding",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "kemCiphertext",
+          "type": "bytes",
+          "indexed": false,
+          "internalType": "bytes"
         }
       ],
       "anonymous": false
@@ -834,6 +965,18 @@
           "type": "uint256",
           "indexed": false,
           "internalType": "uint256"
+        },
+        {
+          "name": "kemBinding",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "kemCiphertext",
+          "type": "bytes",
+          "indexed": false,
+          "internalType": "bytes"
         }
       ],
       "anonymous": false
@@ -971,6 +1114,18 @@
           "type": "uint256",
           "indexed": false,
           "internalType": "uint256"
+        },
+        {
+          "name": "kemBinding",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "kemCiphertext",
+          "type": "bytes",
+          "indexed": false,
+          "internalType": "bytes"
         }
       ],
       "anonymous": false
@@ -1039,6 +1194,18 @@
           "type": "uint256",
           "indexed": false,
           "internalType": "uint256"
+        },
+        {
+          "name": "kemBinding",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "kemCiphertext",
+          "type": "bytes",
+          "indexed": false,
+          "internalType": "bytes"
         }
       ],
       "anonymous": false
@@ -1221,7 +1388,28 @@
     },
     {
       "type": "error",
+      "name": "WrongKemCiphertextLength",
+      "inputs": [
+        {
+          "name": "got",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "want",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ]
+    },
+    {
+      "type": "error",
       "name": "ZeroArbiterKey",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "ZeroKemPkHash",
       "inputs": []
     },
     {

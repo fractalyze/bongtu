@@ -19,6 +19,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ImtTree } from "@bongtu/core/imt";
+import { hybridEnvelopeKey, kemBindingOf, kemSsToLimbs, ml_kem768 } from "@bongtu/core/kem";
 import { poseidonN } from "@bongtu/core/poseidon";
 import { buildAuthorityPlaintext, disclosureChain } from "@bongtu/core/envelope";
 import {
@@ -51,6 +52,18 @@ const CONTRACTS_OUT = join(ROOT, "contracts", "out");
 const PROVER_URL = (process.env.BONGTU_PROVER_URL || "http://127.0.0.1:8700").replace(/\/$/, "");
 
 const addr = JSON.parse(readFileSync(join(ROOT, "deploy", "addresses.91342.json"), "utf8"));
+
+// Post-PQ the pool only accepts hybrid-envelope proofs, so this script targets
+// the UPGRADED pool (UpgradePq.s.sol). The arbiter's full ML-KEM-768 pk is
+// distributed off-chain (ARBITER_KEM_PK env, hex; default = the committed
+// fixture arbiter KEM pk) and is verified against the on-chain
+// arbiterKemPkHash(currentEpoch()) before any encapsulation.
+const KEM_PK: Uint8Array = (() => {
+  const hex: string = process.env.ARBITER_KEM_PK
+    ?? JSON.parse(readFileSync(join(ROOT, "contracts/test/fixtures/realproofs.json"), "utf8")).kemPublicKey;
+  return Uint8Array.from(Buffer.from(hex.replace(/^0x/, ""), "hex"));
+})();
+const kemHex = (b: Uint8Array): string => "0x" + Buffer.from(b).toString("hex");
 
 let failures = 0;
 const ok = (c: unknown, m: string): void => { const p = !!c; if (!p) failures++; console.log(`   ${p ? "PASS" : "FAIL"}  ${m}`); if (!p) throw new Error("assert: " + m); };
@@ -97,12 +110,27 @@ async function main(): Promise<void> {
   // (ethers' auto-estimate overpays ~1500x and drains the faucet grant).
   const TX = { gasPrice: ethers.utils.parseUnits(GIWA_GAS_FLOOR_GWEI, "gwei") };
 
+  // The pool refuses clients holding the wrong (or a pre-upgrade zero) KEM pk:
+  // encapsulating to an unverified key would silently strand the envelope.
+  const onchainKemPkHash = await pool.arbiterKemPkHash(await pool.currentEpoch());
+  ok(onchainKemPkHash === ethers.utils.keccak256(KEM_PK),
+    "keccak256(ARBITER_KEM_PK) == on-chain arbiterKemPkHash(currentEpoch) (pool is PQ-upgraded)");
+
   const EMPLOYER = deriveKeypair(313131313131313131313131n);
   const recipient = (i: number): Keypair => deriveKeypair(4000000019n + BigInt(i) * 1000003n);
   const RCPTS = Array.from({ length: B }, (_, i) => recipient(i));
   const ECDH = 900000000000000000007n, NONCE = 424242424243n;
   // §4: reusing one tx's ephemeral key + nonce for a second envelope is a two-time pad.
   const ECDH_DEP = 610000000000000000011n, NONCE_DEP = 424242424244n;
+  // Fresh ML-KEM encapsulation PER TX (ct reuse collapses the PQ compartment,
+  // design doc §6); noble draws real randomness here — live txs need no replay
+  // determinism.
+  const kemEncap = () => {
+    const { cipherText, sharedSecret } = ml_kem768.encapsulate(KEM_PK);
+    return { kemSs: kemSsToLimbs(sharedSecret), kemCiphertext: cipherText };
+  };
+  const KEM_DEP = kemEncap();
+  const KEM_DISB = kemEncap();
   const sD0 = 8000001n, sD1 = 8000002n, sR = (i: number): bigint => 9000000n + BigInt(i);
   const amounts = Array.from({ length: B }, (_, i) => 100n + BigInt(i)); // 256 distinct positive
   const V = amounts.reduce((a, x) => a + x, 0n);
@@ -127,11 +155,12 @@ async function main(): Promise<void> {
     const { a, b, c, pub } = await proveSnark("deposit", {
       outputCommitments: [dNoteV, dNote0], outputValues: [V, 0n],
       outputSalts: [sD0, sD1], outputOwnerPublicKeys: [EMPLOYER.publicKey, EMPLOYER.publicKey],
-      ecdhPrivateKey: ECDH_DEP, encryptionNonce: NONCE_DEP, authorityPublicKey: ARBITER,
+      ecdhPrivateKey: ECDH_DEP, kemSs: KEM_DEP.kemSs,
+      encryptionNonce: NONCE_DEP, authorityPublicKey: ARBITER,
     });
     ok(BigInt(pub[0]) === V, `deposit out == V (${V})`);
     oracle.appendLeaf(dNoteV); oracle.appendLeaf(dNote0);
-    await (await pool.deposit(a, b, c, pub, TX)).wait();
+    await (await pool.deposit(a, b, c, pub, kemHex(KEM_DEP.kemCiphertext), TX)).wait();
     ok((await pool.root()).toString() === oracle.getRoot().toString(), "after deposit: pool.root == mirror");
     ok((await pool.nextLeafIndex()).toString() === "4", "after deposit: nextLeafIndex == 4");
   }
@@ -150,13 +179,15 @@ async function main(): Promise<void> {
     root: oracle.getRoot(), pathElements: [siblings], leafIndices: [BigInt(leafV)], enabled: [1n],
     outputCommitments: outCommits, outputValues: amounts, outputSalts: amounts.map((_, i) => sR(i)),
     outputOwnerPublicKeys: RCPTS.map((r) => r.publicKey),
+    kemSs: KEM_DISB.kemSs,
     encryptionNonce: NONCE, authorityPublicKey: ARBITER,
   };
   const { a, b, c, pub } = await proveDisburse256(input);
   ok(BigInt(pub[3]) === subtreeRoot, "disburse subtreeRoot (pub[3]) == oracle.computeSubtreeRoot");
-  ok(BigInt(pub[4]) === nfV, "disburse nullifier (pub[4]) == nullifier(deposit note)");
-  ok(BigInt(pub[5]) === oracle.getRoot(), "disburse membership root (pub[5]) == live tree root");
-  ok(BigInt(pub[8]) === ARBITER[0] && BigInt(pub[9]) === ARBITER[1], "disburse authority key == pool's stored arbiter key");
+  ok(BigInt(pub[4]) === kemBindingOf(KEM_DISB.kemSs), "disburse kemBinding (pub[4]) == binding(tx kemSs)");
+  ok(BigInt(pub[5]) === nfV, "disburse nullifier (pub[5]) == nullifier(deposit note)");
+  ok(BigInt(pub[6]) === oracle.getRoot(), "disburse membership root (pub[6]) == live tree root");
+  ok(BigInt(pub[9]) === ARBITER[0] && BigInt(pub[10]) === ARBITER[1], "disburse authority key == pool's stored arbiter key");
 
   // rebuild + prove the on-chain ciphertext via disclosureHash
   const rcptCts = amounts.map((v, i) => poseidonEncrypt([v, sR(i)], ecdhSharedSecret(ECDH, RCPTS[i].publicKey), NONCE));
@@ -165,14 +196,17 @@ async function main(): Promise<void> {
     inputs: [{ owner: EMPLOYER.publicKey, value: V, salt: sD0 }],
     outputs: amounts.map((v, i) => ({ owner: RCPTS[i].publicKey, value: v, salt: sR(i) })),
   });
-  const authCt = poseidonEncrypt(authPlain, ecdhSharedSecret(ECDH, ARBITER), NONCE);
+  // hybrid envelope key (design doc §2): raw-ECDH would break disclosureHash
+  const authCt = poseidonEncrypt(
+    authPlain, hybridEnvelopeKey(ecdhSharedSecret(ECDH, ARBITER), KEM_DISB.kemSs), NONCE);
   ok(disclosureChain([...ctFlat, ...authCt]) === BigInt(pub[2]), "recomputed disclosureHash == pub[2] (on-chain ciphertext is the circuit's)");
 
   oracle.attachSubtree(subtreeRoot, outCommits); // pad leaves 4..255 dead, attach 256..511
   // §6b v2: the enforced-length disburse publishes the FULL ciphertext
   // (256*4 receiver ++ authority = 2054 elements) — the contract reverts otherwise.
   step("SUBMIT disburseWithCiphertexts to GIWA (full ciphertext: receiver ++ authority)");
-  const tx = await pool.disburseWithCiphertexts(a, b, c, pub, [...ctFlat, ...authCt].map(dec), TX);
+  const tx = await pool.disburseWithCiphertexts(
+    a, b, c, pub, [...ctFlat, ...authCt].map(dec), kemHex(KEM_DISB.kemCiphertext), TX);
   const rcpt = await tx.wait();
   ok((await pool.root()).toString() === oracle.getRoot().toString(), "after disburse: pool.root == mirror (256-subtree attached)");
   ok((await pool.nextLeafIndex()).toString() === "512", "after disburse: nextLeafIndex == 512 (pad 4->256 + 256 batch)");

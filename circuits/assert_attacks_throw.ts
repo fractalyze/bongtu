@@ -9,12 +9,19 @@
 // `(1 - enabled[i]) * inputValues[i] === 0` in CheckNullifiersInputsOutputsValueIMT.
 // Requires out/withdraw_js (compile withdraw first, e.g. via prove_all.sh).
 //
-//   npx tsx assert_attacks_throw.ts    # exits 0 iff all three assertions hold
+// PLUS the PQ-envelope binding gate (pq-envelope-design.md §2/§6): for every
+// proved fixture in out/, TAMPERING the kemBinding public signal makes
+// `groth16 verify` FAIL — a prover cannot claim a binding that mismatches its
+// own kemSs witness, so the on-chain binding is exactly what the proof fixed.
+//
+//   npx tsx assert_attacks_throw.ts    # exits 0 iff all assertions hold
 
 import { execFileSync } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { loadSnarkjs } from "@bongtu/core/extern";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = join(HERE, "out");
@@ -82,8 +89,52 @@ for (const name of ["withdraw_mint", "withdraw_attack"]) {
   }
 }
 
+// --- PQ kemBinding tamper gate ---------------------------------------------
+// kemBinding public-signal index per circuit (pq-envelope-design.md §3 layouts).
+const KEM_BINDING_AT: Record<string, number> = {
+  deposit: 13,
+  withdraw: 16,
+  transfer: 26,
+  disburse: 4,
+  disburse256: 4,
+};
+
+async function kemBindingTamperGate(): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const snarkjs: any = loadSnarkjs();
+  const rd = (p: string): any => JSON.parse(readFileSync(p, "utf8"));
+  for (const [name, at] of Object.entries(KEM_BINDING_AT)) {
+    const vkeyP = join(OUT, `${name}.vkey.json`);
+    const pubP = join(OUT, `${name}.public.json`);
+    const proofP = join(OUT, `${name}.proof.json`);
+    if (!existsSync(vkeyP) || !existsSync(pubP) || !existsSync(proofP)) {
+      console.log(`SKIP: ${name} kemBinding tamper (missing out/ artifacts)`);
+      continue;
+    }
+    const vkey = rd(vkeyP);
+    const pub: string[] = rd(pubP);
+    const proof = rd(proofP);
+    if (!(await snarkjs.groth16.verify(vkey, pub, proof))) {
+      console.error(`FAIL: ${name} honest proof does not verify (stale out/?)`);
+      failures++;
+      continue;
+    }
+    const tampered = [...pub];
+    tampered[at] = (BigInt(pub[at]) + 1n).toString();
+    if (await snarkjs.groth16.verify(vkey, tampered, proof)) {
+      console.error(`FAIL: ${name} verified with a TAMPERED kemBinding (pub[${at}]+1)`);
+      failures++;
+    } else {
+      console.log(`OK: ${name} tampered kemBinding (pub[${at}]+1) -> groth16 verify FAILS`);
+    }
+  }
+}
+
+await kemBindingTamperGate();
+
 if (failures) {
   console.error(`\nBELT GATE: FAIL (${failures})`);
   process.exit(1);
 }
-console.log("\nBELT GATE: PASS — mint-from-nothing is unsatisfiable at the circuit level");
+console.log("\nBELT GATE: PASS — mint-from-nothing is unsatisfiable at the circuit level; kemBinding is proof-bound");
+process.exit(0);

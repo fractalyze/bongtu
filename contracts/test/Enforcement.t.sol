@@ -44,49 +44,49 @@ contract EnforcementTest is Base {
         );
     }
 
-    /// deposit appends oc0=pub[13], oc1=pub[14]; a zero in either reverts.
+    /// deposit appends oc0=pub[14], oc1=pub[15]; a zero in either reverts.
     function testZeroOutputCommitmentDepositReverts() public {
         pool = _stubPool();
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = dummyABC();
-        uint[18] memory pub;
-        pub[13] = 0; // zero output commitment
-        pub[14] = 7; // the other output is a normal note
+        uint[19] memory pub;
+        pub[14] = 0; // zero output commitment
+        pub[15] = 7; // the other output is a normal note
 
         vm.expectRevert(BongtuPool.ZeroOutputCommitment.selector);
-        pool.deposit(a, b, c, pub);
+        pool.deposit(a, b, c, pub, dummyKemCt());
         assertEq(pool.nextLeafIndex(), 0, "no leaf must be appended on a rejected deposit");
     }
 
-    /// transfer appends oc0=pub[31], oc1=pub[32]; a zero in either reverts (after
+    /// transfer appends oc0=pub[32], oc1=pub[33]; a zero in either reverts (after
     /// the root guard + nullifier spend, satisfied with the empty root and two
     /// fresh nonzero nullifiers).
     function testZeroOutputCommitmentTransferReverts() public {
         pool = _stubPool();
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = dummyABC();
-        uint[36] memory pub;
-        pub[28] = pool.root(); // known (empty-tree) root => passes root guard
-        pub[26] = 111; // fresh real nullifiers
-        pub[27] = 222;
-        pub[31] = 0; // zero output commitment
-        pub[32] = 9;
+        uint[37] memory pub;
+        pub[29] = pool.root(); // known (empty-tree) root => passes root guard
+        pub[27] = 111; // fresh real nullifiers
+        pub[28] = 222;
+        pub[32] = 0; // zero output commitment
+        pub[33] = 9;
 
         vm.expectRevert(BongtuPool.ZeroOutputCommitment.selector);
-        pool.transfer(a, b, c, pub);
+        pool.transfer(a, b, c, pub, dummyKemCt());
         assertEq(pool.nextLeafIndex(), 0, "no leaf must be appended on a rejected transfer");
     }
 
-    /// withdraw appends change=pub[21]; a zero reverts (after root guard + spend).
+    /// withdraw appends change=pub[22]; a zero reverts (after root guard + spend).
     function testZeroOutputCommitmentWithdrawReverts() public {
         pool = _stubPool();
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = dummyABC();
-        uint[25] memory pub;
-        pub[18] = pool.root(); // known (empty-tree) root
-        pub[16] = 333; // fresh real nullifiers
-        pub[17] = 444;
-        pub[21] = 0; // zero change commitment
+        uint[26] memory pub;
+        pub[19] = pool.root(); // known (empty-tree) root
+        pub[17] = 333; // fresh real nullifiers
+        pub[18] = 444;
+        pub[22] = 0; // zero change commitment
 
         vm.expectRevert(BongtuPool.ZeroOutputCommitment.selector);
-        pool.withdraw(a, b, c, pub);
+        pool.withdraw(a, b, c, pub, dummyKemCt());
         assertEq(pool.nextLeafIndex(), 0, "no leaf must be appended on a rejected withdraw");
     }
 }

@@ -7,7 +7,8 @@ pragma circom 2.2.2;
 // authority encryption at seconds-per-iteration scale.
 //
 // Public: [nullifiers, encryptionNonce, root, enabled, authorityPublicKey]
-//         + circuit outputs ecdhPublicKey[2], disclosureHash, subtreeRoot.
+//         + circuit outputs ecdhPublicKey[2], disclosureHash, subtreeRoot,
+//           kemBinding  => 11 public signals total.
 // Base is the VENDORED copy in circuits/lib (resolves via `-l lib`); a fresh
 // checkout no longer depends on any untracked zeto file (docs/zeto-derivation.md).
 include "anon_enc_nullifier_non_repudiation_imt_base.circom";

@@ -53,6 +53,7 @@ import {
   type OpKind,
   type ParsedEnvelope,
 } from "../src/envelope.js";
+import { ml_kem768, kemSsToLimbs, hybridEnvelopeKey } from "../src/kem.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..", "..");
@@ -83,8 +84,13 @@ const PINS: Record<string, string> = {
   "p1.D.honest.plain": "d374c99999acd980fb7aac3bfe49c85097850c4d6b26d08bfb93d95f9425f495", // == p1.B by construction
   "p1.D.d3.plain": "56af95af5410016a48c689e63da0044d4c6c552f2f2f64efab31c7b8d35b81b7",
   "p1.D.d3.ct": "f95363ef8851a456a4f874fe08f1829772895be84891127b05271890f5f5a5c2",
-  "p2.ct": "4dc51ba09d8064fa53701142520d65ba49d90c83af4e5215159086e0c4a6678a",
-  "p3.disburse256": "d886e4ac7447cf933c999729e5e73aa80abb2f64ea338cc4342de31c45b392a6",
+  // p2.ct / p3.disburse256 RE-RECORDED for U-P1 (pq hybrid envelope): the
+  // committed disburse256 fixture was re-proven with the hybrid
+  // (ECDH||ML-KEM-768) envelope key and deterministic single-leaf input, so the
+  // fixture-derived bytes legitimately changed (the ground-truth assert
+  // disclosureChain == pub[2] is re-proven against the NEW committed proof).
+  "p2.ct": "56150258c69fe5343080f01bac5558ce00480dc2afab0922e4eb18adad5c6de1",
+  "p3.disburse256": "5d69493d2beec596c5bd35c70ddbb1a17cb3154802b8981c7ca5bf9d7721b130",
   "p3.deposit": "3af9037204d708c178633c2f23345d9d17b33427c5eb912adbb8118bb853146a",
   "p3.withdraw": "949f55c40e7cefdf7aab88f13d69143dd85ca5c12edf12d518f591f389847ace",
   "p3.transfer": "14fbd40affe42c14051a3815a84e3ac9b6c71de8fab89df20f51277c1e58e167",
@@ -93,6 +99,19 @@ const PINS: Record<string, string> = {
 // ---- shared fixture actors --------------------------------------------------
 
 const AUTHORITY = deriveKeypair(555555555555555555555555n); // the ONE fixture arbiter key
+
+// The fixture arbiter ML-KEM keypair + the disburse256 fixture encapsulation
+// (label-derived randomness), mirroring circuits/fixture_lib.ts — the committed
+// disburse256 proof's authority tail is encrypted under the HYBRID key
+// (pq-envelope-design.md §2), so the p2/p3 ground-truth recompute needs the
+// same kemSs limbs the witness carried.
+const shaBytes = (label: string): Uint8Array => new Uint8Array(createHash("sha256").update(label).digest());
+const FIXTURE_KEM = ml_kem768.keygen(
+  new Uint8Array([...shaBytes("bongtu/fixture/kem/seed/d"), ...shaBytes("bongtu/fixture/kem/seed/z")]),
+);
+const DISBURSE256_KEM_SS = kemSsToLimbs(
+  ml_kem768.encapsulate(FIXTURE_KEM.publicKey, shaBytes("bongtu/fixture/kem/encap/disburse256")).sharedSecret,
+);
 
 // =============================================================================
 // p1.A — the admin-web disburse assembly material (assemble.test.ts fixture(3))
@@ -279,7 +298,10 @@ function committedDisburse256(): {
   });
   const authorityCt = poseidonEncrypt(
     authPlain,
-    ecdhSharedSecret(ecdh, [BigInt(input.authorityPublicKey[0]), BigInt(input.authorityPublicKey[1])]),
+    hybridEnvelopeKey(
+      ecdhSharedSecret(ecdh, [BigInt(input.authorityPublicKey[0]), BigInt(input.authorityPublicKey[1])]),
+      DISBURSE256_KEM_SS,
+    ),
     nonce,
   );
   return { input, pub, receiverFlat, authorityCt };
@@ -316,10 +338,11 @@ test("p3: parseEnvelope on the committed disburse256 authority tail (arbiter key
     authorityCt,
     "disburse",
     256,
+    DISBURSE256_KEM_SS, // arbiter-decapsulated limbs -> hybrid key
   );
   assert.equal(parsed.inputs.length, 1);
   assert.equal(parsed.outputs.length, 256);
-  assert.equal(parsed.inputs[0].value, 25600n); // sum(100+i, i<256)
+  assert.equal(parsed.inputs[0].value, 58240n); // sum(100+i, i<256) over the U-P1 fixture amounts
   const inOwner = deriveKeypair(BigInt(input.inputOwnerPrivateKey)).publicKey;
   assert.deepEqual(parsed.inputs[0].owner, [inOwner[0], inOwner[1]]);
   // every recovered output rebuilds its committed commitment

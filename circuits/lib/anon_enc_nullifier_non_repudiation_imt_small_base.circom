@@ -19,6 +19,9 @@ pragma circom 2.2.2;
 //       cipherTexts / cipherTextAuthority as circuit outputs) so the contract
 //       binds the leaves and ciphertext directly from the very bytes the circuit
 //       emits — at this arity the ciphertext rides cheaply as public signals.
+//   (e) PQ hybrid envelope (.dev/pq-envelope-design.md §2): private input
+//       kemSs[2] (ML-KEM-768 shared-secret limbs), envelope key = tagged
+//       Poseidon(5) fold of ECDH x kemSs, new LAST output kemBinding.
 //
 // Membership is the append-only IMT (check-imt-proof, depth `nLevels`).
 // Everything else (nullifiers, sum/positive checks, receiver + authority
@@ -32,6 +35,8 @@ include "check-imt-proof.circom";   // vendored IMT membership (bongtu/circuits/
 include "lib/encrypt-outputs.circom";
 include "node_modules/circomlib/circuits/babyjub.circom";
 include "node_modules/circomlib/circuits/comparators.circom"; // IsZero for the §5.2 zero-commitment belt (also reached transitively via check-imt-proof)
+include "node_modules/circomlib/circuits/bitify.circom"; // Num2Bits (kemSs limb canonicalization)
+include "node_modules/circomlib/circuits/poseidon.circom"; // hybrid-key / kemBinding derivation (pq-envelope-design.md §2)
 
 template ZetoTransferSmall(nInputs, nOutputs, nLevels) {
   signal input nullifiers[nInputs];
@@ -40,6 +45,8 @@ template ZetoTransferSmall(nInputs, nOutputs, nLevels) {
   signal input inputSalts[nInputs];
   signal input inputOwnerPrivateKey;
   signal input ecdhPrivateKey;
+  // ML-KEM-768 shared-secret limbs (LE-uint128 halves of ss; PRIVATE).
+  signal input kemSs[2];
   signal input root;
   signal input pathElements[nInputs][nLevels];
   signal input leafIndices[nInputs];
@@ -61,6 +68,9 @@ template ZetoTransferSmall(nInputs, nOutputs, nLevels) {
     l += (3 - (l % 3));
   }
   signal output cipherTextAuthority[l + 1];
+  // LAST output so existing output indices are stable and every public-input
+  // index shifts by exactly +1 (pq-envelope-design.md §3).
+  signal output kemBinding;
 
   var inputOwnerPubKeyAx, inputOwnerPubKeyAy;
   (inputOwnerPubKeyAx, inputOwnerPubKeyAy) = BabyPbk()(in <== inputOwnerPrivateKey);
@@ -124,6 +134,25 @@ template ZetoTransferSmall(nInputs, nOutputs, nLevels) {
   var sharedSecretAuthority[2];
   (sharedSecretAuthority) = Ecdh()(privKey <== ecdhPrivateKey, pubKey <== authorityPublicKey);
 
+  // --- PQ hybrid key (pq-envelope-design.md §2) ---
+  // Canonical-encoding hygiene: each limb is a genuine 128-bit value.
+  component kemSsRange[2];
+  for (var i = 0; i < 2; i++) {
+    kemSsRange[i] = Num2Bits(128);
+    kemSsRange[i].in <== kemSs[i];
+  }
+  // Frozen domain-separation tags (sha256(ASCII) mod r):
+  //   TAG_K0 = sha256("bongtu/pq-envelope/v1/key0"), TAG_K1 = .../key1,
+  //   TAG_BIND = .../binding. Key derivation (arity 5) and binding (arity 3)
+  //   are separated by both tag and arity.
+  var TAG_K0 = 10398998902367040515226727887904115149378422647845688990538198988921570667720;
+  var TAG_K1 = 7025394518961265764175593663800963341053996587382265036146196548941915994055;
+  var TAG_BIND = 5518019128667894418081277213291049553290157756968653594844689494754896839788;
+  signal hybridKey[2];
+  hybridKey[0] <== Poseidon(5)([TAG_K0, sharedSecretAuthority[0], sharedSecretAuthority[1], kemSs[0], kemSs[1]]);
+  hybridKey[1] <== Poseidon(5)([TAG_K1, sharedSecretAuthority[0], sharedSecretAuthority[1], kemSs[0], kemSs[1]]);
+  kemBinding <== Poseidon(3)([TAG_BIND, kemSs[0], kemSs[1]]);
+
   var plainText[2 + 2 * nInputs + 4 * nOutputs];
   plainText[0] = inputOwnerPubKeyAx;
   plainText[1] = inputOwnerPubKeyAy;
@@ -147,5 +176,5 @@ template ZetoTransferSmall(nInputs, nOutputs, nLevels) {
     idx1++;
   }
 
-  cipherTextAuthority <== SymmetricEncrypt(2 + 2 * nInputs + 4 * nOutputs)(plainText <== plainText, key <== sharedSecretAuthority, nonce <== encryptionNonce);
+  cipherTextAuthority <== SymmetricEncrypt(2 + 2 * nInputs + 4 * nOutputs)(plainText <== plainText, key <== hybridKey, nonce <== encryptionNonce);
 }

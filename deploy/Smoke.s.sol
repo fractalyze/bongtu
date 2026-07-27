@@ -29,7 +29,8 @@ contract Smoke is Script {
         uint[2] a;
         uint[2][2] b;
         uint[2] c;
-        uint[18] pub;
+        uint[19] pub;
+        bytes kemCiphertext;
     }
 
     function run() external {
@@ -53,7 +54,7 @@ contract Smoke is Script {
         vm.startBroadcast(deployerKey);
         MockERC20(tokenAddr).mint(deployer, amount);
         IERC20(tokenAddr).approve(address(pool), type(uint256).max);
-        pool.deposit(p.a, p.b, p.c, p.pub);
+        pool.deposit(p.a, p.b, p.c, p.pub, p.kemCiphertext);
         vm.stopBroadcast();
 
         // --- assert the deployed pool advanced -------------------------------
@@ -80,6 +81,10 @@ contract Smoke is Script {
         (uint256 kx, uint256 ky) = pool.currentArbiterKey();
         require(kx == vm.parseJsonUint(aj, ".arbiterKeyX"), "SMOKE: arbiter key x mismatch");
         require(ky == vm.parseJsonUint(aj, ".arbiterKeyY"), "SMOKE: arbiter key y mismatch");
+        require(
+            pool.arbiterKemPkHash(pool.currentEpoch()) == vm.parseJsonBytes32(aj, ".arbiterKemPkHash"),
+            "SMOKE: arbiter KEM pk hash mismatch"
+        );
         console2.log("== smoke: getters OK (B, owner, arbiter key) ==");
         console2.log("pool.B()    :", pool.B());
         console2.log("pool.owner():", pool.owner());
@@ -96,6 +101,7 @@ contract Smoke is Script {
         p.a = [av[0], av[1]];
         p.b = [[b0[0], b0[1]], [b1[0], b1[1]]];
         p.c = [cv[0], cv[1]];
-        for (uint256 i = 0; i < 18; i++) p.pub[i] = pv[i];
+        for (uint256 i = 0; i < 19; i++) p.pub[i] = pv[i];
+        p.kemCiphertext = vm.parseJsonBytes(rj, ".deposit.kemCiphertext");
     }
 }

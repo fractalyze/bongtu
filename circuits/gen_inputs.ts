@@ -27,6 +27,7 @@ import {
   ECDH_SK,
   ENCRYPTION_NONCE,
   SENDER,
+  kemDraw,
   membership,
   receiver,
   salt,
@@ -47,6 +48,7 @@ function genDeposit(): DepositInput {
     outputOwnerPublicKeys: owners,
     // §6b v2 auditor envelope (outputs-only; deposit is a mint, no input note).
     ecdhPrivateKey: BigInt(ECDH_SK),
+    kemSs: kemDraw("deposit").kemSs,
     encryptionNonce: ENCRYPTION_NONCE,
     authorityPublicKey: AUTHORITY.publicKey,
   };
@@ -81,6 +83,7 @@ function genDisburse(): DisburseInput {
     outputValues: outValues,
     outputSalts: outValues.map((_, i) => salt(i)),
     outputOwnerPublicKeys: owners,
+    kemSs: kemDraw("disburse").kemSs,
     encryptionNonce: ENCRYPTION_NONCE,
     authorityPublicKey: AUTHORITY.publicKey,
   };
@@ -114,6 +117,7 @@ function genTransfer(): TransferInput {
     outputValues: outValues,
     outputSalts: outValues.map((_, i) => salt(i)),
     outputOwnerPublicKeys: owners,
+    kemSs: kemDraw("transfer").kemSs,
     encryptionNonce: ENCRYPTION_NONCE,
     authorityPublicKey: AUTHORITY.publicKey,
   };
@@ -148,6 +152,7 @@ function genWithdraw(): WithdrawInput {
     outputOwnerPublicKeys: owners,
     // §6b v2 auditor envelope (input owner + inputs + change note).
     ecdhPrivateKey: BigInt(ECDH_SK),
+    kemSs: kemDraw("withdraw").kemSs,
     encryptionNonce: ENCRYPTION_NONCE,
     authorityPublicKey: AUTHORITY.publicKey,
   };

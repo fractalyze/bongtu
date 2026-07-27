@@ -23,6 +23,9 @@
 //       So a withdraw's inputs + change note are auditor-decryptable from
 //       on-chain data alone; the contract injects the stored arbiter key into
 //       authorityPublicKey so a proof not encrypted to it FAILS.
+//   (6) PQ hybrid envelope (.dev/pq-envelope-design.md §2): private input
+//       kemSs[2] (ML-KEM-768 shared-secret limbs), envelope key = tagged
+//       Poseidon(5) fold of ECDH x kemSs, new LAST output kemBinding.
 //
 // commitment = hash(value, salt, owner public key)
 // nullifier  = hash(value, salt, ownerPrivatekey)
@@ -36,6 +39,8 @@ include "lib/encrypt.circom";
 include "check-imt-proof.circom";   // vendored IMT membership (bongtu/circuits/lib, via -l lib)
 include "node_modules/circomlib/circuits/babyjub.circom"; // BabyPbk (owner + ecdh public keys)
 include "node_modules/circomlib/circuits/comparators.circom"; // IsZero for the §5.2 zero-commitment belt (also reached transitively via check-imt-proof)
+include "node_modules/circomlib/circuits/bitify.circom"; // Num2Bits (kemSs limb canonicalization)
+include "node_modules/circomlib/circuits/poseidon.circom"; // hybrid-key / kemBinding derivation (pq-envelope-design.md §2)
 
 template CheckNullifiersInputsOutputsValueIMT(nInputs, nOutputs, nLevels) {
   signal input nullifiers[nInputs];
@@ -56,6 +61,8 @@ template CheckNullifiersInputsOutputsValueIMT(nInputs, nOutputs, nLevels) {
   // §6b v2 authority envelope: ecdhPrivateKey is private; encryptionNonce +
   // authorityPublicKey are public (the contract injects the stored arbiter key).
   signal input ecdhPrivateKey;
+  // ML-KEM-768 shared-secret limbs (LE-uint128 halves of ss; PRIVATE).
+  signal input kemSs[2];
   signal input encryptionNonce;
   signal input authorityPublicKey[2];
 
@@ -69,6 +76,9 @@ template CheckNullifiersInputsOutputsValueIMT(nInputs, nOutputs, nLevels) {
     lAuth += (3 - (lAuth % 3));
   }
   signal output cipherTextAuthority[lAuth + 1];
+  // LAST output so existing output indices are stable and every public-input
+  // index shifts by exactly +1 (pq-envelope-design.md §3).
+  signal output kemBinding;
 
   var inputOwnerPubKeyAx, inputOwnerPubKeyAy;
   (inputOwnerPubKeyAx, inputOwnerPubKeyAy) = BabyPbk()(in <== inputOwnerPrivateKey);
@@ -151,6 +161,25 @@ template CheckNullifiersInputsOutputsValueIMT(nInputs, nOutputs, nLevels) {
   var sharedSecretAuthority[2];
   (sharedSecretAuthority) = Ecdh()(privKey <== ecdhPrivateKey, pubKey <== authorityPublicKey);
 
+  // --- PQ hybrid key (pq-envelope-design.md §2) ---
+  // Canonical-encoding hygiene: each limb is a genuine 128-bit value.
+  component kemSsRange[2];
+  for (var i = 0; i < 2; i++) {
+    kemSsRange[i] = Num2Bits(128);
+    kemSsRange[i].in <== kemSs[i];
+  }
+  // Frozen domain-separation tags (sha256(ASCII) mod r):
+  //   TAG_K0 = sha256("bongtu/pq-envelope/v1/key0"), TAG_K1 = .../key1,
+  //   TAG_BIND = .../binding. Key derivation (arity 5) and binding (arity 3)
+  //   are separated by both tag and arity.
+  var TAG_K0 = 10398998902367040515226727887904115149378422647845688990538198988921570667720;
+  var TAG_K1 = 7025394518961265764175593663800963341053996587382265036146196548941915994055;
+  var TAG_BIND = 5518019128667894418081277213291049553290157756968653594844689494754896839788;
+  signal hybridKey[2];
+  hybridKey[0] <== Poseidon(5)([TAG_K0, sharedSecretAuthority[0], sharedSecretAuthority[1], kemSs[0], kemSs[1]]);
+  hybridKey[1] <== Poseidon(5)([TAG_K1, sharedSecretAuthority[0], sharedSecretAuthority[1], kemSs[0], kemSs[1]]);
+  kemBinding <== Poseidon(3)([TAG_BIND, kemSs[0], kemSs[1]]);
+
   var plainText[2 + 2 * nInputs + 4 * nOutputs];
   plainText[0] = inputOwnerPubKeyAx;
   plainText[1] = inputOwnerPubKeyAy;
@@ -174,5 +203,5 @@ template CheckNullifiersInputsOutputsValueIMT(nInputs, nOutputs, nLevels) {
     idxAuth++;
   }
 
-  cipherTextAuthority <== SymmetricEncrypt(2 + 2 * nInputs + 4 * nOutputs)(plainText <== plainText, key <== sharedSecretAuthority, nonce <== encryptionNonce);
+  cipherTextAuthority <== SymmetricEncrypt(2 + 2 * nInputs + 4 * nOutputs)(plainText <== plainText, key <== hybridKey, nonce <== encryptionNonce);
 }

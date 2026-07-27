@@ -30,6 +30,7 @@ import {
   ECDH_SK,
   ENCRYPTION_NONCE,
   SENDER,
+  kemDraw,
   membership,
   receiver,
   salt,
@@ -39,11 +40,12 @@ import {
 // §6b v2 authority-envelope material (the shared AUTHORITY key, so
 // withdraw_padded encrypts to the SAME arbiter key the contract injects; the two
 // throwing fixtures still fail on the value-belt, not on a missing-input error).
-const authEnvelope = {
+const authEnvelope = (label: string) => ({
   ecdhPrivateKey: BigInt(ECDH_SK),
+  kemSs: kemDraw(label).kemSs,
   encryptionNonce: ENCRYPTION_NONCE,
   authorityPublicKey: AUTHORITY.publicKey,
-};
+});
 
 // --- mint-from-nothing: the TRUE soundness vector (SPEC §5.2) ---------------
 // A fabricated input with nullifier=0, commitment=0, value=X, enabled=0 passes
@@ -79,7 +81,7 @@ function genMint(): WithdrawInput {
     outputValues: outValues,
     outputSalts: [salt(0)],
     outputOwnerPublicKeys: owners,
-    ...authEnvelope,
+    ...authEnvelope("withdraw_mint"),
   };
 }
 
@@ -108,7 +110,7 @@ function genAttack(): WithdrawInput {
     outputValues: outValues,
     outputSalts: outValues.map((_, i) => salt(i)),
     outputOwnerPublicKeys: owners,
-    ...authEnvelope,
+    ...authEnvelope("withdraw_attack"),
   };
 }
 
@@ -138,7 +140,7 @@ function genPadded(): WithdrawInput {
     outputValues: outValues,
     outputSalts: outValues.map((_, i) => salt(i)),
     outputOwnerPublicKeys: owners,
-    ...authEnvelope,
+    ...authEnvelope("withdraw_padded"),
   };
 }
 

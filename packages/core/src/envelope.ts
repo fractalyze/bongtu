@@ -43,7 +43,8 @@
 // pin suite (test/envelope.test.ts p2) proves this TS fold equals the
 // in-circuit gadget on the committed disburse256 proof fixture.
 
-import type { Point } from "./babyjub.js";
+import type { FieldInput, Point } from "./babyjub.js";
+import { hybridEnvelopeKey } from "./kem.js";
 import { ecdhSharedSecret, poseidonDecrypt } from "./note.js";
 import { poseidon2 } from "./poseidon.js";
 
@@ -157,6 +158,11 @@ export function buildAuthorityPlaintext(kind: OpKind, env: ParsedEnvelope): bigi
  * `ct` is the authority ciphertext ONLY. For disburse that is the TAIL after the
  * 4*B receiver elements (the receiver run is keyed to each recipient, not to the
  * arbiter); deposit/withdraw/transfer publish the authority ciphertext on its own.
+ *
+ * `kemSs` (pq-envelope-design.md §2/§5): the ML-KEM-768 shared-secret limbs the
+ * arbiter decapsulated from the op's kemCiphertext. Present -> the envelope key
+ * is the tagged hybrid Poseidon fold; absent -> the legacy raw-ECDH-point key
+ * (pre-KEM ops decode under the V1 event ABI with no kem fields).
  */
 export function parseEnvelope(
   arbiterPriv: bigint,
@@ -165,9 +171,11 @@ export function parseEnvelope(
   ct: bigint[],
   kind: OpKind,
   B: number,
+  kemSs?: [FieldInput, FieldInput],
 ): ParsedEnvelope {
   const shared = ecdhSharedSecret(arbiterPriv, ecdhPublicKey);
-  const m = poseidonDecrypt(ct, shared, nonce, envelopePlaintextLen(kind, B));
+  const key = kemSs ? hybridEnvelopeKey(shared, kemSs) : shared;
+  const m = poseidonDecrypt(ct, key, nonce, envelopePlaintextLen(kind, B));
 
   switch (kind) {
     case "deposit":

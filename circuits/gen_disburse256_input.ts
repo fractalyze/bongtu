@@ -7,10 +7,12 @@
 //
 // PRNG-free like the others, but the employer / recipient / ECDH seeds stay
 // LOCAL because they mirror deploy/giwa_disburse256.ts (the live runner), not
-// the shared gen_inputs material; only AUTHORITY / write() come from
-// fixture_lib.ts. The tree here is local (leaf 0 a dummy note, leaf 1 the spent
+// the shared gen_inputs material; only AUTHORITY / kemDraw / write() come from
+// fixture_lib.ts. The tree here is local and SINGLE-LEAF (leaf 0 = the spent
 // input note) — the proof verifies against the disburse256 vkey with its own
-// self-consistent root, no chain state involved.
+// self-consistent root, no chain state involved, and the oracle generator
+// (contracts/test/fixtures/gen_disburse256_oracle.ts) reproduces the root with
+// one appendLeaf.
 //
 //   npx tsx gen_disburse256_input.ts     # writes inputs/disburse256.json
 
@@ -19,7 +21,7 @@ import { deriveKeypair, commitment, nullifier, assertDistinctOwnerPubkeys } from
 import type { Keypair } from "@bongtu/core/note";
 import type { DisburseInput } from "@bongtu/core/proving";
 
-import { AUTHORITY, H, write } from "./fixture_lib.js";
+import { AUTHORITY, H, kemDraw, write } from "./fixture_lib.js";
 
 const B = 256; // production disburse batch size
 
@@ -35,9 +37,11 @@ function main(): void {
   const amounts = Array.from({ length: B }, (_, i) => 100n + BigInt(i)); // 256 distinct positive
   const V = amounts.reduce((a, x) => a + x, 0n);
 
-  // A tiny local tree: leaf 0 a dummy note, leaf 1 = the input note we spend.
+  // A single-leaf local tree: leaf 0 = the input note we spend. Single-leaf so
+  // contracts/test/fixtures/gen_disburse256_oracle.ts can reproduce the
+  // membership root with ONE appendLeaf (this input doubles as the committed
+  // disburse256.input.json fixture the GPU proof is bound to).
   const tree = new ImtTree(H, B);
-  tree.appendLeaf(commitment(1n, 1n, EMPLOYER.publicKey));
   const inCommit = commitment(V, inSalt, EMPLOYER.publicKey);
   const leafIndex = tree.getNextLeafIndex();
   tree.appendLeaf(inCommit);
@@ -62,6 +66,7 @@ function main(): void {
     outputValues: amounts,
     outputSalts: amounts.map((_, i) => outSalt(i)),
     outputOwnerPublicKeys: owners,
+    kemSs: kemDraw("disburse256").kemSs,
     encryptionNonce: NONCE,
     authorityPublicKey: AUTHORITY.publicKey,
   };

@@ -20,6 +20,7 @@ import {
   SENDER,
   ZERO_PATH,
   ZERO_ROOT,
+  kemDraw,
   receiver,
   salt,
   write,
@@ -49,6 +50,7 @@ const obj: DisburseInput = {
   outputValues: outValues,
   outputSalts: outValues.map((_, i) => salt(i)),
   outputOwnerPublicKeys: owners,
+  kemSs: kemDraw("disburse_zero_leaf").kemSs,
   encryptionNonce: ENCRYPTION_NONCE,
   authorityPublicKey: AUTHORITY.publicKey,
 };

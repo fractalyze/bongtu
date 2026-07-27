@@ -35,7 +35,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const H = 32;
 const B = 256;
 
-// Real proof publics (10) — the rabbitsnark-GPU disburse256 proof.
+// Real proof publics (11) — the rabbitsnark-GPU disburse256 proof
+// ([0..1]=ecdhPub [2]=disclosureHash [3]=subtreeRoot [4]=kemBinding [5]=nf
+//  [6]=root [7]=enabled [8]=nonce [9..10]=authorityPubKey).
 const pub = JSON.parse(readFileSync(join(HERE, "disburse256.public.json"), "utf8"));
 // Solidity-ready Groth16 calldata (snarkjs applied the G2 inner swap on b).
 const cd = JSON.parse(readFileSync(join(HERE, "disburse256.calldata.json"), "utf8"));
@@ -45,10 +47,11 @@ const INPUT_PATH = process.env.BONGTU_DISBURSE256_INPUT ?? join(HERE, "disburse2
 const input = JSON.parse(readFileSync(INPUT_PATH, "utf8"));
 
 const inputCommitment = BigInt(input.inputCommitments[0]);
-const membershipRoot = BigInt(pub[5]); // proof's asserted root
+const membershipRoot = BigInt(pub[6]); // proof's asserted root
 const subtreeRoot = BigInt(pub[3]); // in-circuit 256-leaf subtree root
-const nullifier = BigInt(pub[4]);
-const arbiterKey = [BigInt(pub[8]), BigInt(pub[9])];
+const kemBinding = BigInt(pub[4]); // PQ envelope binding (pq-envelope-design.md §3)
+const nullifier = BigInt(pub[5]);
+const arbiterKey = [BigInt(pub[9]), BigInt(pub[10])];
 
 const s = (x: bigint | number | string): string => "0x" + BigInt(x).toString(16).padStart(64, "0");
 
@@ -66,7 +69,7 @@ tree.appendLeaf(inputCommitment);
 const seedRoot = tree.getRoot();
 if (seedRoot !== membershipRoot) {
   throw new Error(
-    `seedRoot != public.json[5]:\n  seedRoot=${seedRoot}\n  pub[5]  =${membershipRoot}`,
+    `seedRoot != public.json[6]:\n  seedRoot=${seedRoot}\n  pub[6]  =${membershipRoot}`,
   );
 }
 
@@ -81,10 +84,11 @@ const out = {
   height: H,
   batchSize: B,
   inputCommitment: s(inputCommitment),
-  seedRoot: s(seedRoot), // == public.json[5]
+  seedRoot: s(seedRoot), // == public.json[6]
   subtreeRoot: s(subtreeRoot), // == public.json[3]
-  nullifier: s(nullifier), // == public.json[4]
-  arbiterKey: arbiterKey.map(s), // == public.json[8..9]
+  kemBinding: s(kemBinding), // == public.json[4]
+  nullifier: s(nullifier), // == public.json[5]
+  arbiterKey: arbiterKey.map(s), // == public.json[9..10]
   oracleRoot: s(oracleRoot), // root after appendLeaf + attachSubtree
   nextLeafIndexBeforeAttach, // 1
   finalNextLeafIndex, // pad(1->256) + attach(256) = 512
@@ -98,6 +102,6 @@ const out = {
 mkdirSync(HERE, { recursive: true });
 writeFileSync(join(HERE, "disburse256.oracle.json"), JSON.stringify(out, null, 2));
 console.log("wrote disburse256.oracle.json");
-console.log(`  seedRoot   = ${out.seedRoot}  (== public.json[5], verified)`);
+console.log(`  seedRoot   = ${out.seedRoot}  (== public.json[6], verified)`);
 console.log(`  oracleRoot = ${out.oracleRoot}`);
 console.log(`  finalNextLeafIndex = ${finalNextLeafIndex} (expect 512)`);

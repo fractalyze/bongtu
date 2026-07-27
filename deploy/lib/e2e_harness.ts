@@ -29,6 +29,7 @@
 // deploy/giwa_disburse256.ts also stays independent on purpose: it drives the
 // canonical LIVE GIWA pool (B=256), not a fresh anvil stack.
 
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,6 +37,7 @@ import { fileURLToPath } from "node:url";
 import { deriveKeypair } from "@bongtu/core/note";
 import type { Keypair } from "@bongtu/core/note";
 import type { FieldInput, PointInput } from "@bongtu/core/babyjub";
+import { ml_kem768, kemSsToLimbs } from "@bongtu/core/kem";
 import { toWire } from "@bongtu/core/proving";
 import { loadEthers, loadSnarkjs } from "@bongtu/core/extern";
 
@@ -126,10 +128,11 @@ export interface DeployedStack {
  *  4 Groth16 verifiers, mock kKRW, and BongtuPool behind its UUPS proxy —
  *  then fund + approve the driver wallet (deposit pulls from msg.sender via
  *  SafeERC20). The tx sequence is fixed, so contract addresses stay
- *  nonce-deterministic across both drivers. */
+ *  nonce-deterministic across both drivers. Epoch 0 carries the AUTHORITY_KEM
+ *  pk hash by default (initialize rejects the zero pre-KEM marker). */
 export async function deployStack(
   wallet: any,
-  opts: { batchSize: number; authorityPublicKey: PointInput; mintAmount: bigint },
+  opts: { batchSize: number; authorityPublicKey: PointInput; mintAmount: bigint; kemPkHash?: string },
 ): Promise<DeployedStack> {
   const posHex = readFileSync(POSEIDON_HEX, "utf8").trim();
   const posFactory = new ethers.ContractFactory([], posHex, wallet);
@@ -143,6 +146,7 @@ export async function deployStack(
   const pool = await deployPoolProxy(wallet, [
     poseidon.address, dv.address, wv.address, dsv.address, tv.address, token.address, opts.batchSize,
     [dec(opts.authorityPublicKey[0]), dec(opts.authorityPublicKey[1])],
+    opts.kemPkHash ?? ethers.utils.keccak256(AUTHORITY_KEM.publicKey),
   ]);
   await (await token.mint(wallet.address, dec(opts.mintAmount))).wait();
   await (await token.approve(pool.address, ethers.constants.MaxUint256)).wait();
@@ -158,6 +162,30 @@ export async function deployStack(
 // actors (bjj keypairs; scalars are index-derived, PRNG-free)
 export const EMPLOYER = deriveKeypair(111111111111111111111111n);
 export const AUTHORITY = deriveKeypair(555555555555555555555555n); // arbiter key
+
+// The arbiter's ML-KEM-768 keypair (the PQ half of the hybrid authority
+// envelope, pq-envelope-design.md §2). Deterministic like the bjj actors so
+// both gate drivers and a later arbiter-mode indexer run agree on the key
+// without any shared state; the DECAPS key (secretKey) is what an arbiter-mode
+// consumer feeds to AUTHORITY_KEM_KEY.
+const sha = (s: string): Uint8Array => new Uint8Array(createHash("sha256").update(s).digest());
+export const AUTHORITY_KEM = ml_kem768.keygen(
+  new Uint8Array([...sha("bongtu/e2e-harness/kem/seed/d"), ...sha("bongtu/e2e-harness/kem/seed/z")]),
+);
+
+/** Per-tx ML-KEM encapsulation against AUTHORITY_KEM: label-derived randomness
+ *  keeps proofs reproducible AND every tx's (ss, ct) distinct — reusing one ct
+ *  across ops would collapse the PQ compartment (design doc §6). */
+export function kemDraw(label: string): { kemSs: [bigint, bigint]; kemCiphertext: Uint8Array } {
+  const { cipherText, sharedSecret } = ml_kem768.encapsulate(
+    AUTHORITY_KEM.publicKey,
+    sha(`bongtu/e2e-harness/kem/encap/${label}`),
+  );
+  return { kemSs: kemSsToLimbs(sharedSecret), kemCiphertext: cipherText };
+}
+
+/** The `bytes calldata kemCiphertext` wire form for ethers. */
+export const kemCtHex = (ct: Uint8Array): string => "0x" + Buffer.from(ct).toString("hex");
 export const PAYEE = deriveKeypair(222222222222222222222222n);
 const recipient = (i: number): Keypair => deriveKeypair(2000000011n + BigInt(i) * 1000003n);
 export const RCPTS: Keypair[] = Array.from({ length: GATE_B }, (_, i) => recipient(i));

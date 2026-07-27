@@ -78,17 +78,27 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     // --- disburse access control (caller-gated, §5.3) -------------------------
     mapping(address => bool) public disburseAllowed;
 
+    /// @notice ML-KEM-768 ciphertext wire size (FIPS 203) — the only on-chain
+    ///         check possible on `kemCiphertext` (content is bound off-chain via
+    ///         the proof's `kemBinding` + arbiter decapsulation, design doc §2).
+    uint256 public constant KEM_CIPHERTEXT_LEN = 1088;
+
     // --- public-signal indices (derived from out/<name>.public.json + .sym) ----
-    // deposit  (18): [0]=out [1..2]=ecdhPub [3..12]=cipherTextAuthority[10]
-    //                [13..14]=oc [15]=nonce [16..17]=authorityPubKey
-    // withdraw (25): [0]=out [1..2]=ecdhPub [3..15]=cipherTextAuthority[13]
-    //                [16..17]=nf [18]=root [19..20]=enabled [21]=oc0(change)
-    //                [22]=nonce [23..24]=authorityPubKey
-    // disburse (10): [0..1]=ecdhPub [2]=disclosureHash [3]=subtreeRoot [4]=nf
-    //                [5]=root [6]=enabled [7]=nonce [8..9]=authorityPubKey
-    // transfer (36): [0..1]=ecdhPub [2..9]=cipherTexts[2][4]
-    //                [10..25]=cipherTextAuthority[16] [26..27]=nf [28]=root
-    //                [29..30]=enabled [31..32]=oc [33]=nonce [34..35]=authorityPubKey
+    // The PQ hybrid envelope (.dev/pq-envelope-design.md §3) declares `kemBinding`
+    // as the LAST circuit output, so all pre-existing output indices are unchanged
+    // and every public-INPUT index shifts by exactly +1.
+    // deposit  (19): [0]=out [1..2]=ecdhPub [3..12]=cipherTextAuthority[10]
+    //                [13]=kemBinding [14..15]=oc [16]=nonce [17..18]=authorityPubKey
+    // withdraw (26): [0]=out [1..2]=ecdhPub [3..15]=cipherTextAuthority[13]
+    //                [16]=kemBinding [17..18]=nf [19]=root [20..21]=enabled
+    //                [22]=oc0(change) [23]=nonce [24..25]=authorityPubKey
+    // disburse (11): [0..1]=ecdhPub [2]=disclosureHash [3]=subtreeRoot
+    //                [4]=kemBinding [5]=nf [6]=root [7]=enabled [8]=nonce
+    //                [9..10]=authorityPubKey
+    // transfer (37): [0..1]=ecdhPub [2..9]=cipherTexts[2][4]
+    //                [10..25]=cipherTextAuthority[16] [26]=kemBinding [27..28]=nf
+    //                [29]=root [30..31]=enabled [32..33]=oc [34]=nonce
+    //                [35..36]=authorityPubKey
 
     // --- events (all ciphertext copied from verified publicSignals) -----------
     event Appended(uint256 indexed leafIndex, uint256 leaf, uint256 root);
@@ -97,6 +107,12 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     // output notes are decryptable from on-chain data alone. ecdhPublicKey +
     // encryptionNonce + encryptedValuesForAuthority are copied from the proof's
     // public signals (the contract injected the arbiter key before verify).
+    // PQ hybrid envelope (.dev/pq-envelope-design.md §4): every op event carries
+    // the proof's `kemBinding` public signal AND the raw ML-KEM-768 ciphertext,
+    // so the arbiter decapsulates + binding-checks from event data alone (it must
+    // never need tx calldata). `kemCiphertext` content is NOT verifiable on-chain
+    // (only its 1088-byte length is enforced); a junk-wrapped ct surfaces at the
+    // arbiter as a kemBinding mismatch = first-class alarm.
     event Deposited(
         uint256 indexed epoch,
         uint256 firstLeafIndex,
@@ -106,7 +122,9 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         uint256[2] ecdhPublicKey,
         uint256[10] encryptedValuesForAuthority,
         uint256 encryptionNonce,
-        uint256 root
+        uint256 root,
+        uint256 kemBinding,
+        bytes kemCiphertext
     );
     event Transferred(
         uint256 indexed epoch,
@@ -117,7 +135,9 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         uint256[4] encryptedValuesForReceiver1,
         uint256[16] encryptedValuesForAuthority,
         uint256 encryptionNonce,
-        uint256 root
+        uint256 root,
+        uint256 kemBinding,
+        bytes kemCiphertext
     );
     event Disbursed(
         uint256 indexed epoch,
@@ -126,7 +146,9 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         uint256 disclosureHash,
         uint256[2] ecdhPublicKey,
         uint256 encryptionNonce,
-        uint256 root
+        uint256 root,
+        uint256 kemBinding,
+        bytes kemCiphertext
     );
     /// @notice Raw receiver ciphertext bytes for a disburse batch (SPEC §5.3 /
     ///         §4 disburse note): 4 field elements per output note
@@ -147,9 +169,16 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         uint256[2] ecdhPublicKey,
         uint256[13] encryptedValuesForAuthority,
         uint256 encryptionNonce,
-        uint256 root
+        uint256 root,
+        uint256 kemBinding,
+        bytes kemCiphertext
     );
     event ArbiterRotated(uint256 indexed epoch, uint256 keyX, uint256 keyY, uint256 activatedBlock);
+    /// @notice The keccak256 of the epoch's 1184-byte ML-KEM-768 encapsulation
+    ///         key (the full pk is distributed off-chain; clients verify it
+    ///         against this hash before encapsulating). Emitted alongside
+    ///         ArbiterRotated for the same epoch.
+    event ArbiterKemPkHashSet(uint256 indexed epoch, bytes32 kemPkHash);
     event DisburseAllowlist(address indexed account, bool allowed);
 
     // --- errors ---------------------------------------------------------------
@@ -166,6 +195,9 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     error MisalignedInsert();
     error TreeFull();
     error WrongCiphertextLength(uint256 got, uint256 want);
+    error WrongKemCiphertextLength(uint256 got, uint256 want);
+    error ZeroKemPkHash();
+    error ZeroVerifier();
     error ZeroOutputCommitment();
 
     // --- reentrancy guard -----------------------------------------------------
@@ -202,7 +234,10 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     ///         run-once call. The `initializer` modifier (ERC-7201 storage)
     ///         enforces run-once; the caller (the deployer, via the proxy) becomes
     ///         owner. REQUIRES a non-zero arbiter key (§5.3, Q9) — kills the (0,0)
-    ///         footgun. Not `onlyOwner`: there is no owner until this call sets one.
+    ///         footgun — and, post-PQ, a non-zero KEM pk hash: on a FRESH deploy
+    ///         every epoch carries both keys (a zero hash is the PRE-KEM marker,
+    ///         reserved for epochs minted before the live pool's upgrade).
+    ///         Not `onlyOwner`: there is no owner until this call sets one.
     function initialize(
         IPoseidon2 _poseidon,
         IDepositVerifier _depositVerifier,
@@ -211,10 +246,12 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         ITransferVerifier _transferVerifier,
         IERC20 _token,
         uint256 _batchSize,
-        uint256[2] calldata arbiterKey
+        uint256[2] calldata arbiterKey,
+        bytes32 arbiterKemPkHash_
     ) external initializer {
         if (_batchSize <= 1 || (_batchSize & (_batchSize - 1)) != 0) revert BatchSizeNotPowerOfTwo(_batchSize);
         if (arbiterKey[0] == 0 || arbiterKey[1] == 0) revert ZeroArbiterKey();
+        if (arbiterKemPkHash_ == bytes32(0)) revert ZeroKemPkHash();
 
         __Ownable2Step_init(msg.sender);
         __UUPSUpgradeable_init();
@@ -236,10 +273,13 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         // (all former-constructor tree/param derivation lives here).
         _initTreeAndParams(_batchSize);
 
-        // Seed arbiter epoch 0 (§5.3, Q9) and mark the pool live.
+        // §5.3 Q9; on a fresh deploy epoch 0 carries the KEM hash too (a zero
+        // hash must stay unambiguously "pre-upgrade epoch", design doc §4).
         initialized = true;
         arbiterEpochs.push(ArbiterEpoch({keyX: arbiterKey[0], keyY: arbiterKey[1], activatedBlock: block.number}));
+        arbiterKemPkHash[0] = arbiterKemPkHash_;
         emit ArbiterRotated(0, arbiterKey[0], arbiterKey[1], block.number);
+        emit ArbiterKemPkHashSet(0, arbiterKemPkHash_);
     }
 
     /// @dev The former-constructor tree + param derivation: LOG_B, the enforced
@@ -274,14 +314,57 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     ///      On mainnet the owner is a multisig/timelock (docs/zeto-derivation.md).
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 
+    /// @notice The PQ-migration payload for the live pool's `upgradeToAndCall`
+    ///         (design doc §4/§7): the +1-public hybrid circuits need NEW
+    ///         verifier addresses in the same tx as the impl swap (old proofs vs
+    ///         new verifiers fail on public count — there must be no window),
+    ///         and a FRESH arbiter epoch carrying BOTH keys, so the epoch
+    ///         boundary IS the KEM boundary. `reinitializer(2)` makes it
+    ///         run-once; `onlyOwner` holds because upgradeToAndCall
+    ///         delegatecalls with the owner's msg.sender.
+    function initializeV2(
+        IDepositVerifier _depositVerifier,
+        IWithdrawVerifier _withdrawVerifier,
+        IDisburseVerifier _disburseVerifier,
+        ITransferVerifier _transferVerifier,
+        uint256[2] calldata arbiterKey,
+        bytes32 kemPkHash
+    ) external onlyOwner reinitializer(2) {
+        // A zeroed verifier bricks every op until yet another upgrade; the
+        // upgrade script deploys them inline, so zero here is always a bug.
+        if (
+            address(_depositVerifier) == address(0) || address(_withdrawVerifier) == address(0)
+                || address(_disburseVerifier) == address(0) || address(_transferVerifier) == address(0)
+        ) revert ZeroVerifier();
+        depositVerifier = _depositVerifier;
+        withdrawVerifier = _withdrawVerifier;
+        disburseVerifier = _disburseVerifier;
+        transferVerifier = _transferVerifier;
+        _rotateArbiter(arbiterKey, kemPkHash);
+    }
+
     /// @notice Append an epoch and emit its index; the arbiter pubkey is read
     ///         from storage at execution (never calldata) so a sender cannot
     ///         encrypt to their own key and silently kill non-repudiation.
-    function rotateArbiter(uint256[2] calldata newKey) external onlyOwner whenInitialized {
+    ///         The bjj-only overload is REMOVED (not kept alongside): every
+    ///         post-upgrade epoch must carry a KEM pk hash, or a rotation could
+    ///         mint a zero-hash epoch that is indistinguishable from the
+    ///         pre-KEM marker (design doc §4).
+    function rotateArbiter(uint256[2] calldata newKey, bytes32 newKemPkHash) external onlyOwner whenInitialized {
+        _rotateArbiter(newKey, newKemPkHash);
+    }
+
+    /// @dev Shared by {rotateArbiter} and {initializeV2} (the latter mints the
+    ///      migration epoch inside upgradeToAndCall, where the external rotate
+    ///      is unreachable without changing msg.sender).
+    function _rotateArbiter(uint256[2] calldata newKey, bytes32 newKemPkHash) private {
         if (newKey[0] == 0 || newKey[1] == 0) revert ZeroArbiterKey();
+        if (newKemPkHash == bytes32(0)) revert ZeroKemPkHash();
         uint256 e = arbiterEpochs.length;
         arbiterEpochs.push(ArbiterEpoch({keyX: newKey[0], keyY: newKey[1], activatedBlock: block.number}));
+        arbiterKemPkHash[e] = newKemPkHash;
         emit ArbiterRotated(e, newKey[0], newKey[1], block.number);
+        emit ArbiterKemPkHashSet(e, newKemPkHash);
     }
 
     function currentEpoch() public view returns (uint256) {
@@ -310,17 +393,24 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     ///         authority envelope's public key (§6b v2 enforced disclosure — a
     ///         deposit not encrypted to the current arbiter key FAILS), verify,
     ///         append the two output notes, then pull `out` tokens (SafeERC20, CEI).
-    function deposit(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[18] calldata pub)
-        external
-        whenInitialized
-        nonReentrant
-    {
-        uint[18] memory injected = pub;
-        (injected[16], injected[17]) = currentArbiterKey();
+    ///         `kemCiphertext` = the ML-KEM-768 encapsulation to the arbiter KEM
+    ///         key: length-checked + emitted only (design doc §2 trade-off — the
+    ///         ECDH half keeps proof-fails-on-wrong-key, the KEM half is
+    ///         alarm-enforced via the arbiter's kemBinding check).
+    function deposit(
+        uint[2] calldata a,
+        uint[2][2] calldata b,
+        uint[2] calldata c,
+        uint[19] calldata pub,
+        bytes calldata kemCiphertext
+    ) external whenInitialized nonReentrant {
+        _checkKemCiphertext(kemCiphertext);
+        uint[19] memory injected = pub;
+        (injected[17], injected[18]) = currentArbiterKey();
         if (!depositVerifier.verifyProof(a, b, c, injected)) revert InvalidProof();
 
-        uint256 oc0 = pub[13];
-        uint256 oc1 = pub[14];
+        uint256 oc0 = pub[14];
+        uint256 oc1 = pub[15];
         // A zero output commitment is a non-note (self-burn foot-gun); never append it.
         if (oc0 == 0 || oc1 == 0) revert ZeroOutputCommitment();
 
@@ -328,10 +418,27 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         _appendLeaf(oc0);
         _appendLeaf(oc1);
 
+        _emitDeposited(pub, kemCiphertext, first);
+        token.safeTransferFrom(msg.sender, address(this), pub[0]);
+    }
+
+    /// @dev Split out of {deposit}: the 11-field event plus the verify locals
+    ///      overflows the EVM stack in a single frame (non-via-IR build).
+    function _emitDeposited(uint[19] calldata pub, bytes calldata kemCiphertext, uint256 first) private {
         uint256[10] memory cta;
         for (uint256 i = 0; i < 10; i++) cta[i] = pub[3 + i];
-        emit Deposited(currentEpoch(), first, oc0, oc1, pub[0], [pub[1], pub[2]], cta, pub[15], root);
-        token.safeTransferFrom(msg.sender, address(this), pub[0]);
+        emit Deposited(
+            currentEpoch(), first, pub[14], pub[15], pub[0], [pub[1], pub[2]], cta, pub[16], root, pub[13], kemCiphertext
+        );
+    }
+
+    /// @dev The ONLY on-chain check possible on the KEM ciphertext: FIPS 203
+    ///      pins the ML-KEM-768 ct at exactly 1088 bytes; content is bound
+    ///      off-chain by the proof's kemBinding + arbiter decapsulation.
+    function _checkKemCiphertext(bytes calldata kemCiphertext) private pure {
+        if (kemCiphertext.length != KEM_CIPHERTEXT_LEN) {
+            revert WrongKemCiphertextLength(kemCiphertext.length, KEM_CIPHERTEXT_LEN);
+        }
     }
 
     /// @notice disburse (1-in / B-out): the ONLY disburse entry point (§6b v2 —
@@ -349,43 +456,50 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         uint[2] calldata a,
         uint[2][2] calldata b,
         uint[2] calldata c,
-        uint[10] calldata pub,
-        uint256[] calldata receiverCiphertexts
+        uint[11] calldata pub,
+        uint256[] calldata receiverCiphertexts,
+        bytes calldata kemCiphertext
     ) external whenInitialized nonReentrant {
         if (receiverCiphertexts.length != disburseCiphertextLen) {
             revert WrongCiphertextLength(receiverCiphertexts.length, disburseCiphertextLen);
         }
-        uint256 start = _disburseCore(a, b, c, pub);
+        _checkKemCiphertext(kemCiphertext);
+        uint256 start = _disburseCore(a, b, c, pub, kemCiphertext);
         emit DisburseCiphertexts(start, receiverCiphertexts);
     }
 
-    /// @dev disburse verification + subtree attach, shared by both entry points.
-    ///      Caller-gated (§5.3); contract injects enabled=1 and the arbiter key
-    ///      from storage (§5.2). Returns the batch's start leaf index.
-    function _disburseCore(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[10] calldata pub)
-        private
-        returns (uint256 start)
-    {
+    /// @dev disburse verification + subtree attach. Caller-gated (§5.3); contract
+    ///      injects enabled=1 and the arbiter key from storage (§5.2). Returns
+    ///      the batch's start leaf index.
+    function _disburseCore(
+        uint[2] calldata a,
+        uint[2][2] calldata b,
+        uint[2] calldata c,
+        uint[11] calldata pub,
+        bytes calldata kemCiphertext
+    ) private returns (uint256 start) {
         if (msg.sender != owner() && !disburseAllowed[msg.sender]) revert NotDisburseAuthorized(msg.sender);
-        if (!knownRoots[pub[5]]) revert UnknownRoot(pub[5]);
+        if (!knownRoots[pub[6]]) revert UnknownRoot(pub[6]);
 
-        uint256 nf = pub[4];
+        uint256 nf = pub[5];
         if (nf == 0) revert ZeroNullifier(); // 1-in disburse is always real
         if (nullifierUsed[nf]) revert NullifierAlreadyUsed(nf);
 
         // §5.2 contract-derived enabled + §5.3 arbiter-key-from-storage injection.
         // disburse has a single input and reverts above on nf==0, so enabled is
         // unconditionally 1 (membership on the sole input is always required).
-        uint[10] memory injected = pub;
-        injected[6] = 1;
-        (injected[8], injected[9]) = currentArbiterKey();
+        // kemBinding (pub[4]) is read from the proof, never injected — the
+        // contract has nothing to check it against (design doc §4).
+        uint[11] memory injected = pub;
+        injected[7] = 1;
+        (injected[9], injected[10]) = currentArbiterKey();
         if (!disburseVerifier.verifyProof(a, b, c, injected)) revert InvalidProof();
 
         nullifierUsed[nf] = true;
         start = _attachSubtree(pub[3]);
 
         emit Disbursed(
-            currentEpoch(), nf, pub[3], pub[2], [pub[0], pub[1]], pub[7], root
+            currentEpoch(), nf, pub[3], pub[2], [pub[0], pub[1]], pub[8], root, pub[4], kemCiphertext
         );
         emit SubtreeAppended(start, pub[3], root);
     }
@@ -393,27 +507,36 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     /// @notice transfer (2-in / 2-out): permissionless. Contract injects
     ///         enabled[i]=(nullifier[i]!=0) and the arbiter key from storage,
     ///         spends the real (nonzero) nullifiers, appends the 2 outputs.
-    function transfer(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[36] calldata pub)
-        external
-        whenInitialized
-        nonReentrant
-    {
-        if (!knownRoots[pub[28]]) revert UnknownRoot(pub[28]);
+    function transfer(
+        uint[2] calldata a,
+        uint[2][2] calldata b,
+        uint[2] calldata c,
+        uint[37] calldata pub,
+        bytes calldata kemCiphertext
+    ) external whenInitialized nonReentrant {
+        _checkKemCiphertext(kemCiphertext);
+        if (!knownRoots[pub[29]]) revert UnknownRoot(pub[29]);
 
-        uint[36] memory injected = pub;
-        injected[29] = pub[26] != 0 ? 1 : 0;
+        uint[37] memory injected = pub;
         injected[30] = pub[27] != 0 ? 1 : 0;
-        (injected[34], injected[35]) = currentArbiterKey();
+        injected[31] = pub[28] != 0 ? 1 : 0;
+        (injected[35], injected[36]) = currentArbiterKey();
         if (!transferVerifier.verifyProof(a, b, c, injected)) revert InvalidProof();
 
-        _spendNullifier(pub[26]);
         _spendNullifier(pub[27]);
+        _spendNullifier(pub[28]);
 
         // A zero output commitment is a non-note (self-burn foot-gun); never append it.
-        if (pub[31] == 0 || pub[32] == 0) revert ZeroOutputCommitment();
-        _appendLeaf(pub[31]);
+        if (pub[32] == 0 || pub[33] == 0) revert ZeroOutputCommitment();
         _appendLeaf(pub[32]);
+        _appendLeaf(pub[33]);
 
+        _emitTransferred(pub, kemCiphertext);
+    }
+
+    /// @dev Split out of {transfer}: the 11-field event plus the verify locals
+    ///      overflows the EVM stack in a single frame (non-via-IR build).
+    function _emitTransferred(uint[37] calldata pub, bytes calldata kemCiphertext) private {
         uint256[4] memory ct0 = [pub[2], pub[3], pub[4], pub[5]];
         uint256[4] memory ct1 = [pub[6], pub[7], pub[8], pub[9]];
         uint256[16] memory cta;
@@ -422,14 +545,16 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         }
         emit Transferred(
             currentEpoch(),
-            [pub[26], pub[27]],
-            [pub[31], pub[32]],
+            [pub[27], pub[28]],
+            [pub[32], pub[33]],
             [pub[0], pub[1]],
             ct0,
             ct1,
             cta,
-            pub[33],
-            root
+            pub[34],
+            root,
+            pub[26],
+            kemCiphertext
         );
     }
 
@@ -438,30 +563,35 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     ///         the authority envelope (§6b v2 — a withdraw not encrypted to the
     ///         current arbiter key FAILS), spends the real nullifiers, appends the
     ///         change output, pushes `out` tokens.
-    function withdraw(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[25] calldata pub)
-        external
-        whenInitialized
-        nonReentrant
-    {
-        if (!knownRoots[pub[18]]) revert UnknownRoot(pub[18]);
+    function withdraw(
+        uint[2] calldata a,
+        uint[2][2] calldata b,
+        uint[2] calldata c,
+        uint[26] calldata pub,
+        bytes calldata kemCiphertext
+    ) external whenInitialized nonReentrant {
+        _checkKemCiphertext(kemCiphertext);
+        if (!knownRoots[pub[19]]) revert UnknownRoot(pub[19]);
 
-        uint[25] memory injected = pub;
-        injected[19] = pub[16] != 0 ? 1 : 0;
+        uint[26] memory injected = pub;
         injected[20] = pub[17] != 0 ? 1 : 0;
-        (injected[23], injected[24]) = currentArbiterKey();
+        injected[21] = pub[18] != 0 ? 1 : 0;
+        (injected[24], injected[25]) = currentArbiterKey();
         if (!withdrawVerifier.verifyProof(a, b, c, injected)) revert InvalidProof();
 
-        _spendNullifier(pub[16]);
         _spendNullifier(pub[17]);
+        _spendNullifier(pub[18]);
 
-        uint256 change = pub[21];
+        uint256 change = pub[22];
         // A zero output commitment is a non-note (self-burn foot-gun); never append it.
         if (change == 0) revert ZeroOutputCommitment();
         _appendLeaf(change);
 
         uint256[13] memory cta;
         for (uint256 i = 0; i < 13; i++) cta[i] = pub[3 + i];
-        emit Withdrawn(currentEpoch(), [pub[16], pub[17]], pub[0], change, [pub[1], pub[2]], cta, pub[22], root);
+        emit Withdrawn(
+            currentEpoch(), [pub[17], pub[18]], pub[0], change, [pub[1], pub[2]], cta, pub[23], root, pub[16], kemCiphertext
+        );
         token.safeTransfer(msg.sender, pub[0]);
     }
 
@@ -549,7 +679,17 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         nextLeafIndex += stride;
     }
 
-    /// @dev Reserved trailing storage so a future BongtuPoolV2 can add state
+    // --- V2 (PQ hybrid envelope) state ----------------------------------------
+    // Appended AFTER every V1 slot, consuming the FIRST slot of the original
+    // uint256[50] __gap (design doc §4): the frozen 3-word ArbiterEpoch struct
+    // cannot grow a field (appending would re-stride the dynamic array and
+    // corrupt live epochs on upgrade), so the per-epoch KEM pk hash lives in a
+    // sibling mapping. keccak256 of the epoch's 1184-byte ML-KEM-768
+    // encapsulation key; epochs minted pre-upgrade read 0 — the pre-KEM marker.
+    mapping(uint256 => bytes32) public arbiterKemPkHash;
+
+    /// @dev Reserved trailing storage so a future BongtuPoolV3 can add state
     ///      without colliding with any slot introduced here (upgrade-safety).
-    uint256[50] private __gap;
+    ///      Was 50 in V1; the V2 arbiterKemPkHash mapping consumed one slot.
+    uint256[49] private __gap;
 }

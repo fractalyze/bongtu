@@ -34,6 +34,10 @@ contract ArbiterTest is Base {
     IERC20 _token;
 
     event ArbiterRotated(uint256 indexed epoch, uint256 keyX, uint256 keyY, uint256 activatedBlock);
+    event ArbiterKemPkHashSet(uint256 indexed epoch, bytes32 kemPkHash);
+
+    bytes32 constant KEM_HASH_0 = keccak256("kem-pk-epoch-0");
+    bytes32 constant KEM_HASH_1 = keccak256("kem-pk-epoch-1");
 
     function _newPool() internal returns (BongtuPool) {
         _poseidon = deployPoseidon();
@@ -45,9 +49,9 @@ contract ArbiterTest is Base {
         return deployUninitializedPool();
     }
 
-    /// @dev Drive the 8-arg initializer with the captured deps + a given key.
+    /// @dev Drive the 9-arg initializer with the captured deps + a given key pair.
     function _init(uint256[2] memory key) internal {
-        pool.initialize(_poseidon, _dv, _wv, _dsv, _tv, _token, B, key);
+        pool.initialize(_poseidon, _dv, _wv, _dsv, _tv, _token, B, key, KEM_HASH_0);
     }
 
     function testInitializeRejectsZeroKey() public {
@@ -59,6 +63,11 @@ contract ArbiterTest is Base {
         vm.expectRevert(BongtuPool.ZeroArbiterKey.selector);
         _init([uint256(0), uint256(7)]);
 
+        // a zero KEM pk hash is rejected: bytes32(0) is the reserved pre-KEM
+        // marker (design doc §4) and a fresh deploy must never mint one.
+        vm.expectRevert(BongtuPool.ZeroKemPkHash.selector);
+        pool.initialize(_poseidon, _dv, _wv, _dsv, _tv, _token, B, [uint256(101), uint256(202)], bytes32(0));
+
         assertTrue(!pool.initialized(), "must not be initialized after a rejected key");
     }
 
@@ -66,6 +75,8 @@ contract ArbiterTest is Base {
         pool = _newPool();
         vm.expectEmit(true, false, false, true, address(pool));
         emit ArbiterRotated(0, 101, 202, block.number);
+        vm.expectEmit(true, false, false, true, address(pool));
+        emit ArbiterKemPkHashSet(0, KEM_HASH_0);
         _init([uint256(101), uint256(202)]);
 
         assertTrue(pool.initialized(), "initialized");
@@ -73,6 +84,7 @@ contract ArbiterTest is Base {
         (uint256 x, uint256 y) = pool.currentArbiterKey();
         assertEq(x, 101);
         assertEq(y, 202);
+        assertEq(pool.arbiterKemPkHash(0), KEM_HASH_0, "epoch 0 must carry the seeded KEM pk hash");
     }
 
     function testRotateArbiterAppendsAndEmits() public {
@@ -82,16 +94,34 @@ contract ArbiterTest is Base {
         vm.roll(block.number + 5);
         vm.expectEmit(true, false, false, true, address(pool));
         emit ArbiterRotated(1, 303, 404, block.number);
-        pool.rotateArbiter([uint256(303), uint256(404)]);
+        vm.expectEmit(true, false, false, true, address(pool));
+        emit ArbiterKemPkHashSet(1, KEM_HASH_1);
+        pool.rotateArbiter([uint256(303), uint256(404)], KEM_HASH_1);
 
         assertEq(pool.currentEpoch(), 1, "epoch advanced to 1");
         (uint256 x, uint256 y) = pool.currentArbiterKey();
         assertEq(x, 303, "rotated keyX");
         assertEq(y, 404, "rotated keyY");
+        assertEq(pool.arbiterKemPkHash(1), KEM_HASH_1, "rotation must write the new epoch's KEM pk hash");
+        assertEq(pool.arbiterKemPkHash(0), KEM_HASH_0, "rotation must not touch prior epochs' hashes");
 
-        // rotation also rejects a zero key
+        // rotation also rejects a zero key / a zero KEM pk hash (the latter
+        // would mint a post-KEM epoch indistinguishable from the pre-KEM marker)
         vm.expectRevert(BongtuPool.ZeroArbiterKey.selector);
-        pool.rotateArbiter([uint256(5), uint256(0)]);
+        pool.rotateArbiter([uint256(5), uint256(0)], KEM_HASH_1);
+        vm.expectRevert(BongtuPool.ZeroKemPkHash.selector);
+        pool.rotateArbiter([uint256(5), uint256(6)], bytes32(0));
+    }
+
+    /// The pre-KEM marker semantics (design doc §4): an epoch index the V2 code
+    /// never wrote reads bytes32(0) — exactly what the live pool's pre-upgrade
+    /// epochs return after the UUPS swap (mapping slots default to zero; only
+    /// rotateArbiter/initialize ever write nonzero, both zero-hash-guarded).
+    function testUnwrittenEpochsReadZeroKemPkHash() public {
+        pool = _newPool();
+        _init([uint256(101), uint256(202)]);
+        assertEq(pool.arbiterKemPkHash(1), bytes32(0), "an unminted epoch must read the pre-KEM marker 0");
+        assertEq(pool.arbiterKemPkHash(42), bytes32(0), "any unwritten epoch index must read 0");
     }
 
     function testRotateOnlyOwner() public {
@@ -100,6 +130,6 @@ contract ArbiterTest is Base {
         address stranger = address(0xBEEF);
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(Ownable2StepUpgradeable.OwnableUnauthorized.selector, stranger));
-        pool.rotateArbiter([uint256(1), uint256(2)]);
+        pool.rotateArbiter([uint256(1), uint256(2)], KEM_HASH_1);
     }
 }

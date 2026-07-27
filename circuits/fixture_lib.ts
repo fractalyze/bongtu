@@ -20,11 +20,13 @@
 // gen_disburse256_input.ts keeps its own employer/recipient/ECDH material local
 // (it mirrors deploy/giwa_disburse256.ts) but shares AUTHORITY / H / write().
 
+import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ImtTree } from "@bongtu/core/imt";
+import { ml_kem768, kemSsToLimbs } from "@bongtu/core/kem";
 import { deriveKeypair } from "@bongtu/core/note";
 import type { Keypair } from "@bongtu/core/note";
 import { toWire } from "@bongtu/core/proving";
@@ -50,6 +52,28 @@ export const ECDH_SK = 987654321987654321987654321n;
 export const AUTHORITY = deriveKeypair(555555555555555555555555n);
 
 export const ENCRYPTION_NONCE = 424242424242n; // < 2^128
+
+/** THE fixture arbiter ML-KEM-768 keypair (the PQ half of the hybrid envelope,
+ *  pq-envelope-design.md §2). Seed = sha256 of fixed labels, so — like AUTHORITY
+ *  above — one deterministic keypair binds every fixture proof and
+ *  gen_realproofs.ts metadata by construction. */
+const sha256 = (label: string): Uint8Array =>
+  new Uint8Array(createHash("sha256").update(label).digest());
+export const AUTHORITY_KEM = ml_kem768.keygen(
+  new Uint8Array([...sha256("bongtu/fixture/kem/seed/d"), ...sha256("bongtu/fixture/kem/seed/z")]),
+);
+
+/** Deterministic per-fixture ML-KEM encapsulation against AUTHORITY_KEM: the
+ *  encapsulation randomness is label-derived (PRNG-free), so the same label
+ *  always yields the same (kemSs limbs, 1088-byte kemCiphertext) — fixtures and
+ *  realproofs.json regenerate byte-stable. */
+export function kemDraw(label: string): { kemSs: [bigint, bigint]; kemCiphertext: Uint8Array } {
+  const { cipherText, sharedSecret } = ml_kem768.encapsulate(
+    AUTHORITY_KEM.publicKey,
+    sha256(`bongtu/fixture/kem/encap/${label}`),
+  );
+  return { kemSs: kemSsToLimbs(sharedSecret), kemCiphertext: cipherText };
+}
 
 /** Distinct receiver keypair per output index (distinct scalars => distinct pubkeys). */
 export function receiver(i: number): Keypair {

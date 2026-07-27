@@ -7,9 +7,9 @@ pragma circom 2.2.2;
 // the stored arbiter pubkey into authorityPublicKey, so a proof not encrypted to
 // the current arbiter key FAILS.
 //
-// Public (18): [0]=out [1..2]=ecdhPublicKey [3..12]=cipherTextAuthority[10]
-//              [13..14]=outputCommitments [15]=encryptionNonce
-//              [16..17]=authorityPublicKey
+// Public (19): [0]=out [1..2]=ecdhPublicKey [3..12]=cipherTextAuthority[10]
+//              [13]=kemBinding [14..15]=outputCommitments [16]=encryptionNonce
+//              [17..18]=authorityPublicKey
 include "deposit_authority_imt_base.circom";
 
 component main {

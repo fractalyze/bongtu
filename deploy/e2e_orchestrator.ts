@@ -41,6 +41,7 @@ import {
   ecdhSharedSecret,
   assertDistinctOwnerPubkeys,
 } from "@bongtu/core/note";
+import { hybridEnvelopeKey, kemBindingOf } from "@bongtu/core/kem";
 import { loadEthers } from "@bongtu/core/extern";
 
 // The deploy-and-drive skeleton (anvil connection, forge-artifact deploys, the
@@ -48,7 +49,7 @@ import { loadEthers } from "@bongtu/core/extern";
 // lives in the harness shared with apps/indexer/test/scenario.ts.
 import {
   H, GATE_B as B, dec, connectAnvil, deployStack, prove as harnessProve,
-  EMPLOYER, AUTHORITY, PAYEE, RCPTS,
+  EMPLOYER, AUTHORITY, PAYEE, RCPTS, kemDraw, kemCtHex,
   sD0, sD1, sR, sPay, sChg, sPadT, sPadW, sRes,
   amounts, V,
 } from "./lib/e2e_harness.js";
@@ -98,6 +99,14 @@ async function main(): Promise<void> {
   const NONCE_TRANSFER = 222222222222n;
   const NONCE_WITHDRAW = 444444444444n;
 
+  // fresh ML-KEM encapsulation PER TRANSACTION (design doc §6: ct reuse
+  // collapses the PQ compartment); labels are disjoint from the scenario
+  // sibling's, like the ECDH scalars above.
+  const KEM_DEPOSIT = kemDraw("m0/deposit");
+  const KEM_DISBURSE = kemDraw("m0/disburse");
+  const KEM_TRANSFER = kemDraw("m0/transfer");
+  const KEM_WITHDRAW = kemDraw("m0/withdraw");
+
   const oracle = new ImtTree(H, B);
 
   // ============================ DEPLOY ====================================
@@ -142,14 +151,17 @@ async function main(): Promise<void> {
       outputOwnerPublicKeys: [EMPLOYER.publicKey, EMPLOYER.publicKey],
       // §6b v2 auditor envelope — fresh ephemeral key + nonce for THIS tx.
       ecdhPrivateKey: ECDH_DEPOSIT,
+      kemSs: KEM_DEPOSIT.kemSs,
       encryptionNonce: NONCE_DEPOSIT,
       authorityPublicKey: AUTHORITY.publicKey,
     };
     const { a, b, c, pub } = await prove("deposit", input);
     ok(BigInt(pub[0]) === V, `deposit out (pub[0]) == V (${V})`);
+    ok(BigInt(pub[13]) === kemBindingOf(KEM_DEPOSIT.kemSs),
+      "deposit kemBinding (pub[13]) == Poseidon(3)(TAG_BIND, kemSs) of the tx's encapsulation");
     oracle.appendLeaf(dNote0);
     oracle.appendLeaf(dNote1);
-    await (await pool.deposit(a, b, c, pub)).wait();
+    await (await pool.deposit(a, b, c, pub, kemCtHex(KEM_DEPOSIT.kemCiphertext))).wait();
     await matchRoot("after deposit(2 leaves)");
     const pulled = (await token.balanceOf(pool.address)).sub(poolBal0);
     ok(pulled.toString() === V.toString(), `deposit pulled V=${V} ERC20 into the pool`);
@@ -184,13 +196,17 @@ async function main(): Promise<void> {
       outputValues: amounts,
       outputSalts: amounts.map((_, i) => sR(i)),
       outputOwnerPublicKeys: rcptPubs,
+      kemSs: KEM_DISBURSE.kemSs,
       encryptionNonce: NONCE_DISBURSE,
       authorityPublicKey: AUTHORITY.publicKey,
     };
     const { a, b, c, pub } = await prove("disburse", input);
-    // pub layout (decl order): [0,1]=ecdhPub [2]=disclosureHash [3]=subtreeRoot [4]=nf [5]=root [7]=nonce
+    // pub layout (decl order): [0,1]=ecdhPub [2]=disclosureHash [3]=subtreeRoot
+    // [4]=kemBinding [5]=nf [6]=root [8]=nonce
     ok(BigInt(pub[3]) === subtreeRoot, "disburse subtreeRoot (pub[3]) == oracle.computeSubtreeRoot");
-    ok(BigInt(pub[4]) === nfDepositV, "disburse nullifier (pub[4]) == nullifier(deposit note)");
+    ok(BigInt(pub[5]) === nfDepositV, "disburse nullifier (pub[5]) == nullifier(deposit note)");
+    ok(BigInt(pub[4]) === kemBindingOf(KEM_DISBURSE.kemSs),
+      "disburse kemBinding (pub[4]) == Poseidon(3)(TAG_BIND, kemSs) of the tx's encapsulation");
 
     // reproduce the ciphertext the circuit committed to, and PROVE it via disclosureHash
     const rcptCts = amounts.map((v, i) => {
@@ -198,20 +214,24 @@ async function main(): Promise<void> {
       return poseidonEncrypt([v, sR(i)], ss, NONCE_DISBURSE); // 4 elements each
     });
     const ctFlat = rcptCts.flat();
-    // authority (non-repudiation) envelope, laid out by the owning codec
+    // authority (non-repudiation) envelope, laid out by the owning codec.
+    // Post-PQ the envelope key is the tagged HYBRID fold (ECDH point + ML-KEM
+    // limbs, design doc §2) — a raw-ECDH encrypt would break disclosureHash.
     const authPlain = buildAuthorityPlaintext("disburse", {
       inputs: [{ owner: EMPLOYER.publicKey, value: V, salt: sD0 }],
       outputs: amounts.map((v, i) => ({ owner: RCPTS[i].publicKey, value: v, salt: sR(i) })),
     });
-    const authSs = ecdhSharedSecret(ECDH_DISBURSE, AUTHORITY.publicKey);
-    const authCt = poseidonEncrypt(authPlain, authSs, NONCE_DISBURSE);
+    const authKey = hybridEnvelopeKey(
+      ecdhSharedSecret(ECDH_DISBURSE, AUTHORITY.publicKey), KEM_DISBURSE.kemSs);
+    const authCt = poseidonEncrypt(authPlain, authKey, NONCE_DISBURSE);
     ok(disclosureChain([...ctFlat, ...authCt]) === BigInt(pub[2]),
-      "recomputed disclosureHash == proof pub[2] (published ciphertext is the circuit's)");
+      "recomputed disclosureHash (hybrid envelope key) == proof pub[2] (published ciphertext is the circuit's)");
 
     oracle.attachSubtree(subtreeRoot, outCommits); // pad 2->16 (dead 2..15) + attach 16..31
     // §6b v2: the ONLY disburse path publishes the FULL ciphertext (receiver ++
     // authority) — the contract enforces receiverCiphertexts.length == 4*B + authLen.
-    const rcpt = await (await pool.disburseWithCiphertexts(a, b, c, pub, [...ctFlat, ...authCt].map(dec))).wait();
+    const rcpt = await (await pool.disburseWithCiphertexts(
+      a, b, c, pub, [...ctFlat, ...authCt].map(dec), kemCtHex(KEM_DISBURSE.kemCiphertext))).wait();
     await matchRoot("after disburse(pad+attach 16)");
     ok(await pool.nullifierUsed(dec(nfDepositV)), "disburse marked the deposit-note nullifier");
 
@@ -279,20 +299,21 @@ async function main(): Promise<void> {
       outputValues: [payVal, chgVal],
       outputSalts: [sPay, sChg],
       outputOwnerPublicKeys: [PAYEE.publicKey, R0.publicKey],
+      kemSs: KEM_TRANSFER.kemSs,
       encryptionNonce: NONCE_TRANSFER,
       authorityPublicKey: AUTHORITY.publicKey,
     };
     const { a, b, c, pub } = await prove("transfer", input);
     oracle.appendLeaf(payCommit); // leaf 32
     oracle.appendLeaf(chgCommit); // leaf 33
-    await (await pool.transfer(a, b, c, pub)).wait();
+    await (await pool.transfer(a, b, c, pub, kemCtHex(KEM_TRANSFER.kemCiphertext))).wait();
     await matchRoot("after transfer(2 outputs)");
     ok(await pool.nullifierUsed(dec(nfBatch0)), "transfer marked the batch-note nullifier");
     ok(!(await pool.nullifierUsed(0)), "zero (padded) nullifier never marked");
 
     // replay must revert on nullifier reuse
     let reverted = false;
-    try { await (await pool.transfer(a, b, c, pub)).wait(); } catch { reverted = true; }
+    try { await (await pool.transfer(a, b, c, pub, kemCtHex(KEM_TRANSFER.kemCiphertext))).wait(); } catch { reverted = true; }
     ok(reverted, "replaying the transfer proof reverts (nullifier already used)");
   }
 
@@ -322,6 +343,7 @@ async function main(): Promise<void> {
       outputOwnerPublicKeys: [R0.publicKey],
       // §6b v2 auditor envelope — fresh ephemeral key + nonce for THIS tx.
       ecdhPrivateKey: ECDH_WITHDRAW,
+      kemSs: KEM_WITHDRAW.kemSs,
       encryptionNonce: NONCE_WITHDRAW,
       authorityPublicKey: AUTHORITY.publicKey,
     };
@@ -330,7 +352,7 @@ async function main(): Promise<void> {
     ok(withdrawnAmount === chgVal, `withdraw out (pub[0]) == change value ${chgVal}`);
     oracle.appendLeaf(resCommit); // leaf 34
     const balBefore = await token.balanceOf(employerAddr);
-    await (await pool.withdraw(a, b, c, pub)).wait();
+    await (await pool.withdraw(a, b, c, pub, kemCtHex(KEM_WITHDRAW.kemCiphertext))).wait();
     await matchRoot("after withdraw(1 change output)");
     const got = (await token.balanceOf(employerAddr)).sub(balBefore);
     ok(got.toString() === chgVal.toString(), `withdraw pushed ${chgVal} ERC20 out of the pool`);
