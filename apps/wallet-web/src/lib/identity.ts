@@ -14,7 +14,14 @@ import {
   deriveIdentityFromSignature,
   type WalletIdentity,
 } from "./derive.js";
+import { assertDeterministicSignatures } from "./loginGuard.js";
 import { signKeyDerivation, type Connection } from "./metamask.js";
+
+/** Whether this derivation has to prove the wallet is deterministic before trusting
+ *  what it signed (loginGuard.loginNeedsDeterminismCheck decides). */
+export interface LoginSignaturePlan {
+  doubleSign: boolean;
+}
 
 /**
  * One eth_signTypedData_v4 popup in the connected wallet -> the full wallet identity
@@ -22,14 +29,31 @@ import { signKeyDerivation, type Connection } from "./metamask.js";
  * so a derivation after any wipe reproduces the SAME key the session's notes are
  * owned by — which is what makes re-locking cheap to recover from.
  *
- * The ONE derivation site: the login (App.connectWallet, which then seeds the lock)
- * and the lock's own lazy derive both come through here, so the two can never drift
- * into deriving different keys from the same account.
+ * `doubleSign` asks for that same signature a SECOND time and refuses the pair if the
+ * bytes differ. It costs a second popup, so it is spent only where the determinism it
+ * checks is not already established: the first login of a WalletConnect wallet this
+ * browser has never derived under. See loginGuard.ts for the whole rule.
+ *
+ * The ONE derivation site: the login (via loginFlow.runLogin, which then seeds the
+ * lock) and the lock's own lazy derive both come through here, so the two can never
+ * drift into deriving different keys from the same account.
  */
-export async function deriveTransientIdentity(connection: Connection): Promise<WalletIdentity> {
+export async function deriveLoginIdentity(
+  connection: Connection,
+  plan: LoginSignaturePlan,
+  sign: typeof signKeyDerivation = signKeyDerivation,
+): Promise<WalletIdentity> {
   const typed = keyDerivationTypedData(DEFAULTS.chainId, DEFAULTS.pool, DEFAULTS.keyVersion);
-  const sig = await signKeyDerivation(connection, typed);
+  const sig = await sign(connection, typed);
+  if (plan.doubleSign) assertDeterministicSignatures(sig, await sign(connection, typed));
   return deriveIdentityFromSignature(sig);
+}
+
+/** The lock's lazy re-derive (keyCache.unlock). Always a single signature: by the time
+ *  a key is re-derived the login has already established that this wallet is
+ *  deterministic, and the derived key is checked against the session's anyway. */
+export function deriveTransientIdentity(connection: Connection): Promise<WalletIdentity> {
+  return deriveLoginIdentity(connection, { doubleSign: false });
 }
 
 // No brand name: the connected wallet may be any injected wallet (walletBrand.ts), and

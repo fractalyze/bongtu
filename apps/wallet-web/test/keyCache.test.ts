@@ -112,18 +112,28 @@ test("seeding from the login unlocks the wallet without spending another popup",
 });
 
 test("the login derives through identity.ts — there is ONE derivation recipe", () => {
-  // A second copy of typed-data → sign → derive in the shell could drift from the
-  // lock's copy (a changed domain, a changed key version), and the two would then
-  // produce different keys for the same account: a login that unlocks a key the
-  // notes are not owned by. The seam is a source fact, so it is gated as one.
-  const app = readFileSync(new URL("../src/ui/App.tsx", import.meta.url).pathname, "utf8");
-  assert.match(app, /deriveTransientIdentity\(conn\)/, "the login must use the owner module");
-  for (const inlined of [
-    "keyDerivationTypedData",
-    "signKeyDerivation",
-    "deriveIdentityFromSignature",
-  ]) {
-    assert.ok(!app.includes(inlined), `App.tsx re-implements the derivation via ${inlined}`);
+  // A second copy of typed-data → sign → derive outside identity.ts could drift from
+  // the lock's copy (a changed domain, a changed key version), and the two would then
+  // produce different keys for the same account: a login that unlocks a key the notes
+  // are not owned by. The seam is a source fact, so it is gated as one.
+  const read = (rel: string): string =>
+    readFileSync(new URL(rel, import.meta.url).pathname, "utf8");
+
+  // The login flow is the one caller, and it calls the owner module rather than the
+  // three primitives underneath it.
+  const login = read("../src/lib/loginFlow.ts");
+  assert.match(login, /deriveLoginIdentity/, "the login must use the owner module");
+
+  // The shell holds no recipe at all — not even the call, which now lives in the flow.
+  const app = read("../src/ui/App.tsx");
+  for (const file of [app, login]) {
+    for (const inlined of [
+      "keyDerivationTypedData",
+      "signKeyDerivation",
+      "deriveIdentityFromSignature",
+    ]) {
+      assert.ok(!file.includes(inlined), `the derivation is re-implemented via ${inlined}`);
+    }
   }
 });
 

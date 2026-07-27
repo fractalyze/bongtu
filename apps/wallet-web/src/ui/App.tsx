@@ -14,21 +14,18 @@
 // connected wallet; a page load with no fresh login (a silently restored session)
 // starts LOCKED, because nothing persists the key.
 //
-// A stored unexpired session restores SILENTLY on load: eth_accounts (no popup)
-// must still report the same account, then balance+activity load via the token —
-// no signature popup until the user actually deposits/sends/withdraws.
+// A stored unexpired session restores SILENTLY on load, over whichever transport made
+// it (injected eth_accounts, or a WalletConnect session the SDK still holds): the same
+// account must still be reported, then balance+activity load via the token — no
+// signature popup and no QR modal until the user actually deposits/sends/withdraws.
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { DEFAULTS } from "../config.js";
-import { deriveTransientIdentity } from "../lib/identity.js";
-import {
-  connect,
-  onAccountsChanged,
-  reconnect,
-  walletErrorMessage,
-  type Connection,
-} from "../lib/metamask.js";
+import { onWalletEvents, reconnect, walletErrorMessage, type Connection } from "../lib/metamask.js";
+import { runLogin } from "../lib/loginFlow.js";
+import type { WalletTransport } from "../lib/loginGuard.js";
+import { disconnectWalletConnect, reconnectWalletConnect } from "../lib/walletconnect.js";
 import { keyCache } from "../lib/keyCache.js";
 import { startWalletDiscovery } from "../lib/eip6963.js";
 import { injectedFrom, type WalletDescription } from "../lib/walletBrand.js";
@@ -38,13 +35,12 @@ import {
   buildHistoryUrl,
   buildNotesTokenUrl,
   buildHistoryTokenUrl,
-  obtainViewToken,
   fetchNotes,
   fetchHistory,
   type OwnerNote,
   type HistoryItem,
 } from "../lib/indexerClient.js";
-import { clearSession, loadSession, saveSession, type StoredSession } from "../lib/session.js";
+import { clearKeyBindings, clearSession, loadSession, type StoredSession } from "../lib/session.js";
 import { markLockIntroSeen, shouldShowLockIntro } from "../lib/lockIntro.js";
 import {
   classifyReadFailure,
@@ -87,9 +83,11 @@ export interface WalletContextValue {
    *  cannot refresh). Never clears the balance the way dataError does. */
   dataNotice: string | null;
 
-  connecting: boolean;
+  /** The transport mid-connect: both connect buttons disable, only the pressed one
+   *  says "Connecting…". */
+  connecting: WalletTransport | null;
   connectError: string | null;
-  connectWallet: () => Promise<void>;
+  connectWallet: (transport: WalletTransport) => Promise<void>;
   disconnect: () => void;
   refresh: () => Promise<void>;
   /** post-action refresh: poll until `txHash` is reflected, then apply the data. */
@@ -127,7 +125,7 @@ export function App(): ReactNode {
   const [dataError, setDataError] = useState<string | null>(null);
   const [dataNotice, setDataNotice] = useState<string | null>(null);
 
-  const [connecting, setConnecting] = useState(false);
+  const [connecting, setConnecting] = useState<WalletTransport | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
 
   // Ask every installed wallet to announce itself once, then describe the one in use.
@@ -162,9 +160,18 @@ export function App(): ReactNode {
 
   // Drop the login and every owner-derived value. Used by the Disconnect button and
   // by a dead token (a 401 on the only auth these reads have).
-  const endSession = useCallback((reason: string | null): void => {
+  //
+  // `forget` separates those two: an explicit Disconnect also ends the WalletConnect
+  // pairing and forgets which key this account derives, because the user asked for a
+  // clean device. An expired token must NOT — the account still derives the same key,
+  // and that record is what catches a wallet whose signatures drift (loginGuard.ts).
+  const endSession = useCallback((reason: string | null, forget = false): void => {
     keyCache.lock(); // signing out drops the spending key too, not just the token
     clearSession();
+    if (forget) {
+      clearKeyBindings();
+      void disconnectWalletConnect();
+    }
     setConnection(null);
     setSession(null);
     setBalance(null);
@@ -217,7 +224,23 @@ export function App(): ReactNode {
   // A held spending key belongs to ONE wallet account, so a switch drops it at the
   // moment it happens — the flows re-check anyway, this just makes the header honest
   // (and re-locks a wallet whose owner walked away from the account).
-  useEffect(() => onAccountsChanged(() => keyCache.lock()), []);
+  //
+  // Re-subscribes when the connection changes, because that is when the emitter does:
+  // before a connection it is the page's injected wallet, after one it is whatever
+  // that connection talks through. `disconnect` is wired for WalletConnect ONLY —
+  // there it is the phone ending the session, while an injected wallet fires it for a
+  // dropped RPC socket, which is no reason to sign anyone out.
+  useEffect(
+    () =>
+      onWalletEvents(connection, {
+        accountsChanged: () => keyCache.lock(),
+        disconnect:
+          connection?.transport === "walletconnect"
+            ? () => endSession("Your wallet ended the connection — connect again to continue.")
+            : undefined,
+      }),
+    [connection, endSession],
+  );
 
   // SILENT restore on first load: a stored unexpired session + the same authorised
   // account (eth_accounts, no popup) puts the user straight on Home; anything else
@@ -229,7 +252,13 @@ export function App(): ReactNode {
     const stored = loadSession();
     if (!stored) return;
     void (async () => {
-      const conn = await reconnect(stored.eoaAddress);
+      // Reopen the transport the session was made on. Both are silent by construction:
+      // eth_accounts never prompts, and the WalletConnect restore reads the SDK's own
+      // stored session rather than calling connect(), so no QR modal can appear here.
+      const conn =
+        stored.transport === "walletconnect"
+          ? await reconnectWalletConnect(stored.eoaAddress)
+          : await reconnect(stored.eoaAddress);
       if (!conn) {
         // account changed or no longer authorised — require a fresh connect.
         clearSession();
@@ -240,58 +269,55 @@ export function App(): ReactNode {
     })();
   }, []);
 
-  const connectWallet = useCallback(async (): Promise<void> => {
-    setConnecting(true);
-    setConnectError(null);
-    try {
-      const conn = await connect();
-      // ONE signature popup, through the module that owns the derivation (identity.ts)
-      // — the same call the lock makes when it derives lazily, so a login-seeded key
-      // and a lazily-derived one are the same key by construction, not by two copies
-      // of the recipe agreeing. The identity (bjj keypair) never enters React state:
-      // it signs the token handshake here, and the only reference that outlives this
-      // function is the one keyCache.seed takes below (memory-only, idle-wiped).
-      const id = await deriveTransientIdentity(conn);
-      let sess: StoredSession;
+  const connectWallet = useCallback(
+    async (transport: WalletTransport): Promise<void> => {
+      setConnecting(transport);
+      setConnectError(null);
       try {
-        const vt = await obtainViewToken(INDEXER_URL, id.compressedPubkey, id.keypair.formattedPrivateKey);
-        sess = { eoaAddress: conn.address, compressedPubkey: id.compressedPubkey, token: vt.token, exp: vt.exp };
-        saveSession(sess); // the ONLY persisted record: address + pubkey + view token
-      } catch {
-        // Indexer without /auth (older build) or unreachable: log in for this page
-        // only (tokenless sessions are never persisted — loadSession drops them),
-        // and load the data ONCE with a key-signed query before the key drops.
-        sess = { eoaAddress: conn.address, compressedPubkey: id.compressedPubkey, token: "", exp: 0 };
-        try {
-          applySnapshot(
-            await loadOwnerData(
-              buildNotesUrl(INDEXER_URL, id.compressedPubkey, id.keypair.formattedPrivateKey),
-              buildHistoryUrl(INDEXER_URL, id.compressedPubkey, id.keypair.formattedPrivateKey),
-            ),
-          );
-        } catch {
-          // Nothing loaded and nothing left to load with — the tokenless refresh
-          // notice is what the user will see once the session state lands.
+        // Everything security-relevant about a login — the derivation, the two
+        // refusals, the token handshake, what gets persisted — lives in the flow
+        // (loginFlow.ts), which is gated headlessly. The identity it returns never
+        // enters React state: the only reference that outlives this function is the
+        // one keyCache.seed takes below (memory-only, idle-wiped).
+        const { connection: conn, identity: id, session: sess, tokenless } = await runLogin({
+          transport,
+          indexerUrl: INDEXER_URL,
+        });
+        if (tokenless) {
+          // No token to read with later, so load ONCE now with a key-signed query,
+          // while the key is still in hand.
+          try {
+            applySnapshot(
+              await loadOwnerData(
+                buildNotesUrl(INDEXER_URL, id.compressedPubkey, id.keypair.formattedPrivateKey),
+                buildHistoryUrl(INDEXER_URL, id.compressedPubkey, id.keypair.formattedPrivateKey),
+              ),
+            );
+          } catch {
+            // Nothing loaded and nothing left to load with — the tokenless refresh
+            // notice is what the user will see once the session state lands.
+          }
         }
+        // The login popup already paid for the key — hold it (the seed re-checks it
+        // against the session pubkey, exactly as unlock() does with a derived one) so
+        // the first send/withdraw/deposit costs only its transaction popup.
+        keyCache.seed(id, conn.address, sess.compressedPubkey);
+        setConnection(conn);
+        setSession(sess);
+        // The lock explainer is a once-per-device screen, and ONLY a fresh login sees
+        // it: a restored session is already past its first unlock (lockIntro.ts).
+        setLockIntro(shouldShowLockIntro("connect"));
+        navigate("home");
+      } catch (e) {
+        setConnectError(walletErrorMessage(e));
+      } finally {
+        setConnecting(null);
       }
-      // The login popup already paid for the key — hold it (the seed re-checks it
-      // against the session pubkey, exactly as unlock() does with a derived one) so
-      // the first send/withdraw/deposit costs only its transaction popup.
-      keyCache.seed(id, conn.address, sess.compressedPubkey);
-      setConnection(conn);
-      setSession(sess);
-      // The lock explainer is a once-per-device screen, and ONLY a fresh login sees
-      // it: a restored session is already past its first unlock (lockIntro.ts).
-      setLockIntro(shouldShowLockIntro("connect"));
-      navigate("home");
-    } catch (e) {
-      setConnectError(walletErrorMessage(e));
-    } finally {
-      setConnecting(false);
-    }
-  }, [loadOwnerData, applySnapshot]);
+    },
+    [loadOwnerData, applySnapshot],
+  );
 
-  const disconnect = useCallback((): void => endSession(null), [endSession]);
+  const disconnect = useCallback((): void => endSession(null, true), [endSession]);
 
   // Post-action refresh: the indexer tails the chain on a poll, so the moment a tx
   // confirms /notes may still show the PRE-action state. Poll (3s, ≤30s) until the

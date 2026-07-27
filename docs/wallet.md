@@ -1,8 +1,8 @@
 # Wallet
 
-`apps/wallet-web` is the self-custody public app: an injected wallet in, a BabyJubJub spending key derived on
-the fly, notes read from an arbiter indexer, and transfer / transfer10 / withdraw / deposit proved **in the
-browser**. It imports `@bongtu/core` source directly, so every commitment, nullifier and
+`apps/wallet-web` is the self-custody public app: a wallet in (an injected extension, or WalletConnect when
+the build is configured for it), a BabyJubJub spending key derived on the fly, notes read from an arbiter
+indexer, and transfer / transfer10 / withdraw / deposit proved **in the browser**. It imports `@bongtu/core` source directly, so every commitment, nullifier and
 Poseidon-sponge ciphertext it builds is byte-identical to what the provers prove and the contract
 verifies. Run commands and the test layout are owned by `apps/wallet-web/README.md`.
 
@@ -30,8 +30,9 @@ spending key — which `personal_sign` would.
 Consequences worth stating plainly:
 
 - **The signature *is* the spending key.** Anyone who can make the account sign this exact struct
-  reconstructs the bjj key. v1 assumes an EOA with deterministic ECDSA (any injected EIP-1193 wallet); ERC-4337 accounts
-  need a different derivation.
+  reconstructs the bjj key. v1 assumes an EOA with deterministic ECDSA; ERC-4337 accounts need a
+  different derivation. Injected wallets are taken to satisfy it, and a wallet reached over
+  WalletConnect has to prove it — see *Signing in*.
 - **`keyVersion` is a rotation lever.** It sits in the EIP-712 domain, so bumping it rotates every
   derived key — and orphans every note held under the old one. It is pinned per deployment in
   `src/config.ts`; never change it casually.
@@ -69,6 +70,63 @@ A held key belongs to exactly one wallet account. If the selected account change
 refuses the action outright (`ACCOUNT_MISMATCH_MESSAGE`) rather than derive and spend under a
 stranger's key — and when a held key already proves the mismatch, it refuses without a popup.
 
+The login itself is a flow, not component code: `runLogin` (`src/lib/loginFlow.ts`) opens the
+wallet, derives, runs the two checks below, trades the identity for a view token and persists —
+and when a check fails it throws having written **nothing**. `App.connectWallet` is left with the
+lock, the screen state and the one-shot read a tokenless session does.
+
+### WalletConnect
+
+A second way in, dark unless the build carries `VITE_WC_PROJECT_ID` (`src/lib/walletconnect.ts`).
+Unset — the current default — there is no second button, no SDK fetch, and the wallet behaves
+exactly as it did when an injected extension was the only option. Set, Onboarding offers
+"WalletConnect" alongside (or, with no extension installed, instead of) the extension button; it
+opens the SDK's own QR / deep-link modal, and everything after the connect is the same flow.
+
+`connectWalletConnect` returns the same `Connection` the injected path returns — an ethers
+`Web3Provider` over the WalletConnect EIP-1193 object — so `identity.ts`, `keyCache.ts`, the action
+flows and every submit helper are untouched and cannot tell the difference. The SDK is reached
+**only** through a dynamic `import()`, so it never enters the default chunk; a test walks the static
+import graph from the entry to keep it that way. A session persists in the SDK's own storage and the
+stored record carries `transport: "walletconnect"`, so a returning visit restores silently over the
+same transport (`reconnectWalletConnect` reads the stored session and never calls `connect()` — a
+reload can't pop a QR code at anyone). `accountsChanged` re-locks; over WalletConnect a `disconnect`
+event is the peer hanging up and ends the session, while an injected wallet's `disconnect` means a
+dropped RPC socket and is deliberately ignored. Signing out ends the pairing rather than leaving the
+wallet app showing bongtu as connected.
+
+Two things genuinely differ from an extension, both about the same risk.
+
+**The determinism check.** The whole scheme assumes deterministic (RFC-6979) ECDSA — see *Key
+derivation*. MetaMask-class extensions satisfy it; some mobile wallets reachable over WalletConnect
+randomise their signatures, and such a wallet derives a **different key on every login**, which
+would present as an empty balance and unspendable notes with nothing on screen explaining why.
+Nothing on the wire distinguishes the two, so the wallet looks (`src/lib/loginGuard.ts`):
+
+- **First WalletConnect login for an account this browser has never seen** — the same typed-data
+  signature is requested **twice** and the bytes must match. Two popups, once. Injected logins never
+  do this; neither does any account with a remembered key, where the remembered key is the stronger
+  reference.
+- **Any login for an account this browser remembers** — the freshly derived key must *be* the
+  remembered one, or the login is refused with "This wallet produced a different signing key than
+  last time…". Free, and it is the check that actually fires for returning users.
+
+**What the check compares against.** A second localStorage record (`bongtu.keybinding.v1`) maps
+account → compressed pubkey. It deliberately outlives the session record, which is dropped the
+moment its token expires: "this account derives key K" stays true regardless. It holds an address
+and a public key and nothing else, and an explicit Disconnect forgets it — a user asking to sign out
+gets a clean device, and the next login is a first login again.
+
+**Network switching** goes through the same `ensureChain`; over WalletConnect a wallet that won't
+move to GIWA Sepolia gets a message saying to switch in the wallet app, since the raw relay error
+says nothing a user can act on.
+
+**Enabling it.** Create a project at [Reown Cloud](https://cloud.reown.com) and copy its project id
+(it is public — it identifies the dapp to the relay and has no secret half). Set
+`VITE_WC_PROJECT_ID` in the Vercel project's environment variables and redeploy; it is a build-time
+inject, so an existing deployment does not pick it up. Nothing else changes — no contract, no
+indexer, no circuit.
+
 ## Which wallet the UI shows
 
 Any injected EIP-1193 wallet works, so nothing may be drawn or named as MetaMask by default
@@ -78,10 +136,13 @@ Any injected EIP-1193 wallet works, so nothing may be drawn or named as MetaMask
   also sets `isMetaMask: true` so that MetaMask-era dapps keep working, so the vendor's own flag
   (`isRabby`, `isOkxWallet`, `isCoinbaseWallet`, …) is tested first and `isMetaMask` last. Testing
   `isMetaMask` first is what showed the fox to everyone.
-- **EIP-6963 announcements** supply the wallet's own display name and icon, which is the only way to
-  name a wallet this app has never heard of. Announced names are length-capped and stripped of
-  control characters, and only `data:image/*` icons are used — a remote icon URL would report every
-  render back to the vendor.
+- **Self-descriptions** supply the wallet's own display name and icon, which is the only way to name
+  a wallet this app has never heard of. Two sources feed one registry: EIP-6963 announcements from
+  extensions, and WalletConnect peer metadata (`registerAnnouncedWallet`). Neither is trusted:
+  `describeWallet` is the single place that length-caps names, strips control characters, and accepts
+  only `data:image/*` icons — a remote icon URL would report every render back to the vendor, and
+  peer icons are conventionally remote, so they are dropped. A remote wallet therefore shows its real
+  name beside the generic glyph, and flies no vendor flag, so no brand is ever guessed for it.
 
 What cannot be identified is called "your wallet" in copy and drawn with the generic wallet glyph;
 the MetaMask fox is drawn only for a provider that identified itself as MetaMask. Nothing about the

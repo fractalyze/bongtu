@@ -1,12 +1,18 @@
-// MetaMask (EIP-1193 / ethers v5) wiring — the ONLY browser-coupled module of the
-// wallet (SPEC §6/§7). It connects the injected wallet, obtains the deterministic
-// eth_signTypedData_v4 signature the KDF consumes (derive.ts), and submits the
-// finished transfer / withdraw proof. Everything security-relevant (key derivation,
-// balance, witness assembly) lives in the PURE modules and is unit-tested; this file
-// is the thin, un-testable I/O edge (no MetaMask in the headless env).
+// The injected-wallet (EIP-1193 / ethers v5) edge, and the home of `Connection` — the
+// one shape every other module works against (SPEC §6/§7). It connects the injected
+// wallet, obtains the deterministic eth_signTypedData_v4 signature the KDF consumes
+// (derive.ts), and submits the finished transfer / withdraw proof. Everything
+// security-relevant (key derivation, balance, witness assembly) lives in the PURE
+// modules and is unit-tested; this file is the thin, un-testable I/O edge (no wallet
+// in the headless env).
+//
+// The second edge is walletconnect.ts, which builds the SAME `Connection` over a
+// remote wallet. Everything below `Connection` is transport-blind by construction:
+// the submit/read helpers here work unchanged over either.
 
 import { ethers } from "ethers";
 import type { KeyDerivationTypedData } from "./derive.js";
+import type { WalletTransport } from "./loginGuard.js";
 import type { Calldata } from "@bongtu/core/proving";
 import {
   CHAIN_ID,
@@ -114,12 +120,25 @@ export function metamaskDeepLink(): string {
   return `https://metamask.app.link/dapp/${host}${pathname}`;
 }
 
+/**
+ * A connected wallet, whatever it is connected THROUGH. Every downstream module —
+ * identity, keyCache, the flows, the submit helpers — sees only this shape, so adding
+ * WalletConnect (walletconnect.ts builds the same three fields over its own EIP-1193
+ * provider) reached none of them.
+ *
+ * `provider` is an ethers Web3Provider; the raw EIP-1193 object sits at
+ * `provider.provider` (the chain guard and the wallet-identity path both read it).
+ */
 export interface Connection {
   address: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   provider: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   signer: any;
+  /** How the browser reached this wallet. The flows ignore it; the login guard and the
+   *  chain guard don't (a remote wallet gets a different determinism rule and a
+   *  different network-switch failure message). */
+  transport: WalletTransport;
 }
 
 // EIP-3085/3326 params for GIWA Sepolia, derived from the ONE network module so a
@@ -160,7 +179,7 @@ export async function connect(): Promise<Connection> {
   await ensureGiwaChain(eth);
   const signer = provider.getSigner();
   const address = await signer.getAddress();
-  return { address, provider, signer };
+  return { address, provider, signer, transport: "injected" };
 }
 
 /**
@@ -184,7 +203,7 @@ export async function reconnect(expectedAddress: string): Promise<Connection | n
   }
   const addr = accounts?.[0];
   if (!addr || addr.toLowerCase() !== expectedAddress.toLowerCase()) return null;
-  return { address: addr, provider, signer: provider.getSigner() };
+  return { address: addr, provider, signer: provider.getSigner(), transport: "injected" };
 }
 
 /**
@@ -203,27 +222,67 @@ export async function currentAccount(connection: Connection): Promise<string | n
   }
 }
 
-interface AccountEvents {
+interface WalletEvents {
   on?(event: string, handler: () => void): void;
   removeListener?(event: string, handler: () => void): void;
 }
 
-/** Run `handler` whenever the injected wallet switches accounts; returns an
- *  unsubscribe. No-op where nothing is injected (plain mobile browser). */
-export function onAccountsChanged(handler: () => void): () => void {
-  const eth = (globalThis as { ethereum?: AccountEvents }).ethereum;
-  if (!eth?.on) return () => {};
-  eth.on("accountsChanged", handler);
-  return () => eth.removeListener?.("accountsChanged", handler);
+/**
+ * Subscribe to the wallet's own EIP-1193 events; returns one unsubscribe for all of
+ * them. The emitter is the connection's raw provider when there is a connection (the
+ * WalletConnect provider for a remote wallet, the injected object for an extension),
+ * and the page's injected wallet before one exists — so the caller wires handlers
+ * once and this decides who is actually talking.
+ *
+ * `disconnect` means different things per transport and is therefore the CALLER's
+ * choice: over WalletConnect it is the peer ending the session (a real sign-out),
+ * while an injected wallet fires it for a dropped RPC connection, which must not log
+ * anyone out. App only passes a handler for the first case.
+ */
+export function onWalletEvents(
+  connection: Connection | null,
+  handlers: { accountsChanged?: () => void; disconnect?: () => void },
+): () => void {
+  const source = (connection?.provider?.provider ??
+    (globalThis as { ethereum?: WalletEvents }).ethereum) as WalletEvents | undefined;
+  if (!source?.on) return () => {};
+  const wired = Object.entries(handlers).filter(
+    (e): e is [string, () => void] => typeof e[1] === "function",
+  );
+  for (const [event, handler] of wired) source.on(event, handler);
+  return () => {
+    for (const [event, handler] of wired) source.removeListener?.(event, handler);
+  };
 }
 
 /** Put an existing connection's wallet on GIWA Sepolia (silent when the chain is
  *  already added+selected). The action flows call this before reading token state
  *  or submitting — a silently-reconnected session may still sit on another chain. */
 export async function ensureChain(connection: Connection): Promise<void> {
-  // The raw EIP-1193 provider sits under the ethers Web3Provider.
+  // The raw EIP-1193 provider sits under the ethers Web3Provider — for a WalletConnect
+  // connection that is the WC provider, which relays the same two RPCs to the phone.
   const eth = (connection.provider?.provider ?? ethereum()) as Eip1193;
-  await ensureGiwaChain(eth);
+  try {
+    await ensureGiwaChain(eth);
+  } catch (e) {
+    // An extension either switches or reports a code the generic message already
+    // explains. A remote wallet may simply not implement the switch, or the user may
+    // never see the request — so say what to do instead of surfacing the raw relay error.
+    if (connection.transport === "walletconnect") throw new Error(chainSwitchMessage(e));
+    throw e;
+  }
+}
+
+/** What to tell a WalletConnect user whose wallet would not move to GIWA Sepolia. */
+export function chainSwitchMessage(e: unknown): string {
+  const code = (e as { code?: number | string } | null)?.code;
+  if (code === 4001 || code === "ACTION_REJECTED") {
+    return "You declined the network switch — bongtu only works on GIWA Sepolia.";
+  }
+  return (
+    "Your wallet didn't switch to GIWA Sepolia. Add or select that network in the wallet " +
+    "app, then try again."
+  );
 }
 
 /**

@@ -15,6 +15,7 @@
   "dependencies": {
     "@bongtu/core": "*",
     "@remixicon/react": "^4.9.0",
+    "@walletconnect/ethereum-provider": "2.23.10",
     "ethers": "^5.8.0",
     "ffjavascript": "^0.3.0",
     "poseidon-lite": "^0.3.0",
