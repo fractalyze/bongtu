@@ -22,7 +22,7 @@ export function DownloadProgress({ view }: { view: CircuitDownloadView }): React
       aria-live="polite"
     >
       <div className="flex flex-col gap-0.5">
-        <span className="text-sm font-semibold">Loading the privacy engine</span>
+        <span className="text-sm font-semibold">Downloading security files</span>
         <span className="text-xs text-muted">{downloadOnceSubtitle(view.total)}</span>
       </div>
       <div className="h-1.5 rounded-full bg-surface-2 overflow-hidden">

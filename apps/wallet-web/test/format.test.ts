@@ -41,12 +41,12 @@ test("downloadOnceSubtitle sizes from the actual byte total", () => {
   const t = CIRCUIT_ASSET_BYTES.transfer;
   const total = t.wasm + t.zkey;
   const expectedMb = Math.round(total / (1024 * 1024));
-  assert.equal(downloadOnceSubtitle(total), `Runs on your device — downloads once (${expectedMb} MB)`);
+  assert.equal(downloadOnceSubtitle(total), `Runs on your device. Downloads only once (${expectedMb} MB)`);
   // plain-words copy: no jargon anywhere in the line
   assert.ok(!/zkey|circuit|snark|proof/i.test(downloadOnceSubtitle(total)));
 });
 
 test("downloadOnceSubtitle omits the size while the total is unknown", () => {
-  assert.equal(downloadOnceSubtitle(null), "Runs on your device — downloads once");
-  assert.equal(downloadOnceSubtitle(0), "Runs on your device — downloads once");
+  assert.equal(downloadOnceSubtitle(null), "Runs on your device. Downloads only once");
+  assert.equal(downloadOnceSubtitle(0), "Runs on your device. Downloads only once");
 });

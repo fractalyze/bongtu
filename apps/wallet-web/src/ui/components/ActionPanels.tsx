@@ -75,9 +75,26 @@ export function RunningPanel({
 /** The confirm sheet: the amount, the action's own detail rows, an optional note about
  *  what confirming will cost, and the Cancel / Confirm pair. Confirm stays disabled
  *  while the proving assets are still streaming in. */
+/** The one-glance direction of a confirm: two pills and an arrow ("kKRW in your
+ *  account" -> "Private balance"). Replaces the old From/To definition-list rows,
+ *  which read like a form rather than a picture. */
+export function FlowHint({ from, to }: { from: string; to: string }): ReactNode {
+  return (
+    <div
+      className="flex items-center justify-center gap-2 text-[0.82rem] text-muted"
+      aria-label={`${from} to ${to}`}
+    >
+      <span className="px-2.5 py-1 rounded-full bg-surface border border-border">{from}</span>
+      <span aria-hidden="true" className="text-ink font-semibold">&rarr;</span>
+      <span className="px-2.5 py-1 rounded-full bg-surface border border-border">{to}</span>
+    </div>
+  );
+}
+
 export function ConfirmPanel({
   title,
   amount,
+  hint,
   note,
   download,
   onCancel,
@@ -87,6 +104,8 @@ export function ConfirmPanel({
   /** the screen's own title — the header reads "Confirm <title>". */
   title: string;
   amount: string;
+  /** optional direction line (FlowHint) rendered between the amount and the rows. */
+  hint?: ReactNode;
   note?: ReactNode;
   download: CircuitDownloadView;
   onCancel: () => void;
@@ -97,6 +116,7 @@ export function ConfirmPanel({
   return (
     <Panel title={`Confirm ${title}`}>
       <AmountHero amount={amount} />
+      {hint}
       <dl className="grid grid-cols-[auto_1fr] gap-x-3.5 gap-y-2 p-3.5 bg-surface border border-border rounded-xl">
         {children}
       </dl>

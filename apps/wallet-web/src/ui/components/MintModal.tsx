@@ -84,7 +84,7 @@ export function MintModal({
       // fails inside the wallet with an opaque object — say it plainly instead.
       if ((await readGasBalance(connection)) === 0n) {
         throw new Error(
-          "This account has no GIWA Sepolia ETH to pay gas — get a little ETH onto GIWA Sepolia first, then mint.",
+          "This account has no GIWA Sepolia ETH to pay gas. Get a little ETH onto GIWA Sepolia first, then mint.",
         );
       }
       const res = await mintTestToken(connection, DEFAULTS.token, connection.address, parsed.wei);

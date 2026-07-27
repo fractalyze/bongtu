@@ -25,15 +25,16 @@ export function LockIntro({ onDone }: { onDone: () => void }): ReactNode {
 
       <ul className="list-none flex flex-col gap-3 p-3.5 bg-surface border border-border rounded-xl text-[0.9rem] text-muted">
         <li>
-          Your wallet is unlocked — the signing key lives only in this tab&apos;s memory, never
-          stored.
+          You&apos;re ready to send. The key that moves your money only exists while this page
+          is open. It is never saved anywhere.
         </li>
         <li>
-          After 10 idle minutes it locks automatically — the padlock up top turns closed.
+          If you do nothing for 10 minutes, the wallet locks itself. The padlock at the top
+          closes.
         </li>
         <li>
-          Sending or withdrawing after that re-unlocks with one wallet signature. Viewing your
-          balance never needs it.
+          To send again after that, just confirm once in your wallet app. Your balance is
+          always visible, locked or not.
         </li>
       </ul>
 

@@ -48,7 +48,7 @@ export type ReadFailure =
   /** anything else: keep the session, show a retryable error. */
   | { kind: "error"; message: string };
 
-export const EXPIRED_MESSAGE = "Your login expired — please reconnect.";
+export const EXPIRED_MESSAGE = "Your login expired. Please reconnect.";
 
 /**
  * Classify a failed owner read. Only a 401 is conclusive: the token path is the

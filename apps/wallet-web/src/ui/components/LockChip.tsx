@@ -27,8 +27,8 @@ export function LockChip({ walletName = NEUTRAL_WALLET_NAME }: { walletName?: st
       aria-label={unlocked ? "Wallet unlocked" : "Wallet locked"}
       title={
         unlocked
-          ? "Unlocked — you can send without confirming again for a while."
-          : `Locked — you'll confirm once in ${walletName} the next time you send.`
+          ? "Unlocked. You can send without confirming again for a while."
+          : `Locked. You'll confirm once in ${walletName} the next time you send.`
       }
     >
       {unlocked ? <IconUnlock size={17} /> : <IconLock size={17} />}

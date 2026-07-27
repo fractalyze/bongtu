@@ -34,7 +34,7 @@ import { amountError, recipientError } from "../format.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
 import { SPEND_STEPS } from "../components/StagedProgress.js";
 import { SuccessPanel } from "../components/SuccessPanel.js";
-import { ConfirmPanel, DownloadingPanel, RunningPanel } from "../components/ActionPanels.js";
+import { ConfirmPanel, DownloadingPanel, FlowHint, RunningPanel } from "../components/ActionPanels.js";
 import { AmountInput, Button, ErrorBanner, Field, TextInput } from "../components/controls.js";
 
 /** What the user is told when their balance is real but too scattered to spend at
@@ -191,6 +191,11 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
       <ConfirmPanel
         title={title}
         amount={review}
+        hint={
+          !isTransfer && !merging ? (
+            <FlowHint from="Private balance" to="kKRW in your account" />
+          ) : undefined
+        }
         note={
           merging ? (
             <p className="text-muted text-[0.88rem]">

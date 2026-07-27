@@ -26,11 +26,11 @@ export type WalletTransport = "injected" | "walletconnect";
 
 export const NONDETERMINISTIC_WALLET_MESSAGE =
   "This wallet signed the same message two different ways, so it can't produce a stable " +
-  "bongtu key — every login would look like a different account. Connect with a wallet " +
+  "bongtu key, so every login would look like a different account. Connect with a wallet " +
   "that signs deterministically.";
 
 export const KEY_CHANGED_MESSAGE =
-  "This wallet produced a different signing key than last time — it may not support " +
+  "This wallet produced a different signing key than last time. It may not support " +
   "deterministic signatures. Use the wallet you first connected with.";
 
 /** Hex from two different wallets can differ in case and padding whitespace and still

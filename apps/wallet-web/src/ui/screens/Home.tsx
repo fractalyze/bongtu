@@ -118,7 +118,7 @@ export function Home(): ReactNode {
         <section className="flex flex-col gap-2 bg-surface border border-border-strong rounded-xl p-3.5">
           <p className="text-[0.95rem] font-bold">Deposit kKRW to get started</p>
           <p className="text-sm text-muted">
-            Deposited kKRW becomes private — then send and withdraw freely.
+            Deposited kKRW becomes private. Then send and withdraw freely.
           </p>
           <Button variant="primary" block onClick={() => navigate("deposit")}>
             Deposit kKRW

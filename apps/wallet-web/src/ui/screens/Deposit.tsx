@@ -25,7 +25,7 @@ import { amountError } from "../format.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
 import { SuccessPanel } from "../components/SuccessPanel.js";
 import { DEPOSIT_STEPS } from "../components/StagedProgress.js";
-import { ConfirmPanel, DownloadingPanel, RunningPanel } from "../components/ActionPanels.js";
+import { ConfirmPanel, DownloadingPanel, FlowHint, RunningPanel } from "../components/ActionPanels.js";
 import { AmountInput, Button, ErrorBanner, Field, LinkButton, TestnetTag } from "../components/controls.js";
 import { MintModal } from "../components/MintModal.js";
 
@@ -120,6 +120,7 @@ export function Deposit(): ReactNode {
       <ConfirmPanel
         title="Deposit"
         amount={review}
+        hint={<FlowHint from="kKRW in your account" to="Private balance" />}
         note={
           willApprove ? (
             <p className="text-sm text-muted">
@@ -132,10 +133,6 @@ export function Deposit(): ReactNode {
         onCancel={action.cancel}
         onConfirm={confirm}
       >
-        <dt className="text-muted text-sm">From</dt>
-        <dd className="text-right text-[0.9rem] [overflow-wrap:anywhere]">Your public kKRW</dd>
-        <dt className="text-muted text-sm">To</dt>
-        <dd className="text-right text-[0.9rem] [overflow-wrap:anywhere]">Your private balance</dd>
         <dt className="text-muted text-sm">Network</dt>
         <dd className="text-right text-[0.9rem] [overflow-wrap:anywhere]">
           GIWA · chain {DEFAULTS.chainId}
@@ -161,7 +158,7 @@ export function Deposit(): ReactNode {
       <ScreenHeader title="Deposit" />
       <div className="flex flex-col gap-4">
         <p className="text-sm text-muted">
-          kKRW in, <strong>private kKRW</strong> out — then send and withdraw with nothing
+          kKRW in, <strong>private kKRW</strong> out. Then send and withdraw with nothing
           revealed.
         </p>
 
@@ -196,7 +193,7 @@ export function Deposit(): ReactNode {
             // Non-testnet: no mint to offer — just say what's missing.
             <div className="flex flex-col gap-2 bg-surface border border-border-strong rounded-xl p-3.5">
               <p className="text-sm text-muted">
-                Depositing needs kKRW in this account — fund it first, then come back.
+                Depositing needs kKRW in this account. Fund it first, then come back.
               </p>
             </div>
           )

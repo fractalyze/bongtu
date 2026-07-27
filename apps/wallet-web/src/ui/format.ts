@@ -54,7 +54,7 @@ export function relativeTime(unixSeconds: number): string {
  * unknown (first render before the byte counts arrive).
  */
 export function downloadOnceSubtitle(totalBytes: number | null): string {
-  const base = "Runs on your device — downloads once";
+  const base = "Runs on your device. Downloads only once";
   if (totalBytes === null || totalBytes <= 0) return base;
   return `${base} (${Math.round(totalBytes / (1024 * 1024))} MB)`;
 }

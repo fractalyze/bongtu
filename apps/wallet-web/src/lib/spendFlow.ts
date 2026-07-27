@@ -157,7 +157,7 @@ export async function runSpend(
   const crypto = freshSpendCrypto(randField);
   const built = buildRequest(action, identity, memberships, crypto);
   if (!built.meta.membershipOk) {
-    throw new Error("Your balance just changed — go back and try again.");
+    throw new Error("Your balance just changed. Go back and try again.");
   }
 
   onStage("prove");

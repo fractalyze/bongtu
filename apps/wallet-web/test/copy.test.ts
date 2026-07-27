@@ -196,7 +196,7 @@ test("the padlock renders NO text label — the words live in the tooltip and th
 test("the sync dot carries its status in a tooltip and stays a refresh button", () => {
   const synced = renderToStaticMarkup(h(SyncDot, { state: "synced", onRefresh: () => {} }));
   assert.match(synced, /title="Synced"/);
-  assert.match(synced, /aria-label="Refresh balance — synced"/);
+  assert.match(synced, /aria-label="Refresh balance \(synced\)"/);
   assert.match(synced, /bg-pos/);
   assert.doesNotMatch(synced, />Synced</, "no chip text — the header is icons only");
   assert.doesNotMatch(synced, /disabled=""/, "a synced dot is pressable: it forces a refresh");
@@ -207,7 +207,7 @@ test("the sync dot carries its status in a tooltip and stays a refresh button", 
   assert.match(syncing, /disabled=""/, "no re-entry while a load is already running");
 
   const stale = renderToStaticMarkup(h(SyncDot, { state: "stale", onRefresh: () => {} }));
-  assert.match(stale, /title="Out of sync — tap to refresh"/);
+  assert.match(stale, /title="Out of sync. Tap to refresh"/);
   assert.match(stale, /bg-err/);
 });
 
@@ -350,7 +350,7 @@ test("Confirm waits while the proving assets are still streaming in", () => {
   );
   assert.match(html, />Preparing…</);
   assert.match(html, /disabled=""/, "and it cannot be pressed until they land");
-  assert.match(html, /Loading the privacy engine/, "the download says why the wait exists");
+  assert.match(html, /Downloading security files/, "the download says why the wait exists");
 });
 
 test("the running panel shows the amount in play and the stage the run has reached", () => {

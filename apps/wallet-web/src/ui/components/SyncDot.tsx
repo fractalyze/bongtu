@@ -17,14 +17,14 @@ export type SyncState = "synced" | "syncing" | "stale";
 const TITLE: Record<SyncState, string> = {
   synced: "Synced",
   syncing: "Syncing…",
-  stale: "Out of sync — tap to refresh",
+  stale: "Out of sync. Tap to refresh",
 };
 
 /** Screen-reader name: the dot is a BUTTON, so it has to say what pressing it does. */
 const ARIA: Record<SyncState, string> = {
-  synced: "Refresh balance — synced",
-  syncing: "Refresh balance — syncing",
-  stale: "Refresh balance — out of sync",
+  synced: "Refresh balance (synced)",
+  syncing: "Refresh balance (syncing)",
+  stale: "Refresh balance (out of sync)",
 };
 
 const DOT: Record<SyncState, string> = {

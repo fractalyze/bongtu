@@ -236,7 +236,7 @@ export function App(): ReactNode {
         accountsChanged: () => keyCache.lock(),
         disconnect:
           connection?.transport === "walletconnect"
-            ? () => endSession("Your wallet ended the connection — connect again to continue.")
+            ? () => endSession("Your wallet ended the connection. Connect again to continue.")
             : undefined,
       }),
     [connection, endSession],

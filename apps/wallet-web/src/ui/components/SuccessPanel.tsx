@@ -42,9 +42,11 @@ export function SuccessPanel({
         </p>
         <ExplorerLink href={explorerUrl} />
         {syncing && (
-          <p className="text-muted text-[0.82rem] mt-0.5" role="status">
-            Updating your balance…
-          </p>
+          <span
+            role="status"
+            aria-label="Updating your balance"
+            className="mt-1 inline-block size-4 rounded-full border-2 border-border border-t-primary animate-spin"
+          />
         )}
         <Button
           variant="primary"

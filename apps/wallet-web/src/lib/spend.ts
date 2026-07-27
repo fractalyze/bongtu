@@ -193,7 +193,7 @@ export function selectInputNotes(
 
   const unspent = unspentLargestFirst(notes);
   if (unspent.length === 0) {
-    throw new SpendSelectionError("insufficient", "no spendable notes — load your balance first");
+    throw new SpendSelectionError("insufficient", "no spendable notes. Load your balance first");
   }
 
   const chosen: WalletInputNote[] = [];

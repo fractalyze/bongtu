@@ -67,7 +67,7 @@ interface Eip1193 {
 }
 function ethereum(): Eip1193 {
   const eth = (globalThis as { ethereum?: Eip1193 }).ethereum;
-  if (!eth) throw new Error("No wallet extension found — install or enable one, then reload.");
+  if (!eth) throw new Error("No wallet extension found. Install or enable one, then reload.");
   return eth;
 }
 
@@ -96,7 +96,7 @@ export function walletErrorMessage(e: unknown): string {
   if (o?.code === 4001 || o?.code === "ACTION_REJECTED") return "Transaction rejected in your wallet.";
   const raw = o?.reason ?? o?.error?.message ?? o?.data?.message ?? o?.message;
   if (raw && /insufficient funds/i.test(raw)) {
-    return "Not enough GIWA Sepolia ETH to pay gas — this account needs a little ETH on GIWA Sepolia first.";
+    return "Not enough GIWA Sepolia ETH to pay gas. This account needs a little ETH on GIWA Sepolia first.";
   }
   if (raw) return raw;
   try {
@@ -277,7 +277,7 @@ export async function ensureChain(connection: Connection): Promise<void> {
 export function chainSwitchMessage(e: unknown): string {
   const code = (e as { code?: number | string } | null)?.code;
   if (code === 4001 || code === "ACTION_REJECTED") {
-    return "You declined the network switch — bongtu only works on GIWA Sepolia.";
+    return "You declined the network switch. bongtu only works on GIWA Sepolia.";
   }
   return (
     "Your wallet didn't switch to GIWA Sepolia. Add or select that network in the wallet " +
@@ -331,7 +331,7 @@ export async function assertPoolKemEpoch(connection: Connection, poolAddr: strin
     // The technical verdict (which key, which epoch) goes to the console for
     // diagnosis; the thrown message is what a wallet user can act on.
     console.error(err);
-    throw new Error("This wallet version doesn't match the network yet — try again in a moment.");
+    throw new Error("This wallet version doesn't match the network yet. Try again in a moment.");
   }
   kemVerifiedPool = poolAddr;
 }

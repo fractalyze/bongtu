@@ -100,7 +100,7 @@ export function scalarFromSignature(signature: string): bigint {
   const digest = BigInt(ethers.utils.keccak256(signature));
   const s = digest % SUBGROUP_ORDER;
   if (s === 0n) {
-    throw new Error("scalarFromSignature: signature hashed to 0 mod L (astronomically rare) — re-sign");
+    throw new Error("scalarFromSignature: signature hashed to 0 mod L (astronomically rare). Re-sign");
   }
   return s;
 }

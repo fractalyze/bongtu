@@ -54,7 +54,7 @@ export const WALLETCONNECT_UNCONFIGURED_MESSAGE =
   "WalletConnect isn't configured in this build.";
 
 export const WALLETCONNECT_NO_ACCOUNT_MESSAGE =
-  "Your wallet connected but didn't share an account — approve the connection in the wallet app and try again.";
+  "Your wallet connected but didn't share an account. Approve the connection in the wallet app and try again.";
 
 /** The slice of `@walletconnect/ethereum-provider` this module drives. Declared here
  *  rather than imported so that no type import can smuggle the SDK into the bundle,

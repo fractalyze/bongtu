@@ -49,11 +49,11 @@ export function Onboarding(): ReactNode {
           <span>
             {DEFAULTS.testnet ? (
               <>
-                <strong className="text-ink">Get kKRW</strong> — mint free test kKRW here.
+                <strong className="text-ink">Get kKRW</strong>: mint free test kKRW here.
               </>
             ) : (
               <>
-                <strong className="text-ink">Get kKRW</strong> — fund your account with kKRW.
+                <strong className="text-ink">Get kKRW</strong>: fund your account with kKRW.
               </>
             )}
           </span>
@@ -63,7 +63,7 @@ export function Onboarding(): ReactNode {
             <IconDeposit size={18} />
           </span>
           <span>
-            <strong className="text-ink">Deposit</strong> — it becomes private kKRW.
+            <strong className="text-ink">Deposit</strong>: it becomes private kKRW.
           </span>
         </li>
         <li className="flex gap-2.5 items-center text-[0.9rem] text-muted">
@@ -71,7 +71,7 @@ export function Onboarding(): ReactNode {
             <IconSend size={18} />
           </span>
           <span>
-            <strong className="text-ink">Send &amp; withdraw</strong> — nothing revealed.
+            <strong className="text-ink">Send &amp; withdraw</strong>: nothing revealed.
           </span>
         </li>
       </ol>

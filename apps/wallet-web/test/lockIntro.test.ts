@@ -88,10 +88,10 @@ test("a foreign value in the flag's slot does not count as seen", () => {
 
 test("the explainer states the three facts and offers one way on", () => {
   const html = renderToStaticMarkup(createElement(LockIntro, { onDone: () => {} }));
-  assert.match(html, /the signing key lives only in this tab&#x27;s memory, never stored/);
-  assert.match(html, /After 10 idle minutes it locks automatically/);
-  assert.match(html, /the padlock up top turns closed/);
-  assert.match(html, /re-unlocks with one wallet signature/);
-  assert.match(html, /Viewing your balance never needs it/);
+  assert.match(html, /only exists while this page is open. It is never saved anywhere/);
+  assert.match(html, /If you do nothing for 10 minutes, the wallet locks itself/);
+  assert.match(html, /The padlock at the top closes/);
+  assert.match(html, /confirm once in your wallet app/);
+  assert.match(html, /Your balance is always visible, locked or not/);
   assert.match(html, />Got it</);
 });
