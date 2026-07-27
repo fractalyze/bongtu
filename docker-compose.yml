@@ -56,6 +56,9 @@ services:
       # AUTHORITY_KEY set => ARBITER MODE (institution-internal; holds every
       # owner's decrypted notes). Leave empty for a public indexer.
       AUTHORITY_KEY: ${AUTHORITY_KEY:-}
+      # The ML-KEM-768 decapsulation key (hybrid envelopes). Arbiter mode on a
+      # KEM-epoch pool REFUSES to boot without it (kemBootGuard, design §7).
+      AUTHORITY_KEM_KEY: ${AUTHORITY_KEM_KEY:-}
       PORT: "8600"
     ports:
       - "${INDEXER_PORT:-8600}:8600"
