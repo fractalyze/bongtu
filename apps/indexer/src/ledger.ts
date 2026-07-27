@@ -23,7 +23,7 @@
 //     which never fills, keeps returning the 422 batch-leaf sentinel, §11-7).
 //
 //   - the SAME decrypted envelope also yields a per-owner ACTIVITY HISTORY
-//     (GET /history): received / sent / withdraw / deposit items with the
+//     (GET /history): activity items (kinds: LedgerHistoryItem below) with the
 //     counterparty + amount that op meant for each owner.
 //
 // This module holds the PURE half of the ledger: the decrypt/derive step —
@@ -69,7 +69,7 @@ export interface EnvelopeAlarm {
 }
 
 /** The kind of a per-owner activity item, as served by GET /history. */
-export type HistoryKind = "received" | "sent" | "withdraw" | "deposit";
+export type HistoryKind = "received" | "sent" | "withdraw" | "deposit" | "self";
 
 /**
  * One entry of an owner's activity history (GET /history) — derived from the
@@ -79,6 +79,8 @@ export type HistoryKind = "received" | "sent" | "withdraw" | "deposit";
  *     a transfer);
  *   - "sent":     a transfer whose spent input was the owner's (counterparty =
  *     the payee, amount = what left them);
+ *   - "self":     a transfer whose every nonzero output came back to the owner
+ *     (a pure self-send; counterparty null, amount = the payment output);
  *   - "withdraw": the owner unshielded (counterparty null, amount = unshielded);
  *   - "deposit":  the owner's own deposit output (counterparty null).
  * `counterparty` is a COMPRESSED bjj pubkey hex (never a raw x,y pair). Wire shape
@@ -287,7 +289,13 @@ export function deriveOp(
  *     for its owner (counterparty = sender) AND a matching "sent" for the sender
  *     (counterparty = that payee). Both outputs can be independent payees, so a
  *     split payment yields two "sent" items, never one merged item. A self output
- *     is the sender's change and is NOT listed.
+ *     is the sender's change and is NOT listed. That change-suppression rule
+ *     predates self-send (SPEC §6b was written when the circuit still rejected
+ *     duplicate output owners), so a PURE self-send — every nonzero output back
+ *     to the sender, legal since the §11-8 v1.1 per-output nonce — would erase
+ *     the op from the feed entirely (fractalyze/bongtu#1). That case emits
+ *     exactly ONE "self" item instead: counterparty null, amount = the payment
+ *     slot (output 0 — a consolidation merge carries the whole merged sum there).
  *   - disburse: each non-self output → "received" (counterparty = the employer
  *     input owner). Only a cross-checked batch contributes.
  *   - withdraw: the input owner unshielded inputs − change → "withdraw".
@@ -315,6 +323,16 @@ function deriveHistory(op: OpEnvelope, env: ParsedEnvelope, disburseCrossChecks:
       // distinct non-self payees: emit one "received" AND one matching "sent" per
       // non-self output — never collapse a split payment into a single item.
       const sender = env.inputs[0].owner;
+      // A pure self-send has NO non-self output, so the change suppression below
+      // would erase the op from the owner's feed entirely (fractalyze/bongtu#1):
+      // emit one "self" item instead, amount = the payment slot (output 0).
+      const nonzero = env.outputs.filter((o) => o.value !== 0n);
+      if (nonzero.length > 0 && nonzero.every((o) => sameOwner(o.owner, sender))) {
+        // nonzero[0], not outputs[0]: a hand-built tx can put 0 in the payment
+        // slot; the wallet's shapes (payment at 0, merge sum at 0) are unchanged.
+        out.push({ owner: sender, kind: "self", counterparty: null, amount: nonzero[0].value });
+        return out;
+      }
       for (const o of env.outputs) {
         if (o.value !== 0n && !sameOwner(o.owner, sender)) {
           out.push({ owner: o.owner, kind: "received", counterparty: sender, amount: o.value });

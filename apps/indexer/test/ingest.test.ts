@@ -306,11 +306,51 @@ async function main(): Promise<void> {
   ok(sentTo(U2) === "5", "employer 'sent' 5 to U2 (transfer#2, split payee A)");
   ok(sentTo(U3) === "15", "employer 'sent' 15 to U3 (transfer#2, split payee B) — NOT merged into U2");
   ok(empSent.length === 3, "exactly three 'sent' items (12→U1, 5→U2, 15→U3), no collapsed item");
+  // 2 deposits + 3 sent and NOTHING else: transfer#1's change (18 back to EMP)
+  // stays suppressed, and a normal transfer must never yield a 'self' item.
+  ok(empHist.length === 5, "employer history = 2 deposit + 3 sent — the self change is never listed");
+  ok(empHist.every((h) => h.kind !== "self"), "a normal transfer (with self change) yields NO 'self' item");
   const u3Hist = ix.ledger!.historyOf(U3.publicKey[0], U3.publicKey[1]);
   ok(
     u3Hist.some((h) => h.kind === "received" && h.amount === "15" && h.counterparty === packPubkey(EMP.publicKey)),
     "U3 'received' 15 from the employer",
   );
+
+  step("SELF-SEND: a pure A→A transfer yields exactly ONE 'self' item (fractalyze/bongtu#1)");
+  {
+    const simS = makeSim();
+    const ixS = makeIndexer(true);
+    const sDep0 = note(U1, 30n, 6001n);
+    const sDep1 = note(U1, 0n, 6002n);
+    // The wallet A→A shape (legal since the §11-8 v1.1 per-output nonce):
+    // payment slot (output 0) 12 back to U1, change (output 1) 18 back to U1.
+    // Without the 'self' branch the change-suppression rule would erase the op.
+    const sPay = note(U1, 12n, 6003n);
+    const sChg = note(U1, 18n, 6004n);
+    ixS.applyLogs([
+      ...simS.deposit("0xsdep", sDep0, sDep1, 690000000000000000007n, 661n),
+      ...simS.transfer("0xself", sDep0, note(U1, 0n, 6005n), sPay, sChg, 691000000000000000009n, 662n, [401n, 0n]),
+    ]);
+    const h = ixS.ledger!.historyOf(U1.publicKey[0], U1.publicKey[1]);
+    const selfs = h.filter((x) => x.kind === "self");
+    ok(selfs.length === 1, "exactly one 'self' item for the pure self-send");
+    ok(selfs[0].amount === "12", "'self' amount == the payment slot (output 0), not the sum and not the change");
+    ok(selfs[0].counterparty === null, "'self' carries no counterparty");
+    ok(selfs[0].txHash === "0xself", "'self' item carries the self-send tx");
+    ok(!h.some((x) => x.kind === "received" || x.kind === "sent"), "the self-send yields no received/sent pair");
+
+    // The consolidation-merge shape (U-Y1's producer): both real inputs, output 0
+    // = the merged sum, output 1 = 0 — 'self' carries the WHOLE merged amount.
+    const sMerged = note(U1, 30n, 6006n);
+    ixS.applyLogs(
+      simS.transfer("0xmerge", sPay, sChg, sMerged, note(U1, 0n, 6007n), 692000000000000000003n, 663n, [402n, 403n]),
+    );
+    const h2 = ixS.ledger!.historyOf(U1.publicKey[0], U1.publicKey[1]);
+    const merged = h2.filter((x) => x.kind === "self" && x.txHash === "0xmerge");
+    ok(merged.length === 1 && merged[0].amount === "30", "a consolidation merge yields one 'self' item == the merged sum");
+    const notesS = ixS.ledger!.notesOf(U1.publicKey[0], U1.publicKey[1]);
+    ok(notesS.filter((n) => !n.spent && n.value !== "0").length === 1, "after the merge exactly one live nonzero note remains");
+  }
 
   step("DISBURSE: published batch opens; withheld batch stays a sentinel + alarms");
   ok(feed[3].disclosure?.status === "verified", "published disburse disclosure checks out");
@@ -512,7 +552,7 @@ async function main(): Promise<void> {
     ok(b3.ok === true && b3.lastSuccessAt !== null, "recovered → /health ok:true");
   }
 
-  console.log(`\n${failures === 0 ? "INGEST UNIT TEST PASS — multicall correlation, correlation guard, replay convergence, withheld disburse, ledger dedup, pollOnce/health" : `INGEST UNIT TEST FAIL — ${failures} assertion(s)`}`);
+  console.log(`\n${failures === 0 ? "INGEST UNIT TEST PASS — multicall correlation, self-send history, correlation guard, replay convergence, withheld disburse, ledger dedup, pollOnce/health" : `INGEST UNIT TEST FAIL — ${failures} assertion(s)`}`);
   process.exit(failures === 0 ? 0 : 1);
 }
 

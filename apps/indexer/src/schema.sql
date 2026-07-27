@@ -57,7 +57,7 @@ CREATE INDEX IF NOT EXISTS notes_commitment_idx ON notes (commitment);
 CREATE TABLE IF NOT EXISTS history (
   seq             BIGINT PRIMARY KEY,  -- global chain-apply order (sorted desc on read)
   owner_key       TEXT   NOT NULL,     -- "x,y" decimal bjj pubkey
-  kind            TEXT   NOT NULL,     -- received | sent | withdraw | deposit
+  kind            TEXT   NOT NULL,     -- received | sent | withdraw | deposit | self
   counterparty    TEXT,                -- compressed bjj pubkey hex, or NULL
   amount          TEXT   NOT NULL,     -- decimal
   tx_hash         TEXT   NOT NULL,

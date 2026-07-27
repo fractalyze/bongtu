@@ -10,41 +10,36 @@
 import type { ReactNode } from "react";
 import { encodeAddress } from "@bongtu/core/pubkey";
 import type { HistoryItem, HistoryKind } from "../../lib/indexerClient.js";
+// verb + direction live in lib/activity.ts (pure, headlessly tested) — this file
+// only keeps what needs JSX: the icon mapping and the row layout.
+import { ACTIVITY_VERB, activityDirection } from "../../lib/activity.js";
 import { formatKkrw } from "../../lib/money.js";
 import { relativeTime, shortenPubkey } from "../format.js";
 import { LinkButton } from "./controls.js";
 import {
   IconReceived,
   IconSend,
+  IconSelfSend,
   IconDeposit,
   IconWithdraw,
   IconExternalLink,
 } from "./icons.js";
-
-const VERB: Record<HistoryKind, string> = {
-  received: "Received",
-  sent: "Sent",
-  withdraw: "Withdrawn",
-  deposit: "Deposited",
-};
-
-// received / deposit add to the balance; sent / withdraw remove from it.
-function signOf(kind: HistoryKind): "in" | "out" {
-  return kind === "received" || kind === "deposit" ? "in" : "out";
-}
 
 // Kind icons mirror the Home action icons (send-plane / into-pool / out-of-pool) so
 // a feed row and the button that caused it read as the same gesture.
 const KIND_ICON: Record<HistoryKind, (props: { size?: number }) => ReactNode> = {
   received: IconReceived,
   sent: IconSend,
+  self: IconSelfSend,
   deposit: IconDeposit,
   withdraw: IconWithdraw,
 };
 
 function Row({ item, explorerBase }: { item: HistoryItem; explorerBase: string }): ReactNode {
-  const dir = signOf(item.kind);
-  const Kind = KIND_ICON[item.kind];
+  const dir = activityDirection(item.kind);
+  // Runtime fallback: the server can grow kinds this bundle predates ('self' did
+  // exactly that to older builds) — an unknown kind must degrade, not crash.
+  const Kind = KIND_ICON[item.kind] ?? IconSend;
   const href = `${explorerBase.replace(/\/+$/, "")}/tx/${item.txHash}`;
   // Only the external-link icon navigates (user decision): a whole-row anchor made
   // every stray tap an explorer round-trip.
@@ -58,7 +53,7 @@ function Row({ item, explorerBase }: { item: HistoryItem; explorerBase: string }
         <Kind size={16} />
       </span>
       <span className="flex-1 min-w-0 flex flex-col gap-0.5">
-        <span className="font-semibold text-[0.92rem]">{VERB[item.kind]}</span>
+        <span className="font-semibold text-[0.92rem]">{ACTIVITY_VERB[item.kind] ?? item.kind}</span>
         {item.counterparty && (
           // /history serves canonical hex; users only ever SEE base58, so encode
           // at this display edge like every other address surface.
@@ -76,7 +71,7 @@ function Row({ item, explorerBase }: { item: HistoryItem; explorerBase: string }
             dir === "in" ? "text-pos" : "text-ink"
           }`}
         >
-          {dir === "in" ? "+" : "-"}
+          {dir === "in" ? "+" : dir === "out" ? "-" : ""}
           {formatKkrw(item.amount)}
         </span>
         <span className="text-xs text-muted leading-[1.2]">
