@@ -12,7 +12,9 @@ import {
   GIWA_GAS_FLOOR_GWEI,
   POOL_ABI_FRAGMENTS,
   ERC20_ABI_FRAGMENTS,
+  arbiterKemPkGuardError,
   explorerTxUrl,
+  isPreKemProbeError,
 } from "@bongtu/core/network";
 
 // The GIWA gas floor lives in @bongtu/core/network (ethers' auto-estimate
@@ -28,6 +30,8 @@ const POOL_ABI = [
   POOL_ABI_FRAGMENTS.withdraw,
   POOL_ABI_FRAGMENTS.root,
   POOL_ABI_FRAGMENTS.nextLeafIndex,
+  POOL_ABI_FRAGMENTS.currentEpoch,
+  POOL_ABI_FRAGMENTS.arbiterKemPkHash,
 ];
 
 // The wrapped kKRW ERC-20 fragments for the deposit/shield flow: approve the pool to
@@ -85,15 +89,56 @@ export interface SubmitResult {
   explorerUrl: string;
 }
 
+// One successful verification per pool address is enough for the session: the
+// epoch hash only changes on an arbiter key rotation, which ships as a new
+// wallet bundle anyway (ARBITER_KEM_PK is a build-time deployment fact).
+let kemVerifiedPool: string | null = null;
+
+/**
+ * Refuse to encapsulate to a key the chain does not vouch for (design doc
+ * §4/§5): read the pool's `arbiterKemPkHash(currentEpoch())` and require it to
+ * equal keccak256(ARBITER_KEM_PK). A pre-KEM V1 pool (getter reverts) is also
+ * fatal — this build only produces hybrid proofs, so every op would revert
+ * unlabeled at submit; failing here yields a readable error instead. The flows
+ * call this BEFORE drawing KEM material / proving.
+ */
+export async function assertPoolKemEpoch(connection: Connection, poolAddr: string): Promise<void> {
+  if (kemVerifiedPool === poolAddr) return;
+  const pool = new ethers.Contract(poolAddr, POOL_ABI, connection.provider);
+  let onchainHash: string | null;
+  try {
+    onchainHash = String(await pool.arbiterKemPkHash(await pool.currentEpoch()));
+  } catch (e) {
+    if (!isPreKemProbeError(e)) throw e;
+    onchainHash = null;
+  }
+  const err = arbiterKemPkGuardError(onchainHash);
+  if (err) throw new Error(err);
+  kemVerifiedPool = poolAddr;
+}
+
+// Every pool op now carries the op's raw ML-KEM-768 encapsulation ciphertext
+// (`bytes kemCiphertext`, 1088 B — the hybrid envelope's PQ half, drawn fresh
+// per tx in freshSpendCrypto/freshDepositCrypto). The contract length-checks it
+// (WrongKemCiphertextLength) and re-emits it for the arbiter; pre-checking the
+// length here turns that revert into a readable client error.
+function assertKemCiphertext(kemCiphertext: string): void {
+  if (!/^0x[0-9a-fA-F]+$/.test(kemCiphertext) || (kemCiphertext.length - 2) / 2 !== 1088) {
+    throw new Error(`kemCiphertext must be 1088 bytes of 0x-hex (got ${kemCiphertext.length} chars)`);
+  }
+}
+
 async function submit(
   connection: Connection,
   poolAddr: string,
   fn: "deposit" | "transfer" | "withdraw",
   calldata: Calldata,
+  kemCiphertext: string,
   explorerBase: string,
 ): Promise<SubmitResult> {
+  assertKemCiphertext(kemCiphertext);
   const pool = new ethers.Contract(poolAddr, POOL_ABI, connection.signer);
-  const tx = await pool[fn](calldata.a, calldata.b, calldata.c, calldata.pub, { gasPrice: GAS_PRICE });
+  const tx = await pool[fn](calldata.a, calldata.b, calldata.c, calldata.pub, kemCiphertext, { gasPrice: GAS_PRICE });
   await tx.wait();
   return { txHash: tx.hash, explorerUrl: explorerTxUrl(tx.hash, explorerBase) };
 }
@@ -103,9 +148,10 @@ export function submitTransfer(
   connection: Connection,
   poolAddr: string,
   calldata: Calldata,
+  kemCiphertext: string,
   explorerBase: string,
 ): Promise<SubmitResult> {
-  return submit(connection, poolAddr, "transfer", calldata, explorerBase);
+  return submit(connection, poolAddr, "transfer", calldata, kemCiphertext, explorerBase);
 }
 
 /** Submit a proven withdraw. */
@@ -113,21 +159,24 @@ export function submitWithdraw(
   connection: Connection,
   poolAddr: string,
   calldata: Calldata,
+  kemCiphertext: string,
   explorerBase: string,
 ): Promise<SubmitResult> {
-  return submit(connection, poolAddr, "withdraw", calldata, explorerBase);
+  return submit(connection, poolAddr, "withdraw", calldata, kemCiphertext, explorerBase);
 }
 
-/** Submit a proven deposit/shield: the 0-in/2-out mint `(a, b, c, pub)` (pub[0] == V,
- *  length 18). Permissionless — the pool has NO onlyOwner on deposit. Same submit path
- *  as transfer/withdraw (its single authority envelope rides in `pub`). */
+/** Submit a proven deposit/shield: the 0-in/2-out mint `(a, b, c, pub, kemCiphertext)`
+ *  (pub[0] == V, length 19). Permissionless — the pool has NO onlyOwner on deposit.
+ *  Same submit path as transfer/withdraw (its Poseidon authority envelope rides in
+ *  `pub`; the KEM ct is the separate bytes arg). */
 export function submitDeposit(
   connection: Connection,
   poolAddr: string,
   calldata: Calldata,
+  kemCiphertext: string,
   explorerBase: string,
 ): Promise<SubmitResult> {
-  return submit(connection, poolAddr, "deposit", calldata, explorerBase);
+  return submit(connection, poolAddr, "deposit", calldata, kemCiphertext, explorerBase);
 }
 
 /**

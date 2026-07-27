@@ -22,12 +22,20 @@
 import { deriveKeypair, commitment, poseidonEncrypt, ecdhSharedSecret } from "@bongtu/core/note";
 import type { Keypair } from "@bongtu/core/note";
 import { packPubkey } from "@bongtu/core/pubkey";
+import {
+  ml_kem768,
+  kemSsToLimbs,
+  kemBindingOf,
+  kemBytesToHex,
+  hybridEnvelopeKey,
+} from "@bongtu/core/kem";
 import { ImtTree } from "@bongtu/core/imt";
 import type { Pool } from "pg";
 import { MirrorTree } from "../src/tree.js";
 import { type OpEnvelope } from "../src/ledger.js";
 import { PostgresLedger } from "../src/postgres.js";
 import { Indexer, type ParsedLog } from "../src/ingest.js";
+import { ethers, abiKnowsKem } from "../src/chain.js";
 import { disclosureChain } from "@bongtu/core/envelope";
 import { health } from "../src/api/routes/health.js";
 
@@ -51,6 +59,17 @@ const DUMMY_RPC = "http://127.0.0.1:1"; // never contacted
 const DUMMY_POOL = "0x" + "12".repeat(20);
 
 const ARB = deriveKeypair(555555555555555555555555n);
+// Deterministic arbiter ML-KEM keypair + a per-label encapsulation, for the V2
+// (hybrid-envelope) legs — the V1 legs deliberately carry NO kem material.
+const ARB_KEM = ml_kem768.keygen(new Uint8Array(64).fill(21));
+function kemDraw(seedByte: number): { limbs: [bigint, bigint]; binding: bigint; ciphertextHex: string } {
+  const { cipherText, sharedSecret } = ml_kem768.encapsulate(
+    ARB_KEM.publicKey,
+    new Uint8Array(32).fill(seedByte),
+  );
+  const limbs = kemSsToLimbs(sharedSecret);
+  return { limbs, binding: kemBindingOf(limbs), ciphertextHex: kemBytesToHex(cipherText) };
+}
 const EMP = deriveKeypair(111111111111111111111111n);
 const U1 = deriveKeypair(222222222222222222222222n);
 const U2 = deriveKeypair(333333333333333333333333n);
@@ -99,18 +118,33 @@ function makeSim() {
     return log("Appended", txHash, { leafIndex: BigInt(leafIndex), leaf, root: oracle.getRoot() });
   };
 
-  const deposit = (txHash: string, o0: NoteSpec, o1: NoteSpec, eph: bigint, nonce: bigint): ParsedLog[] => {
+  // `kem` switches the builder to the V2 (hybrid) event shape: the envelope is
+  // encrypted under the tagged hybrid key and the log grows kemBinding +
+  // kemCiphertext. `kem.ciphertextHex` may be a DIFFERENT encapsulation than
+  // `kem.limbs` (the consistent-but-junk-ct attack) — the binding always
+  // matches the limbs the envelope was keyed with, like a real proof's output.
+  const deposit = (
+    txHash: string,
+    o0: NoteSpec,
+    o1: NoteSpec,
+    eph: bigint,
+    nonce: bigint,
+    kem?: { limbs: [bigint, bigint]; ciphertextHex: string },
+  ): ParsedLog[] => {
     tx();
     const [c0, c1] = [commitOf(o0), commitOf(o1)];
     const out = [appended(txHash, c0), appended(txHash, c1)];
     const plain = [...pub2(o0.owner), ...pub2(o1.owner), o0.v, o0.s, o1.v, o1.s];
+    const shared = ecdhSharedSecret(eph, ARB.publicKey);
+    const key = kem ? hybridEnvelopeKey(shared, kem.limbs) : shared;
     out.push(
       log("Deposited", txHash, {
         oc0: c0,
         oc1: c1,
         ecdhPublicKey: pub2(deriveKeypair(eph)),
-        encryptedValuesForAuthority: poseidonEncrypt(plain, ecdhSharedSecret(eph, ARB.publicKey), nonce),
+        encryptedValuesForAuthority: poseidonEncrypt(plain, key, nonce),
         encryptionNonce: nonce,
+        ...(kem ? { kemBinding: kemBindingOf(kem.limbs), kemCiphertext: kem.ciphertextHex } : {}),
       }),
     );
     return out;
@@ -200,11 +234,11 @@ function makeSim() {
 // anvil-free test calls neither), so a never-used dummy pool is safe here.
 const DUMMY_PG_POOL = null as unknown as Pool;
 
-function makeIndexer(arbiter: boolean): Indexer {
+function makeIndexer(arbiter: boolean, kemSecret: Uint8Array | null = null): Indexer {
   const ix = new Indexer({ rpc: DUMMY_RPC, pool: DUMMY_POOL, startBlock: 0, authorityKey: arbiter ? ARB.formattedPrivateKey : null });
   ix.batchSize = B;
   ix.tree = new MirrorTree(H, B);
-  if (arbiter) ix.ledger = new PostgresLedger(DUMMY_PG_POOL, ARB.formattedPrivateKey, B, ix.tree);
+  if (arbiter) ix.ledger = new PostgresLedger(DUMMY_PG_POOL, ARB.formattedPrivateKey, kemSecret, B, ix.tree);
   return ix;
 }
 
@@ -287,6 +321,16 @@ async function main(): Promise<void> {
   ok(!("batchLeaf" in ix.tree.path(d1.start)), "path into the ledger-filled batch is a real path");
   ok("batchLeaf" in ix.tree.path(d2.start), "path into the unopened (withheld) batch returns the sentinel");
 
+  step("V1 HISTORY: pre-KEM (kem-less) events decode via the legacy ECDH path — zero false alarms");
+  // Every op above is V1-shaped (no kemBinding/kemCiphertext on any args), so
+  // the ledger must have taken the legacy raw-ECDH branch for ALL of them: the
+  // notes/history assertions above prove decryption worked, and no KEM check
+  // may fire on history (pq-envelope-design.md §5 pre-KEM gate).
+  ok(logs.every((l) => l.args.kemBinding === undefined), "the scenario is entirely V1-shaped");
+  ok(ix.ledger!.getEnvelopeAlarms().length === 0, "V1 history produced ZERO envelope alarms (no kem false-positives)");
+  ok(ix.ledger!.notesOf(RCPTS[0].publicKey[0], RCPTS[0].publicKey[1]).length === 1,
+    "V1 envelopes still decrypt (kem: null -> legacy key)");
+
   step("REPLAY: re-applying the same range converges without doubling");
   ix.applyLogs(logs);
   ok(ix.store.allEvents().length === 5, "feed did not grow on replay");
@@ -316,7 +360,7 @@ async function main(): Promise<void> {
 
   step("LEDGER: apply() dedups on (txHash, logIndex) by itself");
   {
-    const led = new PostgresLedger(DUMMY_PG_POOL, ARB.formattedPrivateKey, B, new MirrorTree(H, B));
+    const led = new PostgresLedger(DUMMY_PG_POOL, ARB.formattedPrivateKey, null, B, new MirrorTree(H, B));
     const own = deriveKeypair(777777777777777777777777n);
     const [o0, o1] = [note(own, 42n, 4242n), note(own, 0n, 4243n)];
     const eph = 880000000000000000001n;
@@ -329,6 +373,7 @@ async function main(): Promise<void> {
       ecdhPublicKey: pub2(deriveKeypair(eph)),
       nonce: 99n,
       authorityCt: poseidonEncrypt(plain, ecdhSharedSecret(eph, ARB.publicKey), 99n),
+      kem: null,
       outputLeaves: [
         { leafIndex: 0, commitment: commitOf(o0) },
         { leafIndex: 1, commitment: commitOf(o1) },
@@ -339,6 +384,104 @@ async function main(): Promise<void> {
     ok(led.notesOf(own.publicKey[0], own.publicKey[1]).length === 2, "same envelope applied twice → the two outputs recorded once");
     led.apply({ ...env, logIndex: 8 });
     ok(led.notesOf(own.publicKey[0], own.publicKey[1]).length === 4, "same tx, different logIndex = a distinct op (key is txHash:logIndex)");
+  }
+
+  step("DUAL ABI: the pool interface parses BOTH V1 and V2 raw event encodings");
+  {
+    // Encode a raw log under each vintage's own single-ABI interface, then parse
+    // with the indexer's combined interface (what getLogsChunked dispatches on):
+    // topic0 differs between vintages, so a V2-only interface would drop V1
+    // history on the floor — the silent-skip failure the dual ABI closes.
+    const iface = ix.pool.interface;
+    ok(abiKnowsKem(iface), "combined interface models the V2 (kemCiphertext) events");
+    const v1Iface = new ethers.utils.Interface([
+      "event Deposited(uint256 indexed epoch, uint256 firstLeafIndex, uint256 oc0, uint256 oc1, uint256 amount, uint256[2] ecdhPublicKey, uint256[10] encryptedValuesForAuthority, uint256 encryptionNonce, uint256 root)",
+    ]);
+    const v1Raw = v1Iface.encodeEventLog(v1Iface.getEvent("Deposited"), [
+      1n, 0n, 11n, 12n, 5n, [1n, 2n], new Array(10).fill(3n), 42n, 99n,
+    ]);
+    const v1Parsed = iface.parseLog({ topics: v1Raw.topics, data: v1Raw.data });
+    ok(v1Parsed.name === "Deposited" && v1Parsed.args.kemBinding === undefined,
+      "a V1-encoded Deposited parses under the combined ABI, WITHOUT kem fields (-> kem: null)");
+    const v2Frag = Object.values(iface.events).find(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (e: any) => e.name === "Deposited" && e.inputs.some((i: any) => i.name === "kemCiphertext"),
+    )!;
+    const v2Raw = iface.encodeEventLog(v2Frag, [
+      1n, 0n, 11n, 12n, 5n, [1n, 2n], new Array(10).fill(3n), 42n, 99n, 77n, "0x" + "ab".repeat(1088),
+    ]);
+    const v2Parsed = iface.parseLog({ topics: v2Raw.topics, data: v2Raw.data });
+    ok(v2Parsed.name === "Deposited" && v2Parsed.args.kemBinding !== undefined
+      && ethers.utils.arrayify(v2Parsed.args.kemCiphertext).length === 1088,
+      "a V2-encoded Deposited parses with kemBinding + a 1088-byte kemCiphertext");
+    ok(v1Raw.topics[0] !== v2Raw.topics[0], "V1/V2 topic0 differ (the reason dual-ABI is required)");
+  }
+
+  step("V2 KEM: hybrid envelopes decapsulate + binding-check; a junk ct alarms and withholds");
+  {
+    const simK = makeSim();
+    const ixK = makeIndexer(true, ARB_KEM.secretKey);
+    const good = kemDraw(31);
+    const junk = kemDraw(32); // a DIFFERENT (valid) encapsulation — its ss cannot match the witness limbs
+    const gNotes = [note(U1, 40n, 5001n), note(U1, 0n, 5002n)];
+    const bNotes = [note(U2, 25n, 5003n), note(U2, 0n, 5004n)];
+    const kLogs: ParsedLog[] = [
+      // honest V2 deposit: ct matches the limbs the envelope was keyed with
+      ...simK.deposit("0xkemgood", gNotes[0], gNotes[1], 640000000000000000005n, 777n, {
+        limbs: good.limbs,
+        ciphertextHex: good.ciphertextHex,
+      }),
+      // consistent-but-junk ct (design doc §6): proof-side binding matches its
+      // OWN witness limbs, but the submitted ct decapsulates to different ss
+      ...simK.deposit("0xkemjunk", bNotes[0], bNotes[1], 660000000000000000009n, 778n, {
+        limbs: good.limbs,
+        ciphertextHex: junk.ciphertextHex,
+      }),
+    ];
+    ixK.applyLogs(kLogs);
+
+    const u1k = ixK.ledger!.notesOf(U1.publicKey[0], U1.publicKey[1]);
+    ok(u1k.length === 2, "matching V2 op: hybrid envelope decrypted, both notes recorded");
+    const kemAlarms = ixK.ledger!.getEnvelopeAlarms();
+    ok(kemAlarms.length === 1, "exactly one envelope alarm (the junk-wrapped ct)");
+    ok(kemAlarms[0].txHash === "0xkemjunk" && /kem binding mismatch/.test(kemAlarms[0].detail),
+      "alarm names the tx + 'kem binding mismatch — envelope withheld'");
+    ok(kemAlarms[0].expected === kemBindingOf(good.limbs).toString(), "alarm carries the on-chain kemBinding as expected");
+    ok(kemAlarms[0].recomputed !== kemAlarms[0].expected, "alarm carries the mismatching recomputed binding");
+    ok(ixK.ledger!.notesOf(U2.publicKey[0], U2.publicKey[1]).length === 0,
+      "the mismatching op is STOPPED — no notes recorded, envelope withheld");
+    ok(ixK.ledger!.historyOf(U2.publicKey[0], U2.publicKey[1]).length === 0, "…and no history items");
+
+    // A wire-size-violating ct (unreachable from real logs today — the contract
+    // length-checks — but one harness/event-shape slip away): decapsulation
+    // throws inside noble, and that must become an alarm-and-withhold, NOT a
+    // crashloop on the persisted cursor re-hitting the same op.
+    const cNotes = [note(U2, 25n, 5005n), note(U2, 0n, 5006n)];
+    ixK.applyLogs(simK.deposit("0xkemshort", cNotes[0], cNotes[1], 680000000000000000001n, 779n, {
+      limbs: good.limbs,
+      ciphertextHex: "0x" + "ab".repeat(10),
+    }));
+    const shortAlarms = ixK.ledger!.getEnvelopeAlarms();
+    ok(shortAlarms.length === 2, "malformed-length ct raised a second envelope alarm (no throw)");
+    const shortAlarm = shortAlarms.find((a) => a.txHash === "0xkemshort");
+    ok(!!shortAlarm && /kem decapsulation failed/.test(shortAlarm.detail) && /envelope withheld/.test(shortAlarm.detail),
+      "alarm names the tx + 'kem decapsulation failed … envelope withheld'");
+    ok(ixK.ledger!.notesOf(U2.publicKey[0], U2.publicKey[1]).length === 0,
+      "the malformed op is STOPPED — no notes recorded");
+
+    // A V2 op reaching a ledger WITHOUT the decapsulation key is a config
+    // violation the boot guard exists for — deriveOp throws, never false-alarms.
+    const ixNoKey = makeIndexer(true, null);
+    let msg = "";
+    try {
+      ixNoKey.applyLogs(makeSim().deposit("0xkemnokey", gNotes[0], gNotes[1], 640000000000000000005n, 777n, {
+        limbs: good.limbs,
+        ciphertextHex: good.ciphertextHex,
+      }));
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    ok(/AUTHORITY_KEM_KEY/.test(msg), `keyless ledger on a V2 op throws, not alarms (got: ${msg || "no throw"})`);
   }
 
   step("POLL: pollOnce records failure/success state; /health projects it");

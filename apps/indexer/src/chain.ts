@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadEthers } from "@bongtu/core/extern";
+import { KEM_SECRET_KEY_BYTES } from "@bongtu/core/kem";
 import { CHAIN_ID } from "@bongtu/core/network";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -24,10 +25,39 @@ export function loadAbi(sol: string, contract: string): any {
   return JSON.parse(readFileSync(p, "utf8")).abi;
 }
 
-/** The BongtuPool ABI (events + view fns the indexer needs). */
+// The PRE-KEM (V1) op-event shapes, frozen from the pool at b9f9440~1. The V2
+// events append (kemBinding, kemCiphertext), which changes topic0 — so a V2-only
+// interface would silently SKIP every pre-upgrade envelope event while the
+// unchanged Appended/SubtreeAppended kept the mirror advancing (the lagging-
+// indexer failure of pq-envelope-design.md §7). Carrying both fragment sets
+// makes ingest span the upgrade block: ethers parseLog dispatches on topic0, and
+// applyLogs detects the vintage per log by the presence of `kemBinding`.
+const V1_EVENT_FRAGMENTS = [
+  "event Deposited(uint256 indexed epoch, uint256 firstLeafIndex, uint256 oc0, uint256 oc1, uint256 amount, uint256[2] ecdhPublicKey, uint256[10] encryptedValuesForAuthority, uint256 encryptionNonce, uint256 root)",
+  "event Transferred(uint256 indexed epoch, uint256[2] nullifiers, uint256[2] outputCommitments, uint256[2] ecdhPublicKey, uint256[4] encryptedValuesForReceiver0, uint256[4] encryptedValuesForReceiver1, uint256[16] encryptedValuesForAuthority, uint256 encryptionNonce, uint256 root)",
+  "event Disbursed(uint256 indexed epoch, uint256 nullifier, uint256 subtreeRoot, uint256 disclosureHash, uint256[2] ecdhPublicKey, uint256 encryptionNonce, uint256 root)",
+  "event Withdrawn(uint256 indexed epoch, uint256[2] nullifiers, uint256 amount, uint256 changeCommitment, uint256[2] ecdhPublicKey, uint256[13] encryptedValuesForAuthority, uint256 encryptionNonce, uint256 root)",
+];
+
+/** The BongtuPool ABI (events + view fns the indexer needs): the built (V2)
+ *  artifact PLUS the frozen V1 op-event fragments — dual-ABI ingest. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function poolAbi(): any {
-  return loadAbi("BongtuPool", "BongtuPool");
+  const abi = loadAbi("BongtuPool", "BongtuPool");
+  const v1 = V1_EVENT_FRAGMENTS.map((f) => ethers.utils.Fragment.from(f));
+  return [...abi, ...v1];
+}
+
+/** Whether an ethers Interface models the V2 (hybrid) op events — i.e. the
+ *  built artifact carries `kemCiphertext` on Deposited. False == a V1-only
+ *  build, which MUST NOT serve a KEM-epoch pool (kemBootGuardError). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function abiKnowsKem(iface: any): boolean {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return Object.values(iface.events as Record<string, any>).some(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ev: any) => ev.name === "Deposited" && ev.inputs.some((i: any) => i.name === "kemCiphertext"),
+  );
 }
 
 /**
@@ -45,6 +75,10 @@ export interface ChainConfig {
   // and can fold within-batch merkle paths. Undefined/null => PUBLIC MODE (no
   // /notes, batch /path 422s). NEVER logged or returned over HTTP.
   authorityKey?: bigint | null;
+  // The arbiter's ML-KEM-768 decapsulation key (env AUTHORITY_KEM_KEY, hex) —
+  // the PQ half of the hybrid envelope. Required in arbiter mode once the pool
+  // is in a KEM epoch (kemBootGuardError refuses otherwise). NEVER logged.
+  authorityKemKey?: Uint8Array | null;
   // Postgres connection string (env DATABASE_URL) — REQUIRED at runtime (U-I4
   // Postgres-only): the indexer persists its derived state (events / nullifiers /
   // leaves / notes / history + a block cursor) to Postgres and boot-RESUMES from
@@ -81,7 +115,69 @@ export function resolveConfig(): ChainConfig {
   if (!pool) throw new Error("no pool address (set POOL env or deploy/addresses.<chainId>.json)");
   // Arbiter mode is gated purely on AUTHORITY_KEY presence (the arbiter private key).
   const authorityKey = process.env.AUTHORITY_KEY ? parseScalar(process.env.AUTHORITY_KEY) : null;
+  const authorityKemKey = process.env.AUTHORITY_KEM_KEY ? parseKemKey(process.env.AUTHORITY_KEM_KEY) : null;
   // Required at runtime (index.ts fail-fasts via databaseUrlError before this).
   const databaseUrl = process.env.DATABASE_URL || null;
-  return { rpc, pool, startBlock, authorityKey, databaseUrl };
+  return { rpc, pool, startBlock, authorityKey, authorityKemKey, databaseUrl };
+}
+
+/** Parse AUTHORITY_KEM_KEY (the 2400-byte ML-KEM-768 decapsulation key) from
+ *  0x-optional hex. Same handling rule as AUTHORITY_KEY: never logged. The
+ *  exact-length requirement is load-bearing: decapsulating with a truncated
+ *  key throws mid-ingest, and noble's implicit rejection means other wrong
+ *  keys surface only as false tamper alarms — so malformed material must die
+ *  here, at boot. */
+export function parseKemKey(s: string): Uint8Array {
+  const h = s.trim().replace(/^0[xX]/, "");
+  if (h.length % 2 !== 0 || /[^0-9a-fA-F]/.test(h)) {
+    throw new Error("AUTHORITY_KEM_KEY must be an even-length hex string");
+  }
+  if (h.length / 2 !== KEM_SECRET_KEY_BYTES) {
+    throw new Error(
+      `AUTHORITY_KEM_KEY must be the ${KEM_SECRET_KEY_BYTES}-byte ML-KEM-768 decapsulation key (got ${h.length / 2} bytes)`,
+    );
+  }
+  const out = new Uint8Array(h.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(h.slice(2 * i, 2 * i + 2), 16);
+  return out;
+}
+
+const ZERO32 = "0x" + "0".repeat(64);
+
+/**
+ * The KEM boot-guard decision (pq-envelope-design.md §7, mandatory): given the
+ * pool's `arbiterKemPkHash(currentEpoch())`, refuse to serve when the chain is
+ * in a KEM epoch (nonzero hash) but this process cannot honor it — either the
+ * built ABI is V1-only (op envelopes would be SILENTLY skipped: parseLog
+ * misses the new topic0 while Appended keeps the mirror green) or arbiter mode
+ * lacks the decapsulation key (every V2 envelope would be undecryptable).
+ * Returns the one-line fatal error, else null. Same fail-fast posture as
+ * databaseUrlError; pure so the unit suite pins it without an RPC.
+ */
+export function kemBootGuardError(opts: {
+  kemPkHash: string;
+  arbiterMode: boolean;
+  hasKemKey: boolean;
+  abiKnowsKem: boolean;
+  /** keccak256 of the ek embedded in AUTHORITY_KEM_KEY (null when keyless).
+   *  Decapsulating with a wrong-but-well-formed key does not throw — implicit
+   *  rejection yields pseudorandom ss — so without this check a stale/mispasted
+   *  key would record a false "tamper" verdict against EVERY honest V2 op. */
+  kemKeyPkHash: string | null;
+}): string | null {
+  if (opts.kemPkHash.toLowerCase() === ZERO32) return null; // pre-KEM epoch (or V1 pool)
+  if (!opts.abiKnowsKem) {
+    return "FATAL: the pool's arbiterKemPkHash(currentEpoch()) is nonzero but this build's ABI has no KEM event fields — a V1-ABI ingest silently under-records every op envelope while /health stays green. Rebuild contracts/out from the hybrid BongtuPool.";
+  }
+  if (opts.arbiterMode && !opts.hasKemKey) {
+    return "FATAL: the pool's arbiterKemPkHash(currentEpoch()) is nonzero but AUTHORITY_KEM_KEY is unset — arbiter mode cannot decapsulate hybrid envelopes. Set AUTHORITY_KEM_KEY (the ML-KEM-768 decapsulation key) or run public mode.";
+  }
+  if (
+    opts.arbiterMode &&
+    opts.kemKeyPkHash !== null &&
+    opts.kemKeyPkHash.toLowerCase() !== opts.kemPkHash.toLowerCase()
+  ) {
+    return "FATAL: AUTHORITY_KEM_KEY does not match the pool's arbiterKemPkHash(currentEpoch()) — its embedded encapsulation key hashes differently. Serving would record a false 'kem binding mismatch' tamper verdict against every honest op. Fix the key (rotated epoch? wrong env?) before starting.";
+  }
+  return null;
 }

@@ -96,7 +96,11 @@ RPC="$E2E_RPC" "$NODE" --import tsx "$INDEXER/test/pg_scenario_setup.ts" "$FIXTU
 readfix() { "$NODE" -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))[process.argv[2]]))" "$FIXTURES" "$1"; }
 POOL_ADDR="$(readfix poolAddr)"
 ARBITER_KEY="$(readfix arbiterPrivateKey)"
+# The harness pool seeds arbiterKemPkHash, so the indexer's KEM boot guard
+# refuses arbiter mode without the matching decaps key — pass the fixture one.
+ARBITER_KEM_KEY="$(readfix arbiterKemSecretKey)"
 [ -n "$POOL_ADDR" ] || fail "no pool address in fixtures"
+[ -n "$ARBITER_KEM_KEY" ] && [ "$ARBITER_KEM_KEY" != "undefined" ] || fail "no arbiterKemSecretKey in fixtures"
 echo "   pool=$POOL_ADDR"
 
 # --- throwaway postgres ------------------------------------------------------
@@ -113,7 +117,8 @@ export DATABASE_URL="postgres://postgres:postgres@127.0.0.1:${PG_PORT}/postgres"
 
 # --- shared launcher / waiters ----------------------------------------------
 start_indexer() {  # $1=port  $2=logfile  -> echoes pid
-  RPC="$E2E_RPC" POOL="$POOL_ADDR" AUTHORITY_KEY="$ARBITER_KEY" DATABASE_URL="$DATABASE_URL" \
+  RPC="$E2E_RPC" POOL="$POOL_ADDR" AUTHORITY_KEY="$ARBITER_KEY" \
+    AUTHORITY_KEM_KEY="$ARBITER_KEM_KEY" DATABASE_URL="$DATABASE_URL" \
     START_BLOCK=0 PORT="$1" POLL_MS=0 \
     "$NODE" --import tsx "$INDEXER/src/index.ts" >"$2" 2>&1 &
   echo $!

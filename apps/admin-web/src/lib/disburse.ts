@@ -23,6 +23,15 @@ import {
 import { unpackPubkey } from "@bongtu/core/pubkey";
 import { ImtTree, foldToRoot } from "@bongtu/core/imt";
 import { buildAuthorityPlaintext, disclosureChain } from "@bongtu/core/envelope";
+import {
+  ml_kem768,
+  kemSsToLimbs,
+  kemHexToBytes,
+  kemBytesToHex,
+  hybridEnvelopeKey,
+  KEM_CIPHERTEXT_BYTES,
+} from "@bongtu/core/kem";
+import { ARBITER_KEM_PK } from "@bongtu/core/network";
 import type { Point } from "@bongtu/core/babyjub";
 import { toWire } from "@bongtu/core/proving";
 import type { DisburseInput, ProvingRequest } from "@bongtu/core/proving";
@@ -58,10 +67,29 @@ export interface CryptoParams {
   encryptionNonce: string;
   /** the pool's stored arbiter PUBLIC key (safe in employer-mode). */
   authorityPubKey: [string, string];
+  /** ML-KEM-768 shared-secret limbs (decimal) — the PQ half of the hybrid
+   *  authority-envelope key (pq-envelope-design.md §2/§5); the circuit folds
+   *  them into hybridKey and outputs their kemBinding. */
+  kemSs: [string, string];
+  /** the matching 1088-byte encapsulation ciphertext, 0x-hex — the tx's
+   *  `bytes kemCiphertext` arg (never sent to the prover). */
+  kemCiphertext: string;
   /** base for deriving fresh, deterministic output salts. */
   saltSeed: string;
   /** base scalar for deriving distinct dummy owner keys for zero-value padding. */
   padSeed: string;
+}
+
+/**
+ * Fresh ML-KEM-768 encapsulation against the institutional arbiter key
+ * (ARBITER_KEM_PK) — drawn once PER BATCH alongside the ephemeral ECDH scalar
+ * (ct reuse across txs collapses the PQ compartment, design doc §6). The view
+ * calls this at assemble time; tests inject fixed material into CryptoParams.
+ */
+export function freshDisburseKem(): { kemSs: [string, string]; kemCiphertext: string } {
+  const { cipherText, sharedSecret } = ml_kem768.encapsulate(kemHexToBytes(ARBITER_KEM_PK));
+  const [l0, l1] = kemSsToLimbs(sharedSecret);
+  return { kemSs: [l0.toString(), l1.toString()], kemCiphertext: kemBytesToHex(cipherText) };
 }
 
 export interface AssembleMeta {
@@ -90,6 +118,10 @@ export interface AssembleResult {
   request: ProvingRequest;
   /** The 2054-element receiver++authority ciphertext for disburseWithCiphertexts. */
   ciphertext: string[];
+  /** The batch's 1088-byte ML-KEM ct (0x-hex) — the tx's `bytes kemCiphertext`
+   *  arg; passed through from CryptoParams so submit uses the SAME encapsulation
+   *  the proof's kemBinding committed to. */
+  kemCiphertext: string;
   meta: AssembleMeta;
   /** The employer's OWN ledger (no arbiter key) — its authored recipients + change. */
   ledger: LedgerRow[];
@@ -203,9 +235,16 @@ export function buildDisburseRequest(
     outputValues,
     outputSalts,
     outputOwnerPublicKeys,
+    kemSs: [BigInt(crypto.kemSs[0]), BigInt(crypto.kemSs[1])],
     encryptionNonce: BigInt(crypto.encryptionNonce),
     authorityPublicKey: [BigInt(crypto.authorityPubKey[0]), BigInt(crypto.authorityPubKey[1])],
   };
+
+  // The tx's KEM ct is length-checked here (not just on-chain) so a truncated
+  // paste fails at assemble time, before the multi-second GPU proof.
+  if (kemHexToBytes(crypto.kemCiphertext).length !== KEM_CIPHERTEXT_BYTES) {
+    throw new Error(`kemCiphertext must be ${KEM_CIPHERTEXT_BYTES} bytes (draw it with freshDisburseKem)`);
+  }
 
   // Ciphertext: per-output receiver envelope [value, salt] (256 * 4 = 1024) ++ the
   // single authority envelope (1030), laid out by the owning codec
@@ -220,7 +259,14 @@ export function buildDisburseRequest(
     inputs: [{ owner: employer.publicKey, value: V, salt: inSalt }],
     outputs: outs.map((o, i) => ({ owner: o.owner, value: o.value, salt: outputSalts[i] })),
   });
-  const authorityCt = poseidonEncrypt(authPlain, ecdhSharedSecret(ecdh, authorityPub), nonce);
+  // Hybrid envelope key (design doc §2): the SAME tagged Poseidon fold the
+  // circuit derives in-witness — a raw-ECDH key here would emit a ciphertext
+  // that mismatches the proof's disclosureHash.
+  const authorityCt = poseidonEncrypt(
+    authPlain,
+    hybridEnvelopeKey(ecdhSharedSecret(ecdh, authorityPub), [BigInt(crypto.kemSs[0]), BigInt(crypto.kemSs[1])]),
+    nonce,
+  );
   const ciphertext = [...receiverFlat, ...authorityCt];
   // Poseidon(2) fold over receiver ++ authority — equals the proof's pub[2] once proven.
   const disclosureHash = disclosureChain(ciphertext);
@@ -233,6 +279,7 @@ export function buildDisburseRequest(
   return {
     request,
     ciphertext: ciphertext.map((x) => x.toString()),
+    kemCiphertext: crypto.kemCiphertext,
     meta: {
       inputCommitment: inputCommitment.toString(),
       nullifier: nf.toString(),

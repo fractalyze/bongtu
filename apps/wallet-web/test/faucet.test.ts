@@ -86,15 +86,21 @@ test("runDeposit rejects V > balance BEFORE approving or proving", async () => {
   assert.equal(proveCalls, 0, "no proof may be generated for a doomed deposit");
 });
 
-test("runDeposit happy path threads approve → prove → submit when affordable", async () => {
+test("runDeposit happy path threads approve → kem-guard → prove → submit when affordable", async () => {
   let approveCalls = 0;
   let proveCalls = 0;
+  let kemGuardCalls = 0;
   const stages: string[] = [];
   const deps: Partial<RunDepositDeps> = {
     readTokenState: async () => ({ balance: 1_000n, allowance: 0n }), // allowance < V => approve
     approveToken: async () => {
       approveCalls++;
       return "0xapprove";
+    },
+    assertPoolKemEpoch: async () => {
+      // The on-chain key check must precede encapsulation/proving (design §4/§5).
+      assert.equal(proveCalls, 0, "kem guard runs BEFORE the proof");
+      kemGuardCalls++;
     },
     proveInBrowser: async () => {
       proveCalls++;
@@ -105,9 +111,32 @@ test("runDeposit happy path threads approve → prove → submit when affordable
 
   const out = await runDeposit(fakeContext(), { amount: "500" }, (s) => stages.push(s), deps);
   assert.equal(approveCalls, 1, "an exact-V approve is sent when allowance < V");
+  assert.equal(kemGuardCalls, 1, "the pool's arbiter KEM key hash was checked");
   assert.equal(proveCalls, 1);
   assert.equal(out.approved, true);
   assert.equal(out.amount, "500");
   assert.equal(out.txHash, "0xdeposit");
   assert.deepEqual(stages, ["approve", "prove", "submit"]);
+});
+
+test("runDeposit refuses when the pool's KEM epoch rejects this build's key", async () => {
+  let proveCalls = 0;
+  const deps: Partial<RunDepositDeps> = {
+    readTokenState: async () => ({ balance: 1_000n, allowance: 500n }),
+    assertPoolKemEpoch: async () => {
+      throw new Error("on-chain arbiter KEM key hash 0x11 does not match this build's ARBITER_KEM_PK");
+    },
+    proveInBrowser: async () => {
+      proveCalls++;
+      return DUMMY_CALLDATA;
+    },
+    submitDeposit: async () => {
+      throw new Error("submit must not be reached when the kem guard refuses");
+    },
+  };
+  await assert.rejects(
+    runDeposit(fakeContext(), { amount: "500" }, () => {}, deps),
+    /does not match this build's ARBITER_KEM_PK/,
+  );
+  assert.equal(proveCalls, 0, "no proof may be generated against an unverified key");
 });

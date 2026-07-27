@@ -26,6 +26,26 @@ export { ml_kem768 };
 export const KEM_CIPHERTEXT_BYTES = 1088;
 export const KEM_PUBLIC_KEY_BYTES = 1184;
 export const KEM_SHARED_SECRET_BYTES = 32;
+export const KEM_SECRET_KEY_BYTES = 2400;
+
+// FIPS 203 §6.1: dk = dk_PKE (384·k = 1152 B) ‖ ek (1184 B) ‖ H(ek) (32 B) ‖ z (32 B).
+const KEM_SECRET_EK_OFFSET = 1152;
+
+/**
+ * The encapsulation key embedded in an ML-KEM-768 decapsulation key. Lets a
+ * key holder prove WHICH pk its secret matches without a decapsulation
+ * round-trip — decapsulating with a wrong-but-well-formed dk does not throw
+ * (implicit rejection yields pseudorandom ss), so a mismatched key would
+ * otherwise surface only as binding-mismatch alarms on every honest op.
+ */
+export function kemPkFromSecret(secretKey: Uint8Array): Uint8Array {
+  if (secretKey.length !== KEM_SECRET_KEY_BYTES) {
+    throw new Error(
+      `kemPkFromSecret: ML-KEM-768 decapsulation key is ${KEM_SECRET_KEY_BYTES} bytes, got ${secretKey.length}`,
+    );
+  }
+  return secretKey.slice(KEM_SECRET_EK_OFFSET, KEM_SECRET_EK_OFFSET + KEM_PUBLIC_KEY_BYTES);
+}
 
 // Domain-separation tags: sha256(ASCII) mod r (BN254 scalar field), frozen.
 //   TAG_K0   = sha256("bongtu/pq-envelope/v1/key0")    mod r
@@ -37,6 +57,26 @@ export const TAG_K1 =
   7025394518961265764175593663800963341053996587382265036146196548941915994055n;
 export const TAG_BIND =
   5518019128667894418081277213291049553290157756968653594844689494754896839788n;
+
+/** Hex ("0x"-optional) -> bytes, for KEM wire material (pk 1184 B / ct 1088 B /
+ *  dk 2400 B). Browser-safe (no node Buffer) — the wallet decodes ARBITER_KEM_PK
+ *  with this before encapsulating. */
+export function kemHexToBytes(hex: string): Uint8Array {
+  const h = hex.startsWith("0x") || hex.startsWith("0X") ? hex.slice(2) : hex;
+  if (h.length % 2 !== 0 || /[^0-9a-fA-F]/.test(h)) {
+    throw new Error(`kemHexToBytes: not an even-length hex string (${h.length} chars)`);
+  }
+  const out = new Uint8Array(h.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(h.slice(2 * i, 2 * i + 2), 16);
+  return out;
+}
+
+/** Bytes -> "0x…" hex — the tx-calldata form of a kemCiphertext. */
+export function kemBytesToHex(bytes: Uint8Array): string {
+  let s = "0x";
+  for (const b of bytes) s += b.toString(16).padStart(2, "0");
+  return s;
+}
 
 /** Split the 32-byte ML-KEM shared secret into two little-endian 128-bit limbs
  *  (< 2^128 < r each, so the mapping is uniform — no modular bias). */

@@ -17,6 +17,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { commitment } from "@bongtu/core/note";
+import { ml_kem768, kemSsToLimbs, kemHexToBytes, kemBytesToHex } from "@bongtu/core/kem";
+import { ARBITER_KEM_PK } from "@bongtu/core/network";
 import type { Point } from "@bongtu/core/babyjub";
 
 import { deriveIdentityFromSignature } from "../src/lib/derive.js";
@@ -25,10 +27,19 @@ import {
   freshDepositCrypto,
   type DepositCrypto,
 } from "../src/lib/deposit.js";
+import type { KemMaterial } from "../src/lib/spend.js";
 import { DEFAULTS } from "../src/config.js";
 
 // A fixed stand-in for eth_signTypedData_v4 (65-byte ECDSA sig) — a fixed account.
 const SIG = "0x" + "a1".repeat(32) + "b2".repeat(32) + "1c";
+
+// Deterministic ML-KEM material: fixed encapsulation randomness against the real
+// arbiter pk, so the fixture (limbs, ct) regenerates byte-stable across runs.
+const FIXED_ENCAP = ml_kem768.encapsulate(kemHexToBytes(ARBITER_KEM_PK), new Uint8Array(32).fill(9));
+const FIXED_KEM: KemMaterial = {
+  kemSs: kemSsToLimbs(FIXED_ENCAP.sharedSecret).map(String) as [string, string],
+  kemCiphertext: kemBytesToHex(FIXED_ENCAP.cipherText),
+};
 
 // Deterministic per-tx crypto for the builder tests (the flow injects a CSPRNG instead).
 const CRYPTO: DepositCrypto = {
@@ -37,6 +48,8 @@ const CRYPTO: DepositCrypto = {
   salt0: "7000001",
   salt1: "7000002",
   authorityPubKey: DEFAULTS.arbiterPubKey,
+  kemSs: FIXED_KEM.kemSs,
+  kemCiphertext: FIXED_KEM.kemCiphertext,
 };
 
 // ============================ (1) BUILDER ====================================
@@ -96,6 +109,11 @@ test("deposit: mints note(V)+note(0), both self-owned, commitments == sdk commit
     DEFAULTS.arbiterPubKey[1],
   ]);
 
+  // the hybrid-envelope KEM limbs join the witness exactly as injected (the ct
+  // stays OUT of the witness — it is the tx's separate bytes arg).
+  assert.deepEqual(inp.kemSs, [FIXED_KEM.kemSs[0], FIXED_KEM.kemSs[1]]);
+  assert.equal("kemCiphertext" in inp, false);
+
   // JSON-serialisable (POST-able to the prover; no bigints leak).
   assert.doesNotThrow(() => JSON.parse(JSON.stringify(request)));
 });
@@ -132,6 +150,33 @@ test("freshDepositCrypto draws exactly four fields from the injected randomness"
   // and the drawn material is accepted by the builder.
   const wallet = deriveIdentityFromSignature(SIG);
   assert.doesNotThrow(() => buildDepositRequest(wallet, "100", freshDepositCrypto(rand)));
+});
+
+test("freshDepositCrypto: kem draw — deterministic injection in tests, fresh encapsulation by default", () => {
+  // deterministic injection: the injected KEM material passes through untouched
+  // (the field draws stay on `rand` — the kem draw never consumes one).
+  let i = 0;
+  const rand = (): string => String(++i * 3333);
+  let kemDraws = 0;
+  const injected = freshDepositCrypto(rand, () => {
+    kemDraws++;
+    return FIXED_KEM;
+  });
+  assert.equal(kemDraws, 1, "exactly one KEM encapsulation per crypto bundle");
+  assert.equal(i, 4, "the kem draw does not consume field randomness");
+  assert.deepEqual(injected.kemSs, FIXED_KEM.kemSs);
+  assert.equal(injected.kemCiphertext, FIXED_KEM.kemCiphertext);
+
+  // default draw: a real encapsulation against ARBITER_KEM_PK — 1088-byte 0x-hex
+  // ct, two sub-2^128 limbs, and FRESH per call (ct reuse collapses the PQ
+  // compartment, design doc §6).
+  const a = freshDepositCrypto(rand);
+  const b = freshDepositCrypto(rand);
+  for (const c of [a, b]) {
+    assert.match(c.kemCiphertext, /^0x[0-9a-f]{2176}$/);
+    assert.ok(BigInt(c.kemSs[0]) < 1n << 128n && BigInt(c.kemSs[1]) < 1n << 128n);
+  }
+  assert.notEqual(a.kemCiphertext, b.kemCiphertext, "every tx encapsulates fresh");
 });
 
 test("freshDepositCrypto clamps the encryption nonce below 2^128 (circuit constraint)", () => {

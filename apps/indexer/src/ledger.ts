@@ -42,6 +42,7 @@
 import { commitment as noteCommitment } from "@bongtu/core/note";
 import { ImtTree } from "@bongtu/core/imt";
 import { packPubkey } from "@bongtu/core/pubkey";
+import { ml_kem768, kemSsToLimbs, kemBindingOf } from "@bongtu/core/kem";
 import type { Point } from "@bongtu/core/babyjub";
 import { parseEnvelope, type OpKind, type ParsedEnvelope } from "@bongtu/core/envelope";
 
@@ -106,6 +107,11 @@ export interface OpEnvelope {
   ecdhPublicKey: [bigint, bigint];
   nonce: bigint;
   authorityCt: bigint[]; // authority envelope ciphertext (disburse: the tail only)
+  // The op's hybrid-envelope KEM material off the V2 event (kemBinding public
+  // signal + the raw 1088-byte ML-KEM-768 ct). null == a pre-KEM (V1-ABI) op:
+  // legacy raw-ECDH decrypt, KEM checks skipped — the structural pre-upgrade
+  // gate of pq-envelope-design.md §5 (no epoch arithmetic, no false alarms).
+  kem: { binding: bigint; ciphertext: Uint8Array } | null;
   outputLeaves: { leafIndex: number; commitment: bigint }[];
   batch?: { startLeafIndex: number; subtreeRoot: bigint }; // disburse only
 }
@@ -148,9 +154,73 @@ const sameOwner = (a: Point, b: Point): boolean => a[0] === b[0] && a[1] === b[1
  * alarms, a batch-fill instruction (a cross-checked disburse only), and the
  * activity history — all as plain data an adapter records however it likes. Pure:
  * it reads nothing but its arguments (the tree height is passed in), writes nothing.
+ *
+ * `kemSecret` is the arbiter's ML-KEM-768 decapsulation key (AUTHORITY_KEM_KEY).
+ * A V2 op (op.kem set) is decapsulated FIRST and its recomputed
+ * Poseidon(3)(TAG_BIND, limbs) compared to the on-chain kemBinding: a mismatch
+ * is a junk-wrapped ct (design doc §2 trade-off) — first-class EnvelopeAlarm,
+ * op STOPPED (no notes, no batch fill, no history, envelope withheld). On
+ * match, the decapsulated limbs feed the hybrid envelope key; a V1 op
+ * (op.kem null) keeps the legacy raw-ECDH key.
  */
-export function deriveOp(arbiterPriv: bigint, B: number, treeH: number, op: OpEnvelope): DerivedOp {
-  const env = parseEnvelope(arbiterPriv, op.ecdhPublicKey, op.nonce, op.authorityCt, op.kind, B);
+export function deriveOp(
+  arbiterPriv: bigint,
+  kemSecret: Uint8Array | null,
+  B: number,
+  treeH: number,
+  op: OpEnvelope,
+): DerivedOp {
+  let kemSs: [bigint, bigint] | undefined;
+  if (op.kem) {
+    if (!kemSecret) {
+      // The kem boot guard (§7) refuses to serve in exactly this configuration;
+      // throwing (not alarming) keeps a misconfigured arbiter from recording a
+      // false "tamper" verdict against an honest op.
+      throw new Error("deriveOp: op carries KEM material but no AUTHORITY_KEM_KEY is configured");
+    }
+    // Decapsulation can only throw on wire-size violations (the contract's
+    // WrongKemCiphertextLength makes that unreachable from real logs today);
+    // if the invariant ever slips upstream, alarm-and-withhold like any other
+    // bad envelope — a throw here would crashloop ingest on the persisted
+    // cursor re-hitting the same op forever.
+    let decapsulated: Uint8Array;
+    try {
+      decapsulated = ml_kem768.decapsulate(op.kem.ciphertext, kemSecret);
+    } catch (e) {
+      return {
+        outputs: [],
+        spent: [],
+        alarms: [{
+          kind: op.kind,
+          txHash: op.txHash,
+          detail: `kem decapsulation failed (${e instanceof Error ? e.message : String(e)}) — envelope withheld`,
+          recomputed: "0",
+          expected: dec(op.kem.binding),
+        }],
+        batchFill: null,
+        history: [],
+      };
+    }
+    const limbs = kemSsToLimbs(decapsulated);
+    const recomputed = kemBindingOf(limbs);
+    if (recomputed !== op.kem.binding) {
+      return {
+        outputs: [],
+        spent: [],
+        alarms: [{
+          kind: op.kind,
+          txHash: op.txHash,
+          detail: "kem binding mismatch — envelope withheld",
+          recomputed: dec(recomputed),
+          expected: dec(op.kem.binding),
+        }],
+        batchFill: null,
+        history: [],
+      };
+    }
+    kemSs = limbs;
+  }
+  const env = parseEnvelope(arbiterPriv, op.ecdhPublicKey, op.nonce, op.authorityCt, op.kind, B, kemSs);
   const outputs: DerivedNote[] = [];
   const alarms: EnvelopeAlarm[] = [];
   let batchFill: { start: number; leaves: bigint[] } | null = null;

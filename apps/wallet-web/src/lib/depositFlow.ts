@@ -13,7 +13,7 @@
 import { DEFAULTS } from "../config.js";
 import type { WalletIdentity } from "./derive.js";
 import type { Connection } from "./metamask.js";
-import { approveToken, readTokenState, submitDeposit } from "./metamask.js";
+import { approveToken, assertPoolKemEpoch, readTokenState, submitDeposit } from "./metamask.js";
 import { assertDepositAffordable, buildDepositRequest, freshDepositCrypto } from "./deposit.js";
 import { proveInBrowser } from "./prove.js";
 import { randField } from "./spendFlow.js";
@@ -42,10 +42,17 @@ export interface DepositOutcome {
 export interface RunDepositDeps {
   readTokenState: typeof readTokenState;
   approveToken: typeof approveToken;
+  assertPoolKemEpoch: typeof assertPoolKemEpoch;
   proveInBrowser: typeof proveInBrowser;
   submitDeposit: typeof submitDeposit;
 }
-const DEFAULT_DEPS: RunDepositDeps = { readTokenState, approveToken, proveInBrowser, submitDeposit };
+const DEFAULT_DEPS: RunDepositDeps = {
+  readTokenState,
+  approveToken,
+  assertPoolKemEpoch,
+  proveInBrowser,
+  submitDeposit,
+};
 
 /**
  * Approve (if needed) → assemble the deposit witness → prove in-browser → submit the
@@ -88,11 +95,19 @@ export async function runDeposit(
   }
 
   onStage("prove");
+  // Verify the pool's arbiter KEM key hash BEFORE encapsulating/proving: a
+  // pre-KEM or foreign-keyed pool fails here with a readable error instead of
+  // wasting the multi-second proof on a tx that reverts (or worse, shipping an
+  // envelope the arbiter cannot decapsulate).
+  await io.assertPoolKemEpoch(ctx.connection, DEFAULTS.pool);
   const crypto = freshDepositCrypto(randField);
   const built = buildDepositRequest(ctx.identity, amount, crypto);
   const calldata = await io.proveInBrowser(built.request, DEFAULTS.circuitBaseUrl);
 
   onStage("submit");
-  const res = await io.submitDeposit(ctx.connection, DEFAULTS.pool, calldata, DEFAULTS.explorer);
+  // The tx carries the SAME encapsulation the proof's kemBinding committed to
+  // (crypto.kemCiphertext) — a different ct would decapsulate to mismatching
+  // limbs at the arbiter and burn the envelope into an alarm.
+  const res = await io.submitDeposit(ctx.connection, DEFAULTS.pool, calldata, crypto.kemCiphertext, DEFAULTS.explorer);
   return { txHash: res.txHash, explorerUrl: res.explorerUrl, amount, approved };
 }

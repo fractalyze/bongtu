@@ -59,6 +59,6 @@ export const DEFAULTS = {
 // a one-time re-download instead of serving a mismatched key from disk (a stale key fails
 // on-chain verify with no self-heal). Bump this the moment ANY zkey changes on disk:
 //   cat public/circuits/transfer.zkey public/circuits/withdraw.zkey circuits/out/deposit.zkey | sha256sum | cut -c1-8
-export const CIRCUITS_VERSION = "d1712abf";
+export const CIRCUITS_VERSION = "ca05ab9f";
 
 export { H, B } from "@bongtu/core/network";

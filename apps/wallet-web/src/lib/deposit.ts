@@ -21,7 +21,7 @@ import type { Point } from "@bongtu/core/babyjub";
 import { toWire } from "@bongtu/core/proving";
 import type { DepositInput, ProvingRequest } from "@bongtu/core/proving";
 import type { WalletIdentity } from "./derive.js";
-import { toEncryptionNonce } from "./spend.js";
+import { toEncryptionNonce, freshKemMaterial, type KemDrawFn } from "./spend.js";
 import { DEFAULTS } from "../config.js";
 
 /** Fresh per-tx crypto material for one deposit. `ecdhPrivateKey`/`encryptionNonce`
@@ -38,6 +38,11 @@ export interface DepositCrypto {
   salt1: string;
   /** the pool's stored arbiter PUBLIC key — the authority envelope target. */
   authorityPubKey: [string, string];
+  /** ML-KEM-768 shared-secret limbs (decimal) — the PQ half of the hybrid
+   *  envelope key, a fresh encapsulation per tx (pq-envelope-design.md §5). */
+  kemSs: [string, string];
+  /** the matching 1088-byte encapsulation ciphertext, 0x-hex (tx calldata). */
+  kemCiphertext: string;
 }
 
 export interface DepositMeta {
@@ -61,11 +66,14 @@ export type RandField = () => string;
 /**
  * Draw the fresh per-tx crypto material for one deposit. Exactly FOUR draws from
  * `rand` — ecdhPrivateKey, encryptionNonce, salt0, salt1 — since reusing an ephemeral
- * ECDH key + nonce across txs is a two-time pad. `authorityPubKey` is NOT drawn: it is
- * the pool's fixed stored arbiter PUBLIC key (the contract injects the same key before
- * verifying, so a different target fails the proof).
+ * ECDH key + nonce across txs is a two-time pad; plus ONE ML-KEM encapsulation from
+ * `drawKem` (fresh per tx — ct reuse collapses the PQ compartment, design doc §6).
+ * `authorityPubKey` is NOT drawn: it is the pool's fixed stored arbiter PUBLIC key
+ * (the contract injects the same key before verifying, so a different target fails
+ * the proof).
  */
-export function freshDepositCrypto(rand: RandField): DepositCrypto {
+export function freshDepositCrypto(rand: RandField, drawKem: KemDrawFn = freshKemMaterial): DepositCrypto {
+  const kem = drawKem();
   return {
     ecdhPrivateKey: rand(),
     // clamped: SymmetricEncrypt constrains nonce < 2^128 (see toEncryptionNonce)
@@ -73,6 +81,8 @@ export function freshDepositCrypto(rand: RandField): DepositCrypto {
     salt0: rand(),
     salt1: rand(),
     authorityPubKey: DEFAULTS.arbiterPubKey,
+    kemSs: kem.kemSs,
+    kemCiphertext: kem.kemCiphertext,
   };
 }
 
@@ -124,6 +134,7 @@ export function buildDepositRequest(
     outputSalts,
     outputOwnerPublicKeys,
     ecdhPrivateKey: BigInt(crypto.ecdhPrivateKey),
+    kemSs: [BigInt(crypto.kemSs[0]), BigInt(crypto.kemSs[1])],
     encryptionNonce: BigInt(crypto.encryptionNonce),
     authorityPublicKey: [BigInt(crypto.authorityPubKey[0]), BigInt(crypto.authorityPubKey[1])],
   };

@@ -9,7 +9,7 @@
 import { DEFAULTS } from "../config.js";
 import type { WalletIdentity } from "./derive.js";
 import type { Connection } from "./metamask.js";
-import { submitTransfer, submitWithdraw } from "./metamask.js";
+import { assertPoolKemEpoch, submitTransfer, submitWithdraw } from "./metamask.js";
 import { getHead, getPath, type OwnerNote } from "./indexerClient.js";
 import {
   buildTransferRequest,
@@ -80,6 +80,10 @@ export async function runSpend(
   onStage: (stage: SpendStage) => void,
 ): Promise<SpendOutcome> {
   onStage("assemble");
+  // Verify the pool's arbiter KEM key hash BEFORE encapsulating (design doc
+  // §4/§5) — refuse to draw KEM material against a pool the chain does not
+  // vouch for (pre-KEM V1, or a rotated/foreign key).
+  await assertPoolKemEpoch(ctx.connection, DEFAULTS.pool);
   const { inputs, memberships } = await selectSpendInputs(ctx.indexerUrl, ctx.notes, args.amount);
   const crypto = freshSpendCrypto(randField);
   const built =
@@ -94,9 +98,12 @@ export async function runSpend(
   const calldata = await proveInBrowser(built.request, DEFAULTS.circuitBaseUrl);
 
   onStage("submit");
+  // The tx carries the SAME encapsulation the proof's kemBinding committed to
+  // (crypto.kemCiphertext) — a different ct would decapsulate to mismatching
+  // limbs at the arbiter and burn the envelope into an alarm.
   const res =
     kind === "transfer"
-      ? await submitTransfer(ctx.connection, DEFAULTS.pool, calldata, DEFAULTS.explorer)
-      : await submitWithdraw(ctx.connection, DEFAULTS.pool, calldata, DEFAULTS.explorer);
+      ? await submitTransfer(ctx.connection, DEFAULTS.pool, calldata, crypto.kemCiphertext, DEFAULTS.explorer)
+      : await submitWithdraw(ctx.connection, DEFAULTS.pool, calldata, crypto.kemCiphertext, DEFAULTS.explorer);
   return { txHash: res.txHash, explorerUrl: res.explorerUrl, changeValue: built.meta.changeValue };
 }

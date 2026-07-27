@@ -15,7 +15,7 @@ import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { databaseUrlError } from "../src/chain.js";
+import { databaseUrlError, kemBootGuardError, parseKemKey } from "../src/chain.js";
 
 let failures = 0;
 function ok(cond: unknown, msg: string): void {
@@ -37,6 +37,62 @@ step("UNIT: databaseUrlError — refusal iff DATABASE_URL is absent");
   ok(!err!.includes("\n"), "refusal is ONE line");
   ok(databaseUrlError({ DATABASE_URL: "postgres://x@localhost/db" }) === null, "set env → null (boot proceeds)");
   ok(typeof databaseUrlError({ DATABASE_URL: "" }) === "string", "empty-string DATABASE_URL counts as unset");
+}
+
+step("UNIT: kemBootGuardError — refuse a KEM-epoch pool this build cannot honor (design doc §7)");
+{
+  const ZERO = "0x" + "0".repeat(64);
+  const NONZERO = "0x0403c92bcdb56d0369c0981754a6f4af6719395d59eef32370dcfad9bb332314";
+  // pre-KEM epoch (or a V1 pool, folded to the zero hash): every build serves.
+  for (const arbiterMode of [false, true]) {
+    ok(kemBootGuardError({ kemPkHash: ZERO, arbiterMode, hasKemKey: false, abiKnowsKem: true, kemKeyPkHash: null }) === null,
+      `zero kemPkHash → serve (arbiterMode=${arbiterMode})`);
+  }
+  // KEM epoch + V1-only ABI → refuse in BOTH modes (silent envelope under-record).
+  for (const arbiterMode of [false, true]) {
+    const err = kemBootGuardError({ kemPkHash: NONZERO, arbiterMode, hasKemKey: true, abiKnowsKem: false, kemKeyPkHash: NONZERO });
+    ok(typeof err === "string" && /KEM event fields/.test(err) && !err.includes("\n"),
+      `nonzero hash + V1 ABI → ONE-line refusal (arbiterMode=${arbiterMode})`);
+  }
+  // KEM epoch + arbiter mode without AUTHORITY_KEM_KEY → refuse.
+  const noKey = kemBootGuardError({ kemPkHash: NONZERO, arbiterMode: true, hasKemKey: false, abiKnowsKem: true, kemKeyPkHash: null });
+  ok(typeof noKey === "string" && noKey.includes("AUTHORITY_KEM_KEY") && !noKey.includes("\n"),
+    "nonzero hash + keyless arbiter → ONE-line refusal naming AUTHORITY_KEM_KEY");
+  // KEM epoch + arbiter key whose embedded ek hashes to a DIFFERENT pk → refuse:
+  // implicit rejection would otherwise turn every honest op into a false
+  // "kem binding mismatch" tamper alarm.
+  const wrongKey = kemBootGuardError({
+    kemPkHash: NONZERO, arbiterMode: true, hasKemKey: true, abiKnowsKem: true,
+    kemKeyPkHash: "0x" + "11".repeat(32),
+  });
+  ok(typeof wrongKey === "string" && wrongKey.includes("does not match") && !wrongKey.includes("\n"),
+    "nonzero hash + mismatched AUTHORITY_KEM_KEY → ONE-line refusal");
+  // KEM epoch, honorable configs → serve: public mode never needs the key;
+  // arbiter mode with the MATCHING key serves (hash compare case-blind).
+  ok(kemBootGuardError({ kemPkHash: NONZERO, arbiterMode: false, hasKemKey: false, abiKnowsKem: true, kemKeyPkHash: null }) === null,
+    "public mode never needs AUTHORITY_KEM_KEY");
+  ok(kemBootGuardError({ kemPkHash: NONZERO, arbiterMode: true, hasKemKey: true, abiKnowsKem: true, kemKeyPkHash: NONZERO.toUpperCase().replace("0X", "0x") }) === null,
+    "arbiter mode with the matching key serves a KEM epoch");
+}
+
+step("UNIT: parseKemKey — exact 2400-byte ML-KEM-768 dk, malformed rejected");
+{
+  const k = parseKemKey("0x" + "ab".repeat(2400));
+  ok(k.length === 2400 && k[0] === 0xab, "2400-byte decapsulation key parses");
+  ok(parseKemKey("ab".repeat(2400)).length === 2400, "0x prefix optional");
+  for (const [bad, why] of [
+    ["0xabc", "odd-length hex"],
+    ["beef", "wrong length (decapsulating with a truncated key throws mid-ingest)"],
+    ["0x" + "ab".repeat(1184), "pk-sized material is not a decapsulation key"],
+  ] as const) {
+    let threw = false;
+    try {
+      parseKemKey(bad);
+    } catch {
+      threw = true;
+    }
+    ok(threw, `${why} rejected`);
+  }
 }
 
 step("SPAWN: src/index.ts without DATABASE_URL exits nonzero with the refusal line");

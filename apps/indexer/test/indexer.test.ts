@@ -42,6 +42,7 @@ import { packPubkey } from "@bongtu/core/pubkey";
 import { signNotesAuth, notesAuthMessage, packSignature } from "@bongtu/core/eddsa";
 import { ImtTree } from "@bongtu/core/imt";
 import { Indexer } from "../src/ingest.js";
+import { parseKemKey } from "../src/chain.js";
 import { startApi } from "../src/api/router.js";
 import { runScenario } from "./scenario.js";
 
@@ -121,9 +122,27 @@ async function runArbiter(sc: any): Promise<void> {
     pool: sc.poolAddr,
     startBlock: 0,
     authorityKey: BigInt(sc.arbiterPrivateKey),
+    authorityKemKey: parseKemKey(sc.arbiterKemSecretKey),
     databaseUrl: await freshDatabase("bongtu_conf_arbiter"),
   });
   ok(aix.arbiterMode === true, "second indexer is in ARBITER mode (AUTHORITY key set)");
+
+  // KEM boot guard against the LIVE pool (nonzero arbiterKemPkHash on epoch 0):
+  // this build (V2 ABI + AUTHORITY_KEM_KEY) serves; the same arbiter WITHOUT the
+  // decapsulation key must be refused with the one-line fatal (design doc §7).
+  step("ARBITER kem boot guard — keyed build serves, keyless arbiter refused");
+  ok((await aix.kemBootGuard()) === null, "V2 build + AUTHORITY_KEM_KEY → boot guard passes");
+  const keyless = new Indexer({
+    rpc: sc.rpc,
+    pool: sc.poolAddr,
+    startBlock: 0,
+    authorityKey: BigInt(sc.arbiterPrivateKey),
+  });
+  const refusal = await keyless.kemBootGuard();
+  ok(typeof refusal === "string" && refusal.includes("AUTHORITY_KEM_KEY"),
+    "arbiter without AUTHORITY_KEM_KEY on a KEM-epoch pool → one-line refusal");
+  const publicBuild = new Indexer({ rpc: sc.rpc, pool: sc.poolAddr, startBlock: 0 });
+  ok((await publicBuild.kemBootGuard()) === null, "public mode never needs the KEM key");
 
   step("ARBITER phase 1: ingest deposit + honest disburse ONLY (up to the pre-transfer block)");
   await aix.ingest(0, sc.blockAfterHonestDisburse);
@@ -252,11 +271,37 @@ async function runArbiter(sc: any): Promise<void> {
     const afeed = aal.body as any[];
     ok(afeed.filter((a) => a.type === "disclosure").length === 2, "both tampered disburses alarm disclosure-mismatch");
     const envAlarms = afeed.filter((a) => a.type === "envelope");
-    ok(envAlarms.length === 1, "exactly one envelope alarm (the authority-tampered disburse)");
-    ok(envAlarms[0].kind === "disburse" && envAlarms[0].detail.includes(`@${sc.tamperedAuthorityStartLeafIndex}`),
+    ok(envAlarms.length === 2, "exactly two envelope alarms (authority-tampered disburse + kem-mismatch deposit)");
+    const subAlarm = envAlarms.find((a) => a.kind === "disburse");
+    ok(!!subAlarm && subAlarm.detail.includes(`@${sc.tamperedAuthorityStartLeafIndex}`),
       "envelope alarm pinpoints the authority-tampered batch");
     const unopened = await get(abase, `/path/${sc.tamperedAuthorityStartLeafIndex}`);
     ok(unopened.status === 422, "authority-tampered batch stays unopened (/path 422 even in arbiter mode)");
+
+    // KEM-binding cross-check (pq-envelope-design.md §2/§5): the deposit whose
+    // tx ct is a DIFFERENT (consistent-but-junk) encapsulation than the proof's
+    // must surface on the SAME "envelope" alarm branch — txHash + on-chain
+    // (expected) vs decapsulated (recomputed) binding — and be fully withheld.
+    step("ARBITER kem alarm — junk-wrapped kemCiphertext alarms + envelope withheld");
+    const kemAlarm = envAlarms.find((a) => a.kind === "deposit");
+    ok(!!kemAlarm, "the kem-mismatch deposit raised an envelope alarm");
+    ok(kemAlarm.txHash === sc.kemMismatchTxHash, "kem alarm carries the offending txHash");
+    ok(/kem binding mismatch/.test(kemAlarm.detail), "kem alarm detail == 'kem binding mismatch — envelope withheld'");
+    ok(/^\d+$/.test(kemAlarm.expected) && /^\d+$/.test(kemAlarm.recomputed) && kemAlarm.expected !== kemAlarm.recomputed,
+      "kem alarm carries expected (on-chain) vs recomputed (decapsulated) bindings");
+    // withheld == STOPPED: the employer's ledger still holds ONLY the two
+    // deposit#1 notes — the mismatch deposit recorded nothing.
+    const empQ = (
+      ts: number = Math.floor(Date.now() / 1000),
+    ): string => {
+      const pub: [bigint, bigint] = [BigInt(sc.employerPub[0]), BigInt(sc.employerPub[1])];
+      const sig = packSignature(signNotesAuth(BigInt(sc.employerPrivateKey), notesAuthMessage(pub, ts)));
+      return `/notes?owner=${packPubkey(pub)}&ts=${ts}&sig=${sig}`;
+    };
+    const empNotes = await get(abase, empQ());
+    ok(empNotes.status === 200, "GET /notes (employer, signed) 200");
+    ok((empNotes.body as unknown[]).length === 2,
+      `employer holds ONLY the deposit#1 notes (kem-mismatch deposit withheld; got ${(empNotes.body as unknown[]).length})`);
 
     // Distinct 400 branch from the malformed-owner case: auth params are mandatory.
     const noAuth = await get(abase, `/notes?owner=${packPubkey([BigInt(r0.owner[0]), BigInt(r0.owner[1])])}`);
@@ -310,7 +355,7 @@ async function main(): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const feed = evRes.body as any[];
     const kinds = feed.map((e) => e.kind).join(",");
-    ok(kinds === "deposit,disburse,transfer,withdraw,disburse,disburse", `feed kinds in chain order: ${kinds}`);
+    ok(kinds === "deposit,disburse,transfer,withdraw,disburse,disburse,deposit", `feed kinds in chain order: ${kinds}`);
 
     const honest = feed.find((e) => e.kind === "disburse" && e.slices[0]?.leafIndex === sc.disburseHonest.startLeafIndex);
     ok(!!honest, "honest disburse present in feed");

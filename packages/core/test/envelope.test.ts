@@ -53,7 +53,13 @@ import {
   type OpKind,
   type ParsedEnvelope,
 } from "../src/envelope.js";
-import { ml_kem768, kemSsToLimbs, hybridEnvelopeKey } from "../src/kem.js";
+import {
+  KEM_SECRET_KEY_BYTES,
+  hybridEnvelopeKey,
+  kemPkFromSecret,
+  kemSsToLimbs,
+  ml_kem768,
+} from "../src/kem.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..", "..");
@@ -523,4 +529,17 @@ test("builder rejects shapes no circuit produces", () => {
     outputs: env.outputs,
   };
   assert.throws(() => buildAuthorityPlaintext("transfer", twoOwners), /share ONE owner/);
+});
+
+test("kemPkFromSecret: the FIPS 203 dk embeds its ek at offset 1152", () => {
+  // Pinned against noble's own keygen: the extracted slice must BE the
+  // encapsulation key (byte-equal), and wrong-length keys are rejected —
+  // parseKemKey callers rely on this to convict a truncated AUTHORITY_KEM_KEY
+  // at boot instead of via false tamper alarms.
+  const kp = ml_kem768.keygen(
+    new Uint8Array([...shaBytes("bongtu/fixture/kem/seed/d"), ...shaBytes("bongtu/fixture/kem/seed/z")]),
+  );
+  assert.equal(kp.secretKey.length, KEM_SECRET_KEY_BYTES);
+  assert.deepEqual(kemPkFromSecret(kp.secretKey), kp.publicKey);
+  assert.throws(() => kemPkFromSecret(kp.publicKey), /2400 bytes/);
 });

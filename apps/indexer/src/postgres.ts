@@ -203,6 +203,10 @@ export class PostgresLedger {
   constructor(
     private readonly pool: Pool,
     private readonly arbiterPriv: bigint, // NEVER leaves this object
+    // ML-KEM-768 decapsulation key (AUTHORITY_KEM_KEY) — same handling rule as
+    // arbiterPriv: never logged, never serialized. null on a pre-KEM deploy
+    // (the kem boot guard refuses V2 chains without it).
+    private readonly kemSecret: Uint8Array | null,
     private readonly B: number,
     private readonly tree: MirrorTree,
   ) {}
@@ -214,7 +218,7 @@ export class PostgresLedger {
     this.applied.add(key);
     this.pendingApplied.push([op.txHash, op.logIndex]);
 
-    const d = deriveOp(this.arbiterPriv, this.B, this.tree.H, op);
+    const d = deriveOp(this.arbiterPriv, this.kemSecret, this.B, this.tree.H, op);
     for (const o of d.outputs) this.pendingNotes.push(recordNote(this.byOwner, this.byCommitment, o, op.txHash));
     for (const a of d.alarms) {
       this.alarms.push(a);

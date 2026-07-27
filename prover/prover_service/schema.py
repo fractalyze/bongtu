@@ -41,6 +41,11 @@ def _field_element(v: object) -> str:
 
 FieldInput = Annotated[str, BeforeValidator(_field_element)]
 PointInput = Annotated[list[FieldInput], Field(min_length=2, max_length=2)]
+# The hybrid authority envelope's ML-KEM-768 shared-secret limbs (two exact
+# LE-uint128 halves of the 32-byte secret, pq-envelope-design.md §2) — a
+# REQUIRED witness input of every circuit since the PQ upgrade. The 1088-byte
+# kemCiphertext never reaches the prover (it is tx calldata, not witness).
+KemSs = Annotated[list[FieldInput], Field(min_length=2, max_length=2)]
 
 
 class _StrictModel(BaseModel):
@@ -55,6 +60,7 @@ class DepositInput(_StrictModel):
     outputSalts: list[FieldInput]
     outputOwnerPublicKeys: list[PointInput]
     ecdhPrivateKey: FieldInput
+    kemSs: KemSs
     encryptionNonce: FieldInput
     authorityPublicKey: PointInput
 
@@ -76,6 +82,7 @@ class _SpendInput(_StrictModel):
     outputValues: list[FieldInput]
     outputSalts: list[FieldInput]
     outputOwnerPublicKeys: list[PointInput]
+    kemSs: KemSs
     encryptionNonce: FieldInput
     authorityPublicKey: PointInput
 

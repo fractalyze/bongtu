@@ -10,6 +10,7 @@ import { el, field, input, textarea, button, clear, statusLine } from "../lib/do
 import { DEFAULTS } from "../config.js";
 import {
   buildDisburseRequest,
+  freshDisburseKem,
   type RecipientRow,
   type AssembleResult,
 } from "../lib/disburse.js";
@@ -168,6 +169,10 @@ export function employerView(): HTMLElement {
       assembled = null;
       calldata = null;
       const rows = recipients.filter((r) => r.pubkey.trim() !== "" || r.amount.trim() !== "");
+      // Fresh ML-KEM encapsulation per assembled batch (design doc §6: ct reuse
+      // collapses the PQ compartment) — unlike the demo-friendly manual fields
+      // above, this is machine-drawn: limbs feed the witness, the ct feeds the tx.
+      const kem = freshDisburseKem();
       const res = buildDisburseRequest(
         { value: inValue.value.trim(), salt: inSalt.value.trim(), ownerPrivateKey: inPriv.value.trim() },
         { root: memRoot.value.trim(), pathElements: JSON.parse(memPath.value || "[]"), leafIndex: Number(memLeaf.value) },
@@ -176,6 +181,8 @@ export function employerView(): HTMLElement {
           ecdhPrivateKey: ecdh.value.trim(),
           encryptionNonce: nonce.value.trim(),
           authorityPubKey: [arbX.value.trim(), arbY.value.trim()],
+          kemSs: kem.kemSs,
+          kemCiphertext: kem.kemCiphertext,
           saltSeed: saltSeed.value.trim(),
           padSeed: padSeed.value.trim(),
         },
@@ -263,7 +270,7 @@ export function employerView(): HTMLElement {
     }
     try {
       statusLine(submitStatus, "connecting MetaMask + sending disburseWithCiphertexts…", "info");
-      const r = await submitDisburse(poolAddr.value.trim(), calldata, assembled.ciphertext, DEFAULTS.explorer);
+      const r = await submitDisburse(poolAddr.value.trim(), calldata, assembled.ciphertext, assembled.kemCiphertext, DEFAULTS.explorer);
       clear(submitStatus);
       submitStatus.append(
         el("div", { class: "status status-ok", textContent: `submitted: ${r.txHash}` }),

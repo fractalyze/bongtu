@@ -14,6 +14,11 @@
 //                              decrypt every op's authority envelope, build the
 //                              note ledger, serve /notes + within-batch /path.
 //                              UNSET => PUBLIC MODE (no /notes; batch /path 422s).
+//   AUTHORITY_KEM_KEY          arbiter ML-KEM-768 decapsulation key (hex) — the
+//                              PQ half of the hybrid envelope. REQUIRED in
+//                              arbiter mode once the pool is in a KEM epoch
+//                              (the boot guard refuses to serve without it).
+//                              Never logged, never in a response.
 //
 // Read-only on-chain: opens no wallet, sends no transactions. In arbiter mode it
 // holds the arbiter private key in memory ONLY — never logged, never in a response.
@@ -39,6 +44,14 @@ async function main(): Promise<void> {
   const mode = cfg.authorityKey != null ? "ARBITER" : "public";
   console.log(`bongtu indexer: rpc=${cfg.rpc} pool=${cfg.pool} startBlock=${cfg.startBlock} mode=${mode} backend=postgres`);
   const ix = new Indexer(cfg);
+  // KEM boot guard (pq-envelope-design.md §7): a KEM-epoch pool served by a
+  // V1-ABI build or a KEM-keyless arbiter fails SILENTLY (envelopes skipped /
+  // undecryptable while the tree mirror stays green) — refuse to serve instead.
+  const kemErr = await ix.kemBootGuard();
+  if (kemErr) {
+    console.error(kemErr);
+    process.exit(1);
+  }
   await ix.ingest();
   const hd = await ix.head();
   console.log(`ingested to head: root=${hd.root} nextLeafIndex=${hd.nextLeafIndex} events=${ix.store.allEvents().length} alarms=${ix.store.getAlarms().length}`);

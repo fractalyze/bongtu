@@ -21,8 +21,11 @@
 
 import type { Pool } from "pg";
 
+import { kemPkFromSecret } from "@bongtu/core/kem";
+import { isPreKemProbeError } from "@bongtu/core/network";
+
 import { MirrorTree } from "./tree.js";
-import { ethers, poolAbi, type ChainConfig } from "./chain.js";
+import { ethers, poolAbi, abiKnowsKem, kemBootGuardError, type ChainConfig } from "./chain.js";
 import { InMemoryStore, type StorePort, type Slice } from "./store.js";
 import { verifyDisclosure } from "./disclosure.js";
 import { connect, PostgresStore, PostgresLedger } from "./postgres.js";
@@ -47,6 +50,17 @@ export interface ParsedLog {
 
 const bn = (x: unknown): bigint => BigInt((x as { toString(): string }).toString());
 const dec = (x: bigint): string => x.toString();
+
+// The op's hybrid-envelope KEM material, dispatched on event VINTAGE: V2 events
+// carry (kemBinding, kemCiphertext); V1 (pre-upgrade) logs decode without them
+// -> null -> the ledger's legacy raw-ECDH path, KEM checks skipped (the
+// structural pre-KEM gate of pq-envelope-design.md §5 — no false alarms on
+// history). Shape-based, not ABI-based, so synthetic ParsedLogs dispatch too.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const kemOf = (args: any): { binding: bigint; ciphertext: Uint8Array } | null =>
+  args.kemBinding === undefined || args.kemCiphertext === undefined
+    ? null
+    : { binding: bn(args.kemBinding), ciphertext: ethers.utils.arrayify(args.kemCiphertext) };
 
 export class Indexer {
   readonly cfg: ChainConfig;
@@ -96,6 +110,35 @@ export class Indexer {
   /** Live head state straight from the contract (the mirror is asserted against it). */
   async head(): Promise<{ root: bigint; nextLeafIndex: number }> {
     return this.headAt("latest");
+  }
+
+  /**
+   * The KEM boot guard (pq-envelope-design.md §7, mandatory): read the pool's
+   * `arbiterKemPkHash(currentEpoch())` and refuse to serve when the chain is in
+   * a KEM epoch this process cannot honor (V1-only ABI, or arbiter mode without
+   * AUTHORITY_KEM_KEY). A revert/missing getter marks a pre-KEM (V1) pool —
+   * the zero hash, guard passes. Returns the fatal one-liner or null; index.ts
+   * exits on it (the databaseUrlError fail-fast posture).
+   */
+  async kemBootGuard(): Promise<string | null> {
+    let kemPkHash = "0x" + "0".repeat(64);
+    try {
+      const epoch = await this.pool.currentEpoch();
+      kemPkHash = String(await this.pool.arbiterKemPkHash(epoch));
+    } catch (e) {
+      // ONLY a CALL_EXCEPTION (missing getter/revert) marks a pre-KEM V1 pool.
+      // A transient RPC failure must propagate — folding it into "V1 pool"
+      // would disarm the guard exactly when it cannot see the chain.
+      if (!isPreKemProbeError(e)) throw e;
+    }
+    const kemKey = this.cfg.authorityKemKey ?? null;
+    return kemBootGuardError({
+      kemPkHash,
+      arbiterMode: this.arbiterMode,
+      hasKemKey: kemKey !== null,
+      abiKnowsKem: abiKnowsKem(this.pool.interface),
+      kemKeyPkHash: kemKey === null ? null : String(ethers.utils.keccak256(kemPkFromSecret(kemKey))),
+    });
   }
 
   /** Contract root + nextLeafIndex pinned to `blockTag` (ethers v5 call override). */
@@ -282,7 +325,7 @@ export class Indexer {
     await store.boot(this.tree);
     this.store = store;
     if (this.arbiterPriv !== null) {
-      const ledger = new PostgresLedger(pool, this.arbiterPriv, this.batchSize, this.tree);
+      const ledger = new PostgresLedger(pool, this.arbiterPriv, this.cfg.authorityKemKey ?? null, this.batchSize, this.tree);
       await ledger.boot();
       this.ledger = ledger;
     }
@@ -426,6 +469,7 @@ export class Indexer {
             ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
             nonce: bn(l.args.encryptionNonce),
             authorityCt: (l.args.encryptedValuesForAuthority as unknown[]).map(bn),
+            kem: kemOf(l.args),
             outputLeaves: [{ leafIndex: i0, commitment: oc0 }, { leafIndex: i1, commitment: oc1 }],
           });
         }
@@ -463,6 +507,7 @@ export class Indexer {
               nonce: bn(l.args.encryptionNonce),
               // authority envelope = ct[8..23] (receiver0[4] ++ receiver1[4] ++ authority[16])
               authorityCt: (l.args.encryptedValuesForAuthority as unknown[]).map(bn),
+              kem: kemOf(l.args),
               outputLeaves: [{ leafIndex: i0, commitment: oc0 }, { leafIndex: i1, commitment: oc1 }],
             });
           }
@@ -486,6 +531,7 @@ export class Indexer {
               ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
               nonce: bn(l.args.encryptionNonce),
               authorityCt: (l.args.encryptedValuesForAuthority as unknown[]).map(bn),
+              kem: kemOf(l.args),
               outputLeaves: [{ leafIndex: ci, commitment: chg }],
             });
           }
@@ -529,6 +575,7 @@ export class Indexer {
               ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
               nonce: bn(l.args.encryptionNonce),
               authorityCt: ct.slice(B * 4),
+              kem: kemOf(l.args),
               outputLeaves: [],
               batch: { startLeafIndex: start, subtreeRoot: st.subtreeRoot },
             });

@@ -23,6 +23,8 @@ import {
   nullifier,
   assertDistinctOwnerPubkeys,
 } from "@bongtu/core/note";
+import { ml_kem768, kemSsToLimbs, kemHexToBytes, kemBytesToHex } from "@bongtu/core/kem";
+import { ARBITER_KEM_PK } from "@bongtu/core/network";
 import { unpackPubkey } from "@bongtu/core/pubkey";
 import { foldToRoot } from "@bongtu/core/imt";
 import type { Point } from "@bongtu/core/babyjub";
@@ -69,6 +71,12 @@ export interface SpendCrypto {
   encryptionNonce: string;
   /** the pool's stored arbiter PUBLIC key — the authority envelope target (§6b v2). */
   authorityPubKey: [string, string];
+  /** ML-KEM-768 shared-secret limbs (decimal) — the PQ half of the hybrid
+   *  envelope key, a fresh encapsulation per tx (pq-envelope-design.md §5). */
+  kemSs: [string, string];
+  /** the matching 1088-byte encapsulation ciphertext, 0x-hex — the tx's
+   *  `bytes kemCiphertext` calldata arg. */
+  kemCiphertext: string;
   /** salt for the change note back to the wallet. */
   changeSalt: string;
   /** salt for the padded (value-0) input note when only one real note is spent. */
@@ -152,6 +160,29 @@ export function selectInputNotes(notes: readonly SelectableNote[], amount: strin
  *  behind `freshSpendCrypto` (browser CSPRNG in main.ts; deterministic in tests). */
 export type RandField = () => string;
 
+/** One ML-KEM encapsulation result in wire form: witness limbs + tx ct. */
+export interface KemMaterial {
+  kemSs: [string, string];
+  kemCiphertext: string;
+}
+
+/** The injectable KEM draw behind fresh{Spend,Deposit}Crypto — real
+ *  encapsulation in the browser, a deterministic double in tests. */
+export type KemDrawFn = () => KemMaterial;
+
+/**
+ * Fresh ML-KEM-768 encapsulation against the institutional arbiter key
+ * (ARBITER_KEM_PK — the pool stores its keccak256 per epoch). One encapsulation
+ * PER TX: reusing a ct across ops collapses the PQ compartment
+ * (pq-envelope-design.md §6), so this is drawn alongside the ECDH ephemeral in
+ * every fresh crypto bundle. noble's encapsulate uses the platform CSPRNG.
+ */
+export function freshKemMaterial(): KemMaterial {
+  const { cipherText, sharedSecret } = ml_kem768.encapsulate(kemHexToBytes(ARBITER_KEM_PK));
+  const [l0, l1] = kemSsToLimbs(sharedSecret);
+  return { kemSs: [l0.toString(), l1.toString()], kemCiphertext: kemBytesToHex(cipherText) };
+}
+
 /**
  * Clamp a fresh field draw to a valid Poseidon-encryption nonce. Every circuit's
  * `SymmetricEncrypt` constrains `nonce < 2^128` (zeto encrypt.circom — the nonce
@@ -169,13 +200,17 @@ export function toEncryptionNonce(fieldDraw: string): string {
  * ONE tx is fine, but reuse ACROSS txs is a two-time pad — so callers draw a
  * whole fresh SpendCrypto per spend. The authority target is the pool's stored
  * arbiter PUBLIC key (§6b v2): the contract injects the same key from storage
- * before verifying, so a different target fails the proof.
+ * before verifying, so a different target fails the proof. `drawKem` adds the
+ * fresh per-tx ML-KEM encapsulation (hybrid envelope, injectable for tests).
  */
-export function freshSpendCrypto(rand: RandField): SpendCrypto {
+export function freshSpendCrypto(rand: RandField, drawKem: KemDrawFn = freshKemMaterial): SpendCrypto {
+  const kem = drawKem();
   return {
     ecdhPrivateKey: rand(),
     encryptionNonce: toEncryptionNonce(rand()),
     authorityPubKey: DEFAULTS.arbiterPubKey,
+    kemSs: kem.kemSs,
+    kemCiphertext: kem.kemCiphertext,
     changeSalt: rand(),
     padSalt: rand(),
     payeeSalt: rand(),
@@ -341,6 +376,7 @@ export function buildTransferRequest(
     outputValues,
     outputSalts,
     outputOwnerPublicKeys,
+    kemSs: [BigInt(crypto.kemSs[0]), BigInt(crypto.kemSs[1])],
     encryptionNonce: BigInt(crypto.encryptionNonce),
     authorityPublicKey: [BigInt(crypto.authorityPubKey[0]), BigInt(crypto.authorityPubKey[1])],
   };
@@ -400,6 +436,7 @@ export function buildWithdrawRequest(
     outputSalts,
     outputOwnerPublicKeys,
     ecdhPrivateKey: BigInt(crypto.ecdhPrivateKey),
+    kemSs: [BigInt(crypto.kemSs[0]), BigInt(crypto.kemSs[1])],
     encryptionNonce: BigInt(crypto.encryptionNonce),
     authorityPublicKey: [BigInt(crypto.authorityPubKey[0]), BigInt(crypto.authorityPubKey[1])],
   };

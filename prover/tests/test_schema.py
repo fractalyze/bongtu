@@ -46,6 +46,7 @@ def minimal_disburse_input(**overrides) -> dict:
         "outputValues": ["60", "40"],
         "outputSalts": ["9", "10"],
         "outputOwnerPublicKeys": [["1", "2"], ["3", "4"]],
+        "kemSs": ["15", "16"],
         "encryptionNonce": "12",
         "authorityPublicKey": ["13", "14"],
     }
@@ -91,6 +92,7 @@ def test_all_four_circuit_tags_parse():
         "outputSalts": ["1", "2"],
         "outputOwnerPublicKeys": [["1", "2"], ["3", "4"]],
         "ecdhPrivateKey": "7",
+        "kemSs": ["15", "16"],
         "encryptionNonce": "42",
         "authorityPublicKey": ["1", "2"],
     }
@@ -153,6 +155,21 @@ def test_int_field_elements_canonicalize_to_decimal_strings():
     )
     assert req.input.root == "6"
     assert req.input.leafIndices == ["1"]
+
+
+def test_kem_ss_is_required_and_exactly_two_limbs():
+    # The hybrid envelope's kemSs limbs are a REQUIRED witness input of every
+    # circuit (pq-envelope-design.md §2) — a pre-KEM request must be rejected,
+    # never silently proven without the PQ half.
+    legacy = minimal_disburse_input()
+    legacy.pop("kemSs")
+    with pytest.raises(ValidationError, match="kemSs"):
+        request_adapter.validate_python({"circuit": "disburse", "input": legacy})
+    for bad in (["1"], ["1", "2", "3"]):
+        with pytest.raises(ValidationError):
+            request_adapter.validate_python(
+                {"circuit": "disburse", "input": minimal_disburse_input(kemSs=bad)}
+            )
 
 
 def test_disburse_shape_guards():

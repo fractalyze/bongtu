@@ -17,6 +17,10 @@
 //     alarm (status "mismatch") AND, in arbiter mode, the envelope cross-check
 //     alarm (the recovered leaves no longer fold to the on-chain subtreeRoot);
 //     the batch stays unopened.
+//   - a FINAL deposit submits a consistent-but-junk kemCiphertext (a different
+//     encapsulation than the proof's kemSs) → the arbiter's decapsulated
+//     binding mismatches the on-chain kemBinding → kem envelope alarm, op
+//     withheld (no notes), per pq-envelope-design.md §2/§5.
 // (§6b v2 removed the plain disburse() entry point, so a "withheld"
 // nothing-published disburse is not producible on-chain.)
 //
@@ -38,7 +42,7 @@ import {
 // apps/indexer.
 import {
   RPC, H, GATE_B as B, dec, connectAnvil, deployStack, prove,
-  EMPLOYER, AUTHORITY, PAYEE, RCPTS, kemDraw, kemCtHex,
+  EMPLOYER, AUTHORITY, AUTHORITY_KEM, PAYEE, RCPTS, kemDraw, kemCtHex,
   sD0, sD1, sR, sPay, sChg, sPadT, sPadW, sRes,
   amounts, V,
 } from "../../../deploy/lib/e2e_harness.js";
@@ -90,13 +94,16 @@ export interface ScenarioResult {
   disburseHonest: DisburseInfo;
   tamperedStartLeafIndex: number; // receiver-element flip: disclosure alarm only
   tamperedAuthorityStartLeafIndex: number; // authority-tail flip: + arbiter envelope alarm
+  kemMismatchTxHash: string; // deposit whose tx ct != the proof's encapsulation: arbiter kem-binding alarm
   singleLeaves: SingleLeaf[]; // real single-append leaves for the /path test
   // ---- arbiter-mode fixtures (SPEC §6b v2) ---------------------------------
   arbiterPrivateKey: string; // decimal — the AUTHORITY keypair's private scalar
+  arbiterKemSecretKey: string; // 0x-hex — the fixture ML-KEM decaps key (AUTHORITY_KEM_KEY)
   blockAfterHonestDisburse: number; // block height after disburse#1, BEFORE the transfer
   // Expected /history amounts + counterparty for recipient#0 (decimal strings):
   // the arbiter leg checks received(from employer) / sent / withdraw against these.
   employerPub: [string, string];
+  employerPrivateKey: string; // decimal — the employer signs its own /notes auth (never held by the indexer)
   transferPayAmount: string;
   withdrawnAmount: string;
   recipient0Note: ArbiterNote; // recipient #0's disburse-batch note (spent by the transfer)
@@ -322,6 +329,35 @@ export async function runScenario(): Promise<ScenarioResult> {
   // (nothing-published) disburse is no longer producible on-chain — publication
   // is enforced. The payee note @32 stays an unspent single-append leaf for /path.
 
+  // ---- deposit #2 (KEM-MISMATCH): a consistent-but-junk kemCiphertext -------
+  // The proof (and its kemBinding public signal + envelope key) commits to ONE
+  // encapsulation; the tx submits a DIFFERENT, well-formed 1088-byte ct. The
+  // chain accepts it (length is the only on-chain check, design doc §2
+  // trade-off); the arbiter decapsulates the tx's ct, recomputes the binding,
+  // mismatches -> first-class kem alarm + envelope withheld: NO notes recorded
+  // for this op. Appended LAST so every earlier leaf index stays pinned.
+  const sK0 = 8800001n, sK1 = 8800002n;
+  const ECDH_DEP2 = 990000000000000000023n;
+  const NONCE_DEP2 = 888888888888n;
+  const KEM_DEP2_WITNESS = kemDraw("scen/deposit-mismatch/witness");
+  const KEM_DEP2_JUNK = kemDraw("scen/deposit-mismatch/junk-ct");
+  const kNoteV = commitment(7n, sK0, EMPLOYER.publicKey);
+  const kNote0 = commitment(0n, sK1, EMPLOYER.publicKey);
+  let kemMismatchTxHash: string;
+  {
+    const { a, b, c, pub } = await prove("deposit", {
+      outputCommitments: [kNoteV, kNote0], outputValues: [7n, 0n],
+      outputSalts: [sK0, sK1], outputOwnerPublicKeys: [EMPLOYER.publicKey, EMPLOYER.publicKey],
+      ecdhPrivateKey: ECDH_DEP2, kemSs: KEM_DEP2_WITNESS.kemSs,
+      encryptionNonce: NONCE_DEP2, authorityPublicKey: AUTHORITY.publicKey,
+    });
+    oracle.appendLeaf(kNoteV);
+    oracle.appendLeaf(kNote0);
+    const tx = await pool.deposit(a, b, c, pub, kemCtHex(KEM_DEP2_JUNK.kemCiphertext));
+    await tx.wait();
+    kemMismatchTxHash = tx.hash;
+  }
+
   return {
     rpc: RPC,
     poolAddr: pool.address,
@@ -341,6 +377,7 @@ export async function runScenario(): Promise<ScenarioResult> {
     },
     tamperedStartLeafIndex: tamperedStart,
     tamperedAuthorityStartLeafIndex: tamperedAuthorityStart,
+    kemMismatchTxHash,
     singleLeaves: [
       { leafIndex: 0, commitment: dec(dNoteV) },
       { leafIndex: payLeaf, commitment: dec(payCommit) },
@@ -350,8 +387,10 @@ export async function runScenario(): Promise<ScenarioResult> {
     // private scalar); the recipient/payee notes + spent nullifiers let the
     // arbiter test assert the note ledger + spent transition from envelopes alone.
     arbiterPrivateKey: dec(AUTHORITY.formattedPrivateKey),
+    arbiterKemSecretKey: kemCtHex(AUTHORITY_KEM.secretKey),
     blockAfterHonestDisburse,
     employerPub: [dec(EMPLOYER.publicKey[0]), dec(EMPLOYER.publicKey[1])],
+    employerPrivateKey: dec(EMPLOYER.formattedPrivateKey),
     transferPayAmount: dec(payVal),
     withdrawnAmount: dec(chgVal),
     recipient0Note: {

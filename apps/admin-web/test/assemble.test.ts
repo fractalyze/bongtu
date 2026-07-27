@@ -16,9 +16,19 @@ import {
 } from "@bongtu/core/note";
 import { packPubkey } from "@bongtu/core/pubkey";
 import { ImtTree } from "@bongtu/core/imt";
+import { ml_kem768, kemSsToLimbs, kemHexToBytes, kemBytesToHex } from "@bongtu/core/kem";
+import { ARBITER_KEM_PK } from "@bongtu/core/network";
 import type { Point } from "@bongtu/core/babyjub";
-import { buildDisburseRequest, type RecipientRow } from "../src/lib/disburse.js";
+import { buildDisburseRequest, freshDisburseKem, type RecipientRow } from "../src/lib/disburse.js";
 import { DEFAULTS, H, B } from "../src/config.js";
+
+// Deterministic ML-KEM material (fixed encapsulation randomness against the real
+// arbiter pk) so the wire-byte pin below stays reproducible run-to-run.
+const FIXED_ENCAP = ml_kem768.encapsulate(kemHexToBytes(ARBITER_KEM_PK), new Uint8Array(32).fill(5));
+const FIXED_KEM = {
+  kemSs: kemSsToLimbs(FIXED_ENCAP.sharedSecret).map(String) as [string, string],
+  kemCiphertext: kemBytesToHex(FIXED_ENCAP.cipherText),
+};
 
 // A live-tree fixture: two leaves, the second is the employer's input note.
 function fixture(recipientCount: number, value = 100000n) {
@@ -47,6 +57,8 @@ function fixture(recipientCount: number, value = 100000n) {
     ecdhPrivateKey: "900000000000000000007",
     encryptionNonce: "424242424243",
     authorityPubKey: DEFAULTS.arbiterPubKey,
+    kemSs: FIXED_KEM.kemSs,
+    kemCiphertext: FIXED_KEM.kemCiphertext,
     saltSeed: "9000000",
     padSeed: "50000000000",
   };
@@ -117,19 +129,40 @@ test("value conserved: sum(outputs) == input value; change + padding fill B", ()
   assert.equal(BigInt(meta.disbursed) + BigInt(meta.changeValue), f.value);
 });
 
-test("envelope bytes are pinned (U-N1: unchanged across the @bongtu/core/envelope migration)", () => {
+test("envelope bytes are pinned (hybrid authority tail — the PQ wire, design doc §2)", () => {
   // sha256 of the decimal-string JSON of the full 2054-element ciphertext on
-  // fixture(3), recorded from the pre-migration assembly at main 875c179 (the
-  // same ground truth as packages/core/test/envelope.test.ts p1.A). A change
-  // here is a WIRE-BYTE change: auditor decryption of live envelopes breaks.
+  // fixture(3) under FIXED_KEM. Re-pinned when the authority tail switched from
+  // the raw-ECDH key to the hybrid Poseidon fold (the deliberate wire-byte
+  // change of the PQ envelope; the pre-hybrid pin was 6a967498…, main 875c179).
+  // A change here is a WIRE-BYTE change: auditor decryption of live envelopes
+  // breaks — the hybrid derivation itself is pinned against the circuit
+  // fixtures in packages/core/test/envelope.test.ts.
   const f = fixture(3);
-  const { ciphertext, meta } = buildDisburseRequest(f.inputNote, f.membership, f.recipients, f.crypto);
+  const { ciphertext, meta, kemCiphertext } = buildDisburseRequest(f.inputNote, f.membership, f.recipients, f.crypto);
   const sha = createHash("sha256").update(JSON.stringify(ciphertext)).digest("hex");
-  assert.equal(sha, "6a967498e139ed952a4632a9f366c1c6ef0a9a1cdbbadb828d15d7dbcf9ff2a8");
+  assert.equal(sha, "78b72e25ec349b011edcc02c8ce5e179fe0032070b3f8902aca5facb9240e1e7");
   assert.equal(
     meta.disclosureHash,
-    "10410754105375865441329948274228936976154835740787208180438963577568607987646",
+    "3095998976422452395981196483552548910517161000528260453346116616632878541452",
   );
+  // the tx's KEM ct is the injected encapsulation, passed through untouched.
+  assert.equal(kemCiphertext, FIXED_KEM.kemCiphertext);
+});
+
+test("freshDisburseKem draws fresh 1088-byte material against ARBITER_KEM_PK", () => {
+  const a = freshDisburseKem();
+  const b = freshDisburseKem();
+  for (const k of [a, b]) {
+    assert.match(k.kemCiphertext, /^0x[0-9a-f]{2176}$/);
+    assert.ok(BigInt(k.kemSs[0]) < 1n << 128n && BigInt(k.kemSs[1]) < 1n << 128n);
+  }
+  assert.notEqual(a.kemCiphertext, b.kemCiphertext, "every batch encapsulates fresh (no ct reuse)");
+});
+
+test("rejects a wrong-length kemCiphertext before assembly completes", () => {
+  const f = fixture(1);
+  const bad = { ...f.crypto, kemCiphertext: "0xdeadbeef" };
+  assert.throws(() => buildDisburseRequest(f.inputNote, f.membership, f.recipients, bad), /1088/);
 });
 
 test("ciphertext accounts for the 2054 rule (1024 receiver ++ 1030 authority)", () => {

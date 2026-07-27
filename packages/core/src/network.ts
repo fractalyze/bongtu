@@ -41,6 +41,76 @@ export const ARBITER_PUBKEY_Y =
   "9603702957807229873011073182281683387900303214140383090738501285426490726765";
 /** [x, y] tuple form of the arbiter public key. */
 
+// The institutional arbiter ML-KEM-768 encapsulation key (1184 B, FIPS 203) —
+// the PQ half of the hybrid authority envelope (.dev/pq-envelope-design.md §2).
+// Clients encapsulate every op's kemCiphertext against THIS key; the chain
+// stores only its keccak256 (arbiterKemPkHash per epoch, §4), so the full key
+// is a deployment fact distributed here + deploy/addresses.91342.json (both
+// equality-tested against deploy/arbiter-kem-pk.91342.hex's material). PUBLIC:
+// the decapsulation key exists only in the arbiter's env (AUTHORITY_KEM_KEY).
+export const ARBITER_KEM_PK = "0x" +
+  "1206b1b3894761e20bbdf5679ed1cec2e91d1839ab74146f469c142ac50f5548bb7cc6ae9cf3b0113b925c49" +
+  "c6897734036b791d65c413545cb1b387810a3f2727ae7d0073b7237e7ac4a5c19b8213b867746c1303a7c69d" +
+  "7787aff7c42e3658b7c3469d6386a64132e039511a71755fa64b62d60d34285c9aea8b02d98043fbc6fe850a" +
+  "f9fb4c5c281744da6e84903d1d64ae9eb01246447c41d18d676aae5195bce12135ea142d3ba472edf86666d3" +
+  "0e488246ed788ec1ab4abc794f062776e2670d2db38ffc0aba74caaac3333b90973da5b9881b662d6f22b177" +
+  "813c63203b15f451156ac299fccb0b857df0a57c0f98acff870b6de72c095277bc394a6e008dc5a0b26312bc" +
+  "928b7e46cb1050b4a4426559c5846027b44326b566df1821c6c10034fc99fba0237170bb8f58b994b9985c74" +
+  "8af556488a3c49d8c9333d896e95ab32e2c3365752986ef7080704c54b1801401c27bc096cd1198120e8bd99" +
+  "41339e2ba00a788a6f0442971a58c6c01c8dcb4822166de367539298a457f5b11dd46185a59151e83ea5e523" +
+  "f6d77bd12c496c7105c0a30a4f95469c2bc523f59333898898525e13109d7cb425f3584f92bc4be10668fd46" +
+  "1f05330672c29fa782067975ab34f16e7518c494dcb14427223ad244fcb9c0bc092192da078e704b2d47c486" +
+  "a7cad187adcf129ac1274e7c21c5d5fa033ea146d58b2e97a36863a36486d3993f21502cf8bde2eb770a5b29" +
+  "6fe7a84f78b276373656801a3f4c8ce369937d962eefd30dea99ccecf30185088a21434a11d7373aac140625" +
+  "ca9a83b72e0ab453353a1be05e3c0a6103341790d355abe58ba60610e88bc7c6760624318a3698a87d68cca3" +
+  "796a2c11072509b15ff65bba845c2e08a949455f18f05a1ceb1b53a1198fca7fe0425ad75a3377d86cb61acd" +
+  "3bcc53029b2cf1b8c08e6362009c8c4f38156f306acd052e89ac4ba0867b6686aaaadb940506369fc0cedd72" +
+  "19bcfa95121880f7e03174902b9c46082a0cb661b7a4476915bea637104700fc185dac875d9839b46ed00194" +
+  "081f9f2368be4a4ffe3880948462f4121dcb6bb7d6a6970a5a75edab5934e2baacdac0415087203ab5e2c144" +
+  "e985cdd1772306570bb9d6b2787a7b8dc6a1546178b0910b5ae3874954a1774ca092ac857fab1a86f135a22a" +
+  "15293c06747a0906752d4b2a6e04b0b043f93e48f5840559b5fde5a06c3193dad9a905d9ccf6f56a4b81549d" +
+  "a3bf4b3b42378731c5d07c018c897fea008fc9942f251e6fc88ddd891c1de2a9e3687f1804b2df87a0a19aac" +
+  "65f38bc368766d373d58b6b825983ea0f89970e4a46128cce317469752b3845477f90a5b7316717d4b2588f4" +
+  "7c6baa964c3a2f724c9b3ff342ada7a71f0807d836ca47f012d3137fa2f6bacbfca116cbbc02008afd45246a" +
+  "e75af79947194a3e6dd95d2a224256d370275200565676b568158df3264de341d0347c2882bca3735180081d" +
+  "71621f2281aa0c2a807b54b4fa965c622927334049e0964223fccdc37634cc198f91073c457419b4a7937232" +
+  "784c1352b8365e2076c170c72df8e897595621a21157983c79f4965728d1a9ae5721728985ae074796e9042a" +
+  "33c4a2e4c86194b6e330e5598ed9773aab85a05b65c053b94b83860b7bc8105a23113c2bd8e424e2";
+
+/** keccak256 of ARBITER_KEM_PK — what the pool stores per epoch
+ *  (`arbiterKemPkHash(currentEpoch())`); clients verify the full key against it
+ *  before encapsulating. */
+export const ARBITER_KEM_PK_HASH =
+  "0x0403c92bcdb56d0369c0981754a6f4af6719395d59eef32370dcfad9bb332314";
+
+/**
+ * Classify a failed `arbiterKemPkHash(currentEpoch())` probe: ethers raises
+ * CALL_EXCEPTION when the getter is missing/reverts — the pre-KEM (V1) pool
+ * marker. Anything else (network, timeout, server) is a real failure the caller
+ * must surface: folding it into "V1 pool" would fail the guard OPEN on a
+ * transient RPC hiccup.
+ */
+export function isPreKemProbeError(e: unknown): boolean {
+  return (e as { code?: string } | null)?.code === "CALL_EXCEPTION";
+}
+
+/**
+ * The client-side arbiter-KEM-key guard (design doc §4/§5): given the pool's
+ * `arbiterKemPkHash(currentEpoch())` — or null when the probe hit a pre-KEM V1
+ * pool — return the fatal message when encapsulating to ARBITER_KEM_PK would be
+ * wrong, else null. Clients call this BEFORE drawing KEM material so the
+ * bundled key never substitutes for the chain's.
+ */
+export function arbiterKemPkGuardError(onchainHash: string | null): string | null {
+  if (onchainHash === null) {
+    return "the pool has no KEM epoch (pre-PQ V1 pool) but this build only produces hybrid PQ proofs — the pool upgrade has not landed yet";
+  }
+  if (onchainHash.toLowerCase() !== ARBITER_KEM_PK_HASH) {
+    return `on-chain arbiter KEM key hash ${onchainHash} does not match this build's ARBITER_KEM_PK — refusing to encapsulate to an unverified key`;
+  }
+  return null;
+}
+
 /** IMT height (SPEC §4) — the deployed pool + all circuits are built for depth 32. */
 export const H = 32;
 
@@ -54,25 +124,34 @@ export const GIWA_GAS_FLOOR_GWEI = "0.005";
 
 // Minimal hand-written BongtuPool ABI fragments (avoids importing the Foundry
 // artifact JSON into browser bundles) — ONE string per function, shared by
-// both apps. transfer/withdraw take (a,b,c,pub) only: their ciphertext rides
-// in `pub` as circuit outputs. disburseWithCiphertexts is the §6b v2
-// enforced-length form — the 2054-element receiver++authority ciphertext is a
-// separate calldata arg the contract length-checks.
+// both apps. transfer/withdraw take (a,b,c,pub) only for the envelope: their
+// Poseidon ciphertext rides in `pub` as circuit outputs, while the raw
+// ML-KEM-768 `kemCiphertext` (1088 B, length-checked on-chain) is a separate
+// bytes arg on EVERY op (.dev/pq-envelope-design.md §4 — the hybrid V2 pool;
+// these fragments do NOT match the pre-KEM V1 pool by design, see §7 cutover).
+// disburseWithCiphertexts is the §6b v2 enforced-length form — the
+// 2054-element receiver++authority ciphertext is a separate calldata arg the
+// contract length-checks.
 export const POOL_ABI_FRAGMENTS = {
   // deposit (0-in/2-out mint): permissionless (external, whenInitialized, nonReentrant,
-  // NO onlyOwner), pulls V of the ERC-20 from msg.sender. pub is length 18, pub[0] == V;
-  // its single authority envelope rides in pub, so no separate ciphertext arg.
+  // NO onlyOwner), pulls V of the ERC-20 from msg.sender. pub is length 19, pub[0] == V;
+  // its single authority envelope rides in pub, so no separate Poseidon-ct arg.
   deposit:
-    "function deposit(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[18] pub)",
+    "function deposit(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[19] pub, bytes kemCiphertext)",
   transfer:
-    "function transfer(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[36] pub)",
+    "function transfer(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[37] pub, bytes kemCiphertext)",
   withdraw:
-    "function withdraw(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[25] pub)",
+    "function withdraw(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[26] pub, bytes kemCiphertext)",
   disburseWithCiphertexts:
-    "function disburseWithCiphertexts(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[10] pub, uint256[] receiverCiphertexts)",
+    "function disburseWithCiphertexts(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[11] pub, uint256[] receiverCiphertexts, bytes kemCiphertext)",
   root: "function root() view returns (uint256)",
   nextLeafIndex: "function nextLeafIndex() view returns (uint256)",
   B: "function B() view returns (uint256)",
+  // KEM epoch marker (design doc §4/§7): nonzero == the pool expects hybrid
+  // envelopes; clients verify ARBITER_KEM_PK's keccak256 against it and the
+  // indexer's boot guard refuses a V1-ABI/keyless-arbiter build on it.
+  currentEpoch: "function currentEpoch() view returns (uint256)",
+  arbiterKemPkHash: "function arbiterKemPkHash(uint256 epoch) view returns (bytes32)",
 } as const;
 
 // Minimal ERC-20 fragments the public wallet needs for the deposit/shield flow: the

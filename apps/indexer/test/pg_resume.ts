@@ -31,6 +31,7 @@
 import { readFileSync } from "node:fs";
 import { Pool } from "pg";
 import { Indexer } from "../src/ingest.js";
+import { parseKemKey } from "../src/chain.js";
 import type { ChainConfig } from "../src/chain.js";
 
 const fixturesPath = process.argv[2];
@@ -55,6 +56,9 @@ const baseCfg: ChainConfig = {
   pool: sc.poolAddr,
   startBlock: 0,
   authorityKey: BigInt(sc.arbiterPrivateKey),
+  // The scenario pool seeds arbiterKemPkHash, so V2 ops carry KEM material the
+  // arbiter-mode ledger must decapsulate — same fixture key the spawner passes.
+  authorityKemKey: parseKemKey(sc.arbiterKemSecretKey),
 };
 
 // A compact fingerprint of an ingested indexer's served state — the fields the

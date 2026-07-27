@@ -50,7 +50,18 @@ import {
   type MembershipWitness,
 } from "../src/lib/spend.js";
 import { DEFAULTS, H, B } from "../src/config.js";
+import { ml_kem768, kemSsToLimbs, kemHexToBytes, kemBytesToHex } from "@bongtu/core/kem";
+import { ARBITER_KEM_PK } from "@bongtu/core/network";
+import type { KemMaterial } from "../src/lib/spend.js";
 import { resolveIndexerProxy } from "../vite.config.js";
+
+// Deterministic ML-KEM material (fixed encapsulation randomness against the real
+// arbiter pk) — the spend-fixture equivalent of the fixed ecdh/nonce scalars.
+const FIXED_SPEND_ENCAP = ml_kem768.encapsulate(kemHexToBytes(ARBITER_KEM_PK), new Uint8Array(32).fill(7));
+const FIXED_KEM: KemMaterial = {
+  kemSs: kemSsToLimbs(FIXED_SPEND_ENCAP.sharedSecret).map(String) as [string, string],
+  kemCiphertext: kemBytesToHex(FIXED_SPEND_ENCAP.cipherText),
+};
 
 // A fixed stand-in for what eth_signTypedData_v4 returns (65-byte ECDSA sig). MetaMask
 // is deterministic per (account, domain, message), so a fixed hex models a fixed account.
@@ -210,6 +221,8 @@ function fixture(values: bigint[]) {
     ecdhPrivateKey: "800000000000000000003",
     encryptionNonce: "222222222222",
     authorityPubKey: DEFAULTS.arbiterPubKey,
+    kemSs: FIXED_KEM.kemSs,
+    kemCiphertext: FIXED_KEM.kemCiphertext,
     changeSalt: "7000002",
     padSalt: "7100001",
     payeeSalt: "7000001",
@@ -379,6 +392,38 @@ test("freshSpendCrypto draws every field from the injected randomness", () => {
   // and the material is accepted by the builders
   const f = fixture([1000n]);
   assert.doesNotThrow(() => buildTransferRequest(f.wallet, f.inputs, f.memberships, f.recipient, "100", freshSpendCrypto(rand)));
+});
+
+test("freshSpendCrypto: kem draw — deterministic injection, fresh by default, limbs reach the witness", () => {
+  // deterministic injection: the injected material passes through untouched and
+  // never consumes a field draw.
+  let i = 0;
+  const rand = (): string => String(++i * 2222);
+  let kemDraws = 0;
+  const injected = freshSpendCrypto(rand, () => {
+    kemDraws++;
+    return FIXED_KEM;
+  });
+  assert.equal(kemDraws, 1, "exactly one KEM encapsulation per crypto bundle");
+  assert.equal(i, 5, "the kem draw does not consume field randomness");
+  assert.deepEqual(injected.kemSs, FIXED_KEM.kemSs);
+  assert.equal(injected.kemCiphertext, FIXED_KEM.kemCiphertext);
+
+  // the limbs land in BOTH spend witnesses exactly as drawn (the ct stays out —
+  // it is the tx's separate bytes arg).
+  const f = fixture([1000n, 500n]);
+  const t = buildTransferRequest(f.wallet, f.inputs, f.memberships, f.recipient, "100", injected);
+  assert.deepEqual(t.request.input.kemSs, [FIXED_KEM.kemSs[0], FIXED_KEM.kemSs[1]]);
+  assert.equal("kemCiphertext" in t.request.input, false);
+  const w = buildWithdrawRequest(f.wallet, f.inputs, f.memberships, "100", injected);
+  assert.deepEqual(w.request.input.kemSs, [FIXED_KEM.kemSs[0], FIXED_KEM.kemSs[1]]);
+
+  // default draw: a real fresh encapsulation against ARBITER_KEM_PK per call.
+  const a = freshSpendCrypto(rand);
+  const b = freshSpendCrypto(rand);
+  assert.match(a.kemCiphertext, /^0x[0-9a-f]{2176}$/);
+  assert.ok(BigInt(a.kemSs[0]) < 1n << 128n && BigInt(a.kemSs[1]) < 1n << 128n);
+  assert.notEqual(a.kemCiphertext, b.kemCiphertext, "every tx encapsulates fresh");
 });
 
 test("freshSpendCrypto clamps the encryption nonce below 2^128 (circuit constraint)", () => {
