@@ -19,6 +19,8 @@ import {Disburse256Verifier} from "bongtu-src/verifiers/Disburse256Verifier.sol"
 import {TransferVerifier} from "bongtu-src/verifiers/TransferVerifier.sol";
 import {MockERC20} from "bongtu-test/mocks/MockERC20.sol";
 
+import {AddressBook, AddressRecord} from "./AddressBook.sol";
+
 /// @title Deploy — reusable Foundry deploy of the full PRODUCTION B=256 BongtuPool
 ///        stack (M1 Done#2 / U6, SPEC §5/§9).
 ///
@@ -49,36 +51,32 @@ import {MockERC20} from "bongtu-test/mocks/MockERC20.sol";
 ///                                    (realproofs.json .kemPublicKey) — the same
 ///                                    keypair the committed fixtures' KEM
 ///                                    ciphertexts were encapsulated to.
+///   ARBITER_KEM_PK      (bytes)      the FULL encapsulation key to record next
+///                                    to the hash; must hash to
+///                                    ARBITER_KEM_PK_HASH. Default = the fixture
+///                                    key when the hash is the fixture's, and
+///                                    nothing otherwise.
 ///
-/// Records every deployed address to `deploy/addresses.<chainid>.json` (forge also
-/// writes its canonical `broadcast/…/run-latest.json`).
+/// Records every deployed address to `deploy/addresses.<chainid>.json` — the
+/// field list and the merge-write live in `deploy/AddressBook.sol`, shared with
+/// the two upgrade scripts (forge also writes its canonical
+/// `broadcast/…/run-latest.json`).
 contract Deploy is Script {
     // anvil account 0 (public dev key) — overridden by DEPLOYER_KEY on a real net.
     uint256 constant DEFAULT_ANVIL_KEY = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
 
-    struct Deployed {
-        address poseidon;
-        address depositVerifier;
-        address withdrawVerifier;
-        address disburseVerifier;
-        address transferVerifier;
-        address token;
-        address pool; // the ERC-1967 proxy (the canonical, upgrade-stable address)
-        address poolImpl; // the BongtuPool implementation behind the proxy
-        address owner;
-        uint256 batchSize;
-        uint256 arbiterKeyX;
-        uint256 arbiterKeyY;
-        bytes32 arbiterKemPkHash;
-    }
-
-    function run() external returns (Deployed memory d) {
+    /// The deployed record is an `AddressRecord` (deploy/AddressBook.sol) — the
+    /// one place the addresses-file field list is declared, shared with the two
+    /// upgrade scripts.
+    function run() external returns (AddressRecord memory d) {
         uint256 deployerKey = vm.envOr("DEPLOYER_KEY", DEFAULT_ANVIL_KEY);
+        d.chainId = block.chainid;
         d.batchSize = vm.envOr("BATCH_SIZE", uint256(256));
         (uint256 defAx, uint256 defAy) = _fixtureArbiterKey();
         d.arbiterKeyX = vm.envOr("ARBITER_KEY_X", defAx);
         d.arbiterKeyY = vm.envOr("ARBITER_KEY_Y", defAy);
         d.arbiterKemPkHash = vm.envOr("ARBITER_KEM_PK_HASH", _fixtureKemPkHash());
+        d.arbiterKemPk = _kemPk(d.arbiterKemPkHash);
         d.owner = vm.addr(deployerKey);
 
         console2.log("== bongtu B=256 deploy ==");
@@ -95,7 +93,7 @@ contract Deploy is Script {
     /// @dev The full production stack, all inside one broadcast window so each
     ///      `new`/`create` is recorded as an on-chain deployment tx. Writes into
     ///      the struct directly to stay under the stack-depth limit.
-    function _deployStack(uint256 deployerKey, Deployed memory d) internal {
+    function _deployStack(uint256 deployerKey, AddressRecord memory d) internal {
         vm.startBroadcast(deployerKey);
 
         d.poseidon = address(_deployPoseidon());
@@ -137,7 +135,7 @@ contract Deploy is Script {
 
     /// @dev Wiring self-check against the deployed state (runs during the script's
     ///      local execution phase, reading back the just-deployed pool).
-    function _selfCheck(Deployed memory d) internal view {
+    function _selfCheck(AddressRecord memory d) internal view {
         BongtuPool pool = BongtuPool(d.pool);
         require(address(pool.poseidon()) == d.poseidon, "poseidon not wired");
         require(address(pool.disburseVerifier()) == d.disburseVerifier, "disburse verifier not wired");
@@ -175,31 +173,35 @@ contract Deploy is Script {
     ///      fixture kemCiphertext was encapsulated to — same lockstep rule as
     ///      the bjj arbiter key above (design doc §3).
     function _fixtureKemPkHash() internal view returns (bytes32) {
-        return keccak256(vm.parseJsonBytes(vm.readFile("test/fixtures/realproofs.json"), ".kemPublicKey"));
+        return keccak256(_fixtureKemPk());
     }
 
-    function _writeAddresses(Deployed memory d) internal {
-        string memory o = "bongtu-deployment";
-        vm.serializeUint(o, "chainId", block.chainid);
-        vm.serializeAddress(o, "owner", d.owner);
-        vm.serializeUint(o, "batchSize", d.batchSize);
-        vm.serializeUint(o, "arbiterKeyX", d.arbiterKeyX);
-        vm.serializeUint(o, "arbiterKeyY", d.arbiterKeyY);
-        vm.serializeBytes32(o, "arbiterKemPkHash", d.arbiterKemPkHash);
-        vm.serializeAddress(o, "poseidon", d.poseidon);
-        vm.serializeAddress(o, "depositVerifier", d.depositVerifier);
-        vm.serializeAddress(o, "withdrawVerifier", d.withdrawVerifier);
-        vm.serializeAddress(o, "disburseVerifier", d.disburseVerifier);
-        vm.serializeAddress(o, "transferVerifier", d.transferVerifier);
-        vm.serializeAddress(o, "token", d.token);
-        vm.serializeAddress(o, "poolImpl", d.poolImpl);
-        string memory js = vm.serializeAddress(o, "pool", d.pool);
-        string memory path = string.concat("../deploy/addresses.", vm.toString(block.chainid), ".json");
-        vm.writeJson(js, path);
+    function _fixtureKemPk() internal view returns (bytes memory) {
+        return vm.parseJsonBytes(vm.readFile("test/fixtures/realproofs.json"), ".kemPublicKey");
+    }
+
+    /// @dev The FULL arbiter ML-KEM-768 encapsulation key to record next to the
+    ///      hash (the upgraded-pool record shape — clients read the bytes and
+    ///      hash-check them against the chain). An explicit ARBITER_KEM_PK must
+    ///      match the recorded hash or the deploy is misconfigured; with no
+    ///      override the fixture key is recorded only when the hash is the
+    ///      fixture's, and a chain running some other arbiter records no bytes.
+    function _kemPk(bytes32 kemPkHash) internal view returns (bytes memory) {
+        bytes memory pk = vm.envOr("ARBITER_KEM_PK", bytes(""));
+        if (pk.length != 0) {
+            require(keccak256(pk) == kemPkHash, "ARBITER_KEM_PK does not hash to ARBITER_KEM_PK_HASH");
+            return pk;
+        }
+        return kemPkHash == _fixtureKemPkHash() ? _fixtureKemPk() : bytes("");
+    }
+
+    function _writeAddresses(AddressRecord memory d) internal {
+        string memory path = AddressBook.path();
+        AddressBook.write(path, d);
         console2.log("addresses ->", path);
     }
 
-    function _log(Deployed memory d) internal pure {
+    function _log(AddressRecord memory d) internal pure {
         console2.log("poseidon        :", d.poseidon);
         console2.log("depositVerifier :", d.depositVerifier);
         console2.log("withdrawVerifier:", d.withdrawVerifier);

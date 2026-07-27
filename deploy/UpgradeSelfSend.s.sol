@@ -7,6 +7,8 @@ import {BongtuPool} from "bongtu-src/BongtuPool.sol";
 import {ITransferVerifier} from "bongtu-src/interfaces/IVerifiers.sol";
 import {TransferVerifier} from "bongtu-src/verifiers/TransferVerifier.sol";
 
+import {AddressBook, AddressRecord} from "./AddressBook.sol";
+
 /// @title UpgradeSelfSend — the UUPS migration of an ALREADY-PQ-UPGRADED
 ///        BongtuPool to the self-send transfer circuit (U-X3, §11-8 v1.1
 ///        per-output receiver nonce).
@@ -20,9 +22,9 @@ import {TransferVerifier} from "bongtu-src/verifiers/TransferVerifier.sol";
 /// against the new verifier (and vice versa) — there must be no window where
 /// impl and verifier disagree. deposit/withdraw/disburse are untouched.
 ///
-/// Reads/updates `deploy/addresses.<chainid>.json` (only transferVerifier +
-/// poolImpl change; EVERY other field — including arbiterKemPk when present —
-/// is carried over verbatim).
+/// Reads/updates `deploy/addresses.<chainid>.json` through `AddressBook`: only
+/// transferVerifier + poolImpl are assigned, so EVERY other field — including
+/// arbiterKemPk when present — is carried over by the merge.
 /// Env:
 ///   DEPLOYER_KEY  (uint256)  must be the pool OWNER; default = anvil #0
 ///
@@ -31,6 +33,11 @@ import {TransferVerifier} from "bongtu-src/verifiers/TransferVerifier.sol";
 /// strand every wallet's transfer on InvalidProof.
 contract UpgradeSelfSend is Script {
     uint256 constant DEFAULT_ANVIL_KEY = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
+
+    // Initializable's ERC-7201 storage slot; its first word is `uint64
+    // _initialized`, i.e. the reinitializer version the proxy has reached
+    // (contracts/src/utils/proxy/Initializable.sol).
+    bytes32 constant INITIALIZABLE_STORAGE = 0xf0c57e16840df040f15088dc2f81fe391c3923bec73e23a9662efc9c229c6a00;
 
     // Bundled locals: run() + the JSON round-trip together blow the EVM stack
     // in a single frame (non-via-IR build), so everything flows via memory.
@@ -49,11 +56,11 @@ contract UpgradeSelfSend is Script {
 
     function run() external {
         uint256 deployerKey = vm.envOr("DEPLOYER_KEY", DEFAULT_ANVIL_KEY);
-        string memory path = string.concat("../deploy/addresses.", vm.toString(block.chainid), ".json");
-        string memory aj = vm.readFile(path);
+        string memory path = AddressBook.path();
+        AddressRecord memory r = AddressBook.read(path);
 
         Up memory u;
-        u.pool = vm.parseJsonAddress(aj, ".pool");
+        u.pool = r.pool;
         // Pre-upgrade state pinned BEFORE the swap, so the self-check proves
         // "only transferVerifier moved" against genuine before-values.
         u.dvBefore = address(BongtuPool(u.pool).depositVerifier());
@@ -62,6 +69,17 @@ contract UpgradeSelfSend is Script {
         u.epochBefore = BongtuPool(u.pool).currentEpoch();
         (u.axBefore, u.ayBefore) = BongtuPool(u.pool).currentArbiterKey();
         u.kemPkHashBefore = BongtuPool(u.pool).arbiterKemPkHash(u.epochBefore);
+        // initializeV3 is reinitializer(3), which only requires version < 3: it
+        // would run just as happily on a pool that never took the V2 payload, and
+        // burning the version to 3 puts initializeV2 permanently out of reach —
+        // the pool would keep its pre-PQ deposit/withdraw/disburse verifiers with
+        // no way to swap them. So the V2-then-V3 ordering that BongtuPool's
+        // initializeV3 comment says "is pinned by the deploy scripts" is asserted
+        // here, from the initializer version itself (the pool exposes no getter,
+        // and a nonzero KEM hash is not the marker — initialize() sets one at
+        // epoch 0 on a fresh deploy that is still version 1).
+        uint64 version = uint64(uint256(vm.load(u.pool, INITIALIZABLE_STORAGE)));
+        require(version >= 2, "pool is pre-V2: run UpgradePq first");
 
         console2.log("== bongtu self-send upgrade ==");
         console2.log("chainId :", block.chainid);
@@ -70,7 +88,7 @@ contract UpgradeSelfSend is Script {
 
         _upgrade(deployerKey, u);
         _selfCheck(u);
-        _updateAddresses(aj, path, u);
+        _updateAddresses(path, r, u);
         console2.log("SELF-SEND UPGRADE OK -> transferVerifier", u.tv);
     }
 
@@ -99,31 +117,16 @@ contract UpgradeSelfSend is Script {
         require(pool.arbiterKemPkHash(pool.currentEpoch()) == u.kemPkHashBefore, "kem pk hash must not change");
     }
 
-    /// @dev Rewrite the addresses record: ONLY transferVerifier + poolImpl move;
-    ///      every other field is copied from the existing file — including the
-    ///      full `arbiterKemPk` bytes when present (the live-chain record carries
-    ///      it; the UpgradePq rewrite once dropped it, so it is preserved here
-    ///      explicitly and guarded by keyExists).
-    function _updateAddresses(string memory aj, string memory path, Up memory u) internal {
-        string memory o = "bongtu-selfsend-upgrade";
-        vm.serializeUint(o, "chainId", vm.parseJsonUint(aj, ".chainId"));
-        vm.serializeAddress(o, "owner", vm.parseJsonAddress(aj, ".owner"));
-        vm.serializeUint(o, "batchSize", vm.parseJsonUint(aj, ".batchSize"));
-        vm.serializeUint(o, "arbiterKeyX", vm.parseJsonUint(aj, ".arbiterKeyX"));
-        vm.serializeUint(o, "arbiterKeyY", vm.parseJsonUint(aj, ".arbiterKeyY"));
-        vm.serializeBytes32(o, "arbiterKemPkHash", vm.parseJsonBytes32(aj, ".arbiterKemPkHash"));
-        if (vm.keyExists(aj, ".arbiterKemPk")) {
-            vm.serializeBytes(o, "arbiterKemPk", vm.parseJsonBytes(aj, ".arbiterKemPk"));
-        }
-        vm.serializeAddress(o, "poseidon", vm.parseJsonAddress(aj, ".poseidon"));
-        vm.serializeAddress(o, "depositVerifier", vm.parseJsonAddress(aj, ".depositVerifier"));
-        vm.serializeAddress(o, "withdrawVerifier", vm.parseJsonAddress(aj, ".withdrawVerifier"));
-        vm.serializeAddress(o, "disburseVerifier", vm.parseJsonAddress(aj, ".disburseVerifier"));
-        vm.serializeAddress(o, "transferVerifier", u.tv);
-        vm.serializeAddress(o, "token", vm.parseJsonAddress(aj, ".token"));
-        vm.serializeAddress(o, "poolImpl", u.impl);
-        string memory js = vm.serializeAddress(o, "pool", u.pool);
-        vm.writeJson(js, path);
+    /// @dev Merge into the addresses record: ONLY transferVerifier + poolImpl are
+    ///      assigned; every other field — including the full `arbiterKemPk` bytes
+    ///      the live-chain record carries — rides along in the AddressRecord that
+    ///      was read at the top of run(). The UpgradePq rewrite once dropped that
+    ///      field by restating the file field-by-field; there is nothing to
+    ///      restate here any more.
+    function _updateAddresses(string memory path, AddressRecord memory r, Up memory u) internal {
+        r.transferVerifier = u.tv;
+        r.poolImpl = u.impl;
+        AddressBook.write(path, r);
         console2.log("addresses ->", path);
     }
 }

@@ -15,6 +15,8 @@ import {WithdrawVerifier} from "bongtu-src/verifiers/WithdrawVerifier.sol";
 import {Disburse256Verifier} from "bongtu-src/verifiers/Disburse256Verifier.sol";
 import {TransferVerifier} from "bongtu-src/verifiers/TransferVerifier.sol";
 
+import {AddressBook, AddressRecord} from "./AddressBook.sol";
+
 /// @title UpgradePq — the UUPS migration of an ALREADY-DEPLOYED BongtuPool to
 ///        the PQ hybrid-envelope implementation (design doc §4/§7).
 ///
@@ -26,14 +28,19 @@ import {TransferVerifier} from "bongtu-src/verifiers/TransferVerifier.sol";
 /// public count, so there is no partial-deploy window — a lagging wallet gets
 /// InvalidProof, never a silent non-PQ op.
 ///
-/// Reads/updates `deploy/addresses.<chainid>.json` (pool + arbiter key come
-/// from the Deploy.s.sol record; verifier + impl entries are rewritten).
+/// Reads/updates `deploy/addresses.<chainid>.json` through `AddressBook`: pool +
+/// arbiter key come from the Deploy.s.sol record, and only the verifier, impl
+/// and arbiter-key entries are reassigned — every other field is carried over by
+/// the merge rather than restated here.
 /// Env:
 ///   DEPLOYER_KEY         (uint256)  must be the pool OWNER; default = anvil #0
 ///   ARBITER_KEY_X / _Y   (uint256)  default = the recorded (current) bjj key —
 ///                                   the doc-preferred same-key rotation
 ///   ARBITER_KEM_PK_HASH  (bytes32)  default = keccak256 of the fixture arbiter
 ///                                   ML-KEM-768 pk (realproofs.json)
+///   ARBITER_KEM_PK       (bytes)    the full encapsulation key to record beside
+///                                   the hash; default = the recorded one, kept
+///                                   only while it still matches the new hash
 ///
 /// LOCAL/testnet tool. The live GIWA upgrade must land together with the
 /// hybrid-witness clients and the dual-ABI indexer (design doc §7) — running
@@ -58,13 +65,13 @@ contract UpgradePq is Script {
 
     function run() external {
         uint256 deployerKey = vm.envOr("DEPLOYER_KEY", DEFAULT_ANVIL_KEY);
-        string memory path = string.concat("../deploy/addresses.", vm.toString(block.chainid), ".json");
-        string memory aj = vm.readFile(path);
+        string memory path = AddressBook.path();
+        AddressRecord memory r = AddressBook.read(path);
 
         Up memory u;
-        u.pool = vm.parseJsonAddress(aj, ".pool");
-        u.ax = vm.envOr("ARBITER_KEY_X", vm.parseJsonUint(aj, ".arbiterKeyX"));
-        u.ay = vm.envOr("ARBITER_KEY_Y", vm.parseJsonUint(aj, ".arbiterKeyY"));
+        u.pool = r.pool;
+        u.ax = vm.envOr("ARBITER_KEY_X", r.arbiterKeyX);
+        u.ay = vm.envOr("ARBITER_KEY_Y", r.arbiterKeyY);
         // The fixture KEM keypair's seed is a PUBLIC string literal
         // (circuits/fixture_lib.ts) — anyone can derive its decapsulation key.
         // Defaulting to it is only sound on a throwaway local chain; on any
@@ -85,7 +92,7 @@ contract UpgradePq is Script {
 
         _upgrade(deployerKey, u);
         _selfCheck(u);
-        _updateAddresses(aj, path, u);
+        _updateAddresses(path, r, u);
         console2.log("PQ UPGRADE OK -> epoch", BongtuPool(u.pool).currentEpoch());
     }
 
@@ -133,26 +140,25 @@ contract UpgradePq is Script {
         return keccak256(vm.parseJsonBytes(vm.readFile("test/fixtures/realproofs.json"), ".kemPublicKey"));
     }
 
-    /// @dev Rewrite the addresses record: same pool/token/poseidon, new
-    ///      verifiers + impl + kem hash, so Smoke.s.sol and the TS drivers keep
-    ///      reading one canonical file.
-    function _updateAddresses(string memory aj, string memory path, Up memory u) internal {
-        string memory o = "bongtu-pq-upgrade";
-        vm.serializeUint(o, "chainId", block.chainid);
-        vm.serializeAddress(o, "owner", vm.parseJsonAddress(aj, ".owner"));
-        vm.serializeUint(o, "batchSize", vm.parseJsonUint(aj, ".batchSize"));
-        vm.serializeUint(o, "arbiterKeyX", u.ax);
-        vm.serializeUint(o, "arbiterKeyY", u.ay);
-        vm.serializeBytes32(o, "arbiterKemPkHash", u.kemPkHash);
-        vm.serializeAddress(o, "poseidon", vm.parseJsonAddress(aj, ".poseidon"));
-        vm.serializeAddress(o, "depositVerifier", u.dv);
-        vm.serializeAddress(o, "withdrawVerifier", u.wv);
-        vm.serializeAddress(o, "disburseVerifier", u.dsv);
-        vm.serializeAddress(o, "transferVerifier", u.tv);
-        vm.serializeAddress(o, "token", vm.parseJsonAddress(aj, ".token"));
-        vm.serializeAddress(o, "poolImpl", u.impl);
-        string memory js = vm.serializeAddress(o, "pool", u.pool);
-        vm.writeJson(js, path);
+    /// @dev Merge the upgrade into the addresses record: same pool/token/poseidon,
+    ///      new verifiers + impl + arbiter key material, so Smoke.s.sol and the TS
+    ///      drivers keep reading one canonical file.
+    function _updateAddresses(string memory path, AddressRecord memory r, Up memory u) internal {
+        r.depositVerifier = u.dv;
+        r.withdrawVerifier = u.wv;
+        r.disburseVerifier = u.dsv;
+        r.transferVerifier = u.tv;
+        r.poolImpl = u.impl;
+        r.arbiterKeyX = u.ax;
+        r.arbiterKeyY = u.ay;
+        r.arbiterKemPkHash = u.kemPkHash;
+        // The full pk is optional metadata beside the hash. A rotation to a NEW
+        // KEM key makes the recorded bytes stale, and a stale pk is worse than
+        // none (clients hash-check it and would reject), so carry it only while
+        // it still hashes to the epoch's value.
+        bytes memory pk = vm.envOr("ARBITER_KEM_PK", r.arbiterKemPk);
+        r.arbiterKemPk = keccak256(pk) == u.kemPkHash ? pk : bytes("");
+        AddressBook.write(path, r);
         console2.log("addresses ->", path);
     }
 }

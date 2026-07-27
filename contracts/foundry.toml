@@ -12,5 +12,10 @@ fs_permissions = [
     { access = "read", path = "./test" },
     { access = "read-write", path = "../deploy" },
 ]
+# The deploy/upgrade scripts live in ../deploy (outside this project root) and
+# import a sibling there — deploy/AddressBook.sol, the one declaration of the
+# addresses.<chainid>.json field list. solc refuses imports outside the project
+# unless the directory is allow-listed.
+allow_paths = ["../deploy"]
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
