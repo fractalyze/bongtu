@@ -35,8 +35,6 @@ export interface SpendContext {
 export interface SpendOutcome {
   txHash: string;
   explorerUrl: string;
-  /** the change note value the wallet keeps (from the assembled witness meta). */
-  changeValue: string;
 }
 
 // Fresh per-tx field randomness (browser only). A shared ephemeral ECDH key + nonce
@@ -105,5 +103,5 @@ export async function runSpend(
     kind === "transfer"
       ? await submitTransfer(ctx.connection, DEFAULTS.pool, calldata, crypto.kemCiphertext, DEFAULTS.explorer)
       : await submitWithdraw(ctx.connection, DEFAULTS.pool, calldata, crypto.kemCiphertext, DEFAULTS.explorer);
-  return { txHash: res.txHash, explorerUrl: res.explorerUrl, changeValue: built.meta.changeValue };
+  return { txHash: res.txHash, explorerUrl: res.explorerUrl };
 }

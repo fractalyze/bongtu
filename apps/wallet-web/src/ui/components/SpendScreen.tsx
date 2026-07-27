@@ -117,9 +117,6 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
           >
             View on explorer
           </a>
-          <p className="text-muted text-[0.82rem] mt-0.5 mb-2.5">
-            Change kept: {formatKkrw(outcome.changeValue)} kKRW
-          </p>
           <Button variant="primary" block className="mt-2" onClick={() => navigate("home")}>
             Done
           </Button>
