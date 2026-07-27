@@ -274,7 +274,6 @@ body {
   border-radius: var(--radius);
   padding: 14px;
 }
-.get-started-title { font-size: 0.95rem; font-weight: 700; margin: 0; }
 
 /* --- onboarding ----------------------------------------------------------- */
 
@@ -293,32 +292,68 @@ body {
 .onboarding-title { font-size: 2rem; margin: 0 0 4px; letter-spacing: -0.02em; color: var(--primary); }
 .onboarding-tag { color: var(--muted); margin: 0; }
 .onboarding-fine { font-size: 0.8rem; color: var(--muted); text-align: center; margin: 0; }
-.onboarding-steps {
-  list-style: none;
+
+/* --- ConceptFlow (kKRW -> private kKRW -> send) ---------------------------- */
+
+.flowchart {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin: 0;
-  padding: 14px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  padding: 16px 12px;
 }
-.onboarding-step {
+.flowchart-node {
   display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  font-size: 0.88rem;
-  color: var(--muted);
-  line-height: 1.45;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
 }
-.onboarding-step strong { color: var(--ink); }
-.onboarding-step-icon {
+.flowchart-icon {
   display: inline-flex;
-  flex-shrink: 0;
-  color: var(--primary);
-  margin-top: 2px;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--ink);
 }
+.flowchart-node-primary .flowchart-icon {
+  background: var(--primary);
+  color: var(--primary-ink);
+}
+.flowchart-node-primary .flowchart-label { color: var(--primary); font-weight: 700; }
+.flowchart-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-align: center;
+  white-space: nowrap;
+}
+.flowchart-arrow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: var(--border-strong);
+  flex-shrink: 0;
+  /* keeps the two arrows level with the icon circles, not the label row */
+  margin-bottom: 18px;
+}
+.flowchart-arrow-tag {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--primary);
+}
+/* Deposit-labeled arrow: reserve the tag row's height on the plain arrow too. */
+.flowchart-arrow:not(:has(.flowchart-arrow-tag)) { padding-top: 14px; }
 
 /* --- home ----------------------------------------------------------------- */
 

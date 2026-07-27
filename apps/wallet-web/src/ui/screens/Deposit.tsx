@@ -227,8 +227,8 @@ export function Deposit(): ReactNode {
       <ScreenHeader title="Deposit" />
       <div className="spend-body">
         <p className="hint deposit-explainer">
-          Deposit turns public kKRW into <strong>private kKRW</strong>. After that you can
-          send and withdraw it without revealing amounts or recipients.
+          kKRW in, <strong>private kKRW</strong> out — then send and withdraw with nothing
+          revealed.
         </p>
 
         <div className="deposit-avail" aria-live="polite">
@@ -246,8 +246,8 @@ export function Deposit(): ReactNode {
               <span className="faucet-title">First, get test kKRW</span>
             </div>
             <p className="hint">
-              You have no kKRW yet. Mint {formatKkrw(FAUCET_AMOUNT)} test kKRW to your wallet —
-              free, you only pay gas — then deposit it here.
+              Mint {formatKkrw(FAUCET_AMOUNT)} free test kKRW (you pay only gas), then deposit
+              it here.
             </p>
             <button
               className="btn btn-primary btn-block"

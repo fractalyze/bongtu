@@ -15,6 +15,8 @@ import {
   RiDownload2Line,
   RiUpload2Line,
   RiArrowLeftDownLine,
+  RiArrowRightLine,
+  RiCoinLine,
   RiFileCopyLine,
   RiCheckLine,
   RiCloseLine,
@@ -85,6 +87,16 @@ export function IconBack({ size = 20 }: IconProps): ReactNode {
 /** Signals "opens the block explorer" on activity cards and outbound links. */
 export function IconExternalLink({ size = 14 }: IconProps): ReactNode {
   return <RiExternalLinkLine size={size} aria-hidden="true" />;
+}
+
+/** Flow-direction connector in the ConceptFlow diagram (glyph arrows stay banned). */
+export function IconArrowRight({ size = 16 }: IconProps): ReactNode {
+  return <RiArrowRightLine size={size} aria-hidden="true" />;
+}
+
+/** Public (unshielded) kKRW in the ConceptFlow diagram. */
+export function IconCoin({ size = 18 }: IconProps): ReactNode {
+  return <RiCoinLine size={size} aria-hidden="true" />;
 }
 
 /** The official MetaMask fox (full color), shown when the connected provider is
