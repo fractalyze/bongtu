@@ -19,15 +19,6 @@ on:
       - "packages/**"
       - ".github/workflows/deploy-wallet.yml"
 
-# deploy-wallet and deploy-admin build in the SAME clone (/home/a41/bongtu-deploy) and
-# both `git reset --hard` + `npm ci` at its root — a concurrent run would corrupt the
-# other's tree mid-build. This literal group is shared with deploy-admin so the two
-# serialize; cancel-in-progress is false because a half-done reset/ci must finish, not
-# be killed and leave the clone dirty.
-concurrency:
-  group: bongtu-deploy-clone
-  cancel-in-progress: false
-
 jobs:
   deploy:
     runs-on: [self-hosted, bongtu-devbox]
