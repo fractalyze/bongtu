@@ -10,11 +10,14 @@
 //   (3) FLOW GUARD — runDeposit rejects a deposit that exceeds the public balance
 //       WITHOUT emitting an approve tx (and never reaching the proof), so a doomed
 //       deposit fails fast; the happy path still threads approve → prove → submit.
+//   (4) TESTNET POSTURE — the ENV-derived flag every testnet-only affordance
+//       (faucet UI included) gates on: default true, only literal "false" disables.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import type { Calldata } from "@bongtu/core/proving";
+import { DEFAULTS, testnetFromEnv } from "../src/config.js";
 import { deriveIdentityFromSignature } from "../src/lib/derive.js";
 import { FAUCET_AMOUNT } from "../src/lib/faucet.js";
 import { assertDepositAffordable } from "../src/lib/deposit.js";
@@ -139,4 +142,22 @@ test("runDeposit refuses when the pool's KEM epoch rejects this build's key", as
     /does not match this build's ARBITER_KEM_PK/,
   );
   assert.equal(proveCalls, 0, "no proof may be generated against an unverified key");
+});
+
+// ============================ (4) TESTNET POSTURE ===========================
+// Every testnet-only affordance (this faucet's UI, Testnet chips, mint onboarding
+// copy) gates on DEFAULTS.testnet, which comes from ENV via testnetFromEnv —
+// never a copy check. Locked rule: default TRUE (every current deployment is
+// GIWA Sepolia); ONLY the literal "false" turns it off.
+
+test("testnetFromEnv: default-true, only literal 'false' disables", () => {
+  assert.equal(testnetFromEnv(undefined), true); // unset env (and the node runner)
+  assert.equal(testnetFromEnv("true"), true);
+  assert.equal(testnetFromEnv(""), true); // empty var is not an opt-out
+  assert.equal(testnetFromEnv("0"), true); // no truthiness guessing — literal match only
+  assert.equal(testnetFromEnv("false"), false);
+});
+
+test("DEFAULTS.testnet is true where import.meta.env is absent (node runner)", () => {
+  assert.equal(DEFAULTS.testnet, true);
 });

@@ -25,7 +25,7 @@ import { ScreenHeader } from "./ScreenHeader.js";
 import { StagedProgress } from "./StagedProgress.js";
 import { SuccessMark } from "./SuccessMark.js";
 import { DownloadProgress } from "./DownloadProgress.js";
-import { Button } from "./controls.js";
+import { AmountInput, Button, ErrorBanner, Field, TextInput } from "./controls.js";
 
 type Phase = "form" | "confirm" | "running" | "done";
 
@@ -162,7 +162,7 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
   if (phase === "confirm") {
     return (
       <div className="flex flex-col gap-4.5 px-4.5 pt-4.5 pb-6.5">
-        <ScreenHeader title={`Confirm ${title.toLowerCase()}`} />
+        <ScreenHeader title={`Confirm ${title}`} />
         <div className="flex flex-col gap-4">
           <div className="text-center text-[1.9rem] [font-weight:750] py-2 tabular-nums">
             {review} <span className="text-[0.62em] font-semibold text-muted ml-1">kKRW</span>
@@ -191,7 +191,7 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
           <DownloadProgress view={download} />
           <div className="flex gap-2.5">
             <Button variant="ghost" className="flex-1" onClick={() => setPhase("form")}>
-              Back
+              Cancel
             </Button>
             <Button
               variant="primary"
@@ -199,7 +199,7 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
               disabled={download.active}
               onClick={submit}
             >
-              {download.active ? "Preparing keys…" : "Confirm & prove"}
+              {download.active ? "Preparing Keys…" : "Confirm & Prove"}
             </Button>
           </div>
         </div>
@@ -226,10 +226,9 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
       <ScreenHeader title={title} />
       <div className="flex flex-col gap-4">
         {isTransfer && (
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[0.82rem] text-muted font-semibold">Recipient address</span>
-            <input
-              className="bg-surface border border-border rounded-xl px-3.5 py-[13px] text-ink font-mono text-[0.98rem] w-full tabular-nums focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(18,58,92,0.12)]"
+          <Field label="Recipient address" error={recipient.trim() ? rcptErr : null}>
+            <TextInput
+              mono
               placeholder="0x… compressed bongtu pubkey"
               value={recipient}
               onChange={(e) => setRecipient(e.target.value)}
@@ -237,42 +236,18 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
               autoCorrect="off"
               spellCheck={false}
             />
-            {recipient.trim() && rcptErr && (
-              <span className="text-[0.8rem] text-err">{rcptErr}</span>
-            )}
-          </label>
+          </Field>
         )}
 
-        <label className="flex flex-col gap-1.5">
-          <span className="text-[0.82rem] text-muted font-semibold">Amount (kKRW)</span>
-          <input
-            className="bg-surface border border-border rounded-xl px-3.5 py-[13px] text-ink text-[0.98rem] w-full tabular-nums focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(18,58,92,0.12)]"
-            inputMode="decimal"
-            placeholder="0.00"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value.replace(/[^\d.,]/g, ""))}
-          />
-          <span className="text-[0.78rem] text-muted">
-            Balance: {balance === null ? "—" : formatKkrw(balance)} kKRW
-          </span>
-          {amount.trim() && amtErr && <span className="text-[0.8rem] text-err">{amtErr}</span>}
-        </label>
+        <Field
+          label="Amount (kKRW)"
+          hint={<>Balance: {balance === null ? "—" : formatKkrw(balance)} kKRW</>}
+          error={amount.trim() ? amtErr : null}
+        >
+          <AmountInput value={amount} onValueChange={setAmount} />
+        </Field>
 
-        {error && (
-          <div className="rounded-xl px-3.5 py-3 text-[0.88rem] flex gap-2.5 items-center justify-between flex-wrap border border-err-border bg-err-bg text-err">
-            {error}
-            {/GIWA Sepolia ETH/.test(error) && (
-              <a
-                className="font-semibold underline text-err"
-                href={DEFAULTS.gasFaucet}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Get GIWA Sepolia ETH from the faucet
-              </a>
-            )}
-          </div>
-        )}
+        {error && <ErrorBanner message={error} />}
 
         <Button
           variant="primary"
@@ -283,7 +258,7 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
             setPhase("confirm");
           }}
         >
-          Review {title.toLowerCase()}
+          Review {title}
         </Button>
       </div>
     </div>

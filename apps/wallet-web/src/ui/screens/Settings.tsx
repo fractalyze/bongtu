@@ -9,7 +9,7 @@ import { DEFAULTS } from "../../config.js";
 import { useWallet } from "../App.js";
 import { IconExternalLink } from "../components/icons.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
-import { Button } from "../components/controls.js";
+import { Button, TextInput } from "../components/controls.js";
 import { shortenPubkey } from "../format.js";
 
 const EXPLORER = DEFAULTS.explorer.replace(/\/+$/, "");
@@ -98,8 +98,8 @@ export function Settings(): ReactNode {
         <h2 className="text-xs uppercase tracking-[0.08em] text-muted [font-weight:650]">Indexer</h2>
         <label className="flex flex-col gap-1.5">
           <span className="text-[0.82rem] text-muted font-semibold">Arbiter indexer URL</span>
-          <input
-            className="bg-surface border border-border rounded-xl px-3.5 py-[13px] text-ink font-mono text-[0.98rem] w-full tabular-nums focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(18,58,92,0.12)]"
+          <TextInput
+            mono
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             autoCapitalize="off"
@@ -116,7 +116,7 @@ export function Settings(): ReactNode {
           disabled={!dirty || !draft.trim()}
           onClick={() => setIndexerUrl(draft.trim())}
         >
-          Save indexer URL
+          Save Indexer URL
         </Button>
 
         <h2 className="text-xs uppercase tracking-[0.08em] text-muted [font-weight:650]">

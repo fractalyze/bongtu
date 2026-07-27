@@ -81,7 +81,7 @@ export function walletErrorMessage(e: unknown): string {
   if (o?.code === 4001 || o?.code === "ACTION_REJECTED") return "Transaction rejected in your wallet.";
   const raw = o?.reason ?? o?.error?.message ?? o?.data?.message ?? o?.message;
   if (raw && /insufficient funds/i.test(raw)) {
-    return "Not enough GIWA Sepolia ETH to pay gas — this account needs a little testnet ETH on GIWA first.";
+    return "Not enough GIWA Sepolia ETH to pay gas — this account needs a little ETH on GIWA Sepolia first.";
   }
   if (raw) return raw;
   try {

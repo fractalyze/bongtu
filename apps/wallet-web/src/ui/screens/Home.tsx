@@ -49,7 +49,7 @@ export function Home(): ReactNode {
         <div className="inline-flex items-center gap-2 text-primary">
           <EnvelopeLogo size={26} />
           <span className="font-bold text-[1.1rem] tracking-[-0.01em]">bongtu</span>
-          <TestnetTag />
+          {DEFAULTS.testnet && <TestnetTag />}
         </div>
         <div className="flex items-center gap-2">
           <StatusChip indexerUrl={indexerUrl} />

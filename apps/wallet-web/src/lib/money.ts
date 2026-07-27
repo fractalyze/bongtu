@@ -16,6 +16,40 @@ export const MAX_NOTE_WEI = 1n << 100n;
 export const MAX_UINT256 = (1n << 256n) - 1n;
 
 /**
+ * Live-typing normalizer for amount inputs: strip everything but digits and the
+ * FIRST decimal point, thousands-group the integer part. The result always
+ * satisfies parseKkrw's strict comma-grouping rule, so typing can never
+ * manufacture the "commas only as thousands separators" error.
+ */
+export function groupAmountInput(raw: string): string {
+  const cleaned = raw.replace(/[^\d.]/g, "");
+  const dot = cleaned.indexOf(".");
+  const int = (dot === -1 ? cleaned : cleaned.slice(0, dot)).replace(/^0+(?=\d)/, "");
+  const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  if (dot === -1) return grouped;
+  const frac = cleaned.slice(dot + 1).replace(/\./g, "");
+  return `${grouped}.${frac}`;
+}
+
+/**
+ * Where the caret lands in a regrouped amount string: the index just AFTER the
+ * `significantBefore`-th significant char (digit or dot). Separator commas move
+ * when the string regroups, so the DOM caret index from before the re-render
+ * cannot be reused — only the significant count is stable across regrouping.
+ */
+export function amountCaretIndex(formatted: string, significantBefore: number): number {
+  if (significantBefore <= 0) return 0;
+  let seen = 0;
+  for (let i = 0; i < formatted.length; i++) {
+    if (formatted[i] !== ",") {
+      seen += 1;
+      if (seen === significantBefore) return i + 1;
+    }
+  }
+  return formatted.length;
+}
+
+/**
  * Render raw wei as whole kKRW: integer part thousands-grouped, then exactly 6
  * fraction digits TRUNCATED beyond the 6th (never rounded — rounding could display
  * more than the user actually holds). 1e11 wei of dust renders "0.000000".

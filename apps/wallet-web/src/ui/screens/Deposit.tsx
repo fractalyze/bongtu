@@ -16,7 +16,7 @@ import type { ReactNode } from "react";
 import { DEFAULTS } from "../../config.js";
 import { ensureCircuitAssets, prewarmProver } from "../../lib/prove.js";
 import { runDeposit, type DepositStage, type DepositOutcome } from "../../lib/depositFlow.js";
-import { mintTestToken, readGasBalance, readTokenState, walletErrorMessage } from "../../lib/metamask.js";
+import { readTokenState, walletErrorMessage } from "../../lib/metamask.js";
 import { FAUCET_AMOUNT } from "../../lib/faucet.js";
 import { useWallet } from "../App.js";
 import { navigate, useCircuitDownload, useElapsedSeconds } from "../hooks.js";
@@ -25,7 +25,8 @@ import { ScreenHeader } from "../components/ScreenHeader.js";
 import { SuccessMark } from "../components/SuccessMark.js";
 import { StagedProgress, type StagedStep } from "../components/StagedProgress.js";
 import { DownloadProgress } from "../components/DownloadProgress.js";
-import { Button, LinkButton, TestnetTag } from "../components/controls.js";
+import { AmountInput, Button, ErrorBanner, Field, LinkButton, TestnetTag } from "../components/controls.js";
+import { MintModal } from "../components/MintModal.js";
 
 type Phase = "form" | "confirm" | "running" | "done";
 
@@ -55,9 +56,7 @@ export function Deposit(): ReactNode {
   const [outcome, setOutcome] = useState<DepositOutcome | null>(null);
   const [tokenBalance, setTokenBalance] = useState<bigint | null>(null);
   const [allowance, setAllowance] = useState<bigint | null>(null);
-  const [faucetPending, setFaucetPending] = useState(false);
-  const [faucetTxUrl, setFaucetTxUrl] = useState<string | null>(null);
-  const [showFaucet, setShowFaucet] = useState(false);
+  const [mintOpen, setMintOpen] = useState(false);
   const download = useCircuitDownload("deposit");
 
   const elapsed = useElapsedSeconds(phase === "running" && stage === "prove");
@@ -102,32 +101,6 @@ export function Deposit(): ReactNode {
 
   // Whether the confirm step will need an approve tx (allowance already covers V => skip).
   const willApprove = allowance === null || amountWei <= 0n || allowance < amountWei;
-
-  // DEV FAUCET: self-mint test kKRW from the connected wallet (MockERC20.mint is
-  // permissionless; the user pays their own gas), then refresh balance/allowance.
-  // Always offered — a tester with a non-zero balance still needs a way to mint more.
-  async function getTestTokens(): Promise<void> {
-    if (!connection) return;
-    setFaucetPending(true);
-    setError(null);
-    setFaucetTxUrl(null);
-    try {
-      // The mint is permissionless but still a tx: an account with ZERO gas ETH
-      // fails inside MetaMask with an opaque object — say it plainly instead.
-      if ((await readGasBalance(connection)) === 0n) {
-        throw new Error(
-          "This account has no GIWA Sepolia ETH to pay gas — get a little testnet ETH onto GIWA Sepolia first, then mint.",
-        );
-      }
-      const res = await mintTestToken(connection, DEFAULTS.token, connection.address, FAUCET_AMOUNT);
-      setFaucetTxUrl(res.explorerUrl);
-      await refreshTokenState();
-    } catch (e) {
-      setError(walletErrorMessage(e));
-    } finally {
-      setFaucetPending(false);
-    }
-  }
 
   async function submit(): Promise<void> {
     if (!identity || !connection) return;
@@ -195,7 +168,7 @@ export function Deposit(): ReactNode {
   if (phase === "confirm") {
     return (
       <div className="flex flex-col gap-4.5 px-4.5 pt-4.5 pb-6.5">
-        <ScreenHeader title="Confirm deposit" />
+        <ScreenHeader title="Confirm Deposit" />
         <div className="flex flex-col gap-4">
           <div className="text-center text-[1.9rem] [font-weight:750] py-2 tabular-nums">
             {review} <span className="text-[0.62em] font-semibold text-muted ml-1">kKRW</span>
@@ -221,7 +194,7 @@ export function Deposit(): ReactNode {
           <DownloadProgress view={download} />
           <div className="flex gap-2.5">
             <Button variant="ghost" className="flex-1" onClick={() => setPhase("form")}>
-              Back
+              Cancel
             </Button>
             <Button
               variant="primary"
@@ -229,7 +202,7 @@ export function Deposit(): ReactNode {
               disabled={download.active}
               onClick={submit}
             >
-              {download.active ? "Preparing keys…" : "Confirm & prove"}
+              {download.active ? "Preparing Keys…" : "Confirm & Prove"}
             </Button>
           </div>
         </div>
@@ -272,102 +245,47 @@ export function Deposit(): ReactNode {
             </div>
 
             {noTokens ? (
-              <div className="flex flex-col gap-2 bg-surface border border-border-strong rounded-xl p-3.5">
-                <div className="flex items-center gap-2">
-                  <TestnetTag />
-                  <span className="text-[0.9rem] font-semibold">First, get test kKRW</span>
-                </div>
-                <p className="text-sm text-muted">
-                  Mint {formatKkrw(FAUCET_AMOUNT)} free test kKRW (you pay only gas), then
-                  deposit it here.
-                </p>
-                <Button
-                  variant="primary"
-                  block
-                  disabled={faucetPending || !connection}
-                  onClick={() => void getTestTokens()}
-                >
-                  {faucetPending ? "Minting test kKRW…" : "Get test kKRW"}
-                </Button>
-                {faucetTxUrl && (
-                  <a
-                    className="text-primary no-underline text-[0.9rem] font-semibold"
-                    href={faucetTxUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Minted — view on explorer
-                  </a>
-                )}
-              </div>
-            ) : (
-              <>
-                <label className="flex flex-col gap-1.5">
-                  <span className="text-[0.82rem] text-muted font-semibold">Amount (kKRW)</span>
-                  <input
-                    className="bg-surface border border-border rounded-xl px-3.5 py-[13px] text-ink text-[0.98rem] w-full tabular-nums focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(18,58,92,0.12)]"
-                    inputMode="decimal"
-                    placeholder="0.00"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value.replace(/[^\d.,]/g, ""))}
-                  />
-                  {amount.trim() && amtErr && (
-                    <span className="text-[0.8rem] text-err">{amtErr}</span>
-                  )}
-                </label>
-
-                {/* With a balance the faucet is a side path — one extra tap keeps
-                    it from outweighing the amount form. */}
-                {showFaucet ? (
-                  <div className="flex flex-col gap-2 bg-surface border border-border rounded-xl p-3.5">
-                    <div className="flex items-center gap-2">
-                      <TestnetTag />
-                      <span className="text-[0.9rem] font-semibold">Get more test kKRW</span>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      block
-                      disabled={faucetPending || !connection}
-                      onClick={() => void getTestTokens()}
-                    >
-                      {faucetPending
-                        ? "Minting test kKRW…"
-                        : `Mint ${formatKkrw(FAUCET_AMOUNT)} test kKRW`}
-                    </Button>
-                    {faucetTxUrl && (
-                      <a
-                        className="text-primary no-underline text-[0.9rem] font-semibold"
-                        href={faucetTxUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Minted — view on explorer
-                      </a>
-                    )}
+              DEFAULTS.testnet ? (
+                <div className="flex flex-col gap-2 bg-surface border border-border-strong rounded-xl p-3.5">
+                  <div className="flex items-center gap-2">
+                    <TestnetTag />
+                    <span className="text-[0.9rem] font-semibold">First, get test kKRW</span>
                   </div>
-                ) : (
-                  <LinkButton small className="self-start" onClick={() => setShowFaucet(true)}>
-                    Need more test kKRW?
-                  </LinkButton>
-                )}
-              </>
+                  <p className="text-sm text-muted">
+                    Mint {formatKkrw(FAUCET_AMOUNT)} free test kKRW (you pay only gas), then
+                    deposit it here.
+                  </p>
+                  <Button variant="primary" block disabled={!connection} onClick={() => setMintOpen(true)}>
+                    Get Test kKRW
+                  </Button>
+                </div>
+              ) : (
+                // Non-testnet: no mint to offer — just say what's missing.
+                <div className="flex flex-col gap-2 bg-surface border border-border-strong rounded-xl p-3.5">
+                  <p className="text-sm text-muted">
+                    Depositing needs kKRW in this account — fund it first, then come back.
+                  </p>
+                </div>
+              )
+            ) : (
+              // The faucet is a side path off the amount label — visually lighter
+              // than the label itself so it never outweighs the amount form.
+              <Field
+                label="Amount (kKRW)"
+                right={
+                  DEFAULTS.testnet ? (
+                    <LinkButton small subtle onClick={() => setMintOpen(true)}>
+                      Need more test kKRW?
+                    </LinkButton>
+                  ) : undefined
+                }
+                error={amount.trim() ? amtErr : null}
+              >
+                <AmountInput value={amount} onValueChange={setAmount} />
+              </Field>
             )}
 
-            {error && (
-              <div className="rounded-xl px-3.5 py-3 text-[0.88rem] flex gap-2.5 items-center justify-between flex-wrap border border-err-border bg-err-bg text-err">
-                {error}
-                {/GIWA Sepolia ETH/.test(error) && (
-                  <a
-                    className="font-semibold underline text-err"
-                    href={DEFAULTS.gasFaucet}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Get GIWA Sepolia ETH from the faucet
-                  </a>
-                )}
-              </div>
-            )}
+            {error && <ErrorBanner message={error} />}
 
             {!noTokens && (
               <Button
@@ -379,12 +297,20 @@ export function Deposit(): ReactNode {
                   setPhase("confirm");
                 }}
               >
-                Review deposit
+                Review Deposit
               </Button>
             )}
           </>
         )}
       </div>
+
+      {DEFAULTS.testnet && mintOpen && (
+        <MintModal
+          connection={connection}
+          onClose={() => setMintOpen(false)}
+          onMinted={refreshTokenState}
+        />
+      )}
     </div>
   );
 }

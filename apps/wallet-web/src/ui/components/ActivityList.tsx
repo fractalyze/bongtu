@@ -116,7 +116,7 @@ export function ActivityList({
             {heading}
           </h2>
           {onViewAll && history.length > 0 && (
-            <LinkButton onClick={onViewAll}>View all</LinkButton>
+            <LinkButton onClick={onViewAll}>View All</LinkButton>
           )}
         </div>
       )}

@@ -44,7 +44,7 @@ export function ReceivePanel({ pubkey }: { pubkey: string }): ReactNode {
         {pubkey}
       </div>
       <Button variant="primary" block onClick={copy}>
-        {copied ? "Copied" : "Copy address"}
+        {copied ? "Copied" : "Copy Address"}
       </Button>
     </div>
   );

@@ -15,6 +15,8 @@ import assert from "node:assert/strict";
 
 import {
   formatKkrw,
+  amountCaretIndex,
+  groupAmountInput,
   parseKkrw,
   allowanceLabel,
   MAX_NOTE_WEI,
@@ -118,6 +120,53 @@ test("parseKkrw enforces the 2^100 note-value belt before proving", () => {
   assert.equal(MAX_NOTE_WEI, 1n << 100n);
 });
 
+// ==================== (2b) LIVE-TYPING NORMALIZER ===========================
+// groupAmountInput is what AmountInput runs on EVERY keystroke: it must group
+// live, keep exactly one decimal point, strip junk, trim leading zeros, and —
+// the locked invariant — never emit a string that trips parseKkrw's strict
+// comma-grouping rule (typing can't manufacture the comma error).
+
+test("groupAmountInput: thousands-groups the integer part while typing", () => {
+  // the keystroke sequence for "1234567" — every intermediate stays grouped
+  assert.equal(groupAmountInput("1"), "1");
+  assert.equal(groupAmountInput("12"), "12");
+  assert.equal(groupAmountInput("123"), "123");
+  assert.equal(groupAmountInput("1234"), "1,234");
+  assert.equal(groupAmountInput("1,2345"), "12,345"); // regroups a now-stale comma
+  assert.equal(groupAmountInput("1,234,567"), "1,234,567"); // already-clean is a fixpoint
+});
+
+test("groupAmountInput: keeps a single decimal point, fraction ungrouped", () => {
+  assert.equal(groupAmountInput("1.5"), "1.5");
+  assert.equal(groupAmountInput("1234.5678"), "1,234.5678");
+  assert.equal(groupAmountInput("1234."), "1,234."); // mid-typing trailing dot survives
+  assert.equal(groupAmountInput("1.2.3"), "1.23"); // extra dots collapse into the fraction
+});
+
+test("groupAmountInput: strips junk, trims leading zeros", () => {
+  assert.equal(groupAmountInput("abc12x3!"), "123");
+  assert.equal(groupAmountInput("₩1,000 kKRW"), "1,000");
+  assert.equal(groupAmountInput("007"), "7");
+  assert.equal(groupAmountInput("000.5"), "0.5"); // one zero kept before the dot
+  assert.equal(groupAmountInput("0"), "0");
+  assert.equal(groupAmountInput(""), "");
+});
+
+test("groupAmountInput: output never trips parseKkrw's comma-grouping rule", () => {
+  // Junky/partial inputs may parse-fail (empty, bare dot) but NEVER with the
+  // comma error — the normalizer's whole reason to exist.
+  const inputs = ["", ".", "1", "1,2345", "12345678", "1,234,567.89", "0007.25", "1.2.3", "abc", "9,9"];
+  for (const raw of inputs) {
+    const out = groupAmountInput(raw);
+    const p = parseKkrw(out);
+    if (!p.ok) assert.doesNotMatch(p.error, /thousands separators/i, `input "${raw}" -> "${out}"`);
+  }
+  // and a well-formed typed amount round-trips to the exact wei
+  const p = parseKkrw(groupAmountInput("1234567.25"));
+  assert.ok(p.ok);
+  assert.equal(p.ok ? p.wei : 0n, 1_234_567n * WEI + (WEI / 4n));
+});
+
 // ============================ (3) ALLOWANCE LABEL ===========================
 
 test("allowanceLabel: MaxUint256 reads Unlimited, ordinary values are formatted", () => {
@@ -130,4 +179,17 @@ test("allowanceLabel: MaxUint256 reads Unlimited, ordinary values are formatted"
   const nearMax = allowanceLabel(MAX_UINT256 - 1n);
   assert.notEqual(nearMax, "Unlimited");
   assert.match(nearMax, /^[\d,]+\.\d{6}$/);
+});
+
+test("amountCaretIndex: caret lands after the same significant char across regrouping", () => {
+  // "1234" caret after "12" (2 significant) → "1,234" index 3 (after the '2').
+  assert.equal(amountCaretIndex("1,234", 2), 3);
+  // start / zero significants
+  assert.equal(amountCaretIndex("1,234", 0), 0);
+  // beyond the end clamps to length
+  assert.equal(amountCaretIndex("1,234", 99), 5);
+  // dot counts as significant: "1,234.5" after 5 significants (1234.) → index 6
+  assert.equal(amountCaretIndex("1,234.5", 5), 6);
+  // full string
+  assert.equal(amountCaretIndex("12", 2), 2);
 });

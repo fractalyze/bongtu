@@ -20,8 +20,21 @@ import {
   TOKEN_ADDRESS,
 } from "@bongtu/core/network";
 
+/**
+ * Deployment posture from ENV, never copy checks: `VITE_TESTNET=false` at build time
+ * flips every testnet-only affordance (faucet/mint UI, Testnet chips, mint onboarding
+ * copy) off in one place. Default TRUE because every current deployment is GIWA
+ * Sepolia. Pure so the default-true rule is testable under the node runner.
+ */
+export function testnetFromEnv(value: string | undefined): boolean {
+  return (value ?? "true") !== "false";
+}
+
 export const DEFAULTS = {
   chainId: CHAIN_ID,
+  // Testnet posture from ENV, never copy checks (see testnetFromEnv); default true
+  // because every current deployment is GIWA Sepolia.
+  testnet: testnetFromEnv(import.meta.env?.VITE_TESTNET),
   rpc: RPC_URL,
   explorer: EXPLORER_BASE,
   // The official GIWA testnet-ETH faucet (docs.giwa.io/en/get-started/faucets) —
