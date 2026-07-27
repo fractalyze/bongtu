@@ -68,7 +68,11 @@ jobs:
           vercel build --prod
           vercel deploy --prebuilt --prod
       - name: Verify production serves the app and the indexer rewrite
+        # Both surfaces: the Vercel-controlled default URL (always ours) and the
+        # user-facing custom domain (also convicts a DNS/verification regression).
         run: |
-          curl -fsS -o /dev/null -w 'root %{http_code}\n' https://bongtu-wallet-orcin.vercel.app/
-          curl -fsS https://bongtu-wallet-orcin.vercel.app/indexer/health | grep -q '"ok": *true'
-          echo "wallet + /indexer rewrite healthy"
+          for base in https://bongtu-wallet-orcin.vercel.app https://bongtu.fractalyze.io; do
+            curl -fsS -o /dev/null -w "root $base %{http_code}\n" "$base/"
+            curl -fsS "$base/indexer/health" | grep -q '"ok": *true'
+          done
+          echo "wallet + /indexer rewrite healthy on both domains"
