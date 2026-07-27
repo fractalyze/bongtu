@@ -60,14 +60,6 @@ export function Home(): ReactNode {
             onRefresh={() => void refresh()}
           />
           <LockChip walletName={wallet.name} />
-          <span
-            className="inline-flex items-center p-[5px] text-muted"
-            role="img"
-            aria-label={wallet.name}
-            title={wallet.name}
-          >
-            <WalletMark wallet={wallet} size={17} />
-          </span>
           <IconButton aria-label="Settings" onClick={() => navigate("settings")}>
             <IconGear />
           </IconButton>

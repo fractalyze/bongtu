@@ -249,16 +249,19 @@ test("the sync state folds the page's read state together with the indexer's hea
   );
 });
 
-test("Home's nav is the four icons, in order, with no words and no refresh button", () => {
+test("Home's nav is exactly three icons — sync, lock, settings — no words", () => {
+  // The wallet-brand mark left the nav (user decision 2026-07-28); the connected-
+  // wallet CARD below the balance is where brand identity lives.
   const home = readFileSync(`${UI_DIR}screens/Home.tsx`, "utf8");
   const nav = home.slice(home.indexOf("<header"), home.indexOf("</header>"));
-  const order = ["IndexerSyncDot", "LockChip", "WalletMark", "IconGear"];
+  const order = ["IndexerSyncDot", "LockChip", "IconGear"];
   let at = -1;
   for (const mark of order) {
     const i = nav.indexOf(mark);
     assert.ok(i > at, `${mark} is missing from the nav or out of order`);
     at = i;
   }
+  assert.doesNotMatch(nav, /WalletMark/, "the brand mark lives in the wallet card, not the nav");
   assert.doesNotMatch(nav, /IconRefresh/, "the standalone refresh button is retired");
   assert.doesNotMatch(nav, /wallet\.named/, "the wallet's NAME never renders in the nav");
 });
