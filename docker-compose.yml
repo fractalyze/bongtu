@@ -59,6 +59,12 @@ services:
       # The ML-KEM-768 decapsulation key (hybrid envelopes). Arbiter mode on a
       # KEM-epoch pool REFUSES to boot without it (kemBootGuard, design §7).
       AUTHORITY_KEM_KEY: ${AUTHORITY_KEM_KEY:-}
+      # /auth view tokens (arbiter mode): HMAC secret — unset means a per-boot
+      # secret and every wallet login dies on restart, so pin it in .env.compose.
+      TOKEN_SECRET: ${TOKEN_SECRET:-}
+      # Origin(s) wallets DIAL for reads. Behind the same-origin /indexer proxy
+      # that is the WALLET apps' origins, not this host's (README `PUBLIC_URL`).
+      PUBLIC_URL: ${PUBLIC_URL:-}
       PORT: "8600"
     ports:
       - "${INDEXER_PORT:-8600}:8600"
