@@ -32,7 +32,7 @@ deploy/cache
 
 # app trees the indexer image does not use
 prover
-apps/admin-web
+apps/payroll-web
 apps/wallet-web
 
 # docs / misc

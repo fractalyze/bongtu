@@ -3,7 +3,7 @@
 // A ProvingRequest is a COMPLETE, already-resolved circom witness input plus a
 // circuit tag. A prover is a PURE PROVER (SPEC §6): it turns this witness input
 // into a proof. It does NOT parse CSV, resolve ETH addresses to bjj pubkeys, build
-// merkle witnesses from chain state, or submit txs — the apps (admin-web,
+// merkle witnesses from chain state, or submit txs — the apps (payroll-web,
 // wallet-web) do all of that and hand the prover a finished input. So every
 // membership witness (root/pathElements/leafIndices/enabled) and every ciphertext
 // key (ecdhPrivateKey/encryptionNonce/authorityPublicKey) is already present in

@@ -1,4 +1,4 @@
-// bongtu admin — role-moded shell (SPEC §7 / Q10). Two modes in one app, switched
+// bongtu payroll — role-moded shell (SPEC §7 / Q10). Two modes in one app, switched
 // by a tab: EMPLOYER (no arbiter key: assemble + prove + disburse) and AUDITOR
 // (holds the arbiter key: decrypt the /events feed into a ledger). The two are kept
 // as separate components so an employer instance never renders the arbiter-key
@@ -23,7 +23,7 @@ export function App(): ReactNode {
       <header className="flex items-center gap-4 flex-wrap py-4 border-b border-line sticky top-0 bg-bg z-[5]">
         <div className="flex items-center gap-2">
           <span className="text-xl font-bold text-accent">봉투</span>
-          <span className="font-semibold">bongtu admin</span>
+          <span className="font-semibold">bongtu payroll</span>
         </div>
         <div className="flex gap-2">
           <button className={mode === "employer" ? TAB_ACTIVE_CLS : TAB_CLS} onClick={() => setMode("employer")}>

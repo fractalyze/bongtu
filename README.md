@@ -31,7 +31,7 @@ headline 256-disburse has run end-to-end on this pool (tx `0xe254240a…`, `next
 ## System map
 
 ```
- wallet-web (browser, self-custody)          admin-web (employer console)
+ wallet-web (browser, self-custody)          payroll-web (employer console)
    MetaMask sign ─▶ bjj key                    recipient list (≤256)
    snarkjs proves transfer/withdraw/deposit      │ POST /prove — witness incl. the
    │ tx (a,b,c,pub)   ▲ /notes /history /path    ▼           employer spending key
@@ -58,7 +58,7 @@ export **raw `src/*.ts`** (no build step) as `@bongtu/*` specifiers. `circuits/`
 - `packages/core/` — `@bongtu/core`: single-frontier IMT, Poseidon, BabyJubjub keys, note/encrypt, trial-decrypt, shared `ProvingRequest`/`Calldata` wire types
 - `prover/` — Python FastAPI GPU prover service (not an npm package; employer GPU box only): holds the compiled disburse256 zkey resident and serves a typed `ProvingRequest` → Groth16 calldata over `POST /prove`; the wire types live in `packages/core/src/proving.ts`
 - `apps/indexer/` — `@bongtu/indexer`: event ingest → MirrorTree mirror (root == on-chain root), merkle-path + ciphertext-feed API, disclosure alarms; **arbiter mode** (`AUTHORITY_KEY`) decrypts every envelope to serve `/notes?owner=` + within-batch paths
-- `apps/admin-web/` — `@bongtu/admin-web`: role-moded console — employer-mode (recipients → request → prover service → tx) + auditor-mode (arbiter `/notes` ledger)
+- `apps/payroll-web/` — `@bongtu/payroll-web`: role-moded console — employer-mode (recipients → request → prover service → tx) + auditor-mode (arbiter `/notes` ledger)
 - `apps/wallet-web/` — `@bongtu/wallet-web`: MetaMask wallet — sign → bjj key, balance from `/notes`, transfer/withdraw with browser snarkjs proving
 - `deploy/` — Foundry deploy script (local anvil + GIWA), the live 256-disburse runner, the M0 cross-circuit e2e
 - `docs/` — current-fact reference docs, one file per topic: protocol, circuits, contracts, deployment,
@@ -142,7 +142,7 @@ How to run each piece is owned by its own README:
 - Folder READMEs — each folder's own layout, run/test commands, and API surface:
   [`packages/core`](packages/core/README.md) · [`apps/indexer`](apps/indexer/README.md) ·
   [`circuits`](circuits/README.md) · [`contracts`](contracts/README.md) ·
-  [`apps/admin-web`](apps/admin-web/README.md) · [`apps/wallet-web`](apps/wallet-web/README.md).
+  [`apps/payroll-web`](apps/payroll-web/README.md) · [`apps/wallet-web`](apps/wallet-web/README.md).
 
 Milestone trackers and decision records (applied/deferred/rejected lists, layout and CI rationale) live in
 [`.dev/`](.dev/README.md) — agent-facing working docs, kept out of `docs/`.

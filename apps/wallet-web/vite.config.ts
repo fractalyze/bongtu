@@ -16,7 +16,7 @@ const REPO_ROOT = resolve(HERE, "..", "..");
 // ".js" first and would miss both, so rewrite a relative ".js" import to the sibling
 // ".ts"/".tsx" that actually exists. This lets the wallet import the exact same crypto
 // the prover + indexer run, unbuilt, AND lets NodeNext-required ".js" specifiers reach
-// the React components. (The ".ts" half is byte-for-byte the plugin admin-web ships —
+// the React components. (The ".ts" half is byte-for-byte the plugin payroll-web ships —
 // the wallet must agree with the indexer/contract on every commitment/ciphertext.)
 function tsJsResolve(): Plugin {
   return {

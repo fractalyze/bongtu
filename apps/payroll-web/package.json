@@ -1,5 +1,5 @@
 {
-  "name": "@bongtu/admin-web",
+  "name": "@bongtu/payroll-web",
   "version": "0.0.0",
   "description": "bongtu admin PoC — role-moded web app: employer-mode (assemble a disburse ProvingRequest, prove on the prover/ service, submit disburseWithCiphertexts) and auditor-mode (arbiter-key decrypt of the /events feed into a ledger). SPEC §7. Imports unbuilt @bongtu/* workspace source directly so the crypto is byte-identical.",
   "type": "module",

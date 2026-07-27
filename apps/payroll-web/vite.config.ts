@@ -53,7 +53,7 @@ export default defineConfig(({ mode }) => {
     server: {
       // The app imports unbuilt @bongtu/core source via the root node_modules
       // symlink — allow the Vite dev server to read the whole monorepo, not
-      // just apps/admin-web.
+      // just apps/payroll-web.
       fs: { allow: [REPO_ROOT] },
       proxy,
     },

@@ -74,7 +74,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="bongtu prover service", lifespan=lifespan)
 
-# The employer browser app (admin-web, another origin) POSTs directly here.
+# The employer browser app (payroll-web, another origin) POSTs directly here.
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["POST", "GET"], allow_headers=["*"]
 )

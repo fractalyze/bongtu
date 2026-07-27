@@ -12,8 +12,8 @@
 //
 // This module owns BOTH directions, so encoder/decoder drift is structurally
 // impossible: buildAuthorityPlaintext is the exact inverse of parseEnvelope,
-// and every producer (admin-web disburse assembly, the deploy runners, the
-// indexer scenario) and consumer (indexer arbiter ledger, admin-web auditor
+// and every producer (payroll-web disburse assembly, the deploy runners, the
+// indexer scenario) and consumer (indexer arbiter ledger, payroll-web auditor
 // ledger) goes through it. TWO deliberate exceptions stay hand-rolled as
 // independent checks and must NOT import this module:
 // circuits/auditor_decrypt_check.ts (the circuit-parity gate) and

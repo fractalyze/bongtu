@@ -8,7 +8,7 @@
 // parseEnvelope, each reproduced on the committed fixture material that site
 // already used:
 //
-//   p1.A  apps/admin-web/src/lib/disburse.ts   (assemble.test.ts fixture(3), B=256;
+//   p1.A  apps/payroll-web/src/lib/disburse.ts   (assemble.test.ts fixture(3), B=256;
 //                                               recorded from the GENUINE function
 //                                               output — decrypted ciphertext tail)
 //   p1.B  deploy/e2e_orchestrator.ts           (its inline actor material, B=16)
@@ -120,7 +120,7 @@ const DISBURSE256_KEM_SS = kemSsToLimbs(
 );
 
 // =============================================================================
-// p1.A — the admin-web disburse assembly material (assemble.test.ts fixture(3))
+// p1.A — the payroll-web disburse assembly material (assemble.test.ts fixture(3))
 // =============================================================================
 
 test("p1.A: sdk builder reproduces the admin buildDisburseRequest envelope bytes", () => {

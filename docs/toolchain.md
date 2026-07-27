@@ -27,7 +27,7 @@ the env var. The call sites are the three `deploy/` scripts (`loadEthers` in all
 and `contracts/test/fixtures/gen_realproofs.ts`. The `circuits/gen_*.ts` fixture generators are
 *not* on this path: they import only `@bongtu/core` and node builtins, so `prove_all.sh` runs
 without it. The browser apps are separate:
-`apps/wallet-web` declares `ethers` + `snarkjs` and `apps/admin-web` declares `ethers` as ordinary
+`apps/wallet-web` declares `ethers` + `snarkjs` and `apps/payroll-web` declares `ethers` as ordinary
 dependencies, bundled by Vite. `pot15_hez` is too small — `transfer` alone is ~62K constraints.
 
 ## Include resolution roots

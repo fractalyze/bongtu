@@ -1,4 +1,4 @@
-// React entry for the bongtu admin console. All chain/proving logic stays in the
+// React entry for the bongtu payroll console. All chain/proving logic stays in the
 // PURE lib modules (disburse / csv / ledger / chain / clients); this tree is the
 // view wiring around them. See src/ui/App.tsx for the mode shell.
 

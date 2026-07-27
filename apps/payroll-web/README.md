@@ -1,4 +1,4 @@
-# bongtu admin (PoC)
+# bongtu payroll (PoC)
 
 A minimal, functional role-moded admin web app (SPEC §7 / Q10). One app, two modes,
 switched by a tab. It imports the bongtu `sdk` and `indexer` **source
@@ -63,7 +63,7 @@ via the arbiter indexer, not a general auditor browse.
 
 ```sh
 export PATH=$HOME/.foundry/bin:$HOME/.nvm/versions/node/v22.17.1/bin:$PATH
-cd apps/admin-web
+cd apps/payroll-web
 npm install
 npm run dev        # Vite dev server → open the printed URL
 ```
@@ -91,20 +91,13 @@ The employer-mode "Prove via service" button POSTs the assembled request to
 `VITE_PROVER_URL`. The zkey is compiled once at service boot; a warm prove
 request is ~6 s wall (~5 s CPU witness-gen + ~0.5 s GPU proof).
 
-## Deployment (Vercel git integration)
+## Deployment
 
-Production is https://bongtu-admin.vercel.app — the `bongtu-admin` project on the
-`fractalyze` Vercel team, git-connected to this repo. All of the deploy config lives
-on Vercel's side, not in a workflow file: root directory `apps/admin-web`, and an
-ignored-build-step (`git diff --quiet HEAD^ HEAD -- ":(top)apps/admin-web" ":(top)packages"`)
-so only pushes touching this app or the workspace packages it imports trigger a build.
-Everything else is framework auto-detection, same as a root-level vite app. The
-checked-in `vercel.json` exists for the ONE thing auto-detection cannot provide: the
-`/indexer/:path*` rewrite that keeps the indexer same-origin for the browser (the
-prod counterpart of the dev proxy in `vite.config.ts`). This differs from the wallet
-deliberately — the wallet builds on the dev box because its gitignored proving assets
-must be staged from there; admin proves through the prover service and has no such
-assets, so Vercel builds it from git alone.
+Production: https://payroll.fractalyze.io — the `bongtu-payroll` Vercel project
+(`fractalyze` team), git-connected with root directory `apps/payroll-web`; only pushes
+touching `apps/payroll-web/**` or `packages/**` trigger a build. `vercel.json` carries
+the `/indexer/:path*` rewrite that keeps the indexer same-origin (prod counterpart of
+the dev proxy in `vite.config.ts`).
 
 ## Defaults (live GIWA Sepolia — `deploy/addresses.91342.json`)
 

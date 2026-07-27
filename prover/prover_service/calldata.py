@@ -9,7 +9,7 @@
 #   c   = [pi_c[0], pi_c[1]]
 #   pub = the public signals
 # with every value hex-encoded as a 0x-prefixed, zero-padded 32-byte word.
-# The TS consumers (admin-web chain.ts, deploy runners) splat this straight into
+# The TS consumers (payroll-web chain.ts, deploy runners) splat this straight into
 # BongtuPool verifier calls, so the format here must never drift from snarkjs.
 
 from __future__ import annotations

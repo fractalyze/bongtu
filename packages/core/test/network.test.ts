@@ -11,7 +11,7 @@
 //      this suite red until the module follows.
 //   2. Facts the artifact does NOT carry (H, the gas floor, RPC/explorer
 //      bases, the POOL_ABI_FRAGMENTS fragment strings) are pinned byte-for-byte to the
-//      values previously hand-copied across apps/admin-web/src/lib/chain.ts,
+//      values previously hand-copied across apps/payroll-web/src/lib/chain.ts,
 //      apps/wallet-web/src/lib/metamask.ts, both app config.ts files, and
 //      deploy/giwa_disburse256.ts — the copies this module replaced.
 
@@ -113,7 +113,7 @@ test("POOL_ABI_FRAGMENTS fragments match the hybrid (V2) BongtuPool signatures",
     POOL_ABI_FRAGMENTS.withdraw,
     "function withdraw(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[26] pub, bytes kemCiphertext)",
   );
-  // Admin fragment (apps/admin-web/src/lib/chain.ts): §6b v2 enforced-length
+  // Admin fragment (apps/payroll-web/src/lib/chain.ts): §6b v2 enforced-length
   // disburse — receiverCiphertexts is the separate 2054-element calldata arg.
   assert.equal(
     POOL_ABI_FRAGMENTS.disburseWithCiphertexts,

@@ -5,7 +5,7 @@ rabbitsnark (the GPU Groth16 prover, bridged from a local checkout — see
 `setup.sh`) held **resident in-process** — the 1.24GB disburse256 zkey is
 parsed and GPU-compiled **once at boot**, so every proof after the warm-up is
 sub-second GPU time instead of a ~2min cold shell-out.
-It replaces the retired prover-cli npm package + admin-web `prover-helper.ts`
+It replaces the retired prover-cli npm package + payroll-web `prover-helper.ts`
 Node shell-out pair.
 
 This is a **top-level directory, not an npm package**: it is Python, runs only
@@ -27,7 +27,7 @@ of truth); `prover_service/schema.py` mirrors them 1:1 and must be kept in sync.
 | `POST /prove` | body = a `ProvingRequest` (`{circuit:"disburse", input:{...}, backend?:"gpu"}`, field elements as decimal strings) → 200 `Calldata` `{a,b,c,pub}` — snarkjs `exportSolidityCallData` form (G2 inner-swap applied), every value a 0x 32-byte hex word, splat straight into `pool.disburseWithCiphertexts` |
 
 Witness handling: the service accepts the **circuit input JSON** (exactly what
-`apps/admin-web` assembles and POSTs) and runs circom witness generation
+`apps/payroll-web` assembles and POSTs) and runs circom witness generation
 **server-side** (`node circuits/out/disburse256_js/generate_witness.js`, ~5s
 CPU for the 2.79M-constraint circuit) before the GPU proof. No `.wtns` upload path exists — no consumer produces
 one, and the input JSON is what the employer flow already has in hand.
@@ -60,7 +60,7 @@ node -e 'const i=require("./circuits/inputs/disburse256.json");
   body:JSON.stringify({circuit:"disburse",input:i})}).then(r=>r.json()).then(c=>console.log(c.pub))'
 ```
 
-Consumers: `apps/admin-web` employer-mode (URL in `src/config.ts`, build-time
+Consumers: `apps/payroll-web` employer-mode (URL in `src/config.ts`, build-time
 override `VITE_PROVER_URL`) and `deploy/giwa_disburse256.ts`
 (`BONGTU_PROVER_URL`). If `circuits/inputs/disburse256.json` is missing,
 regenerate it: `cd circuits && npx tsx gen_disburse256_input.ts`.
@@ -95,7 +95,7 @@ regenerate it: `cd circuits && npx tsx gen_disburse256_input.ts`.
 - **CORS is `*` and `/prove` is unauthenticated** — same posture as the retired
   prover-helper, and the default bind is loopback, but any browser tab ON the
   employer box can fire ~6s prove jobs at it. Scope `allow_origins` to the
-  admin-web origin if that box browses the open web.
+  payroll-web origin if that box browses the open web.
 - Orphaned `bongtu-prove-*` scratch dirs (SIGKILL mid-prove) are swept at the
   next boot (`app.py`); they are mode-0700 and same-user only in the interim.
 

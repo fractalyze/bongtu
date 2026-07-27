@@ -32,7 +32,7 @@ import `@bongtu/core/<module>` and tsc (NodeNext), tsx, and Vite all resolve the
 
 - `apps/indexer` — `ImtTree` for the mirror, `envelope` for the arbiter ledger's
   decrypt + the disclosure chain, `indexerApi` for the route response types.
-- `apps/admin-web` / `apps/wallet-web` — commitments/ciphertext, `envelope` for the
+- `apps/payroll-web` / `apps/wallet-web` — commitments/ciphertext, `envelope` for the
   disburse assembly + auditor ledger (admin), `proving` request assembly, the
   `indexerApi` client, `pubkey` + `eddsa` for the signed `/notes` read.
 - `circuits/` generators and `contracts/test/fixtures/` generators — witness inputs and
