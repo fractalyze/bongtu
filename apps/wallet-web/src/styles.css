@@ -294,6 +294,9 @@ body {
 .onboarding-title { font-size: 2rem; margin: 0 0 4px; letter-spacing: -0.02em; color: var(--primary); }
 .onboarding-tag { color: var(--muted); margin: 0; }
 .onboarding-fine { font-size: 0.8rem; color: var(--muted); text-align: center; margin: 0; }
+.onboarding-testnet { display: inline-block; margin-top: 8px; }
+.onboarding-deeplink { text-align: center; text-decoration: none; display: block; }
+.onboarding-nowallet { text-align: center; }
 
 .onboarding-steps {
   list-style: none;

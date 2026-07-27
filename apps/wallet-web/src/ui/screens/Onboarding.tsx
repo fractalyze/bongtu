@@ -7,6 +7,7 @@
 
 import type { ReactNode } from "react";
 import { useWallet } from "../App.js";
+import { hasInjectedWallet, metamaskDeepLink } from "../../lib/metamask.js";
 import { EnvelopeLogo, IconDeposit, IconSend, IconWallet } from "../components/icons.js";
 
 export function Onboarding(): ReactNode {
@@ -18,9 +19,8 @@ export function Onboarding(): ReactNode {
           <EnvelopeLogo size={52} />
         </span>
         <h1 className="onboarding-title">bongtu</h1>
-        <p className="onboarding-tag">
-          The privacy wallet for kKRW on GIWA <span className="testnet-tag">Testnet</span>
-        </p>
+        <p className="onboarding-tag">The privacy wallet for kKRW on GIWA.</p>
+        <span className="testnet-tag onboarding-testnet">Testnet</span>
       </div>
 
       <ol className="onboarding-steps">
@@ -52,9 +52,24 @@ export function Onboarding(): ReactNode {
 
       {connectError && <div className="banner banner-err">{connectError}</div>}
 
-      <button className="btn btn-primary btn-block btn-lg" onClick={connectWallet} disabled={connecting}>
-        {connecting ? "Connecting…" : "Connect Wallet"}
-      </button>
+      {hasInjectedWallet() ? (
+        <button className="btn btn-primary btn-block btn-lg" onClick={connectWallet} disabled={connecting}>
+          {connecting ? "Connecting…" : "Connect Wallet"}
+        </button>
+      ) : (
+        // No injected provider (plain mobile browser, or desktop without the
+        // extension): the deep link reopens this page inside MetaMask Mobile's
+        // dapp browser, where the normal connect flow works.
+        <>
+          <a className="btn btn-primary btn-block btn-lg onboarding-deeplink" href={metamaskDeepLink()}>
+            Open in MetaMask app
+          </a>
+          <p className="hint onboarding-nowallet">
+            On mobile this opens the MetaMask app; on desktop, install the MetaMask extension
+            and reload.
+          </p>
+        </>
+      )}
       <p className="onboarding-fine">Self-custody wallet. Your privacy, guaranteed by proofs.</p>
     </div>
   );

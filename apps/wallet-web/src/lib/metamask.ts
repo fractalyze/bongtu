@@ -56,6 +56,21 @@ function ethereum(): Eip1193 {
   return eth;
 }
 
+/** Whether an EIP-1193 provider is injected — true in extension browsers AND in
+ *  MetaMask Mobile's in-app browser; false in a plain mobile browser, where the
+ *  only path to a connection is the deep link below. */
+export function hasInjectedWallet(): boolean {
+  return Boolean((globalThis as { ethereum?: unknown }).ethereum);
+}
+
+/** MetaMask Mobile deep link that reopens THIS page inside the app's dapp
+ *  browser (which injects window.ethereum). Universal-link form, so it also
+ *  routes to the app store when the app is missing. */
+export function metamaskDeepLink(): string {
+  const { host, pathname } = window.location;
+  return `https://metamask.app.link/dapp/${host}${pathname}`;
+}
+
 export interface Connection {
   address: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
