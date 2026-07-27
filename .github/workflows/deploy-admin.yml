@@ -1,0 +1,58 @@
+# Continuous release of the admin console SPA (apps/admin-web) to Vercel — the
+# same box-built pattern as deploy-wallet: the app imports unbuilt @bongtu/*
+# workspace source, so `vercel build` needs the whole monorepo as context; only
+# the prebuilt .vercel/output is uploaded. Runs on the box's self-hosted runner
+# as pure shell (ambient Vercel CLI login, no secrets). Unlike the wallet there
+# is no proving-asset guard: admin proves through the prover service, not
+# in-browser, so the bundle carries no zkeys.
+name: deploy-admin
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    # Deliberately narrow (user decision, mirrors deploy-wallet): only the app
+    # and the workspace packages it imports fire a deploy.
+    paths:
+      - "apps/admin-web/**"
+      - "packages/**"
+      - ".github/workflows/deploy-admin.yml"
+
+# deploy-admin and deploy-wallet build in the SAME clone (/home/a41/bongtu-deploy) and
+# both `git reset --hard` + `npm ci` at its root — a concurrent run would corrupt the
+# other's tree mid-build. This literal group is shared with deploy-wallet so the two
+# serialize; cancel-in-progress is false because a half-done reset/ci must finish, not
+# be killed and leave the clone dirty.
+concurrency:
+  group: bongtu-deploy-clone
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, bongtu-devbox]
+    env:
+      PATH: /home/a41/.nvm/versions/node/v22.17.1/bin:/usr/local/bin:/usr/bin:/bin
+    steps:
+      - name: Sync deploy clone to origin/main
+        run: |
+          cd /home/a41/bongtu-deploy
+          git fetch origin main
+          git reset --hard origin/main
+      - name: Install workspace dependencies
+        run: |
+          cd /home/a41/bongtu-deploy
+          npm ci
+      - name: Build locally and deploy prebuilt output
+        run: |
+          cd /home/a41/bongtu-deploy/apps/admin-web
+          # The clone is linked once, out of band, to the bongtu-admin Vercel
+          # project (its .vercel/ is untracked and survives the reset --hard).
+          vercel pull --yes --environment production
+          vercel build --prod
+          vercel deploy --prebuilt --prod
+      - name: Verify production serves the app and the indexer rewrite
+        run: |
+          base=https://bongtu-admin.vercel.app
+          curl -fsS -o /dev/null -w "root $base %{http_code}\n" "$base/"
+          curl -fsS "$base/indexer/health" | grep -q '"ok": *true'
+          echo "admin + /indexer rewrite healthy"

@@ -35,7 +35,14 @@ export const DEFAULTS = {
     (typeof import.meta.env !== "undefined" && import.meta.env.VITE_PROVER_URL) ||
     "http://127.0.0.1:8700/prove",
   // A public-mode indexer for /head + /path; auditor-mode points at an arbiter indexer.
-  indexerUrl: "http://localhost:8600",
+  // Defaults to the relative path `/indexer` (like the wallet): in dev the Vite proxy
+  // forwards it to a localhost indexer, in prod the Vercel rewrite (vercel.json) forwards
+  // it to the Funnel indexer — the browser only ever talks to its own origin. Overridable
+  // at build time via VITE_INDEXER_URL; the dotted+typeof form matches proverUrl so Vite's
+  // static replacement actually fires (an optional-chained form would make it inert).
+  indexerUrl:
+    (typeof import.meta.env !== "undefined" && import.meta.env.VITE_INDEXER_URL) ||
+    "/indexer",
 } as const;
 
 export { H, B } from "@bongtu/core/network";
