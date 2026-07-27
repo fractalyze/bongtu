@@ -6,15 +6,21 @@ import {VmSafe} from "forge-std/Vm.sol";
 /// @notice One deployment record — the complete field list of
 ///         `deploy/addresses.<chainid>.json`, declared ONCE.
 ///
-/// Every deploy/upgrade script used to hand-serialize all fifteen fields, so a
-/// script that only changed two still had to restate the other thirteen; the PQ
-/// upgrade's rewrite once dropped `arbiterKemPk` that way. Scripts now read the
-/// record, assign the fields they actually change, and write it back.
+/// Every deploy/upgrade script used to hand-serialize the whole field list, so a
+/// script that only changed two entries still had to restate all the others; the
+/// PQ upgrade's rewrite once dropped `arbiterKemPk` that way. Scripts now read
+/// the record, assign the fields they actually change, and write it back.
 ///
-/// `arbiterKemPk` is the one OPTIONAL field: it is the full 1184-byte ML-KEM-768
-/// encapsulation key, recorded as convenience metadata next to the hash the pool
-/// actually stores. A chain whose arbiter predates the hybrid envelope has none,
-/// so it is absent from the file rather than empty.
+/// Two fields are OPTIONAL, and for the same reason: a chain can legitimately
+/// predate them, and writing a zero would claim the pool holds one when it does
+/// not. Both are therefore absent from the file rather than empty.
+///   - `arbiterKemPk` — the full 1184-byte ML-KEM-768 encapsulation key,
+///     convenience metadata next to the hash the pool actually stores. Absent on
+///     a chain whose arbiter predates the hybrid envelope.
+///   - `transfer10Verifier` — absent until `UpgradeTransfer10.s.sol` runs. A
+///     pre-V4 pool's `transfer10Verifier` really is `address(0)` (which is why
+///     `transfer10` reverts there), so the field appearing at all is the marker
+///     that the V4 payload landed.
 struct AddressRecord {
     uint256 chainId;
     address owner;
@@ -28,6 +34,7 @@ struct AddressRecord {
     address withdrawVerifier;
     address disburseVerifier;
     address transferVerifier;
+    address transfer10Verifier; // optional — absent on a pre-V4 chain
     address token;
     address poolImpl;
     address pool;
@@ -59,8 +66,8 @@ library AddressBook {
         return string.concat("../deploy/addresses.", vm.toString(block.chainid), ".json");
     }
 
-    /// @notice Load the existing record. Every field except `arbiterKemPk` is
-    ///         required — a record missing one is corrupt, and defaulting it to
+    /// @notice Load the existing record. Every field except the two optional ones
+    ///         is required — a record missing one is corrupt, and defaulting it to
     ///         zero would write that zero back on the next merge.
     function read(string memory p) internal view returns (AddressRecord memory r) {
         string memory j = vm.readFile(p);
@@ -76,12 +83,17 @@ library AddressBook {
         r.withdrawVerifier = vm.parseJsonAddress(j, ".withdrawVerifier");
         r.disburseVerifier = vm.parseJsonAddress(j, ".disburseVerifier");
         r.transferVerifier = vm.parseJsonAddress(j, ".transferVerifier");
+        if (vm.keyExists(j, ".transfer10Verifier")) {
+            r.transfer10Verifier = vm.parseJsonAddress(j, ".transfer10Verifier");
+        }
         r.token = vm.parseJsonAddress(j, ".token");
         r.poolImpl = vm.parseJsonAddress(j, ".poolImpl");
         r.pool = vm.parseJsonAddress(j, ".pool");
     }
 
-    /// @notice Write the record back, omitting `arbiterKemPk` when empty.
+    /// @notice Write the record back. An unset optional field stays ABSENT: a
+    ///         zero there would claim material the pool does not hold, and the
+    ///         next merge-read would carry that claim forward as truth.
     /// @dev The recorded key and the recorded hash must describe the SAME
     ///      arbiter: a rotation that changes the hash and carries the old bytes
     ///      forward would publish a key clients hash-check and reject. Callers
@@ -105,6 +117,9 @@ library AddressBook {
         vm.serializeAddress(o, "withdrawVerifier", r.withdrawVerifier);
         vm.serializeAddress(o, "disburseVerifier", r.disburseVerifier);
         vm.serializeAddress(o, "transferVerifier", r.transferVerifier);
+        if (r.transfer10Verifier != address(0)) {
+            vm.serializeAddress(o, "transfer10Verifier", r.transfer10Verifier);
+        }
         vm.serializeAddress(o, "token", r.token);
         vm.serializeAddress(o, "poolImpl", r.poolImpl);
         string memory js = vm.serializeAddress(o, "pool", r.pool);

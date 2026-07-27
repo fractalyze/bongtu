@@ -83,6 +83,41 @@ plus the new implementation, and **no epoch**, because no arbiter key material c
 `initializeV2` first: `reinitializer(3)` would accept a never-V2 pool and burn the version past 2,
 stranding it on its pre-PQ verifiers with no way back.
 
+## The transfer10 upgrade
+
+The third UUPS upgrade adds the 10-in/10-out `transfer10` entry point (U-Z1). Its payload is
+`initializeV4`, which installs a **new** `Transfer10Verifier` and changes nothing else — the 2-in
+`transfer` keeps its own verifier and its own verifying key, `deposit` / `withdraw` / `disburse` are
+untouched, and no epoch is minted. Unlike the two upgrades before it this one is purely additive:
+every proof that verified before the transaction still verifies after it, so a lagging wallet is not
+stranded, it simply cannot reach the new entry point yet.
+
+Atomicity still matters, for the mirror-image reason. `transfer10Verifier` is a **new storage slot**,
+appended after every earlier one (the same discipline `arbiterKemPkHash` followed in V2, and for the
+same reason: inserting it beside the other four verifier slots would re-stride the IMT root and
+nullifier state below it). It is zero until the payload runs, and `transfer10` calls it directly — so
+a bare `upgradeTo` would leave a pool that advertises the entry point and reverts on every call to
+it.
+
+`deploy/UpgradeTransfer10.s.sol` is the reusable form. Two pre-flight requires, both read from the
+Initializable version slot before anything is broadcast:
+
+| require | why |
+|---|---|
+| version ≥ 3 | `reinitializer(4)` would accept a never-V2/V3 pool and burn the version past both, stranding it on its pre-PQ verifiers or its pre-self-send transfer key. `BongtuPool.initializeV4`'s natspec names this script as where the ordering is enforced. |
+| version < 4 | a pre-V4 pool runs an implementation that predates the `transfer10Verifier` getter, so *reading* the verifier to ask "already upgraded?" reverts on exactly the pools that need the answer. The version slot answers it without a call. |
+
+After the swap the script re-reads the live proxy and requires that the other four verifiers, the
+arbiter bjj key, the KEM pk hash, the epoch, **and the IMT root + `nextLeafIndex`** are all unchanged
+from the values it pinned before broadcasting. The tree pair is there specifically for the new slot:
+a mis-declared storage layout does not announce itself, it moves the root.
+
+`transfer10Verifier` is an optional field of `addresses.<chainid>.json` — absent until this script
+runs, rather than recorded as a zero, so the field's presence is itself the marker that the pool took
+the V4 payload. Read it there rather than from the live-address table above: while
+`deploy/addresses.91342.json` carries no such entry, GIWA is still pre-V4 and `transfer10` reverts
+there.
+
 ## Chain facts
 
 | fact | value |
@@ -107,7 +142,8 @@ the faucet grant. `packages/core/src/network.ts` exports
 | `deploy/Deploy.s.sol` | deploys Poseidon + 4 verifiers + (optionally) a mock kKRW + the pool implementation + an `ERC1967Proxy` whose constructor runs `initialize` atomically; writes `addresses.<chainid>.json` |
 | `deploy/UpgradePq.s.sol` | the UUPS migration of an already-deployed pool to the hybrid PQ implementation: deploys the four regenerated verifiers + the new impl, then one `upgradeToAndCall` whose `initializeV2` payload swaps the verifier addresses and mints the epoch carrying both keys; rewrites the verifier/impl entries in `addresses.<chainid>.json` |
 | `deploy/UpgradeSelfSend.s.sol` | the UUPS migration to the self-send transfer circuit: deploys the regenerated `TransferVerifier` + the new impl, then one `upgradeToAndCall` whose `initializeV3` payload swaps only that verifier and mints no epoch; pre-flight asserts the pool is already V2 |
-| `deploy/AddressBook.sol` | the field list of `addresses.<chainid>.json`, declared once, with a read + merge-write the three scripts above share (each names only the fields it changes) |
+| `deploy/UpgradeTransfer10.s.sol` | the UUPS migration that adds the `transfer10` entry point: deploys `Transfer10Verifier` + the new impl, then one `upgradeToAndCall` whose `initializeV4` payload installs only that verifier and mints no epoch; pre-flight asserts the pool is V3 and not already V4, and the post-check asserts the IMT root did not move |
+| `deploy/AddressBook.sol` | the field list of `addresses.<chainid>.json`, declared once, with a read + merge-write the four scripts above share (each names only the fields it changes) |
 | `deploy/Smoke.s.sol` | a real `deposit` against the deployed pool using the committed proof fixture |
 | `deploy/deploy_local.sh` | anvil + Deploy + getter read-back + Smoke — the local gate |
 | `deploy/giwa_disburse256.ts` | the live 256-recipient disburse runner (rebuild mirror → deposit → prover service → `disburseWithCiphertexts` → measure L2 gas and L1 data fee) |

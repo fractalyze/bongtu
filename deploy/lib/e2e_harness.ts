@@ -15,9 +15,9 @@
 //   - the deploy helpers deploy() / deployPoolProxy() — the ONE TS restatement
 //     of Deploy.s.sol's UUPS + initialize wiring, so a pool-initializer change
 //     is Deploy.s.sol plus one TS site, not three,
-//   - deployStack(): Poseidon-v1 + the 4 Groth16 verifiers + mock kKRW +
-//     BongtuPool behind its UUPS proxy on a live anvil, then driver-wallet
-//     funding (mint + approve),
+//   - deployStack(): the whole stack on a live anvil, at the initializer version
+//     the live pool has reached — a gate stack that lagged it would reject
+//     proofs the live pool accepts, and read as a circuit bug,
 //   - the shared actor / salt / amount fixture material both drivers assume.
 //
 // The chain-agnostic half — artifact(), the CPU snarkjs prove() wrapper, dec(),
@@ -108,16 +108,27 @@ export interface DeployedStack {
   wv: any; // WithdrawVerifier
   dsv: any; // DisburseVerifier
   tv: any; // TransferVerifier
+  tv10: any; // Transfer10Verifier (installed by the initializeV4 payload)
   token: any; // mock kKRW
   pool: any; // BongtuPool bound at the PROXY address
 }
 
 /** Deploy the full anvil stack both heavy gates start from: Poseidon-v1, the
- *  4 Groth16 verifiers, mock kKRW, and BongtuPool behind its UUPS proxy —
+ *  5 Groth16 verifiers, mock kKRW, and BongtuPool behind its UUPS proxy —
  *  then fund + approve the driver wallet (deposit pulls from msg.sender via
  *  SafeERC20). The tx sequence is fixed, so contract addresses stay
  *  nonce-deterministic across both drivers. Epoch 0 carries the AUTHORITY_KEM
- *  pk hash by default (initialize rejects the zero pre-KEM marker). */
+ *  pk hash by default (initialize rejects the zero pre-KEM marker).
+ *
+ *  The stack lands at initializer version 4, matching the live pool: the
+ *  8-arg `initialize` wires the four verifiers it has always taken, and
+ *  `initializeV4` then installs the transfer10 verifier — the same payload
+ *  deploy/UpgradeTransfer10.s.sol sends, since `transfer10Verifier` is
+ *  reachable no other way (it is not an `initialize` argument, so a stack that
+ *  skipped this step would revert every `transfer10` on a call to address(0)).
+ *  The V2/V3 payloads are deliberately NOT replayed here — they exist to move
+ *  an older pool's verifiers onto the current ones, and a fresh stack deploys
+ *  the current ones outright. */
 export async function deployStack(
   wallet: any,
   opts: { batchSize: number; authorityPublicKey: PointInput; mintAmount: bigint; kemPkHash?: string },
@@ -130,15 +141,17 @@ export async function deployStack(
   const wv = await deploy(wallet, "WithdrawVerifier", "WithdrawVerifier");
   const dsv = await deploy(wallet, "DisburseVerifier", "DisburseVerifier");
   const tv = await deploy(wallet, "TransferVerifier", "TransferVerifier");
+  const tv10 = await deploy(wallet, "Transfer10Verifier", "Transfer10Verifier");
   const token = await deploy(wallet, "MockERC20", "MockERC20");
   const pool = await deployPoolProxy(wallet, [
     poseidon.address, dv.address, wv.address, dsv.address, tv.address, token.address, opts.batchSize,
     [dec(opts.authorityPublicKey[0]), dec(opts.authorityPublicKey[1])],
     opts.kemPkHash ?? ethers.utils.keccak256(AUTHORITY_KEM.publicKey),
   ]);
+  await (await pool.initializeV4(tv10.address)).wait();
   await (await token.mint(wallet.address, dec(opts.mintAmount))).wait();
   await (await token.approve(pool.address, ethers.constants.MaxUint256)).wait();
-  return { poseidon, dv, wv, dsv, tv, token, pool };
+  return { poseidon, dv, wv, dsv, tv, tv10, token, pool };
 }
 
 // ---------------------------------------------------------------------------

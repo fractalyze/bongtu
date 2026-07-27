@@ -325,6 +325,31 @@ async function runArbiter(sc: any): Promise<void> {
     ok((empNotes.body as unknown[]).length === 2,
       `employer holds ONLY the deposit#1 notes (kem-mismatch deposit withheld; got ${(empNotes.body as unknown[]).length})`);
 
+    // The V4 arity-10 op, from the arbiter's side. Every note it touches belongs
+    // to ONE owner, which is what makes these EXACT counts instead of
+    // "contains": if a single one of the ten output envelopes failed to open —
+    // the per-output-nonce failure mode — the count is short and this bites.
+    step("ARBITER /notes — transfer10 (arity 10): two spent inputs + ten opened outputs, one owner");
+    const t10 = sc.transfer10;
+    const t10Q = (ts: number = Math.floor(Date.now() / 1000)): string => {
+      const pub: [bigint, bigint] = [BigInt(t10.ownerPub[0]), BigInt(t10.ownerPub[1])];
+      const sig = packSignature(signNotesAuth(BigInt(t10.ownerPrivateKey), notesAuthMessage(pub, ts)));
+      return `/notes?owner=${packPubkey(pub)}&ts=${ts}&sig=${sig}`;
+    };
+    const t10Res = await get(abase, t10Q());
+    ok(t10Res.status === 200, "GET /notes (transfer10 owner, signed) 200");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const t10Notes = t10Res.body as any[];
+    ok(t10Notes.length === 2 + t10.arity,
+      `transfer10 owner holds its 2 deposit notes + ${t10.arity} outputs (got ${t10Notes.length})`);
+    ok(t10.spentLeafIndices.every((li: number) => noteAt(t10Notes, li)?.spent === true),
+      `both transfer10 inputs (@${t10.spentLeafIndices.join(", @")}) read spent == true`);
+    const t10Outs = Array.from({ length: t10.arity }, (_, i) => noteAt(t10Notes, t10.startLeafIndex + i));
+    ok(t10Outs.every((n) => !!n && n.spent === false),
+      `all ${t10.arity} transfer10 outputs @${t10.startLeafIndex}.. recorded, unspent`);
+    ok(t10Outs.every((n, i) => n.value === t10.outValues[i] && n.commitment === t10.outCommits[i]),
+      "every transfer10 output opens to the value + commitment that was proved");
+
     // Distinct 400 branch from the malformed-owner case: auth params are mandatory.
     const noAuth = await get(abase, `/notes?owner=${packPubkey([BigInt(r0.owner[0]), BigInt(r0.owner[1])])}`);
     ok(noAuth.status === 400, "GET /notes with owner but no ts/sig → 400 (auth params required)");
@@ -377,7 +402,8 @@ async function main(): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const feed = evRes.body as any[];
     const kinds = feed.map((e) => e.kind).join(",");
-    ok(kinds === "deposit,disburse,transfer,withdraw,disburse,disburse,deposit", `feed kinds in chain order: ${kinds}`);
+    ok(kinds === "deposit,disburse,transfer,withdraw,disburse,disburse,deposit,deposit,transfer10",
+      `feed kinds in chain order: ${kinds}`);
 
     const honest = feed.find((e) => e.kind === "disburse" && e.slices[0]?.leafIndex === sc.disburseHonest.startLeafIndex);
     ok(!!honest, "honest disburse present in feed");

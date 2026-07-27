@@ -110,7 +110,20 @@ export interface ScenarioResult {
   recipient0PrivateKey: string; // decimal — TEST-ONLY: recipient #0 signs its own /notes auth
   payeeNote: ArbiterNote; // the payee's transfer output note (created by the transfer)
   payeePrivateKey: string; // decimal — TEST-ONLY: the payee signs its own /notes auth
+  transfer10: Transfer10Info; // the V4 arity-10 leg (own owner, so no count above moves)
   spentNullifiers: string[]; // decimal — the real (nonzero) nullifiers this run produces
+}
+
+/** The transfer10 leg's secrets: one owner holds every note it touches, which is
+ *  what lets the arbiter assertions be exact counts rather than "contains". */
+export interface Transfer10Info {
+  ownerPub: [string, string];
+  ownerPrivateKey: string; // decimal — TEST-ONLY, signs its own /notes auth
+  startLeafIndex: number;
+  arity: number;
+  outCommits: string[]; // decimal
+  outValues: string[]; // decimal
+  spentLeafIndices: [number, number]; // the deposit notes the op spends
 }
 
 export async function runScenario(): Promise<ScenarioResult> {
@@ -336,7 +349,7 @@ export async function runScenario(): Promise<ScenarioResult> {
   // chain accepts it (length is the only on-chain check, design doc §2
   // trade-off); the arbiter decapsulates the tx's ct, recomputes the binding,
   // mismatches -> first-class kem alarm + envelope withheld: NO notes recorded
-  // for this op. Appended LAST so every earlier leaf index stays pinned.
+  // for this op. Appended past every pinned leaf index so it cannot shift one.
   const sK0 = 8800001n, sK1 = 8800002n;
   const ECDH_DEP2 = 990000000000000000023n;
   const NONCE_DEP2 = 888888888888n;
@@ -357,6 +370,79 @@ export async function runScenario(): Promise<ScenarioResult> {
     const tx = await pool.deposit(a, b, c, pub, kemCtHex(KEM_DEP2_JUNK.kemCiphertext));
     await tx.wait();
     kemMismatchTxHash = tx.hash;
+  }
+
+  // ---- transfer10 (arity 10, ALL ten outputs to one owner) -------------------
+  // The V4 entry point, driven on-chain rather than from a synthetic log: a
+  // fresh owner deposits, then spends BOTH deposit notes through transfer10
+  // with the other eight slots padded. Every output goes to that one owner, so
+  // the per-output nonce (§11-8 v1.1) is under its maximum load — ten
+  // ciphertexts under one ephemeral key that must each open independently.
+  //
+  // A NEW owner rather than an existing actor, and appended after every leg
+  // above: the arbiter assertions upstream pin exact per-owner note and history
+  // counts, and reusing recipient#0 or the employer would move them.
+  // ingest.test.ts already exercises this decode path against synthetic logs;
+  // what only a live leg can show is that the indexer's mirror still equals the
+  // contract root once a single op appends TEN leaves at once.
+  const T10 = deriveKeypair(333333333333333333333333n);
+  const ECDH_DEP3 = 975000000000000000013n;
+  const ECDH_T10 = 985000000000000000017n;
+  const NONCE_DEP3 = 444444444444n;
+  const NONCE_T10 = 999999999999n;
+  const KEM_DEP3 = kemDraw("scen/deposit-t10");
+  const KEM_T10 = kemDraw("scen/transfer10");
+  const T10_ARITY = 10;
+  const t10InValue = 90n;
+  const sT10In = (i: number): bigint => 8900001n + BigInt(i);
+  const sT10Pad = (i: number): bigint => 8910001n + BigInt(i);
+  const sT10Out = (i: number): bigint => 8920001n + BigInt(i);
+  const t10InCommits = [
+    commitment(t10InValue, sT10In(0), T10.publicKey),
+    commitment(0n, sT10In(1), T10.publicKey),
+  ];
+  const t10OutValues = Array.from({ length: T10_ARITY }, () => t10InValue / BigInt(T10_ARITY));
+  const t10OutCommits = t10OutValues.map((v, i) => commitment(v, sT10Out(i), T10.publicKey));
+  const t10DepositLeaf = 80 + 2; // 82 — after the kem-mismatch deposit's 80/81
+  const t10StartLeaf = t10DepositLeaf + 2; // 84 — the ten outputs land here
+  const t10Nullifiers = [
+    nullifier(t10InValue, sT10In(0), T10.formattedPrivateKey),
+    nullifier(0n, sT10In(1), T10.formattedPrivateKey),
+  ];
+  {
+    const { a, b, c, pub } = await prove("deposit", {
+      outputCommitments: t10InCommits, outputValues: [t10InValue, 0n],
+      outputSalts: [sT10In(0), sT10In(1)], outputOwnerPublicKeys: [T10.publicKey, T10.publicKey],
+      ecdhPrivateKey: ECDH_DEP3, kemSs: KEM_DEP3.kemSs,
+      encryptionNonce: NONCE_DEP3, authorityPublicKey: AUTHORITY.publicKey,
+    });
+    oracle.appendLeaf(t10InCommits[0]);
+    oracle.appendLeaf(t10InCommits[1]);
+    await (await pool.deposit(a, b, c, pub, kemCtHex(KEM_DEP3.kemCiphertext))).wait();
+  }
+  {
+    const zeros: bigint[] = new Array(H).fill(0n);
+    const padCommit = commitment(0n, sT10Pad(0), T10.publicKey);
+    const paths = [oracle.merklePath(t10DepositLeaf).siblings, oracle.merklePath(t10DepositLeaf + 1).siblings];
+    const idx = (i: number): bigint => (i < 2 ? BigInt(t10DepositLeaf + i) : 0n);
+    const { a, b, c, pub } = await prove("transfer10", {
+      nullifiers: Array.from({ length: T10_ARITY }, (_, i) => (i < 2 ? t10Nullifiers[i] : 0n)),
+      inputCommitments: Array.from({ length: T10_ARITY }, (_, i) => (i < 2 ? t10InCommits[i] : padCommit)),
+      inputValues: Array.from({ length: T10_ARITY }, (_, i) => (i === 0 ? t10InValue : 0n)),
+      inputSalts: Array.from({ length: T10_ARITY }, (_, i) => (i < 2 ? sT10In(i) : sT10Pad(0))),
+      inputOwnerPrivateKey: T10.formattedPrivateKey, ecdhPrivateKey: ECDH_T10,
+      root: oracle.getRoot(),
+      pathElements: Array.from({ length: T10_ARITY }, (_, i) => (i < 2 ? paths[i] : zeros)),
+      leafIndices: Array.from({ length: T10_ARITY }, (_, i) => idx(i)),
+      enabled: Array.from({ length: T10_ARITY }, (_, i) => (i < 2 ? 1n : 0n)),
+      outputCommitments: t10OutCommits, outputValues: t10OutValues,
+      outputSalts: Array.from({ length: T10_ARITY }, (_, i) => sT10Out(i)),
+      outputOwnerPublicKeys: Array.from({ length: T10_ARITY }, () => T10.publicKey),
+      kemSs: KEM_T10.kemSs,
+      encryptionNonce: NONCE_T10, authorityPublicKey: AUTHORITY.publicKey,
+    });
+    for (const oc of t10OutCommits) oracle.appendLeaf(oc);
+    await (await pool.transfer10(a, b, c, pub, kemCtHex(KEM_T10.kemCiphertext))).wait();
   }
 
   return {
@@ -382,6 +468,9 @@ export async function runScenario(): Promise<ScenarioResult> {
     singleLeaves: [
       { leafIndex: 0, commitment: dec(dNoteV) },
       { leafIndex: payLeaf, commitment: dec(payCommit) },
+      // transfer10 appends its ten outputs one at a time, exactly like transfer,
+      // so a /path into the first of them is servable in PUBLIC mode too.
+      { leafIndex: t10StartLeaf, commitment: dec(t10OutCommits[0]) },
     ],
     // ---- arbiter-mode fixtures -----------------------------------------------
     // The AUTHORITY keypair IS the arbiter key (the indexer decrypts with its
@@ -408,16 +497,27 @@ export async function runScenario(): Promise<ScenarioResult> {
       salt: dec(sPay),
     },
     payeePrivateKey: dec(PAYEE.formattedPrivateKey),
+    transfer10: {
+      ownerPub: [dec(T10.publicKey[0]), dec(T10.publicKey[1])],
+      ownerPrivateKey: dec(T10.formattedPrivateKey),
+      startLeafIndex: t10StartLeaf, // 84 — the first of the ten appended outputs
+      arity: T10_ARITY,
+      outCommits: t10OutCommits.map(dec),
+      outValues: t10OutValues.map(dec),
+      spentLeafIndices: [t10DepositLeaf, t10DepositLeaf + 1], // both deposit notes
+    },
     // Real (nonzero) nullifiers, in spend order: deposit note(V)@0 (disburse#1),
     // recipient0 batch note @16 (transfer), change @33 (withdraw), note(0)@1
-    // (disburse#2), residue note(0)@34 (disburse#3). Transfer/withdraw pad
-    // inputs have nullifier 0 (skipped).
+    // (disburse#2), residue note(0)@34 (disburse#3), then the transfer10's two
+    // real inputs @82/@83. Transfer/withdraw/transfer10 pad inputs have
+    // nullifier 0 (skipped).
     spentNullifiers: [
       dec(nfDepositV),
       dec(nfBatch0),
       dec(nfChange),
       dec(nf0),
       dec(nfRes),
+      ...t10Nullifiers.map(dec),
     ],
   };
 }
