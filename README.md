@@ -20,10 +20,10 @@ enforced four-op auditor disclosure.
 | | address |
 |---|---|
 | BongtuPool (proxy, B=256) | [`0x93365980784ef504613EF5822ce1289CF858Fc10`](https://sepolia-explorer.giwa.io/address/0x93365980784ef504613EF5822ce1289CF858Fc10) |
-| BongtuPool impl | [`0x459f80A457f11328eBd67aeBFa9F90D05c58b27f`](https://sepolia-explorer.giwa.io/address/0x459f80A457f11328eBd67aeBFa9F90D05c58b27f) |
+| BongtuPool impl (hybrid PQ, epoch 1) | [`0xc975d2897bA961c11Eb8EB86f2654272a5b6b631`](https://sepolia-explorer.giwa.io/address/0xc975d2897bA961c11Eb8EB86f2654272a5b6b631) |
 
 Verified on-chain through the proxy: `B()==256`, `disburseCiphertextLen==2054` (disclosure enforced), a real
-envelope-carrying `deposit`. Measured: warm 256-disburse GPU proof **~0.47s** (2.79M constraints); the
+envelope-carrying `deposit`. Measured: warm 256-disburse GPU proof **~0.47s** (2.80M constraints); the
 headline 256-disburse has run end-to-end on this pool (tx `0xe254240a…`, `nextLeafIndex` 4→512) at
 3,872,403 L2 gas — 15,126 per recipient, far under the Karst cap — plus ~4e-6 ETH of L1 data fee for the
 ~66 KB ciphertext array. Per-op gas and proof times: [`docs/performance.md`](docs/performance.md).
