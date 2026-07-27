@@ -16,6 +16,7 @@ import { BalanceCard } from "../components/BalanceCard.js";
 import { ActivityList } from "../components/ActivityList.js";
 import { StatusChip } from "../components/StatusChip.js";
 import { ReceiveModal } from "../components/ReceiveModal.js";
+import { Button, IconButton, TestnetTag } from "../components/controls.js";
 import {
   EnvelopeLogo,
   IconGear,
@@ -43,18 +44,18 @@ export function Home(): ReactNode {
   const brand = connection ? walletBrand(connection.provider?.provider) : "unknown";
 
   return (
-    <div className="screen home">
-      <header className="home-head">
-        <div className="brand">
+    <div className="flex flex-col gap-3 px-4.5 pt-4.5 pb-6.5">
+      <header className="flex items-center justify-between">
+        <div className="inline-flex items-center gap-2 text-primary">
           <EnvelopeLogo size={26} />
-          <span className="brand-name">bongtu</span>
-          <span className="testnet-tag">Testnet</span>
+          <span className="font-bold text-[1.1rem] tracking-[-0.01em]">bongtu</span>
+          <TestnetTag />
         </div>
-        <div className="home-head-right">
+        <div className="flex items-center gap-2">
           <StatusChip indexerUrl={indexerUrl} />
-          <button className="icon-btn" aria-label="Settings" onClick={() => navigate("settings")}>
+          <IconButton aria-label="Settings" onClick={() => navigate("settings")}>
             <IconGear />
-          </button>
+          </IconButton>
         </div>
       </header>
 
@@ -66,14 +67,25 @@ export function Home(): ReactNode {
       />
 
       {connection && (
-        <section className="wallet-card" aria-label="Connected wallet">
+        <section
+          className="flex items-center justify-center gap-2 text-muted bg-surface border border-border rounded-xl px-3.5 py-[11px]"
+          aria-label="Connected wallet"
+        >
           <IconLink size={16} />
           {brand === "metamask" ? <MetaMaskFox size={18} /> : <IconWallet size={16} />}
-          <span className="tip-wrap">
-            <span className="wallet-addr mono" tabIndex={0} aria-describedby="wallet-addr-tip">
+          <span className="relative inline-flex group">
+            <span
+              className="font-mono text-[0.78rem] rounded-md focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2"
+              tabIndex={0}
+              aria-describedby="wallet-addr-tip"
+            >
               {shortenPubkey(connection.address)}
             </span>
-            <span className="tip mono" role="tooltip" id="wallet-addr-tip">
+            <span
+              className="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2 bg-ink text-white font-mono text-[0.68rem] leading-[1.45] px-[9px] py-1.5 rounded-lg w-max max-w-[250px] [overflow-wrap:anywhere] text-center opacity-0 pointer-events-none transition-opacity z-30 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100"
+              role="tooltip"
+              id="wallet-addr-tip"
+            >
               {connection.address}
             </span>
           </span>
@@ -84,24 +96,35 @@ export function Home(): ReactNode {
           three actions with the one move that works: Deposit. Never over a
           spinner or a data error (balance unknown there). */}
       {!loading && !dataError && balance === 0n ? (
-        <section className="get-started">
-          <p className="get-started-title">Deposit kKRW to get started</p>
-          <p className="hint">Deposited kKRW becomes private — then send and withdraw freely.</p>
-          <button className="btn btn-primary btn-block" onClick={() => navigate("deposit")}>
+        <section className="flex flex-col gap-2 bg-surface border border-border-strong rounded-xl p-3.5">
+          <p className="text-[0.95rem] font-bold">Deposit kKRW to get started</p>
+          <p className="text-sm text-muted">
+            Deposited kKRW becomes private — then send and withdraw freely.
+          </p>
+          <Button variant="primary" block onClick={() => navigate("deposit")}>
             Deposit kKRW
-          </button>
+          </Button>
         </section>
       ) : (
-        <div className="actions">
-          <button className="action" onClick={() => navigate("send")}>
+        <div className="grid grid-cols-3 gap-2">
+          <button
+            className="bg-surface border border-border rounded-xl pt-3 px-1 pb-2.5 text-primary text-sm [font-weight:650] cursor-pointer font-sans flex flex-col items-center gap-1.5 hover:border-border-strong"
+            onClick={() => navigate("send")}
+          >
             <IconSend />
             <span>Send</span>
           </button>
-          <button className="action" onClick={() => navigate("withdraw")}>
+          <button
+            className="bg-surface border border-border rounded-xl pt-3 px-1 pb-2.5 text-primary text-sm [font-weight:650] cursor-pointer font-sans flex flex-col items-center gap-1.5 hover:border-border-strong"
+            onClick={() => navigate("withdraw")}
+          >
             <IconWithdraw />
             <span>Withdraw</span>
           </button>
-          <button className="action" onClick={() => navigate("deposit")}>
+          <button
+            className="bg-surface border border-border rounded-xl pt-3 px-1 pb-2.5 text-primary text-sm [font-weight:650] cursor-pointer font-sans flex flex-col items-center gap-1.5 hover:border-border-strong"
+            onClick={() => navigate("deposit")}
+          >
             <IconDeposit />
             <span>Deposit</span>
           </button>
@@ -109,11 +132,11 @@ export function Home(): ReactNode {
       )}
 
       {dataError ? (
-        <div className="banner banner-warn">
+        <div className="rounded-xl px-3.5 py-3 text-[0.88rem] flex gap-2.5 items-center justify-between flex-wrap border border-warn-border bg-warn-bg text-warn">
           {dataError}
-          <button className="btn btn-ghost btn-sm" onClick={() => void refresh()}>
+          <Button variant="ghost" size="sm" onClick={() => void refresh()}>
             Retry
-          </button>
+          </Button>
         </div>
       ) : (
         <ActivityList

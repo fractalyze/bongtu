@@ -9,7 +9,7 @@ import { ReceivePanel } from "../components/ReceivePanel.js";
 export function Receive(): ReactNode {
   const { identity } = useWallet();
   return (
-    <div className="screen">
+    <div className="flex flex-col gap-4.5 px-4.5 pt-4.5 pb-6.5">
       <ScreenHeader title="Receive" />
       <ReceivePanel pubkey={identity?.compressedPubkey ?? ""} />
     </div>

@@ -24,6 +24,7 @@ import { ScreenHeader } from "./ScreenHeader.js";
 import { StagedProgress } from "./StagedProgress.js";
 import { SuccessMark } from "./SuccessMark.js";
 import { DownloadProgress } from "./DownloadProgress.js";
+import { Button } from "./controls.js";
 
 type Phase = "form" | "confirm" | "running" | "done";
 
@@ -112,21 +113,30 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
   // --- success ---------------------------------------------------------------
   if (phase === "done" && outcome) {
     return (
-      <div className="screen">
+      <div className="flex flex-col gap-4.5 px-4.5 pt-4.5 pb-6.5">
         <ScreenHeader title={title} />
-        <div className="success">
+        <div className="flex flex-col items-center gap-2.5 text-center pt-4.5">
           <SuccessMark />
-          <h2 className="success-title">{isTransfer ? "Payment sent" : "Withdrawal sent"}</h2>
-          <p className="success-amount">
-            {review} <span className="unit">kKRW</span>
+          <h2 className="mt-1.5 text-xl font-bold">
+            {isTransfer ? "Payment sent" : "Withdrawal sent"}
+          </h2>
+          <p className="text-[1.8rem] [font-weight:750] my-0.5 tabular-nums">
+            {review} <span className="text-[0.62em] font-semibold text-muted ml-1">kKRW</span>
           </p>
-          <a className="success-link" href={outcome.explorerUrl} target="_blank" rel="noreferrer">
+          <a
+            className="text-primary no-underline text-[0.9rem] font-semibold"
+            href={outcome.explorerUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
             View on explorer
           </a>
-          <p className="success-change">Change kept: {formatKkrw(outcome.changeValue)} kKRW</p>
-          <button className="btn btn-primary btn-block" onClick={() => navigate("home")}>
+          <p className="text-muted text-[0.82rem] mt-0.5 mb-2.5">
+            Change kept: {formatKkrw(outcome.changeValue)} kKRW
+          </p>
+          <Button variant="primary" block className="mt-2" onClick={() => navigate("home")}>
             Done
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -135,11 +145,11 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
   // --- running ---------------------------------------------------------------
   if (phase === "running") {
     return (
-      <div className="screen">
+      <div className="flex flex-col gap-4.5 px-4.5 pt-4.5 pb-6.5">
         <ScreenHeader title={title} />
-        <div className="spend-body">
-          <div className="review-amount">
-            {review} <span className="unit">kKRW</span>
+        <div className="flex flex-col gap-4">
+          <div className="text-center text-[1.9rem] [font-weight:750] py-2 tabular-nums">
+            {review} <span className="text-[0.62em] font-semibold text-muted ml-1">kKRW</span>
           </div>
           <StagedProgress stage={stage} elapsed={elapsed} />
         </div>
@@ -150,35 +160,46 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
   // --- confirm ---------------------------------------------------------------
   if (phase === "confirm") {
     return (
-      <div className="screen">
+      <div className="flex flex-col gap-4.5 px-4.5 pt-4.5 pb-6.5">
         <ScreenHeader title={`Confirm ${title.toLowerCase()}`} />
-        <div className="spend-body">
-          <div className="review-amount">
-            {review} <span className="unit">kKRW</span>
+        <div className="flex flex-col gap-4">
+          <div className="text-center text-[1.9rem] [font-weight:750] py-2 tabular-nums">
+            {review} <span className="text-[0.62em] font-semibold text-muted ml-1">kKRW</span>
           </div>
-          <dl className="review">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3.5 gap-y-2 p-3.5 bg-surface border border-border rounded-xl">
             {isTransfer && (
               <>
-                <dt>To</dt>
-                <dd className="mono">{recipient.trim()}</dd>
+                <dt className="text-muted text-sm">To</dt>
+                <dd className="font-mono text-right text-[0.9rem] [overflow-wrap:anywhere]">
+                  {recipient.trim()}
+                </dd>
               </>
             )}
-            <dt>{isTransfer ? "From" : "Source"}</dt>
-            <dd>Your private balance</dd>
-            <dt>Network</dt>
-            <dd>GIWA · chain {DEFAULTS.chainId}</dd>
+            <dt className="text-muted text-sm">{isTransfer ? "From" : "Source"}</dt>
+            <dd className="text-right text-[0.9rem] [overflow-wrap:anywhere]">
+              Your private balance
+            </dd>
+            <dt className="text-muted text-sm">Network</dt>
+            <dd className="text-right text-[0.9rem] [overflow-wrap:anywhere]">
+              GIWA · chain {DEFAULTS.chainId}
+            </dd>
           </dl>
-          <p className="hint">
+          <p className="text-sm text-muted">
             Your proof is generated on this device — your key never leaves the browser.
           </p>
           <DownloadProgress view={download} />
-          <div className="btn-row">
-            <button className="btn btn-ghost" onClick={() => setPhase("form")}>
+          <div className="flex gap-2.5">
+            <Button variant="ghost" className="flex-1" onClick={() => setPhase("form")}>
               Back
-            </button>
-            <button className="btn btn-primary" disabled={download.active} onClick={submit}>
+            </Button>
+            <Button
+              variant="primary"
+              className="flex-1"
+              disabled={download.active}
+              onClick={submit}
+            >
               {download.active ? "Preparing keys…" : "Confirm & prove"}
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -190,9 +211,9 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
   // everything the user could press here needs these assets anyway.
   if (download.active) {
     return (
-      <div className="screen">
+      <div className="flex flex-col gap-4.5 px-4.5 pt-4.5 pb-6.5">
         <ScreenHeader title={title} />
-        <div className="spend-body">
+        <div className="flex flex-col gap-4">
           <DownloadProgress view={download} />
         </div>
       </div>
@@ -200,14 +221,14 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
   }
 
   return (
-    <div className="screen">
+    <div className="flex flex-col gap-4.5 px-4.5 pt-4.5 pb-6.5">
       <ScreenHeader title={title} />
-      <div className="spend-body">
+      <div className="flex flex-col gap-4">
         {isTransfer && (
-          <label className="field">
-            <span className="field-label">Recipient address</span>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[0.82rem] text-muted font-semibold">Recipient address</span>
             <input
-              className="input mono"
+              className="bg-surface border border-border rounded-xl px-3.5 py-[13px] text-ink font-mono text-[0.98rem] w-full tabular-nums focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(18,58,92,0.12)]"
               placeholder="0x… compressed bongtu pubkey"
               value={recipient}
               onChange={(e) => setRecipient(e.target.value)}
@@ -215,29 +236,36 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
               autoCorrect="off"
               spellCheck={false}
             />
-            {recipient.trim() && rcptErr && <span className="field-err">{rcptErr}</span>}
+            {recipient.trim() && rcptErr && (
+              <span className="text-[0.8rem] text-err">{rcptErr}</span>
+            )}
           </label>
         )}
 
-        <label className="field">
-          <span className="field-label">Amount (kKRW)</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[0.82rem] text-muted font-semibold">Amount (kKRW)</span>
           <input
-            className="input"
+            className="bg-surface border border-border rounded-xl px-3.5 py-[13px] text-ink text-[0.98rem] w-full tabular-nums focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(18,58,92,0.12)]"
             inputMode="decimal"
             placeholder="0.00"
             value={amount}
             onChange={(e) => setAmount(e.target.value.replace(/[^\d.,]/g, ""))}
           />
-          <span className="field-hint">
+          <span className="text-[0.78rem] text-muted">
             Balance: {balance === null ? "—" : formatKkrw(balance)} kKRW
           </span>
-          {amount.trim() && amtErr && <span className="field-err">{amtErr}</span>}
+          {amount.trim() && amtErr && <span className="text-[0.8rem] text-err">{amtErr}</span>}
         </label>
 
-        {error && <div className="banner banner-err">{error}</div>}
+        {error && (
+          <div className="rounded-xl px-3.5 py-3 text-[0.88rem] flex gap-2.5 items-center justify-between flex-wrap border border-err-border bg-err-bg text-err">
+            {error}
+          </div>
+        )}
 
-        <button
-          className="btn btn-primary btn-block"
+        <Button
+          variant="primary"
+          block
           disabled={!formValid}
           onClick={() => {
             setError(null);
@@ -245,7 +273,7 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
           }}
         >
           Review {title.toLowerCase()}
-        </button>
+        </Button>
       </div>
     </div>
   );

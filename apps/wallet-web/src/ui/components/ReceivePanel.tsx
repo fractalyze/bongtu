@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import QRCode from "qrcode";
 import { useCopyFeedback } from "../hooks.js";
+import { Button } from "./controls.js";
 
 export function ReceivePanel({ pubkey }: { pubkey: string }): ReactNode {
   const [qr, setQr] = useState<string>("");
@@ -28,13 +29,23 @@ export function ReceivePanel({ pubkey }: { pubkey: string }): ReactNode {
   }, [pubkey]);
 
   return (
-    <div className="receive-body">
-      <p className="receive-lead">Share this address to receive privacy kKRW.</p>
-      <div className="qr-frame">{qr ? <img className="qr" src={qr} alt="Your bongtu address QR" /> : <div className="qr-skeleton" />}</div>
-      <div className="pubkey-box mono">{pubkey}</div>
-      <button className="btn btn-primary btn-block" onClick={copy}>
+    <div className="flex flex-col gap-4 items-center">
+      <p className="text-muted text-[0.9rem] text-center mt-1">
+        Share this address to receive privacy kKRW.
+      </p>
+      <div className="bg-surface border border-border p-3 rounded-2xl">
+        {qr ? (
+          <img className="block w-60 max-w-full h-auto" src={qr} alt="Your bongtu address QR" />
+        ) : (
+          <div className="w-60 h-60 bg-surface-2 rounded-lg animate-pulse-soft" />
+        )}
+      </div>
+      <div className="w-full bg-surface-2 border border-border rounded-xl px-3.5 py-3 font-mono text-[0.8rem] text-muted [overflow-wrap:anywhere] text-center">
+        {pubkey}
+      </div>
+      <Button variant="primary" block onClick={copy}>
         {copied ? "Copied" : "Copy address"}
-      </button>
+      </Button>
     </div>
   );
 }

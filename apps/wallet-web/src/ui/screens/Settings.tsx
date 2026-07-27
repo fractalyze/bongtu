@@ -9,6 +9,7 @@ import { DEFAULTS } from "../../config.js";
 import { useWallet } from "../App.js";
 import { IconExternalLink } from "../components/icons.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
+import { Button } from "../components/controls.js";
 import { shortenPubkey } from "../format.js";
 
 const EXPLORER = DEFAULTS.explorer.replace(/\/+$/, "");
@@ -35,23 +36,26 @@ function Row({
   mono?: boolean;
 }): ReactNode {
   const tipId = useId();
-  const cls = `settings-val${mono ? " mono" : ""}`;
+  const row =
+    "flex justify-between gap-3.5 py-[11px] border-b border-border last:border-b-0 text-[0.88rem]";
+  const cls = `inline-flex items-center gap-1.5${mono ? " font-mono" : ""}`;
   if (!full) {
     return (
-      <div className="settings-row">
-        <span className="settings-key">{label}</span>
+      <div className={row}>
+        <span className="text-muted flex-none">{label}</span>
         <span className={cls}>{value}</span>
       </div>
     );
   }
   const short = shortenPubkey(full);
   return (
-    <div className="settings-row">
-      <span className="settings-key">{label}</span>
-      <span className="tip-wrap">
+    <div className={row}>
+      <span className="text-muted flex-none">{label}</span>
+      <span className="relative inline-flex group">
         {href ? (
           <span className={cls}>
             <a
+              className="text-inherit inline-flex items-center gap-1.5 no-underline hover:text-primary"
               href={href}
               target="_blank"
               rel="noreferrer"
@@ -63,12 +67,18 @@ function Row({
             </a>
           </span>
         ) : (
-          // tabIndex so keyboard users can reveal the tooltip (.tip-wrap:has(:focus-visible))
+          // tabIndex so keyboard users can reveal the tooltip (group-has-[:focus-visible])
           <span className={cls} tabIndex={0} aria-describedby={tipId}>
             {short}
           </span>
         )}
-        <span className="tip mono" role="tooltip" id={tipId}>
+        {/* the value hugs the frame's right edge; a centered 250px tip would be clipped
+            by the frame's overflow-hidden — anchor it to the right instead */}
+        <span
+          className="absolute bottom-[calc(100%+8px)] left-auto right-0 translate-x-0 bg-ink text-white font-mono text-[0.68rem] leading-[1.45] px-[9px] py-1.5 rounded-lg w-max max-w-[250px] [overflow-wrap:anywhere] text-center opacity-0 pointer-events-none transition-opacity z-30 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100"
+          role="tooltip"
+          id={tipId}
+        >
           {full}
         </span>
       </span>
@@ -82,34 +92,37 @@ export function Settings(): ReactNode {
   const dirty = draft.trim() !== indexerUrl;
 
   return (
-    <div className="screen">
+    <div className="flex flex-col gap-4.5 px-4.5 pt-4.5 pb-6.5">
       <ScreenHeader title="Settings" />
-      <div className="settings-body">
-        <h2 className="section-title">Indexer</h2>
-        <label className="field">
-          <span className="field-label">Arbiter indexer URL</span>
+      <div className="flex flex-col gap-3.5">
+        <h2 className="text-xs uppercase tracking-[0.08em] text-muted [font-weight:650]">Indexer</h2>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[0.82rem] text-muted font-semibold">Arbiter indexer URL</span>
           <input
-            className="input mono"
+            className="bg-surface border border-border rounded-xl px-3.5 py-[13px] text-ink font-mono text-[0.98rem] w-full tabular-nums focus:outline-none focus:border-primary focus:shadow-[0_0_0_3px_rgba(18,58,92,0.12)]"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             autoCapitalize="off"
             autoCorrect="off"
             spellCheck={false}
           />
-          <span className="field-hint">
+          <span className="text-[0.78rem] text-muted">
             Balance and activity are read from this arbiter-mode indexer.
           </span>
         </label>
-        <button
-          className="btn btn-primary btn-block"
+        <Button
+          variant="primary"
+          block
           disabled={!dirty || !draft.trim()}
           onClick={() => setIndexerUrl(draft.trim())}
         >
           Save indexer URL
-        </button>
+        </Button>
 
-        <h2 className="section-title">Deployment</h2>
-        <div className="settings-card">
+        <h2 className="text-xs uppercase tracking-[0.08em] text-muted [font-weight:650]">
+          Deployment
+        </h2>
+        <div className="bg-surface border border-border rounded-xl px-3.5 py-1">
           <Row label="Network" value={`GIWA · chain ${DEFAULTS.chainId}`} />
           <Row label="Pool" full={DEFAULTS.pool} href={`${EXPLORER}/address/${DEFAULTS.pool}`} mono />
           <Row label="Token" full={DEFAULTS.token} href={`${EXPLORER}/address/${DEFAULTS.token}`} mono />
@@ -119,10 +132,10 @@ export function Settings(): ReactNode {
           {identity && <Row label="Your address" full={identity.compressedPubkey} mono />}
         </div>
 
-        <button className="btn btn-danger btn-block" onClick={disconnect}>
+        <Button variant="danger" block onClick={disconnect}>
           Disconnect
-        </button>
-        <p className="settings-fine">
+        </Button>
+        <p className="text-xs text-muted">
           Disconnecting clears your key from this device. Reconnect anytime — your key is
           re-derived from your wallet signature.
         </p>

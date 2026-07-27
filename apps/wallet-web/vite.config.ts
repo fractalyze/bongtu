@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { Plugin } from "vite";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..", "..");
@@ -67,7 +68,7 @@ export default defineConfig(({ mode }) => {
   return {
     // react() transpiles JSX + wires Fast Refresh; tsJsResolve is enforce:"pre" so the
     // NodeNext ".js" -> ".ts"/".tsx" rewrite resolves before React's own hooks run.
-    plugins: [react(), tsJsResolve()],
+    plugins: [react(), tailwindcss(), tsJsResolve()],
     server: {
       // The wallet imports unbuilt @bongtu/* workspace source (packages/core, apps/indexer
       // via root node_modules symlinks) — allow

@@ -175,8 +175,10 @@ export function App(): ReactNode {
 
   return (
     <WalletContext.Provider value={value}>
-      <div className="page">
-        <div className="frame">{identity ? <Router route={route} /> : <Onboarding />}</div>
+      <div className="min-h-full flex justify-center items-stretch p-[clamp(0px,3vw,28px)]">
+        <div className="w-full max-w-[420px] bg-bg border border-border rounded-[clamp(0px,3vw,20px)] shadow-[0_8px_28px_-18px_rgba(17,24,39,0.18)] overflow-hidden flex flex-col min-h-[min(760px,calc(100vh-56px))]">
+          {identity ? <Router route={route} /> : <Onboarding />}
+        </div>
       </div>
     </WalletContext.Provider>
   );

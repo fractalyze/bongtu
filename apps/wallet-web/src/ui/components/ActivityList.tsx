@@ -11,6 +11,7 @@ import type { ReactNode } from "react";
 import type { HistoryItem, HistoryKind } from "../../lib/indexerClient.js";
 import { formatKkrw } from "../../lib/money.js";
 import { relativeTime, shortenPubkey } from "../format.js";
+import { LinkButton } from "./controls.js";
 import {
   IconReceived,
   IconSend,
@@ -47,27 +48,40 @@ function Row({ item, explorerBase }: { item: HistoryItem; explorerBase: string }
   // Only the external-link icon navigates (user decision): a whole-row anchor made
   // every stray tap an explorer round-trip.
   return (
-    <div className="activity-row">
-      <span className={`activity-icon activity-${dir}`}>
+    <div className="flex items-center gap-3 py-[11px] border-t border-border first:border-t-0">
+      <span
+        className={`w-[34px] h-[34px] rounded-full grid place-items-center flex-none ${
+          dir === "in" ? "bg-pos-bg text-pos" : "bg-surface-2 text-muted"
+        }`}
+      >
         <Kind size={16} />
       </span>
-      <span className="activity-mid">
-        <span className="activity-verb">{VERB[item.kind]}</span>
+      <span className="flex-1 min-w-0 flex flex-col gap-0.5">
+        <span className="font-semibold text-[0.92rem]">{VERB[item.kind]}</span>
         {item.counterparty && (
-          <span className="activity-cpty" title={item.counterparty}>
+          <span
+            className="font-mono text-[0.74rem] text-muted overflow-hidden text-ellipsis whitespace-nowrap"
+            title={item.counterparty}
+          >
             {shortenPubkey(item.counterparty)}
           </span>
         )}
       </span>
-      <span className="activity-right">
-        <span className={`activity-amt activity-${dir}`}>
+      <span className="flex flex-col items-end gap-0 flex-none">
+        <span
+          className={`font-bold tabular-nums text-[0.92rem] leading-[1.25] ${
+            dir === "in" ? "text-pos" : "text-ink"
+          }`}
+        >
           {dir === "in" ? "+" : "-"}
           {formatKkrw(item.amount)}
         </span>
-        <span className="activity-time">{relativeTime(item.blockTimestamp)}</span>
+        <span className="text-xs text-muted leading-[1.2]">
+          {relativeTime(item.blockTimestamp)}
+        </span>
       </span>
       <a
-        className="activity-ext"
+        className="inline-flex text-muted flex-none p-1 -m-1 rounded-md hover:text-primary focus-visible:text-primary"
         href={href}
         target="_blank"
         rel="noreferrer"
@@ -95,21 +109,23 @@ export function ActivityList({
   onViewAll?: () => void;
 }): ReactNode {
   return (
-    <section className="activity">
+    <section className="flex flex-col gap-1.5 bg-surface border border-border rounded-xl px-3.5 py-3">
       {heading !== null && (
-        <div className="activity-head">
-          <h2 className="section-title">{heading}</h2>
+        <div className="flex justify-between items-baseline">
+          <h2 className="text-xs uppercase tracking-[0.08em] text-muted [font-weight:650]">
+            {heading}
+          </h2>
           {onViewAll && history.length > 0 && (
-            <button className="link-btn" onClick={onViewAll}>
-              View all
-            </button>
+            <LinkButton onClick={onViewAll}>View all</LinkButton>
           )}
         </div>
       )}
       {history.length === 0 ? (
-        <p className="activity-empty">{loading ? "Loading activity…" : "No activity yet."}</p>
+        <p className="text-muted text-[0.88rem] my-1">
+          {loading ? "Loading activity…" : "No activity yet."}
+        </p>
       ) : (
-        <div className="activity-rows">
+        <div className="flex flex-col">
           {history.map((it) => (
             <Row key={`${it.seq}-${it.txHash}`} item={it} explorerBase={explorerBase} />
           ))}

@@ -7,18 +7,19 @@ import { useWallet } from "../App.js";
 import { DEFAULTS } from "../../config.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
 import { ActivityList } from "../components/ActivityList.js";
+import { Button } from "../components/controls.js";
 
 export function Activity(): ReactNode {
   const { history, loading, dataError, refresh } = useWallet();
   return (
-    <div className="screen">
+    <div className="flex flex-col gap-4.5 px-4.5 pt-4.5 pb-6.5">
       <ScreenHeader title="Activity" />
       {dataError ? (
-        <div className="banner banner-warn">
+        <div className="rounded-xl px-3.5 py-3 text-[0.88rem] flex gap-2.5 items-center justify-between flex-wrap border border-warn-border bg-warn-bg text-warn">
           {dataError}
-          <button className="btn btn-ghost btn-sm" onClick={() => void refresh()}>
+          <Button variant="ghost" size="sm" onClick={() => void refresh()}>
             Retry
-          </button>
+          </Button>
         </div>
       ) : (
         <ActivityList

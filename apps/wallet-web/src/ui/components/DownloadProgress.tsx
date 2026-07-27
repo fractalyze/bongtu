@@ -15,18 +15,26 @@ export function DownloadProgress({ view }: { view: CircuitDownloadView }): React
   if (!view.active) return null;
   const pct = view.total !== null && view.total > 0 ? Math.min(100, (view.received / view.total) * 100) : null;
   return (
-    <div className="dl" role="status" aria-live="polite">
-      <div className="dl-head">
-        <span className="dl-title">Downloading proving keys</span>
-        <span className="dl-note">one-time · cached for next visits</span>
+    <div
+      className="flex flex-col gap-2 bg-surface border border-border rounded-xl px-3.5 py-3"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="flex justify-between items-baseline gap-2">
+        <span className="text-sm font-semibold">Downloading proving keys</span>
+        <span className="text-xs text-muted">one-time · cached for next visits</span>
       </div>
-      <div className="dl-track">
+      <div className="h-1.5 rounded-full bg-surface-2 overflow-hidden">
         <div
-          className={pct === null ? "dl-fill dl-fill-indeterminate" : "dl-fill"}
+          className={
+            pct === null
+              ? "h-full rounded-full bg-primary w-[35%] animate-dl-sweep"
+              : "h-full rounded-full bg-primary transition-[width] duration-[250ms]"
+          }
           style={pct === null ? undefined : { width: `${pct}%` }}
         />
       </div>
-      <div className="dl-meta">
+      <div className="flex justify-between text-[0.78rem] text-muted tabular-nums">
         <span>
           {mb(view.received)}
           {view.total !== null ? ` / ${mb(view.total)} MB` : " MB"}

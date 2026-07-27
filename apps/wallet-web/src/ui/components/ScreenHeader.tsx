@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { navigate } from "../hooks.js";
+import { IconButton } from "./controls.js";
 import { IconBack } from "./icons.js";
 
 export function ScreenHeader({
@@ -10,12 +11,16 @@ export function ScreenHeader({
   right?: ReactNode;
 }): ReactNode {
   return (
-    <header className="screen-head">
-      <button className="icon-btn" aria-label="Back" onClick={() => navigate("home")}>
+    <header className="grid grid-cols-[1fr_auto_1fr] items-center">
+      <IconButton
+        className="justify-self-start"
+        aria-label="Back"
+        onClick={() => navigate("home")}
+      >
         <IconBack />
-      </button>
-      <h1 className="screen-title">{title}</h1>
-      <div className="screen-head-right">{right}</div>
+      </IconButton>
+      <h1 className="text-[1.05rem] [font-weight:650] text-center">{title}</h1>
+      <div className="flex justify-end">{right}</div>
     </header>
   );
 }

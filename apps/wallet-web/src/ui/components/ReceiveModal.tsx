@@ -9,6 +9,7 @@
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { ReceivePanel } from "./ReceivePanel.js";
+import { IconButton } from "./controls.js";
 import { IconClose } from "./icons.js";
 
 const FOCUSABLE = 'button, a[href], input, [tabindex]:not([tabindex="-1"])';
@@ -52,7 +53,7 @@ export function ReceiveModal({ pubkey, onClose }: { pubkey: string; onClose: () 
 
   return (
     <div
-      className="modal-backdrop"
+      className="fixed inset-0 bg-backdrop flex items-center justify-center p-5 z-50"
       onMouseDown={(e) => {
         downOnBackdrop.current = e.target === e.currentTarget;
       }}
@@ -61,12 +62,18 @@ export function ReceiveModal({ pubkey, onClose }: { pubkey: string; onClose: () 
         downOnBackdrop.current = false;
       }}
     >
-      <div ref={cardRef} className="modal-card" role="dialog" aria-modal="true" aria-label="Receive">
-        <div className="modal-head">
-          <h2 className="modal-title">Receive</h2>
-          <button className="icon-btn" aria-label="Close" onClick={onClose}>
+      <div
+        ref={cardRef}
+        className="bg-surface rounded-2xl px-4.5 pt-4 pb-5 w-full max-w-[360px] max-h-[calc(100vh-40px)] overflow-y-auto flex flex-col gap-2.5 shadow-[0_18px_44px_-20px_rgba(17,24,39,0.45)]"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Receive"
+      >
+        <div className="flex items-center justify-between">
+          <h2 className="text-[1.02rem] [font-weight:650]">Receive</h2>
+          <IconButton aria-label="Close" onClick={onClose}>
             <IconClose />
-          </button>
+          </IconButton>
         </div>
         <ReceivePanel pubkey={pubkey} />
       </div>

@@ -23,6 +23,13 @@ const LABEL: Record<ChipState, string> = {
   offline: "offline",
 };
 
+const DOT: Record<ChipState, string> = {
+  checking: "bg-muted animate-pulse-soft",
+  synced: "bg-pos",
+  degraded: "bg-warn",
+  offline: "bg-err",
+};
+
 export function StatusChip({ indexerUrl }: { indexerUrl: string }): ReactNode {
   const [health, setHealth] = useState<Health | null>(null);
   const [errored, setErrored] = useState(false);
@@ -50,8 +57,11 @@ export function StatusChip({ indexerUrl }: { indexerUrl: string }): ReactNode {
 
   const state = classify(health, errored);
   return (
-    <span className={`chip chip-${state}`} title={`indexer ${indexerUrl}`}>
-      <span className="chip-dot" />
+    <span
+      className="inline-flex items-center gap-1.5 text-xs text-muted"
+      title={`indexer ${indexerUrl}`}
+    >
+      <span className={`w-[7px] h-[7px] rounded-full ${DOT[state]}`} />
       {LABEL[state]}
     </span>
   );

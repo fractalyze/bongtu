@@ -6,7 +6,10 @@ import { IconCheck } from "./icons.js";
 
 export function SuccessMark(): ReactNode {
   return (
-    <div className="success-check" aria-hidden="true">
+    <div
+      className="w-[62px] h-[62px] rounded-full grid place-items-center bg-pos-bg border border-pos text-pos"
+      aria-hidden="true"
+    >
       <IconCheck size={30} />
     </div>
   );
