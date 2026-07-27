@@ -9,20 +9,62 @@ into `packages/core/src/network.ts` so both web apps read one set of constants.
 | role | address |
 |---|---|
 | BongtuPool — ERC-1967 proxy, the canonical pool | `0x93365980784ef504613EF5822ce1289CF858Fc10` |
-| BongtuPool implementation | `0x459f80A457f11328eBd67aeBFa9F90D05c58b27f` |
+| BongtuPool implementation | `0xc975d2897bA961c11Eb8EB86f2654272a5b6b631` |
 | Poseidon-v1 hasher | `0xaA7778c778C83cE5655d5F217bDfE7782e01Bc50` |
-| DepositVerifier | `0xF3b5D0eb5558B9427Fe599792E728b9B2bD20B2E` |
-| WithdrawVerifier | `0xaA581CFB50F69144C6a9B6380193858E8f4B00Db` |
-| Disburse256Verifier | `0xD030602597CC7F47107e6F96d0d1D6b73a71698F` |
-| TransferVerifier | `0x594408F216d096E8BCB21cdceb58a14186895892` |
+| DepositVerifier | `0x71F42727670Ad93685665b437711531156E57624` |
+| WithdrawVerifier | `0xBA13CB6c005291aa33b7f68A3ABC26002562A9A7` |
+| Disburse256Verifier (`disburseVerifier`) | `0x378439670AbD2C497443D21113727fa4827b47ea` |
+| TransferVerifier | `0x550A32693d1B6855247d96ef5Ec4512B6095CD99` |
 | mock kKRW (ERC-20) | `0x17A89cC5FF3395Bb01464c9E422749CcDbFa8C3f` |
 | owner / deployer | `0xe92a97e645351268F3d60d5a27EB842A5b293058` |
 
-`batchSize` is 256. The **proxy** is the address to integrate against; the implementation changes
-on upgrade. The live pool is canonical and is not redeployed for new work — a circuit change ships
+`batchSize` is 256. The **proxy** is the address to integrate against; the implementation and the
+four verifiers changed in the 2026-07-27 hybrid upgrade below and will change again on the next
+circuit edit. The live pool is canonical and is not redeployed for new work — a circuit change ships
 as a UUPS `upgradeToAndCall` ([contracts.md](contracts.md#proxy-and-wiring)).
 
 `deploy/addresses.31337.json` is the equivalent record for the local anvil stack.
+
+## The hybrid PQ upgrade, 2026-07-27
+
+The live pool was migrated to the hybrid ML-KEM-768 authority envelope in **one atomic
+`upgradeToAndCall`** — new implementation, all four regenerated `+1`-public verifiers, and the
+`initializeV2` payload minting a fresh arbiter epoch, in a single transaction. Atomicity is
+load-bearing: old proofs fail the new verifiers on public count and vice versa, so a two-step
+migration would have left a window in which every op reverted.
+
+| after the upgrade | value |
+|---|---|
+| `currentEpoch()` | **1** (was 0) |
+| `arbiterKemPkHash(1)` | `0x0403c92bcdb56d0369c0981754a6f4af6719395d59eef32370dcfad9bb332314` |
+| `arbiterKemPkHash(0)` | `0x00…00` — the pre-KEM marker for every epoch-0 op |
+| arbiter bjj key | **unchanged** across the epoch |
+| `KEM_CIPHERTEXT_LEN()` | 1088 |
+
+The hash is `keccak256` of the institutional 1184-byte ML-KEM-768 encapsulation key. The key itself
+is a **public** value distributed off-chain in three places that are equality-tested against each
+other: `deploy/arbiter-kem-pk.91342.hex` (the committed material), the `arbiterKemPk` field of
+`deploy/addresses.91342.json`, and `ARBITER_KEM_PK` in `packages/core/src/network.ts`, which ships
+it to both web apps. The addresses file also records `arbiterKemPkHash` alongside `arbiterKeyX` /
+`arbiterKeyY`.
+
+Clients never trust their bundled copy. Before drawing KEM material they read
+`arbiterKemPkHash(currentEpoch())` from the pool and refuse to proceed unless it equals
+`keccak256(ARBITER_KEM_PK)` — and refuse just as loudly against a pre-KEM pool, since a hybrid build
+cannot produce a proof such a pool would accept. So a stale bundle produces a readable error, never
+a wasted proof or a silently mis-keyed envelope.
+
+`deploy/UpgradePq.s.sol` is the reusable form of this migration for a local or testnet pool. It
+defaults to rotating the *same* bjj key (the epoch boundary exists to be the KEM boundary, not to
+churn identities) and must land together with the hybrid clients and the dual-ABI indexer.
+
+**`AUTHORITY_KEM_KEY` is now an operational requirement for arbiter mode.** An arbiter-mode indexer
+against a KEM-epoch pool needs the ML-KEM-768 *decapsulation* key in that env var alongside
+`AUTHORITY_KEY`, or it refuses to boot — as it also does if the key's embedded encapsulation key
+hashes to something other than the on-chain value. Both refusals are deliberate: serving without the
+key would under-record every envelope, and serving with the wrong one would stamp every honest
+operation as tampered ([indexer.md](indexer.md#the-kem-boot-guard)). `docker-compose.yml` forwards
+the variable; like `AUTHORITY_KEY` it is never logged and never serialized.
 
 ## Chain facts
 
@@ -46,6 +88,7 @@ the faucet grant. `packages/core/src/network.ts` exports
 | file | does |
 |---|---|
 | `deploy/Deploy.s.sol` | deploys Poseidon + 4 verifiers + (optionally) a mock kKRW + the pool implementation + an `ERC1967Proxy` whose constructor runs `initialize` atomically; writes `addresses.<chainid>.json` |
+| `deploy/UpgradePq.s.sol` | the UUPS migration of an already-deployed pool to the hybrid PQ implementation: deploys the four regenerated verifiers + the new impl, then one `upgradeToAndCall` whose `initializeV2` payload swaps the verifier addresses and mints the epoch carrying both keys; rewrites the verifier/impl entries in `addresses.<chainid>.json` |
 | `deploy/Smoke.s.sol` | a real `deposit` against the deployed pool using the committed proof fixture |
 | `deploy/deploy_local.sh` | anvil + Deploy + getter read-back + Smoke — the local gate |
 | `deploy/giwa_disburse256.ts` | the live 256-recipient disburse runner (rebuild mirror → deposit → prover service → `disburseWithCiphertexts` → measure L2 gas and L1 data fee) |
@@ -80,15 +123,23 @@ proof the contract tests accept — was produced against that one key. Overridin
 them, and the smoke deposit reverts `InvalidProof`. Rotate the key **and** the fixtures together, or
 neither.
 
+Since the hybrid upgrade the coupling is a **pair**: the fixtures are bound to (arbiter bjj key,
+arbiter ML-KEM-768 pk), and the fixture encapsulation key travels as `realproofs.kemPublicKey`
+the same way `realproofs.arbiterKey` does. `ARBITER_KEM_PK_HASH` is the matching deploy/upgrade knob.
+
 The live pool's stored key is recorded as `arbiterKeyX` / `arbiterKeyY` in
 `deploy/addresses.91342.json` and re-exported as `ARBITER_PUBKEY_X` / `ARBITER_PUBKEY_Y` from
 `packages/core/src/network.ts`. It is a **public** key — shipping it in the browser bundle is
-required, since the wallet encrypts every envelope to it. The matching private key is the arbiter's
+required, since the wallet encrypts every envelope to it. The same holds for `ARBITER_KEM_PK`. The
+matching private halves (the bjj scalar and the ML-KEM-768 decapsulation key) are the arbiter's
 alone; see [security-model.md](security-model.md).
 
 ## Verifying a deployment
 
-Through the proxy: `B() == 256`, `initialized() == true`, `disburseCiphertextLen() == 2054`, the
-ERC-1967 implementation slot pointing at `poolImpl`, and `currentArbiterKey()` equal to the recorded
-key. `Deploy.s.sol` asserts the stored arbiter key itself before writing the addresses file, and
-`deploy_local.sh` reads `B()` back over `cast` before running the smoke deposit.
+Through the proxy: `B() == 256`, `initialized() == true`, `disburseCiphertextLen() == 2054`,
+`KEM_CIPHERTEXT_LEN() == 1088`, the ERC-1967 implementation slot pointing at `poolImpl`,
+`currentArbiterKey()` equal to the recorded key, and `arbiterKemPkHash(currentEpoch())` equal to
+`keccak256` of the recorded `arbiterKemPk` (nonzero — a zero here means the pool is still pre-KEM
+and every hybrid client will refuse it). `Deploy.s.sol` asserts the stored arbiter key itself before
+writing the addresses file, and `deploy_local.sh` reads `B()` back over `cast` before running the
+smoke deposit.

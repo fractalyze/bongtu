@@ -39,10 +39,15 @@ vendored into `circuits/lib/` and modified:
 
 | bongtu file | upstream source | verdict | deliberate deltas |
 |---|---|---|---|
-| `deposit.circom` + `lib/deposit_authority_imt_base.circom` | `lib/deposit.circom` | faithful derivation | added in-circuit authority envelope (18-public surface) |
-| `transfer.circom` + `lib/anon_enc_nullifier_non_repudiation_imt_small_base.circom` | `basetokens/anon_enc_nullifier_non_repudiation_base.circom` | faithful derivation | SMT→IMT membership, depth 64→32; value belt; zero-commitment guard. Upstream's `cipherTexts` / `cipherTextAuthority` outputs are kept — 36-public surface |
-| `withdraw.circom` + `lib/check-nullifiers-value-imt-base.circom` | `lib/check-nullifiers-value-base.circom` | faithful derivation | SMT→IMT membership; value belt; zero-commitment guard; `GreaterEqThan(100)→(101)` completeness fix; authority envelope |
-| `disburse.circom` / `disburse256.circom` + `lib/anon_enc_nullifier_non_repudiation_imt_base.circom` | `basetokens/anon_enc_nullifier_non_repudiation_base.circom` | derived, structurally | SMT→IMT membership; zero-commitment guard; **added** depth-`log2(B)` subtree gadget with public `subtreeRoot`; **added** public `disclosureHash`; upstream's `cipherTexts` / `cipherTextAuthority` outputs **removed** (ciphertext is bound by `disclosureHash` instead) — 10-public surface; 16- and 256-arity instantiations |
+| `deposit.circom` + `lib/deposit_authority_imt_base.circom` | `lib/deposit.circom` | faithful derivation | added in-circuit authority envelope (19-public surface) |
+| `transfer.circom` + `lib/anon_enc_nullifier_non_repudiation_imt_small_base.circom` | `basetokens/anon_enc_nullifier_non_repudiation_base.circom` | faithful derivation | SMT→IMT membership, depth 64→32; value belt; zero-commitment guard. Upstream's `cipherTexts` / `cipherTextAuthority` outputs are kept — 37-public surface |
+| `withdraw.circom` + `lib/check-nullifiers-value-imt-base.circom` | `lib/check-nullifiers-value-base.circom` | faithful derivation | SMT→IMT membership; value belt; zero-commitment guard; `GreaterEqThan(100)→(101)` completeness fix; authority envelope — 26-public surface |
+| `disburse.circom` / `disburse256.circom` + `lib/anon_enc_nullifier_non_repudiation_imt_base.circom` | `basetokens/anon_enc_nullifier_non_repudiation_base.circom` | derived, structurally | SMT→IMT membership; zero-commitment guard; **added** depth-`log2(B)` subtree gadget with public `subtreeRoot`; **added** public `disclosureHash`; upstream's `cipherTexts` / `cipherTextAuthority` outputs **removed** (ciphertext is bound by `disclosureHash` instead) — 11-public surface; 16- and 256-arity instantiations |
+
+All four bases carry one further delta upstream has no counterpart for: the envelope key is a
+hybrid ECDH ‖ ML-KEM-768 fold rather than the raw ECDH point, with `kemSs` as a private witness and
+`kemBinding` as the trailing public output — the `+1` in every count above
+([circuits.md](circuits.md#the-hybrid-envelope-key)).
 
 `GreaterEqThan(100)→(101)`: summing two 100-bit inputs can reach 2^101, which violates
 `GreaterEqThan(100)`'s `< 2^100` precondition and would make honest near-maximum withdrawals lose

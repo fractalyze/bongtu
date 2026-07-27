@@ -7,15 +7,37 @@ upstream Zeto is in [zeto-derivation.md](zeto-derivation.md); build commands are
 
 | circuit | template | arity | constraints | publics |
 |---|---|---|---|---|
-| `deposit.circom` | `BongtuDepositAuthority(2)` | 0-in / 2-out | 11,594 | 18 |
-| `transfer.circom` | `ZetoTransferSmall(2,2,32)` | 2-in / 2-out | 61,861 | 36 |
-| `withdraw.circom` | `CheckNullifiersInputsOutputsValueIMT(2,1,32)` | 2-in / 1-out | 51,786 | 25 |
-| `disburse.circom` | `Zeto(1,16,32)` | 1-in / 16-out | 206,186 | 10 |
-| `disburse256.circom` | `Zeto(1,256,32)` | 1-in / 256-out | 2,794,186 | 10 |
+| `deposit.circom` | `BongtuDepositAuthority(2)` | 0-in / 2-out | 14,127 | 19 |
+| `transfer.circom` | `ZetoTransferSmall(2,2,32)` | 2-in / 2-out | 64,394 | 37 |
+| `withdraw.circom` | `CheckNullifiersInputsOutputsValueIMT(2,1,32)` | 2-in / 1-out | 54,319 | 26 |
+| `disburse.circom` | `Zeto(1,16,32)` | 1-in / 16-out | 208,719 | 11 |
+| `disburse256.circom` | `Zeto(1,256,32)` | 1-in / 256-out | 2,796,719 | 11 |
 
-Constraint counts measured 2026-07-26 (`snarkjs r1cs info` over `circuits/out/*.r1cs`).
+Constraint counts measured 2026-07-27 (`snarkjs r1cs info` over `circuits/out/*.r1cs`).
 `disburse.circom` is the dev-loop instantiation of the *same* base as `disburse256.circom`; the
-live pool carries the 256 verifier.
+live pool carries the 256 verifier. Note that the dev-loop one is not optional collateral: a public
+count is a per-base property, so an envelope change regenerates **five** verifier/zkey pairs.
+
+## The hybrid envelope key
+
+All four bases derive their `SymmetricEncrypt` key by folding the classical ECDH secret together
+with an ML-KEM-768 shared secret supplied as a private witness, and expose a public commitment to
+that secret:
+
+```circom
+kemSsRange[i] = Num2Bits(128);  kemSsRange[i].in <== kemSs[i];   // canonical-limb hygiene
+hybridKey[0] <== Poseidon(5)([TAG_K0,   ecdh[0], ecdh[1], kemSs[0], kemSs[1]]);
+hybridKey[1] <== Poseidon(5)([TAG_K1,   ecdh[0], ecdh[1], kemSs[0], kemSs[1]]);
+kemBinding   <== Poseidon(3)([TAG_BIND, kemSs[0], kemSs[1]]);
+```
+
+`kemBinding` is declared as the **last** circuit output, which is why every existing output index is
+unchanged and every public-*input* index shifted by exactly one. Because it is computed from the
+witness, a prover cannot claim a binding inconsistent with the secret it encrypted under; the
+mechanism and its alarm-enforced trade-off are in
+[security-model.md](security-model.md#post-quantum-the-hybrid-authority-envelope-key), the exact
+derivation in [protocol.md](protocol.md#the-hybrid-envelope-key). There is no ECDH-only encryption
+path left in any base. Receiver-side `EncryptOutputs` is untouched.
 
 ## Public surfaces
 
@@ -23,60 +45,65 @@ circom orders public signals as circuit **outputs first** (declaration order), t
 `public` inputs (declaration order). The contract indexes into these vectors literally, so any
 reordering is a breaking change requiring a new verifier and a pool upgrade.
 
-**deposit — `uint[18]`**
+**deposit — `uint[19]`**
 
 | idx | signal |
 |---|---|
 | 0 | `out` (sum of output values; the amount pulled from the depositor) |
 | 1..2 | `ecdhPublicKey[2]` |
 | 3..12 | `cipherTextAuthority[10]` |
-| 13..14 | `outputCommitments[2]` |
-| 15 | `encryptionNonce` |
-| 16..17 | `authorityPublicKey[2]` |
+| 13 | `kemBinding` |
+| 14..15 | `outputCommitments[2]` |
+| 16 | `encryptionNonce` |
+| 17..18 | `authorityPublicKey[2]` |
 
-**transfer — `uint[36]`**
+**transfer — `uint[37]`**
 
 | idx | signal |
 |---|---|
 | 0..1 | `ecdhPublicKey[2]` |
 | 2..9 | `cipherTexts[2][4]` (receiver-decryptable, one per output) |
 | 10..25 | `cipherTextAuthority[16]` |
-| 26..27 | `nullifiers[2]` |
-| 28 | `root` |
-| 29..30 | `enabled[2]` |
-| 31..32 | `outputCommitments[2]` |
-| 33 | `encryptionNonce` |
-| 34..35 | `authorityPublicKey[2]` |
+| 26 | `kemBinding` |
+| 27..28 | `nullifiers[2]` |
+| 29 | `root` |
+| 30..31 | `enabled[2]` |
+| 32..33 | `outputCommitments[2]` |
+| 34 | `encryptionNonce` |
+| 35..36 | `authorityPublicKey[2]` |
 
-**withdraw — `uint[25]`**
+**withdraw — `uint[26]`**
 
 | idx | signal |
 |---|---|
 | 0 | `out` (= `sum(inputs) − sum(outputs)`, the ERC-20 amount pushed) |
 | 1..2 | `ecdhPublicKey[2]` |
 | 3..15 | `cipherTextAuthority[13]` |
-| 16..17 | `nullifiers[2]` |
-| 18 | `root` |
-| 19..20 | `enabled[2]` |
-| 21 | `outputCommitments[0]` (the change note) |
-| 22 | `encryptionNonce` |
-| 23..24 | `authorityPublicKey[2]` |
+| 16 | `kemBinding` |
+| 17..18 | `nullifiers[2]` |
+| 19 | `root` |
+| 20..21 | `enabled[2]` |
+| 22 | `outputCommitments[0]` (the change note) |
+| 23 | `encryptionNonce` |
+| 24..25 | `authorityPublicKey[2]` |
 
-**disburse / disburse256 — `uint[10]`**
+**disburse / disburse256 — `uint[11]`**
 
 | idx | signal |
 |---|---|
 | 0..1 | `ecdhPublicKey[2]` |
 | 2 | `disclosureHash` |
 | 3 | `subtreeRoot` |
-| 4 | `nullifiers[0]` |
-| 5 | `root` |
-| 6 | `enabled[0]` |
-| 7 | `encryptionNonce` |
-| 8..9 | `authorityPublicKey[2]` |
+| 4 | `kemBinding` |
+| 5 | `nullifiers[0]` |
+| 6 | `root` |
+| 7 | `enabled[0]` |
+| 8 | `encryptionNonce` |
+| 9..10 | `authorityPublicKey[2]` |
 
-The batch's ciphertext does **not** ride in the public vector: it travels as a separate calldata
-argument bound by `disclosureHash` (see [protocol.md](protocol.md) and [contracts.md](contracts.md)).
+Neither the batch's ciphertext nor the 1088-byte `kemCiphertext` rides in the public vector. The
+former travels as a separate calldata argument bound by `disclosureHash`; the latter as a `bytes`
+argument bound by `kemBinding` (see [protocol.md](protocol.md) and [contracts.md](contracts.md)).
 
 ## Soundness invariants
 

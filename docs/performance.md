@@ -3,11 +3,37 @@
 Measured numbers only. Each row says when and how it was taken; anything not reproducible from this
 tree or from chain is not here.
 
-## On-chain gas per operation
+Two measurement contexts appear below and they are not comparable: the **harness** figures are a
+clean `gasleft()` delta around the pool call, and the **live** figures are whole-transaction
+`gasUsed` from a GIWA receipt, which also pays the intrinsic cost and the calldata cost of
+everything the call receives. Rows are additionally labelled **pre-KEM** (before the 2026-07-27
+hybrid ML-KEM-768 envelope upgrade) or **hybrid** (after it).
+
+## Live chain, hybrid envelope
+
+Whole-transaction `gasUsed` from the GIWA receipts of the end-to-end run against the live pool
+`0x93365980784ef504613EF5822ce1289CF858Fc10` on arbiter epoch 1, **measured 2026-07-27**:
+
+| operation | L2 gas | L1 data fee | tx |
+|---|---|---|---|
+| `deposit` | 2,630,914 | 1.22e-7 ETH over 27,599 L1 gas | `0xa18ef3c12ae19fd06ba8eff1684b0d9610af861c8c5cb28cf4a539dc403521e1` |
+| `transfer` | 2,769,948 | 1.59e-7 ETH over 34,772 L1 gas | `0x7112ed922bc7a7c143f2fcd55a94dbf7a93fc89c5f204c8ddddc17814acddf1c` |
+| `withdraw` | 1,729,696 | 1.37e-7 ETH over 29,606 L1 gas | `0x174c28a654f59a4032e576f84cc7fc014a72ce57283fbe9a71ae6ad548ed4ba9` |
+
+All three at the pinned 0.005 gwei L2 price, so an operation costs ≈ 0.9–1.4e-5 ETH. Against the
+prior live measurements on the same pool pre-upgrade (2026-07-24: deposit ≈ 2.24M, transfer ≈ 2.48M,
+withdraw ≈ 1.28M) the hybrid delta is the 1088-byte `kemCiphertext` carried in calldata **and**
+re-emitted in the event, plus one extra Groth16 public input — the same double-pay lever flagged
+below for disburse ciphertext.
+
+`disburseWithCiphertexts` has **not** been re-measured live since the upgrade; it is an admin-path
+operation and the live 256-recipient figure below is pre-KEM.
+
+## On-chain gas per operation (harness, pre-KEM)
 
 Clean `gasleft()` delta around the single pool call, real verifiers, B=16 pool
 (`contracts/test/GasReport.t.sol`; `forge --gas-report` inflates via metering and mixes arities, so
-it is not used). **Measured 2026-07-26** on the current tree.
+it is not used). **Measured 2026-07-26**, before the hybrid upgrade.
 
 | operation | L2 gas | notes |
 |---|---|---|
@@ -17,7 +43,7 @@ it is not used). **Measured 2026-07-26** on the current tree.
 | `disburseWithCiphertexts` (1-in / 16-out, partial block, full ciphertext) | 2,194,716 | B=16 dev arity |
 
 The production 256 arity (`contracts/test/Disburse256.t.sol`, real GPU proof against the real
-verifier, **measured 2026-07-26**):
+verifier, **measured 2026-07-26**, pre-KEM):
 
 Both cases seed a single input note at leaf 0, so both disburse into a **1-leaf partial block** and
 both close it in-call before attaching the 256-leaf subtree:
@@ -33,12 +59,12 @@ second also pins `root()` against the `@bongtu/core` oracle. The partial-block c
 inserting the ≤255 pad leaves individually would be O(B) — up to 255 leaves × 32 hashes — and would
 not fit under the cap ([protocol.md](protocol.md#batch-attach-is-olog-b-not-ob)).
 
-### Live chain
+### Live chain: the 256-recipient disburse (pre-KEM)
 
 The headline 256-recipient private disbursement, run against the live pool
 `0x93365980784ef504613EF5822ce1289CF858Fc10` — tx
 `0xe254240a5df042a163073c028399a5fc63cf87434a7e7ebbf5ddfea73c803bd6`, block 31560457,
-**receipt read 2026-07-26**:
+**receipt read 2026-07-26**, on arbiter epoch 0 (pre-KEM):
 
 | quantity | value |
 |---|---|
@@ -85,21 +111,24 @@ Three levers follow directly, none implemented:
 
 | circuit | constraints | zkey | proven by |
 |---|---|---|---|
-| `deposit` | 11,594 | 5.6 MB | `circuits/prove_all.sh` (CPU); also in-browser |
-| `withdraw` | 51,786 | 24 MB | `circuits/prove_all.sh` (CPU); also in-browser |
-| `transfer` | 61,861 | 27 MB | `circuits/prove_all.sh` (CPU); also in-browser |
-| `disburse` (1×16) | 206,186 | 92 MB | `circuits/prove_all.sh` (CPU) |
-| `disburse256` (1×256) | 2,794,186 | 1.3 GB | `prover/` only — rabbitsnark on GPU, zkey held resident |
+| `deposit` | 14,127 | 6.5 MB | `circuits/prove_all.sh` (CPU); also in-browser |
+| `withdraw` | 54,319 | 24 MB | `circuits/prove_all.sh` (CPU); also in-browser |
+| `transfer` | 64,394 | 28 MB | `circuits/prove_all.sh` (CPU); also in-browser |
+| `disburse` (1×16) | 208,719 | 92 MB | `circuits/prove_all.sh` (CPU) |
+| `disburse256` (1×256) | 2,796,719 | 1.3 GB | `prover/` only — rabbitsnark on GPU, zkey held resident |
 
-Constraint counts and zkey sizes measured 2026-07-26 (`snarkjs r1cs info`, `ls` over
-`circuits/out/`).
+Constraint counts and zkey sizes measured 2026-07-27 (`snarkjs r1cs info`, `ls` over
+`circuits/out/`) on the hybrid circuits. The hybrid key derivation costs a flat **+2,533
+constraints** in every circuit — two Poseidon(5), one Poseidon(3) and the two `Num2Bits(128)` limb
+range checks — which is +22% on `deposit` and under +0.1% on `disburse256`.
 
 - **disburse256 on GPU** (rabbitsnark, RTX 5090, `CUDA_VISIBLE_DEVICES=0`): warm proof ≈ **0.47 s**;
   the cold zkey compile that precedes the first proof is ≈ 120 s. Recorded in the repo `CLAUDE.md`
   regen recipe and the root `README.md` status (measured 2026-07-24). The prover service keeps the
   compiled zkey resident so production proofs are the warm number; a cold service boot pays the
   compile once.
-- **Browser transfer** (headless Chromium, real): warm proof **3.5–5.4 s** on a 24-thread desktop.
+- **Browser transfer** (headless Chromium, real): warm proof **3.5–5.4 s** on a 24-thread desktop,
+  measured 2026-07-26 on the pre-KEM transfer circuit; the hybrid circuit adds ~4% constraints.
   The laptop figure carried alongside it in `apps/wallet-web/src/lib/prove.ts` — 7–20 s — is a
   budget, not a measurement. COOP/COEP had no effect and are not set.
 - CPU `groth16 setup` for disburse256 is a multi-minute step producing the 1.3 GB zkey; it is not in

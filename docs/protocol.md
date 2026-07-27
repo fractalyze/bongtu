@@ -113,13 +113,64 @@ reach of any block limit. The sub-`LOG_B` frontier is left stale on purpose: `ne
 ## Authority envelopes
 
 Every operation encrypts one envelope to the pool's stored arbiter public key **inside the proof**.
-Encryption is ECDH + Poseidon sponge (`SymmetricEncrypt` in-circuit, `poseidonEncrypt` in
-`packages/core/src/note.ts`), keyed by `ECDH(ephemeralPrivateKey, arbiterPublicKey)`. Given the
-arbiter private key plus the on-chain `(ecdhPublicKey, encryptionNonce, ciphertext)`, the auditor
-recovers the plaintext with no user key and no nullifier linkage.
+Encryption is a Poseidon sponge (`SymmetricEncrypt` in-circuit, `poseidonEncrypt` in
+`packages/core/src/note.ts`) under a two-element key. Given the arbiter's key material plus the
+on-chain `(ecdhPublicKey, encryptionNonce, ciphertext, kemCiphertext)`, the auditor recovers the
+plaintext with no user key and no nullifier linkage.
 
 Plaintext field order is a consensus artifact — reordering passes a TypeScript round-trip and
 breaks decryption of live-chain envelopes. `packages/core/src/envelope.ts` owns both directions.
+
+### The hybrid envelope key
+
+The sponge key is a hybrid of a classical ECDH secret and an ML-KEM-768 shared secret, so opening an
+envelope requires breaking both. `packages/core/src/kem.ts` owns the tags and the fold; the circuits
+carry the same literals.
+
+```
+ecdh[2]      = Ecdh(ephemeralPrivateKey, arbiterPublicKey)          // BabyJubJub, as before
+kemSs[0]     = LE-uint128(ss[0..16])                                // ML-KEM-768 shared secret,
+kemSs[1]     = LE-uint128(ss[16..32])                               //   two exact 128-bit limbs
+hybridKey[0] = Poseidon(5)([TAG_K0,   ecdh[0], ecdh[1], kemSs[0], kemSs[1]])
+hybridKey[1] = Poseidon(5)([TAG_K1,   ecdh[0], ecdh[1], kemSs[0], kemSs[1]])
+kemBinding   = Poseidon(3)([TAG_BIND, kemSs[0], kemSs[1]])
+```
+
+`TAG_K0` / `TAG_K1` / `TAG_BIND` are `sha256("bongtu/pq-envelope/v1/{key0,key1,binding}") mod r`,
+frozen as literals. Key derivation and binding are separated by both tag and arity. The limbs are
+never reduced, so the mapping into the field is bias-free.
+
+`kemSs` is a private witness in all four circuits; `kemBinding` is a public output. The 1088-byte
+`kemCiphertext` itself never enters the proof — it travels as a calldata argument, is length-checked
+on-chain, and is re-emitted in the op event so the arbiter can decapsulate from logs alone. The
+arbiter recomputes `Poseidon(3)([TAG_BIND, …])` from its own decapsulation and compares; a mismatch
+means the ciphertext does not match the secret the envelope was actually keyed under, which is an
+alarm rather than a revert ([security-model.md](security-model.md#post-quantum-the-hybrid-authority-envelope-key)).
+
+Receiver ciphertexts are unaffected: they stay keyed by plain `ECDH(ephemeral, recipientPublicKey)`.
+
+### Op shapes and epoch semantics
+
+Every op takes the KEM ciphertext alongside its public-signal vector, and each vector grew by one
+signal (`kemBinding`, declared last so no existing output index moved):
+
+| op | signature | publics |
+|---|---|---|
+| deposit | `deposit(a,b,c, uint[19] pub, bytes kemCiphertext)` | 18 → **19** |
+| transfer | `transfer(a,b,c, uint[37] pub, bytes kemCiphertext)` | 36 → **37** |
+| withdraw | `withdraw(a,b,c, uint[26] pub, bytes kemCiphertext)` | 25 → **26** |
+| disburse | `disburseWithCiphertexts(a,b,c, uint[11] pub, uint256[] receiverCiphertexts, bytes kemCiphertext)` | 10 → **11** |
+
+Exact index layouts are in [circuits.md](circuits.md#public-surfaces).
+
+Arbiter epochs carry the KEM boundary. An epoch is `{keyX, keyY, activatedBlock}` in
+`arbiterEpochs` plus `arbiterKemPkHash[epoch]`, the keccak256 of that epoch's 1184-byte ML-KEM-768
+encapsulation key. A **zero** hash marks a pre-KEM epoch: epoch 0 on the live pool, whose ops are
+ECDH-only and carry no KEM fields at all. Epoch 1 (the 2026-07-27 upgrade) is the first hybrid
+epoch. Because the boundary is an epoch boundary, and pre-upgrade events do not even decode under
+the current event ABI, no reader needs epoch arithmetic to tell the two regimes apart. Clients read
+`arbiterKemPkHash(currentEpoch())` and verify their bundled encapsulation key against it before
+encapsulating.
 
 | op | plaintext | len | authority ct |
 |---|---|---|---|

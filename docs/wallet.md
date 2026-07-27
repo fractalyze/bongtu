@@ -68,6 +68,28 @@ the stale one and forces a one-time re-download.
 `prewarmProver()` builds and immediately terminates a bn128 curve during the prefetch to pay the
 one-time WASM compile early; it is best-effort and never blocks the UI.
 
+## Encapsulating to the arbiter
+
+Every operation the wallet builds — deposit, transfer, withdraw — draws fresh ML-KEM-768 material
+against the arbiter's encapsulation key: the shared secret joins the witness as `kemSs`, and the
+1088-byte ciphertext joins the transaction calldata. Encapsulation is sub-millisecond
+(`@noble/post-quantum`), invisible next to a multi-second browser proof. It is fresh per
+transaction; reusing a ciphertext would collapse several operations into one post-quantum
+compartment.
+
+**The bundled key is chain-vouched before it is used.** `assertPoolKemEpoch` reads
+`arbiterKemPkHash(currentEpoch())` from the pool and compares it to `keccak256(ARBITER_KEM_PK)`
+*before* the flow draws KEM material or starts proving; the result is memoized per pool address.
+Two failures are distinguished and both are fatal:
+
+| condition | outcome |
+|---|---|
+| on-chain hash differs from the bundled key | refuse — encapsulating to an unverified key would make the arbiter record a false tamper alarm |
+| pool has no KEM epoch (pre-upgrade V1 pool) | refuse — this build only produces hybrid proofs, which such a pool cannot verify |
+
+Failing here rather than at submit is the point: the alternative is an unlabeled `InvalidProof`
+revert, or worse, an accepted operation whose envelope no one can open.
+
 ## Deposit and the dev faucet
 
 Deposit is a 0-in / 2-out mint, and `BongtuPool.deposit` is permissionless (`external`, gated only
@@ -83,8 +105,9 @@ by `whenInitialized` + `nonReentrant`), so a browser can initiate one directly
 `safeTransferFrom`. Both outputs belong to the depositor, which is safe here: deposit publishes no
 per-recipient ciphertext, only one authority envelope over both notes, so the shared-ephemeral-key
 two-time pad does not apply and `assertDistinctOwnerPubkeys` is not used. Four fresh random field
-elements are drawn per deposit (ephemeral ECDH key, nonce, two salts); the authority public key is
-not drawn — it is the pool's stored key, which the contract injects before verifying.
+elements are drawn per deposit (ephemeral ECDH key, nonce, two salts), plus one ML-KEM-768
+encapsulation; the authority public key is not drawn — it is the pool's stored key, which the
+contract injects before verifying.
 
 The flow approves the ERC-20 for exactly `V` (skipped when the allowance already covers it) and
 pre-checks affordability before spending a proof on a doomed deposit.
@@ -127,7 +150,9 @@ entirely; the Settings screen can override it per session.
 ## What the client bundles
 
 Everything in `src/config.ts` and `@bongtu/core/network` is public: pool address, token address,
-chain id, RPC and explorer bases, `H` and `B`, the gas-price floor, and the **arbiter public key**.
-The arbiter public key must ship — the wallet encrypts every authority envelope to it, and the
-contract injects the same key from storage before verifying, so a stale copy means a wasted proof
-rejected on chain. No private key ever lives in the wallet.
+chain id, RPC and explorer bases, `H` and `B`, the gas-price floor, the **arbiter bjj public key**
+and the **arbiter ML-KEM-768 encapsulation key** (`ARBITER_KEM_PK`, 1184 bytes). Both must ship —
+the wallet encrypts every authority envelope under a key folded from the two — and both are checked
+against the chain before use: the bjj key by the contract's own injection before verifying, the KEM
+key by the pre-encapsulation hash guard above. A stale copy of either costs a wasted proof, not a
+silent mis-encryption. No private key ever lives in the wallet.

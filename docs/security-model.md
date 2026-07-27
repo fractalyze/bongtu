@@ -5,15 +5,17 @@ guaranteed. Mechanisms live in [protocol.md](protocol.md), [circuits.md](circuit
 [contracts.md](contracts.md); this page states the boundaries.
 
 Naming: **arbiter**, **auditor**, and the circuit/contract identifiers `authority*` /
-`AUTHORITY_KEY` / `ARBITER_KEY_X/Y` all denote the SAME party — the holder of the one bjj private
-key every envelope is encrypted to. Docs prose says "arbiter"; "auditor" names its compliance role;
-`authority` is the upstream Zeto vocabulary the code inherits.
+`AUTHORITY_KEY` / `ARBITER_KEY_X/Y` all denote the SAME party — the holder of the key material every
+envelope is encrypted to. Docs prose says "arbiter"; "auditor" names its compliance role;
+`authority` is the upstream Zeto vocabulary the code inherits. Since the 2026-07-27 hybrid upgrade
+that material is a **pair**: the bjj private key plus an ML-KEM-768 decapsulation key
+(`AUTHORITY_KEM_KEY`). Opening a post-upgrade envelope needs both.
 
 ## Who sees what
 
 | party | holds | can read |
 |---|---|---|
-| **arbiter (auditor)** | the arbiter bjj **private** key | every note created and destroyed by every op: input owner, per-note value, salt, output owners — decrypted from on-chain envelopes alone, with no user key and no nullifier linkage |
+| **arbiter (auditor)** | the arbiter bjj **private** key **and** the ML-KEM-768 decapsulation key | every note created and destroyed by every op: input owner, per-note value, salt, output owners — decrypted from on-chain envelopes alone, with no user key and no nullifier linkage |
 | **employer (discloser)** | a disburse-allowlisted sender key; **no** arbiter key | the batch it authored (its own recipients and amounts) and its own notes. Nothing about other users' transfers |
 | **public user (wallet)** | own bjj spending key | own notes only — via signature-gated `/notes`, or by trial-decrypting receiver ciphertext with its own key |
 | **prover service (GPU box)** | no key of its own | everything in a `POST /prove` disburse request, in plaintext: the employer's bjj **spending scalar** (`inputOwnerPrivateKey`), the input note, and the full recipient/amount list. Institution-internal by necessity — a compromised prover box impersonates the employer |
@@ -49,8 +51,8 @@ The invariant: **every note creation and destruction is auditor-openable from on
 It holds by construction, at three levels.
 
 1. **In-circuit.** All four circuits encrypt an authority envelope over the op's inputs and outputs
-   (owner, value, salt) to `authorityPublicKey`. The envelope is not optional — it is wired into the
-   constraint system, so a proof without a well-formed envelope does not exist.
+   (owner, value, salt) under a key derived from `authorityPublicKey`. The envelope is not optional —
+   it is wired into the constraint system, so a proof without a well-formed envelope does not exist.
 2. **Key injection.** The contract overwrites `authorityPublicKey` in the public-signal vector with
    the key stored in `arbiterEpochs` before every `verifyProof`. A sender cannot encrypt to its own
    key: the proof simply fails. Each event carries the epoch index, so the auditor picks the right
@@ -69,6 +71,76 @@ length-correct junk: the transaction succeeds, the recipients' notes are undisco
 tamper is *provable and immediately visible*. Combined with disburse being caller-gated to a known
 allowlisted employer, that is the honest strength of the guarantee — detection and attribution, not
 prevention.
+
+## Post-quantum: the hybrid authority-envelope key
+
+Everything bongtu encrypts is published on-chain and stays there. The pre-upgrade envelope key was
+`ECDH(ephemeralPrivateKey, arbiterPublicKey)` on BabyJubJub, and **both** points are public — the
+ephemeral key is a public signal copied into every op event, the arbiter key is in `arbiterEpochs`.
+A future ECDLP break therefore retro-decrypts every authority envelope from chain data alone. Since
+the envelope carries the op-wide plaintext including every recipient pubkey, it is also the key that
+unlocks the receiver ciphertexts. That is the harvest-now-decrypt-later exposure the hybrid upgrade
+closes.
+
+Since **arbiter epoch 1** (live on GIWA 2026-07-27) the authority envelope key is a hybrid fold of
+the classical ECDH secret and an ML-KEM-768 shared secret, and the shared secret is bound into the
+proof:
+
+```
+kemSs[0..1]  = the 32-byte ML-KEM-768 shared secret as two LE 128-bit limbs   (private witness)
+hybridKey[i] = Poseidon(5)([TAG_Ki, ecdh.x, ecdh.y, kemSs[0], kemSs[1]])      (envelope key)
+kemBinding   = Poseidon(3)([TAG_BIND, kemSs[0], kemSs[1]])                    (public signal)
+```
+
+Every op additionally carries the 1088-byte `kemCiphertext` as calldata, length-checked on-chain
+(`WrongKemCiphertextLength`) and re-emitted in the event so the arbiter never has to read calldata.
+An adversary who breaks ECDLP alone recovers one of four Poseidon preimage components and nothing
+else; an adversary who breaks ML-KEM alone still faces the intact ECDH half.
+
+**The enforcement is asymmetric, and deliberately so.** The ECDH half keeps proof-fails-on-wrong-key:
+the contract injects the stored arbiter key before `verifyProof`, so an envelope encrypted to the
+wrong bjj key has no valid proof. The KEM half cannot get that guarantee — verifying an
+encapsulation on-chain would mean ML-KEM inside the circuit (order 5–10M constraints per op), so the
+chain checks the ciphertext's *length*, not its content. A junk-wrapped ciphertext therefore
+downgrades to alarm-enforcement: the arbiter decapsulates, recomputes `Poseidon(3)([TAG_BIND, …])`,
+finds it differs from the proof's `kemBinding`, and raises a first-class `envelope` alarm while
+withholding the envelope. That is the same detection-and-attribution outcome class as a
+length-padded junk disburse publish. Note what the attacker buys: the envelope is then unopenable by
+anyone, including themselves — an immediate, attributable alarm and nothing else. `kemBinding` is a
+circuit **output** computed from the witness `kemSs`, so a prover cannot claim a binding
+inconsistent with the secret it actually encrypted under; the only reachable attack is
+consistent-but-junk, which alarms.
+
+**False-tamper is the failure mode worth defending, and both ends do.** A client encapsulating to a
+stale KEM key, or an arbiter decapsulating with the wrong one, would stamp an honest operation as
+tampered. So neither end trusts its bundled copy: clients read `arbiterKemPkHash(currentEpoch())`
+from the pool **before** drawing KEM material and refuse on mismatch — or on a pre-KEM pool, which
+this build cannot produce proofs for — and the indexer refuses to boot at all unless the
+encapsulation key embedded in its own `AUTHORITY_KEM_KEY` hashes to the on-chain value. Fail-closed
+both ways: the bundled key is chain-vouched, never trusted-from-bundle.
+
+Scope, stated honestly:
+
+- **Epoch 0 envelopes are ECDH-only forever.** The upgrade seals what comes after it, not what was
+  already published. Every bjj recipient pubkey inside a pre-upgrade envelope is burned at Q-day,
+  and for those identities the receiver-ciphertext attack is not stranded either. Full stranding
+  applies only to identities that never appeared in a pre-upgrade envelope. `arbiterKemPkHash(0) ==
+  0` is the on-chain, audit-facing statement of exactly where that boundary sits.
+- **Receiver ciphertexts are still ECDH-only.** Per-recipient KEM is deferred: it costs ~38k gas per
+  recipient (≈ +9.7M on a 256-batch) and only helps an adversary who already holds candidate
+  recipient pubkeys — which, post-upgrade, appear nowhere on-chain in the clear. The interim defence
+  is operational: bongtu addresses are shared off-channel, never published.
+- **The KEM alarm is arbiter-attested, not publicly recomputable.** The disclosure alarm can be
+  re-derived by anyone from public data; confirming a `kemBinding` mismatch requires decapsulating
+  under the arbiter's secret key, so a third party can neither verify a raised alarm nor detect a
+  suppressed one. Publishing the mismatching secret would break the envelope. Accepted: the alarm's
+  consumer is the institution that operates the arbiter.
+- **Signatures are unchanged.** Groth16 and the bjj EdDSA read-auth are classically sound; forgery
+  is a forge-later problem, migratable before Q-day. ML-DSA is not part of this work.
+
+Downgrade is structurally unavailable rather than merely discouraged: the upgraded circuits have no
+ECDH-only encryption path, and the pool rejects any `kemCiphertext` that is not exactly 1088 bytes.
+"Opting out" degenerates into the consistent-but-junk case, i.e. an alarm.
 
 ## Why the zero-commitment guard exists
 
@@ -96,7 +168,12 @@ Present-tense, deliberate, and not fixed by anything in the tree today.
   bounded by the number of independent depositors. Mitigations are operational: pre-fund well ahead,
   split deposits. This grows with adoption; it is not a property of the cryptography.
 - **Arbiter rotation invalidates in-flight proofs.** `rotateArbiter` takes effect immediately and
-  there is no grace window, so any proof built against the previous key fails.
+  there is no grace window, so any proof built against the previous key fails. It rotates the bjj
+  key and the KEM pk hash together, so a client that has cached the old KEM key is caught by the
+  pre-encapsulation guard rather than producing a false-tamper op.
+- **Receiver ciphertexts are not post-quantum.** Only the authority envelope carries the hybrid key;
+  per-recipient KEM is deferred on cost grounds. See the post-quantum section above for why the
+  residual exposure needs an adversary who already holds recipient pubkeys.
 - **Two-time pad on duplicate output owners.** All outputs of a transfer or batch share one ephemeral
   key and one nonce, so two outputs to the same owner would leak `m1 − m2`. This is mitigated by
   assembly-time rejection (`assertDistinctOwnerPubkeys`), not by the constraint system. A
@@ -119,8 +196,9 @@ Present-tense, deliberate, and not fixed by anything in the tree today.
   powers-of-tau file with no phase-2 ceremony. Whoever ran setup can forge proofs. A phase-2 MPC is
   a mainnet prerequisite, and it must come *after* circuit freeze — any circuit edit re-runs setup
   and redeploys the verifier.
-- **Demo arbiter key.** The live pool's stored arbiter key is a development key whose private half
-  exists on a developer machine. It is fixed at deploy and coupled to the committed proof fixtures
+- **Demo arbiter keys.** The live pool's stored arbiter bjj key and the epoch-1 ML-KEM-768
+  encapsulation key are both development keys whose private halves exist on a developer machine.
+  They are fixed at deploy and coupled to the committed proof fixtures
   ([deployment.md](deployment.md#the-arbiter-key-is-fixed-at-deploy-and-the-fixtures-are-bound-to-it)).
 - **Mock token.** The escrowed kKRW is `MockERC20` with a permissionless `mint`. Any production
   token must be non-fee-on-transfer and non-rebasing, or the pool is insolvent by construction.

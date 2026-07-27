@@ -10,10 +10,16 @@ proxy/ownership util. How to build and test the folder is owned by
 
 | function | publics | access | tree effect |
 |---|---|---|---|
-| `deposit(a,b,c,pub)` | `uint[18]` | permissionless | appends 2 leaves, pulls `pub[0]` tokens |
-| `transfer(a,b,c,pub)` | `uint[36]` | permissionless | spends 2 nullifiers, appends 2 leaves |
-| `withdraw(a,b,c,pub)` | `uint[25]` | permissionless | spends 2 nullifiers, appends 1 change leaf, pushes `pub[0]` tokens |
-| `disburseWithCiphertexts(a,b,c,pub,receiverCiphertexts)` | `uint[10]` + `uint256[]` | owner or `disburseAllowed[msg.sender]` | spends 1 nullifier, attaches a `B`-leaf subtree |
+| `deposit(a,b,c,pub,kemCiphertext)` | `uint[19]` | permissionless | appends 2 leaves, pulls `pub[0]` tokens |
+| `transfer(a,b,c,pub,kemCiphertext)` | `uint[37]` | permissionless | spends 2 nullifiers, appends 2 leaves |
+| `withdraw(a,b,c,pub,kemCiphertext)` | `uint[26]` | permissionless | spends 2 nullifiers, appends 1 change leaf, pushes `pub[0]` tokens |
+| `disburseWithCiphertexts(a,b,c,pub,receiverCiphertexts,kemCiphertext)` | `uint[11]` + `uint256[]` | owner or `disburseAllowed[msg.sender]` | spends 1 nullifier, attaches a `B`-leaf subtree |
+
+Every op takes the ML-KEM-768 `kemCiphertext` as a trailing `bytes calldata` argument and reverts
+`WrongKemCiphertextLength` unless it is exactly `KEM_CIPHERTEXT_LEN == 1088` bytes. It is not
+otherwise inspectable on-chain — its correctness is bound off-chain by the proof's `kemBinding`
+public signal and the arbiter's decapsulation
+([security-model.md](security-model.md#post-quantum-the-hybrid-authority-envelope-key)).
 
 `rotateArbiter`, `setDisburseAllowed` and `_authorizeUpgrade` are `onlyOwner`. Every operation runs
 `whenInitialized` before `nonReentrant`, so a call against an uninitialized proxy reverts
@@ -33,6 +39,10 @@ The contract never trusts calldata for the two fields that decide soundness. Bef
 
 A proof made against different values simply fails verification (`InvalidProof`). The circuit-side
 belts that make this injection sufficient are in [circuits.md](circuits.md#soundness-invariants).
+
+`kemBinding` is deliberately **not** injected: it is read from the proof's own public signals,
+because the contract has nothing to check it against — verifying an ML-KEM encapsulation on-chain is
+not affordable. It is the arbiter, not the pool, that closes that loop.
 
 disburse additionally reverts `ZeroNullifier` before verification: its single input is always real,
 so `enabled` degenerates to a constant.
@@ -90,23 +100,44 @@ one exception is `DisburseCiphertexts`, whose payload is length-checked and hash
 |---|---|
 | `Appended(leafIndex, leaf, root)` | every single-leaf insert (the indexer's tree feed) |
 | `SubtreeAppended(startLeafIndex, subtreeRoot, root)` | every batch attach |
-| `Deposited` | epoch, first leaf index, both commitments, amount, `ecdhPublicKey`, `uint256[10]` authority envelope, nonce, root |
-| `Transferred` | epoch, 2 nullifiers, 2 commitments, `ecdhPublicKey`, 2×`uint256[4]` receiver ciphertexts, `uint256[16]` authority envelope, nonce, root |
-| `Withdrawn` | epoch, 2 nullifiers, amount, change commitment, `ecdhPublicKey`, `uint256[13]` authority envelope, nonce, root |
-| `Disbursed` | epoch, nullifier, `subtreeRoot`, `disclosureHash`, `ecdhPublicKey`, nonce, root |
+| `Deposited` | epoch, first leaf index, both commitments, amount, `ecdhPublicKey`, `uint256[10]` authority envelope, nonce, root, `kemBinding`, `kemCiphertext` |
+| `Transferred` | epoch, 2 nullifiers, 2 commitments, `ecdhPublicKey`, 2×`uint256[4]` receiver ciphertexts, `uint256[16]` authority envelope, nonce, root, `kemBinding`, `kemCiphertext` |
+| `Withdrawn` | epoch, 2 nullifiers, amount, change commitment, `ecdhPublicKey`, `uint256[13]` authority envelope, nonce, root, `kemBinding`, `kemCiphertext` |
+| `Disbursed` | epoch, nullifier, `subtreeRoot`, `disclosureHash`, `ecdhPublicKey`, nonce, root, `kemBinding`, `kemCiphertext` |
 | `DisburseCiphertexts(startLeafIndex, receiverCiphertexts)` | the 2054-element array |
-| `ArbiterRotated(epoch, keyX, keyY, activatedBlock)` | key rotation |
+| `ArbiterRotated(epoch, keyX, keyY, activatedBlock)` | bjj key rotation |
+| `ArbiterKemPkHashSet(epoch, kemPkHash)` | the same epoch's KEM pk hash |
 
 Every op event carries the **epoch index**, so an auditor picks the exact arbiter key even at a
 rotation-boundary block. Without `ecdhPublicKey` + `encryptionNonce` no recipient can derive a
-decryption key at all, which is why they are in the event rather than off-chain.
+decryption key at all, which is why they are in the event rather than off-chain. `kemCiphertext` is
+re-emitted rather than left in calldata for the same reason: the arbiter reads logs, not
+transactions.
+
+Adding those two fields changed every op event's topic0, which is why a reader must carry both ABI
+generations to see the full history ([indexer.md](indexer.md#dual-abi-ingest)).
 
 ## Arbiter epochs
 
 `arbiterEpochs` is an append-only array of `{keyX, keyY, activatedBlock}`. `initialize` seeds epoch
-0 and **requires** a non-zero key (`ZeroArbiterKey`), killing the `(0,0)` foot-gun.
-`rotateArbiter(newKey)` appends and emits. In-flight proofs built against the previous key become
-invalid at rotation — there is no grace window.
+0 and **requires** a non-zero key (`ZeroArbiterKey`), killing the `(0,0)` foot-gun. In-flight proofs
+built against the previous key become invalid at rotation — there is no grace window.
+
+The struct is **frozen**: appending a field would re-stride the dynamic array and corrupt live
+epochs across an upgrade. So the per-epoch ML-KEM-768 encapsulation-key hash lives in a sibling
+`mapping(uint256 => bytes32) public arbiterKemPkHash`, added in V2 out of the first slot of the
+original `uint256[50] __gap` (now `uint256[49]`).
+
+`rotateArbiter(newKey, newKemPkHash)` writes both and emits both events. The bjj-only overload was
+**removed**, not kept alongside: a rotation that skipped the hash would mint a zero-hash epoch
+indistinguishable from the pre-KEM marker. `arbiterKemPkHash[epoch] == 0` means exactly one thing —
+that epoch predates the hybrid envelope. The full 1184-byte key is distributed off-chain and
+verified by clients against this hash ([deployment.md](deployment.md#the-hybrid-pq-upgrade-2026-07-27)).
+
+`initializeV2` is the one-shot (`reinitializer(2)`) migration payload for `upgradeToAndCall`: it
+swaps the four verifier addresses and mints the first hybrid epoch in the same transaction as the
+implementation swap, because old proofs and new verifiers disagree on public count and no window may
+exist between them.
 
 ## Proxy and wiring
 
@@ -136,7 +167,9 @@ carries consensus meaning.
   `TransferVerifier`, …). They are fixed per implementation; a circuit change ships as
   `upgradeToAndCall`, which preserves the pool address and the entire tree/nullifier state.
 - An `nPublic`-changing circuit edit is breaking: new verifier, new `IVerifiers` arity, new impl.
-- `uint256[50] __gap` reserves trailing storage for a future implementation.
+  The hybrid-envelope upgrade was exactly that — `kemBinding` took each vector to 19/37/26/11 — and
+  it shipped as one atomic `upgradeToAndCall` carrying impl and verifiers together.
+- `uint256[49] __gap` reserves trailing storage for a future implementation.
   `contracts/test/Upgrade.t.sol` pins state preservation, owner-only upgrade, re-init rejection and
   implementation locking.
 

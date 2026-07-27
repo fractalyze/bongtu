@@ -56,8 +56,40 @@ Leaf writes are a delta (only leaves recorded since the last flush). The tree is
 nodes; it is rebuilt from the `leaves` table in `O(n)` at boot. Schema: `src/schema.sql`, applied
 idempotently on every boot.
 
-The decrypt/derive step (envelope → notes, spent marks, history, envelope alarms) is one pure
-function, `deriveOp` in `src/ledger.ts`, called once per op — crypto and recording never mix.
+The decrypt/derive step (KEM decapsulation → binding check → envelope → notes, spent marks, history,
+envelope alarms) is one pure function, `deriveOp` in `src/ledger.ts`, called once per op — crypto and
+recording never mix.
+
+## Dual-ABI ingest
+
+Adding `kemBinding` + `kemCiphertext` to the op events changed their topic0, so the pool has two
+event generations and the indexer carries **both** ABI fragment sets. A pre-upgrade (V1) log decodes
+without the KEM fields and enters the ledger as `kem: null`; a hybrid log carries
+`kem: { binding, ciphertext }`. The gate is structural, not arithmetic: there is no epoch lookup and
+no block-number comparison anywhere in the path, so pre-KEM history cannot false-alarm no matter how
+the epoch list evolves. This is verified against the full pre-upgrade history of the live pool.
+
+A V1-only build against a hybrid pool would fail **silently**, which is the reason for the boot
+guard below: `getLogsChunked` wraps `parseLog` in try/catch-continue, so unknown-topic0 envelope
+events are skipped while `Appended` / `SubtreeAppended` keep the tree mirror advancing. `/health`
+would stay green while the note ledger and the feed under-recorded.
+
+## The KEM boot guard
+
+`kemBootGuard` runs before the service serves anything. It reads
+`arbiterKemPkHash(currentEpoch())` and refuses to boot in three configurations:
+
+| condition | why refusing is right |
+|---|---|
+| pool is in a KEM epoch, build has a V1-only ABI | every op envelope would be silently skipped |
+| pool is in a KEM epoch, arbiter mode, no `AUTHORITY_KEM_KEY` | nothing could be decapsulated |
+| the encapsulation key **embedded in** `AUTHORITY_KEM_KEY` hashes differently from the on-chain value | it would record a false "kem binding mismatch" tamper verdict against every honest op |
+
+The third check derives the encapsulation key from the secret (`kemPkFromSecret`, the FIPS 203 `dk`
+layout) rather than trusting a separately configured public key, so a mismatched pair cannot slip
+through. The probe is fail-closed: only a `CALL_EXCEPTION` — a missing or reverting getter — is read
+as "this is a pre-KEM V1 pool". A transient RPC error propagates and the boot fails, rather than
+being folded into a benign-looking verdict.
 
 ## Log scanning and `LOG_CHUNK`
 
@@ -101,10 +133,13 @@ existing and refusing.
 
 Setting `AUTHORITY_KEY` to the arbiter's bjj private key flips the indexer into arbiter mode. That
 instance decrypts **every** operation's authority envelope, so it holds every owner's notes,
-balances and counterparties in plaintext.
+balances and counterparties in plaintext. Against a hybrid pool it also needs `AUTHORITY_KEM_KEY`,
+the ML-KEM-768 decapsulation key — both halves of the envelope key, both under the same handling
+rule: held in memory only, never logged, never returned, never printed next to the connection
+string. `docker-compose.yml` forwards both.
 
 ```
-   public indexer                        arbiter indexer  (AUTHORITY_KEY set)
+   public indexer                        arbiter indexer  (AUTHORITY_KEY + AUTHORITY_KEM_KEY)
    ─────────────                         ───────────────
    chain data only                       chain data + EVERY owner's decrypted notes
    /notes, /history absent (404)         /notes, /history present, per-owner signature-gated
@@ -135,3 +170,24 @@ from tampered receiver-only bytes, so staying silent would make the alarm duty b
 truncating what is published. This is the operational half of enforced disclosure — the contract
 guarantees the bytes are *there*, the indexer proves they are *right*. See
 [security-model.md](security-model.md).
+
+## Envelope alarms and the KEM binding
+
+The `envelope` alarm class on `/alarms` is arbiter-mode only, and it now covers two checks. The
+older one is the envelope cross-check: the decrypted authority plaintext must reproduce the
+operation's on-chain commitments. The newer one closes the post-quantum loop, and it runs **first**,
+before any decryption.
+
+For every hybrid op the arbiter decapsulates `kemCiphertext` under `AUTHORITY_KEM_KEY`, recomputes
+`Poseidon(3)([TAG_BIND, kemSs[0], kemSs[1]])`, and compares it to the proof's `kemBinding`. On a
+mismatch the op **stops**: no notes recorded, no batch fill, no history, envelope withheld — and an
+alarm carrying the tx hash plus the expected and recomputed values. The chain can only check that
+the ciphertext is 1088 bytes, so this is where a junk-wrapped encapsulation is caught
+([security-model.md](security-model.md#post-quantum-the-hybrid-authority-envelope-key)).
+
+A ciphertext malformed enough that decapsulation itself throws takes the same path — alarm and
+withhold — rather than propagating. That matters operationally: a throw here would re-crash on the
+unadvanced cursor hitting the same op forever, turning one bad op into a permanently stalled ingest.
+The one case that does throw is an op carrying KEM material with no key configured, which is a
+misconfiguration the boot guard already refuses; failing loudly there is better than recording a
+false tamper verdict.
