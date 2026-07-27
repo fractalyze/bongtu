@@ -39,8 +39,9 @@ import {
   explorerTxUrl,
   isPreKemProbeError,
 } from "../src/network.js";
-import { KEM_PUBLIC_KEY_BYTES, kemHexToBytes, ml_kem768 } from "../src/kem.js";
-import { loadEthers } from "../src/extern.js";
+import { keccak_256 } from "@noble/hashes/sha3";
+
+import { KEM_PUBLIC_KEY_BYTES, kemBytesToHex, kemHexToBytes, ml_kem768 } from "../src/kem.js";
 
 // packages/core/test -> repo root (tests run under tsx/node, not the browser).
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -138,9 +139,9 @@ test("ARBITER_KEM_PK is the deploy artifact's 1184-byte key and hashes to ARBITE
   assert.equal(bytes.length, KEM_PUBLIC_KEY_BYTES);
   const artifact = readFileSync(join(REPO_ROOT, "deploy", "arbiter-kem-pk.91342.hex"), "utf8").trim();
   assert.equal(ARBITER_KEM_PK, artifact.startsWith("0x") ? artifact : `0x${artifact}`);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const ethers: any = loadEthers();
-  assert.equal(ethers.utils.keccak256(ARBITER_KEM_PK), ARBITER_KEM_PK_HASH);
+  // noble keccak, NOT loadEthers: the extern loader resolves via the dev-box
+  // BONGTU_NODE_MODULES fallback, which hosted CI runners do not have.
+  assert.equal(kemBytesToHex(keccak_256(bytes)), ARBITER_KEM_PK_HASH);
   const { cipherText, sharedSecret } = ml_kem768.encapsulate(bytes);
   assert.equal(cipherText.length, 1088);
   assert.equal(sharedSecret.length, 32);
