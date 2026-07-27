@@ -2,6 +2,8 @@ import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Plugin } from "vite";
+import tailwindcss from "@tailwindcss/vite";
+import react from "@vitejs/plugin-react";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..", "..");
@@ -19,14 +21,19 @@ function tsJsResolve(): Plugin {
       if (!importer) return null;
       if (!source.startsWith("./") && !source.startsWith("../")) return null;
       if (!source.endsWith(".js")) return null;
-      const tsPath = resolve(dirname(importer), source.slice(0, -3) + ".ts");
-      return existsSync(tsPath) ? tsPath : null;
+      // NodeNext ".js" specifiers point at sibling ".ts" — and, now that the
+      // view layer is React, at sibling ".tsx" — sources.
+      const base = resolve(dirname(importer), source.slice(0, -3));
+      for (const ext of [".ts", ".tsx"]) {
+        if (existsSync(base + ext)) return base + ext;
+      }
+      return null;
     },
   };
 }
 
 export default {
-  plugins: [tsJsResolve()],
+  plugins: [react(), tailwindcss(), tsJsResolve()],
   server: {
     // The app imports unbuilt @bongtu/core source via the root node_modules
     // symlink — allow the Vite dev server to read the whole monorepo, not
