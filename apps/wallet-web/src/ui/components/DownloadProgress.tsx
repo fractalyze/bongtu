@@ -21,8 +21,8 @@ export function DownloadProgress({ view }: { view: CircuitDownloadView }): React
       aria-live="polite"
     >
       <div className="flex justify-between items-baseline gap-2">
-        <span className="text-sm font-semibold">Downloading proving keys</span>
-        <span className="text-xs text-muted">one-time · cached for next visits</span>
+        <span className="text-sm font-semibold">Setting up your wallet</span>
+        <span className="text-xs text-muted">one-time download</span>
       </div>
       <div className="h-1.5 rounded-full bg-surface-2 overflow-hidden">
         <div

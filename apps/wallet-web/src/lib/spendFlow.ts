@@ -91,7 +91,7 @@ export async function runSpend(
       ? buildTransferRequest(ctx.identity, inputs, memberships, args.to ?? "", args.amount, crypto)
       : buildWithdrawRequest(ctx.identity, inputs, memberships, args.amount, crypto);
   if (!built.meta.membershipOk) {
-    throw new Error("membership witness does not fold to the live root — reload balance and retry");
+    throw new Error("Your balance just changed — go back and try again.");
   }
 
   onStage("prove");

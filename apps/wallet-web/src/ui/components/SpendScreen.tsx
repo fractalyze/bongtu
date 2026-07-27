@@ -186,7 +186,7 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
             </dd>
           </dl>
           <p className="text-sm text-muted">
-            Your proof is generated on this device — your key never leaves the browser.
+            Everything happens on your device — your keys never leave it.
           </p>
           <DownloadProgress view={download} />
           <div className="flex gap-2.5">
@@ -199,7 +199,7 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
               disabled={download.active}
               onClick={submit}
             >
-              {download.active ? "Preparing Keys…" : "Confirm & Prove"}
+              {download.active ? "Setting up…" : "Confirm"}
             </Button>
           </div>
         </div>
@@ -258,7 +258,7 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
             setPhase("confirm");
           }}
         >
-          Review {title}
+          Review
         </Button>
       </div>
     </div>

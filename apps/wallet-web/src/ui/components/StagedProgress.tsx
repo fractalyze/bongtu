@@ -64,7 +64,7 @@ export function StagedProgress({
       </ol>
       {stage === "prove" && (
         <p className="text-sm text-muted text-center">
-          Generating ZK proof on your device… typically 5–20 seconds
+          Preparing your private transaction… usually 5–20 seconds
           <span className="text-primary tabular-nums"> · {elapsed}s</span>
         </p>
       )}

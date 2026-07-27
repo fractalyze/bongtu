@@ -196,7 +196,12 @@ export async function assertPoolKemEpoch(connection: Connection, poolAddr: strin
     onchainHash = null;
   }
   const err = arbiterKemPkGuardError(onchainHash);
-  if (err) throw new Error(err);
+  if (err) {
+    // The technical verdict (which key, which epoch) goes to the console for
+    // diagnosis; the thrown message is what a wallet user can act on.
+    console.error(err);
+    throw new Error("This wallet version doesn't match the network yet — try again in a moment.");
+  }
   kemVerifiedPool = poolAddr;
 }
 

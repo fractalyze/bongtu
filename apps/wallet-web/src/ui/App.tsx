@@ -66,7 +66,7 @@ export function useWallet(): WalletContextValue {
 function friendlyIndexerError(err: unknown, indexerUrl: string): string {
   const msg = err instanceof Error ? err.message : String(err);
   if (/->\s*(404|401|403)/.test(msg)) {
-    return `The indexer at ${indexerUrl} isn't serving your notes — connect an arbiter-mode indexer to see your balance and activity.`;
+    return `Can't load your balance right now. Check the indexer connection and retry.`;
   }
   return `Couldn't reach the indexer at ${indexerUrl}. Check it's running and the URL in Settings. (${msg})`;
 }

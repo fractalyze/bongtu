@@ -128,7 +128,7 @@ export function Deposit(): ReactNode {
         <ScreenHeader title="Deposit" />
         <div className="flex flex-col items-center gap-2.5 text-center pt-4.5">
           <SuccessMark />
-          <h2 className="mt-1.5 text-xl font-bold">Deposit shielded</h2>
+          <h2 className="mt-1.5 text-xl font-bold">Deposit complete</h2>
           <p className="text-[1.8rem] [font-weight:750] my-0.5 tabular-nums">
             {review} <span className="text-[0.62em] font-semibold text-muted ml-1">kKRW</span>
           </p>
@@ -186,7 +186,7 @@ export function Deposit(): ReactNode {
             </dd>
           </dl>
           <p className="text-sm text-muted">
-            Your proof is generated on this device — your key never leaves the browser.{" "}
+            Everything happens on your device — your keys never leave it.{" "}
             {willApprove
               ? "This needs two transactions: first approve the pool to pull this amount, then shield it."
               : ""}
@@ -202,7 +202,7 @@ export function Deposit(): ReactNode {
               disabled={download.active}
               onClick={submit}
             >
-              {download.active ? "Preparing Keys…" : "Confirm & Prove"}
+              {download.active ? "Setting up…" : "Confirm"}
             </Button>
           </div>
         </div>
@@ -297,7 +297,7 @@ export function Deposit(): ReactNode {
                   setPhase("confirm");
                 }}
               >
-                Review Deposit
+                Review
               </Button>
             )}
           </>
