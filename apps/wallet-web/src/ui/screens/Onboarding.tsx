@@ -16,10 +16,10 @@ export function Onboarding(): ReactNode {
   return (
     <div className="px-5.5 py-6.5 flex flex-col justify-center gap-4 flex-1 bg-bg">
       <div className="text-center mb-2">
-        <span className="inline-flex text-primary mb-1.5">
+        <span className="inline-flex text-primary">
           <EnvelopeLogo size={52} />
         </span>
-        <h1 className="text-[2rem] font-bold mb-1 tracking-[-0.02em] text-primary">bongtu</h1>
+        <h1 className="text-[2rem] leading-tight font-bold mb-1 tracking-[-0.02em] text-primary">bongtu</h1>
         <p className="text-muted">The privacy wallet for kKRW on GIWA.</p>
         <TestnetTag className="inline-block mt-2" />
       </div>
