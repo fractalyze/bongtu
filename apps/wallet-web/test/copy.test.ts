@@ -162,13 +162,13 @@ test("the unlock line names the connected wallet, and falls back to neutral word
       walletName: "Rabby",
     }),
   );
-  assert.match(named, /Confirm in Rabby to unlock your wallet/);
+  assert.match(named, /Confirm once in Rabby to open your wallet/);
   assert.doesNotMatch(named, /MetaMask/);
 
   const anonymous = renderToStaticMarkup(
     h(StagedProgress, { stage: "unlock", elapsed: 0, steps: withUnlock(SPEND_STEPS) }),
   );
-  assert.match(anonymous, new RegExp(`Confirm in ${NEUTRAL_WALLET_NAME} to unlock`));
+  assert.match(anonymous, new RegExp(`Confirm once in ${NEUTRAL_WALLET_NAME} to open`));
 });
 
 test("the lock chip's tooltip names the connected wallet", () => {
@@ -368,7 +368,7 @@ test("the running panel shows the amount in play and the stage the run has reach
   assert.match(html, /250/);
   assert.match(html, /Assembling/);
   assert.match(html, /Proving/);
-  assert.match(html, /usually 5–20 seconds/, "never a promise of sub-5s");
+  assert.match(html, /Usually 5 to 20 seconds/, "never a promise of sub-5s");
   assert.match(html, /· 7s/, "the honest elapsed clock");
 });
 
