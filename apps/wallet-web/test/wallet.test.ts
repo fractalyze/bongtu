@@ -51,7 +51,7 @@ import {
   type MembershipWitness,
 } from "../src/lib/spend.js";
 import { recipientError } from "../src/ui/format.js";
-import { DEFAULTS, H, B } from "../src/config.js";
+import { CIRCUITS_VERSION, DEFAULTS, H, B } from "../src/config.js";
 import { ml_kem768, kemSsToLimbs, kemHexToBytes, kemBytesToHex } from "@bongtu/core/kem";
 import { ARBITER_KEM_PK } from "@bongtu/core/network";
 import type { KemMaterial } from "../src/lib/spend.js";
@@ -119,6 +119,12 @@ test("the Vite indexer proxy is on in development and auto-disabled in productio
   const dev = resolveIndexerProxy("development");
   assert.ok(dev && "/indexer" in dev, "development must proxy /indexer");
   assert.equal(resolveIndexerProxy("production"), undefined, "production must not proxy — infra owns /indexer");
+  // The proving assets have one home in every environment: dev must reach the SAME
+  // versioned blob path the vercel.json /circuits rewrite serves in deployments.
+  assert.ok(dev && "/circuits" in dev, "development must proxy /circuits to the blob store");
+  const circuits = (dev as Record<string, { target: string; rewrite: (p: string) => string }>)["/circuits"];
+  assert.match(circuits.target, /public\.blob\.vercel-storage\.com$/);
+  assert.equal(circuits.rewrite("/circuits/transfer.zkey"), `/circuits/${CIRCUITS_VERSION}/transfer.zkey`);
 });
 
 test("the key-derivation struct is domain-separated (chainId, pool, version)", () => {

@@ -62,7 +62,9 @@ export const DEFAULTS = {
   // node:test runner, so read it defensively (falls back to the relative default).
   indexerUrl: import.meta.env?.VITE_INDEXER_URL || "/indexer",
   // Where the transfer/withdraw circuit assets (wasm + zkey) are served for browser
-  // snarkjs proving. Static assets under the app, or a configured CDN/helper URL.
+  // snarkjs proving. One source in every environment: the bongtu-circuits blob store
+  // under the CIRCUITS_VERSION path — reached through this same-origin path by the
+  // vercel.json rewrite in deployments and the vite dev proxy locally.
   // Files: `${circuitBaseUrl}/{transfer,withdraw}.wasm` and `.zkey`.
   circuitBaseUrl: "/circuits",
 } as const;
@@ -75,6 +77,9 @@ export const DEFAULTS = {
 // a one-time re-download instead of serving a mismatched key from disk (a stale key fails
 // on-chain verify with no self-heal). Bump this the moment ANY zkey changes on disk:
 //   cat public/circuits/transfer.zkey public/circuits/withdraw.zkey circuits/out/deposit.zkey | sha256sum | cut -c1-8
+// A bump is live only with its two companions in the SAME change: upload the new
+// assets (deploy/upload_circuits.sh — refuses a hash that doesn't match this pin)
+// and point vercel.json's /circuits rewrite at the new circuits/<version>/ path.
 export const CIRCUITS_VERSION = "f623e71c";
 
 // Exact byte sizes of the served proving assets — the download progress bar's

@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Plugin } from "vite";
@@ -42,11 +42,27 @@ function tsJsResolve(): Plugin {
 // development work: SSH-forward ONLY the wallet port and `/indexer/*` still reaches an
 // indexer bound to the dev box's localhost:8600. Target overridable for a non-default
 // indexer host/port.
+// The proving assets have ONE home in every environment: the bongtu-circuits blob
+// store, addressed by CIRCUITS_VERSION. Deployments reach it through the vercel.json
+// `/circuits` rewrite; local dev reaches it through this proxy — same path, same
+// bytes, no local asset seed. The version is read from src/config.ts so a pin bump
+// re-points dev automatically (vercel.json is the one place that needs a manual bump,
+// and the config.ts pin comment says so).
+const CIRCUITS_VERSION = /CIRCUITS_VERSION = "([0-9a-f]{8})"/.exec(
+  readFileSync(resolve(HERE, "src/config.ts"), "utf8"),
+)![1];
+const CIRCUITS_BLOB_ORIGIN = "https://hbttd0nloguhlykr.public.blob.vercel-storage.com";
+
 const indexerProxy = {
   "/indexer": {
     target: process.env.VITE_INDEXER_PROXY_TARGET || "http://localhost:8600",
     changeOrigin: true,
     rewrite: (p: string) => p.replace(/^\/indexer/, ""),
+  },
+  "/circuits": {
+    target: CIRCUITS_BLOB_ORIGIN,
+    changeOrigin: true,
+    rewrite: (p: string) => p.replace(/^\/circuits/, `/circuits/${CIRCUITS_VERSION}`),
   },
 };
 
