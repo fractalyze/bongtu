@@ -203,3 +203,46 @@ test("prefetch evicts a stale-version bucket before serving the current one", as
   const keys = (await cs.keys()).sort();
   assert.deepEqual(keys, ["bongtu-circuits-v88542b90"], "stale version bucket must be gone");
 });
+
+// --- (4) streamed miss reports per-chunk progress ---------------------------------
+
+test("cold prefetch streams progress (received grows, total = Content-Length); warm hit stays silent", async () => {
+  const cs = new FakeCacheStorage();
+  // A 3-chunk streamed body with an honest Content-Length — the shape a static
+  // server serves the ~28 MB zkey with; progress must grow per chunk up to it.
+  const streamed = (n: number, chunk: number): Response => {
+    let sent = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(c) {
+        if (sent >= n) return c.close();
+        const size = Math.min(chunk, n - sent);
+        c.enqueue(new Uint8Array(size).fill(7));
+        sent += size;
+      },
+    });
+    return new Response(body, { headers: { "content-length": String(n) } });
+  };
+  const progress: { url: string; received: number; total: number | null }[] = [];
+  const { wasm, zkey } = await prefetchCircuitAssets("transfer", "/circuits", "88542b90", {
+    cacheStorage: cs,
+    fetchFn: async (url: string) => streamed(url.endsWith(".zkey") ? 32 : 8, 16),
+    onProgress: (p) => progress.push(p),
+  });
+
+  assert.equal(wasm.byteLength, 8, "streamed chunks reassemble to the full wasm");
+  assert.equal(zkey.byteLength, 32, "streamed chunks reassemble to the full zkey");
+  const zk = progress.filter((p) => p.url === "/circuits/transfer.zkey");
+  assert.deepEqual(zk.map((p) => p.received), [16, 32], "received grows per chunk");
+  assert.ok(zk.every((p) => p.total === 32), "total mirrors Content-Length");
+
+  // warm second run: cache hit, zero progress events
+  const warm: string[] = [];
+  await prefetchCircuitAssets("transfer", "/circuits", "88542b90", {
+    cacheStorage: cs,
+    fetchFn: async () => {
+      throw new Error("warm cache must not fetch");
+    },
+    onProgress: (p) => warm.push(p.url),
+  });
+  assert.deepEqual(warm, [], "a cache hit reports no progress");
+});

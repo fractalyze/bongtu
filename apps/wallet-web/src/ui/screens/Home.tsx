@@ -94,6 +94,23 @@ export function Home(): ReactNode {
         </button>
       </div>
 
+      {/* Empty private balance == a first-timer who doesn't know the next move:
+          lead them straight into the deposit flow (2026-07-27 user ask). Only when
+          the balance is a LOADED zero — never over a spinner or a data error. */}
+      {!loading && !dataError && balance === 0n && (
+        <section className="get-started">
+          <p className="get-started-title">Start by depositing kKRW</p>
+          <p className="hint">
+            Your private balance is empty. Deposit turns public kKRW into private kKRW you
+            can send and withdraw without revealing anything — no kKRW yet? The deposit
+            screen mints free testnet kKRW too.
+          </p>
+          <button className="btn btn-primary btn-block" onClick={() => navigate("deposit")}>
+            Deposit kKRW
+          </button>
+        </section>
+      )}
+
       {dataError ? (
         <div className="banner banner-warn">
           {dataError}

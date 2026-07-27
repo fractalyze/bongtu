@@ -16,14 +16,15 @@ import type { ReactNode } from "react";
 import { DEFAULTS } from "../../config.js";
 import { ensureCircuitAssets, prewarmProver } from "../../lib/prove.js";
 import { runDeposit, type DepositStage, type DepositOutcome } from "../../lib/depositFlow.js";
-import { readTokenState, mintTestToken, approveToken } from "../../lib/metamask.js";
+import { readTokenState, mintTestToken } from "../../lib/metamask.js";
 import { FAUCET_AMOUNT } from "../../lib/faucet.js";
 import { useWallet } from "../App.js";
-import { navigate, useElapsedSeconds } from "../hooks.js";
-import { formatKkrw, parseKkrw, allowanceLabel } from "../../lib/money.js";
+import { navigate, useCircuitDownload, useElapsedSeconds } from "../hooks.js";
+import { formatKkrw, parseKkrw } from "../../lib/money.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
 import { SuccessMark } from "../components/SuccessMark.js";
 import { StagedProgress, type StagedStep } from "../components/StagedProgress.js";
+import { DownloadProgress } from "../components/DownloadProgress.js";
 
 type Phase = "form" | "confirm" | "running" | "done";
 
@@ -49,14 +50,13 @@ export function Deposit(): ReactNode {
   const [amount, setAmount] = useState("");
   const [phase, setPhase] = useState<Phase>("form");
   const [stage, setStage] = useState<DepositStage>("approve");
-  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<DepositOutcome | null>(null);
   const [tokenBalance, setTokenBalance] = useState<bigint | null>(null);
   const [allowance, setAllowance] = useState<bigint | null>(null);
   const [faucetPending, setFaucetPending] = useState(false);
   const [faucetTxUrl, setFaucetTxUrl] = useState<string | null>(null);
-  const [revoking, setRevoking] = useState(false);
+  const download = useCircuitDownload("deposit");
 
   const elapsed = useElapsedSeconds(phase === "running" && stage === "prove");
 
@@ -75,12 +75,10 @@ export function Deposit(): ReactNode {
   }, [connection]);
 
   // Prefetch the deposit circuit assets + warm the curve on open (best-effort).
+  // Progress/disable state comes from useCircuitDownload — the prove.ts registry —
+  // not from this call's promise, so a remount mid-download stays honest.
   useEffect(() => {
-    void ensureCircuitAssets("deposit", DEFAULTS.circuitBaseUrl, {
-      onDownloadStart: () => setDownloading(true),
-    })
-      .then(() => setDownloading(false))
-      .catch(() => setDownloading(false));
+    void ensureCircuitAssets("deposit", DEFAULTS.circuitBaseUrl).catch(() => {});
     void prewarmProver();
   }, []);
 
@@ -119,21 +117,6 @@ export function Deposit(): ReactNode {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setFaucetPending(false);
-    }
-  }
-
-  // Revoke = approve(pool, 0); afterwards deposits fall back to the exact-V approve cycle.
-  async function revoke(): Promise<void> {
-    if (!connection) return;
-    setRevoking(true);
-    setError(null);
-    try {
-      await approveToken(connection, DEFAULTS.token, DEFAULTS.pool, 0n);
-      await refreshTokenState();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setRevoking(false);
     }
   }
 
@@ -212,19 +195,18 @@ export function Deposit(): ReactNode {
             <dd>GIWA · chain {DEFAULTS.chainId}</dd>
           </dl>
           <p className="hint">
-            {downloading
-              ? "Preparing proving keys (one-time download)… "
-              : "Your proof is generated on this device — your key never leaves the browser. "}
+            Your proof is generated on this device — your key never leaves the browser.{" "}
             {willApprove
               ? "This needs two transactions: first approve the pool to pull this amount, then shield it."
               : ""}
           </p>
+          <DownloadProgress view={download} />
           <div className="btn-row">
             <button className="btn btn-ghost" onClick={() => setPhase("form")}>
               Back
             </button>
-            <button className="btn btn-primary" onClick={submit}>
-              Confirm & prove
+            <button className="btn btn-primary" disabled={download.active} onClick={submit}>
+              {download.active ? "Preparing keys…" : "Confirm & prove"}
             </button>
           </div>
         </div>
@@ -233,76 +215,103 @@ export function Deposit(): ReactNode {
   }
 
   // --- form ------------------------------------------------------------------
+  // Two states by what the user actually has: no kKRW => the mint guide IS the
+  // screen (nothing to deposit yet); some kKRW => the depositable amount leads
+  // and the faucet collapses to a side offer. Allowance is deliberately not
+  // shown — the flow approves exactly V when needed; it's plumbing, not a
+  // decision the user makes here.
+  const noTokens = tokenBalance !== null && tokenBalance === 0n;
+
   return (
     <div className="screen">
       <ScreenHeader title="Deposit" />
       <div className="spend-body">
-        <label className="field">
-          <span className="field-label">Amount (kKRW)</span>
-          <input
-            className="input"
-            inputMode="decimal"
-            placeholder="0.00"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value.replace(/[^\d.,]/g, ""))}
-          />
-          <span className="field-hint">
-            kKRW balance: {tokenBalance === null ? "—" : formatKkrw(tokenBalance)} · Pool
-            allowance: {allowance === null ? "—" : allowanceLabel(allowance)}
-            {allowance !== null && allowance > 0n && (
-              <>
-                {" "}
-                <button
-                  className="link-btn link-btn-sm"
-                  disabled={revoking}
-                  onClick={() => void revoke()}
-                >
-                  {revoking ? "Revoking…" : "Revoke"}
-                </button>
-              </>
-            )}
-          </span>
-          {amount.trim() && amtErr && <span className="field-err">{amtErr}</span>}
-        </label>
+        <p className="hint deposit-explainer">
+          Deposit turns public kKRW into <strong>private kKRW</strong>. After that you can
+          send and withdraw it without revealing amounts or recipients.
+        </p>
 
-        <div className="faucet">
-          <div className="faucet-head">
-            <span className="testnet-tag">Testnet</span>
-            <span className="faucet-title">Need test kKRW?</span>
-          </div>
-          <p className="hint">
-            Mint {formatKkrw(FAUCET_AMOUNT)} test kKRW to your wallet any time — you only pay
-            gas.
-          </p>
-          <button
-            className="btn btn-ghost btn-block"
-            disabled={faucetPending || !connection}
-            onClick={() => void getTestTokens()}
-          >
-            {faucetPending ? "Minting test kKRW…" : "Get test kKRW"}
-          </button>
-          {faucetTxUrl && (
-            <a className="success-link" href={faucetTxUrl} target="_blank" rel="noreferrer">
-              Minted — view on explorer
-            </a>
-          )}
+        <div className="deposit-avail" aria-live="polite">
+          <span className="deposit-avail-label">You can deposit</span>
+          <span className="deposit-avail-amount">
+            {tokenBalance === null ? "—" : formatKkrw(tokenBalance)}{" "}
+            <span className="unit">kKRW</span>
+          </span>
         </div>
 
-        {error && <div className="banner banner-err">{error}</div>}
-        {downloading && (
-          <div className="banner banner-info">Downloading proving keys (one-time)…</div>
+        {noTokens ? (
+          <div className="faucet faucet-hero">
+            <div className="faucet-head">
+              <span className="testnet-tag">Testnet</span>
+              <span className="faucet-title">First, get test kKRW</span>
+            </div>
+            <p className="hint">
+              You have no kKRW yet. Mint {formatKkrw(FAUCET_AMOUNT)} test kKRW to your wallet —
+              free, you only pay gas — then deposit it here.
+            </p>
+            <button
+              className="btn btn-primary btn-block"
+              disabled={faucetPending || !connection}
+              onClick={() => void getTestTokens()}
+            >
+              {faucetPending ? "Minting test kKRW…" : "Get test kKRW"}
+            </button>
+            {faucetTxUrl && (
+              <a className="success-link" href={faucetTxUrl} target="_blank" rel="noreferrer">
+                Minted — view on explorer
+              </a>
+            )}
+          </div>
+        ) : (
+          <>
+            <label className="field">
+              <span className="field-label">Amount (kKRW)</span>
+              <input
+                className="input"
+                inputMode="decimal"
+                placeholder="0.00"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value.replace(/[^\d.,]/g, ""))}
+              />
+              {amount.trim() && amtErr && <span className="field-err">{amtErr}</span>}
+            </label>
+
+            <div className="faucet">
+              <div className="faucet-head">
+                <span className="testnet-tag">Testnet</span>
+                <span className="faucet-title">Need more test kKRW?</span>
+              </div>
+              <button
+                className="btn btn-ghost btn-block"
+                disabled={faucetPending || !connection}
+                onClick={() => void getTestTokens()}
+              >
+                {faucetPending ? "Minting test kKRW…" : `Mint ${formatKkrw(FAUCET_AMOUNT)} test kKRW`}
+              </button>
+              {faucetTxUrl && (
+                <a className="success-link" href={faucetTxUrl} target="_blank" rel="noreferrer">
+                  Minted — view on explorer
+                </a>
+              )}
+            </div>
+          </>
         )}
 
-        <button
-          className="btn btn-primary btn-block"
-          disabled={!formValid}
-          onClick={() => {
-            setError(null);
-            setPhase("confirm");
-          }}
-        >
-          Review deposit
-        </button>
+        {error && <div className="banner banner-err">{error}</div>}
+        <DownloadProgress view={download} />
+
+        {!noTokens && (
+          <button
+            className="btn btn-primary btn-block"
+            disabled={!formValid || download.active}
+            onClick={() => {
+              setError(null);
+              setPhase("confirm");
+            }}
+          >
+            {download.active ? "Preparing keys…" : "Review deposit"}
+          </button>
+        )}
       </div>
     </div>
   );

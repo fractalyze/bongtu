@@ -58,6 +58,15 @@ export interface CacheStorageLike {
   delete(cacheName: string): Promise<boolean>;
 }
 
+/** Byte-level progress of one asset download (a cache MISS being fetched). */
+export interface AssetDownloadProgress {
+  url: string;
+  received: number;
+  /** Total bytes from Content-Length; null when the server doesn't send it
+   *  (the UI then shows an indeterminate bar, no ETA). */
+  total: number | null;
+}
+
 export interface PrefetchDeps {
   /** Defaults to the global `caches`. Injected as an in-memory fake in tests. */
   cacheStorage?: CacheStorageLike;
@@ -67,6 +76,9 @@ export interface PrefetchDeps {
    *  begins. The UI shows the first-run "downloading proving key" banner on the
    *  first such call and clears it when the prefetch promise resolves. */
   onDownloadStart?: (url: string) => void;
+  /** Fires per received chunk of a MISSED asset — drives the progress bar + ETA.
+   *  Never fires on a cache hit. */
+  onProgress?: (progress: AssetDownloadProgress) => void;
 }
 
 /** The kept in-memory buffers for one circuit — reused across a session's proofs. */
@@ -94,7 +106,9 @@ export async function evictStaleCaches(version: string, deps: PrefetchDeps = {})
 
 // One asset: serve it from the version bucket on a hit; on a miss download it,
 // announce the download, store a clone, and return the bytes. A Response body is
-// single-use, so we `put` a clone and read the ArrayBuffer from the original.
+// single-use, so we `put` a clone and read the bytes from the original — via a
+// streaming reader when progress is wanted (per-chunk onProgress with the
+// Content-Length total), else the plain arrayBuffer path.
 async function cachedFetch(cache: CacheLike, url: string, deps: PrefetchDeps): Promise<ArrayBuffer> {
   const hit = await cache.match(url);
   if (hit) return hit.arrayBuffer();
@@ -103,7 +117,27 @@ async function cachedFetch(cache: CacheLike, url: string, deps: PrefetchDeps): P
   const res = await doFetch(url);
   if (!res.ok) throw new Error(`asset ${url} -> ${res.status} (is the circuit wasm/zkey served at ${new URL(url, "http://x").pathname}?)`);
   await cache.put(url, res.clone());
-  return res.arrayBuffer();
+  if (!deps.onProgress || !res.body) return res.arrayBuffer();
+
+  const totalHeader = res.headers.get("content-length");
+  const total = totalHeader ? Number(totalHeader) : null;
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.byteLength;
+    deps.onProgress({ url, received, total });
+  }
+  const out = new Uint8Array(received);
+  let off = 0;
+  for (const c of chunks) {
+    out.set(c, off);
+    off += c.byteLength;
+  }
+  return out.buffer;
 }
 
 /**

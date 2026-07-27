@@ -1,8 +1,9 @@
 // Tiny view hooks: hash-based routing (no router lib — the brief locks a single SPA),
 // an elapsed-seconds counter for the proving stage, and copy-with-feedback.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { copyText } from "../lib/clipboard.js";
+import { subscribeCircuitDownload, type CircuitDownloadState } from "../lib/prove.js";
 
 export type Route = "home" | "receive" | "send" | "withdraw" | "deposit" | "activity" | "settings";
 
@@ -44,6 +45,53 @@ export function useElapsedSeconds(active: boolean): number {
     return () => clearInterval(id);
   }, [active]);
   return secs;
+}
+
+/** What a screen renders for a circuit's proving-asset download. `active` also
+ *  gates every proof-reaching button (disabled while the assets stream in). */
+export interface CircuitDownloadView {
+  active: boolean;
+  received: number;
+  /** Summed Content-Length across the circuit's assets; null when any is unsized
+   *  (bar goes indeterminate, no ETA). */
+  total: number | null;
+  /** Whole seconds remaining at the observed rate; null until measurable. */
+  etaSeconds: number | null;
+}
+
+const IDLE_DOWNLOAD: CircuitDownloadView = { active: false, received: 0, total: null, etaSeconds: null };
+
+/**
+ * Live download progress of `circuit`'s wasm+zkey (prove.ts registry — survives
+ * remounts and StrictMode's coalesced prefetch). Updates are coalesced to ~4/s so
+ * a fast stream doesn't re-render the screen per network chunk.
+ */
+export function useCircuitDownload(circuit: "transfer" | "withdraw" | "deposit"): CircuitDownloadView {
+  const [view, setView] = useState<CircuitDownloadView>(IDLE_DOWNLOAD);
+  const lastPaint = useRef(0);
+  useEffect(() => {
+    return subscribeCircuitDownload(circuit, (s: CircuitDownloadState | null) => {
+      if (!s) {
+        lastPaint.current = 0;
+        setView(IDLE_DOWNLOAD);
+        return;
+      }
+      const now = Date.now();
+      if (now - lastPaint.current < 250) return; // coalesce chunk storms
+      lastPaint.current = now;
+      const assets = Object.values(s.assets);
+      const received = assets.reduce((n, a) => n + a.received, 0);
+      const total = assets.every((a) => a.total !== null)
+        ? assets.reduce((n, a) => n + (a.total ?? 0), 0)
+        : null;
+      const elapsed = (now - s.startedAt) / 1000;
+      const rate = elapsed > 0.5 ? received / elapsed : 0;
+      const etaSeconds =
+        total !== null && rate > 0 ? Math.max(1, Math.ceil((total - received) / rate)) : null;
+      setView({ active: true, received, total, etaSeconds });
+    });
+  }, [circuit]);
+  return view;
 }
 
 /** Copy `text` and flip a short-lived `copied` flag — only on a REAL clipboard write

@@ -22,7 +22,12 @@
 
 import type { ProvingRequest, Calldata } from "@bongtu/core/proving";
 import { CIRCUITS_VERSION } from "../config.js";
-import { prefetchCircuitAssets, type CircuitAssets, type PrefetchDeps } from "./assets.js";
+import {
+  prefetchCircuitAssets,
+  type AssetDownloadProgress,
+  type CircuitAssets,
+  type PrefetchDeps,
+} from "./assets.js";
 
 // The circuits the public wallet proves in-browser on CPU (SPEC §6): the two spends
 // (transfer/withdraw) plus the 0-in/2-out deposit/shield. disburse is GPU-only (prover/).
@@ -32,6 +37,44 @@ type CpuCircuit = "transfer" | "withdraw" | "deposit";
 // bucket survives a restart (disk), and caching the PROMISE (not just the resolved
 // value) coalesces the two calls React StrictMode fires on mount into one download.
 const inflight: Partial<Record<CpuCircuit, Promise<CircuitAssets>>> = {};
+
+// ---------------------------------------------------------------------------------
+// Download-state registry. Because the prefetch promise is coalesced, only the FIRST
+// caller's PrefetchDeps callbacks are wired — a screen that (re)mounts mid-download
+// would show nothing and leave its buttons enabled while 28 MB stream in. So the
+// live download state is kept HERE, per circuit, and screens subscribe: on attach
+// the current state replays immediately, every chunk updates it, resolution clears
+// it (state null == no active download; the UI hides the bar and re-enables).
+// ---------------------------------------------------------------------------------
+
+/** The live download of one circuit's assets: per-URL byte progress + start time
+ *  (the ETA is rate-derived by the UI hook). */
+export interface CircuitDownloadState {
+  startedAt: number;
+  assets: Record<string, AssetDownloadProgress>;
+}
+
+const downloadState: Partial<Record<CpuCircuit, CircuitDownloadState>> = {};
+const downloadListeners: Partial<Record<CpuCircuit, Set<(s: CircuitDownloadState | null) => void>>> = {};
+
+function emitDownload(circuit: CpuCircuit): void {
+  const s = downloadState[circuit] ?? null;
+  for (const cb of downloadListeners[circuit] ?? []) cb(s);
+}
+
+/**
+ * Subscribe to a circuit's live download state (null == none active). The current
+ * state is replayed synchronously on subscribe, so a screen attaching mid-download
+ * renders the bar (and disables its actions) immediately. Returns unsubscribe.
+ */
+export function subscribeCircuitDownload(
+  circuit: CpuCircuit,
+  cb: (s: CircuitDownloadState | null) => void,
+): () => void {
+  (downloadListeners[circuit] ??= new Set()).add(cb);
+  cb(downloadState[circuit] ?? null);
+  return () => downloadListeners[circuit]?.delete(cb);
+}
 
 /** Whether `circuit` is one the wallet proves in-browser (transfer/withdraw/deposit). */
 export function isCpuCircuit(circuit: string): circuit is CpuCircuit {
@@ -56,7 +99,23 @@ export async function ensureCircuitAssets(
 ): Promise<CircuitAssets> {
   const pending = inflight[circuit];
   if (pending) return pending;
-  const p = prefetchCircuitAssets(circuit, circuitBaseUrl, CIRCUITS_VERSION, deps);
+  const p = prefetchCircuitAssets(circuit, circuitBaseUrl, CIRCUITS_VERSION, {
+    ...deps,
+    onDownloadStart: (url) => {
+      downloadState[circuit] ??= { startedAt: Date.now(), assets: {} };
+      downloadState[circuit].assets[url] = { url, received: 0, total: null };
+      emitDownload(circuit);
+      deps.onDownloadStart?.(url);
+    },
+    onProgress: (progress) => {
+      const s = downloadState[circuit];
+      if (s) {
+        s.assets[progress.url] = progress;
+        emitDownload(circuit);
+      }
+      deps.onProgress?.(progress);
+    },
+  });
   inflight[circuit] = p;
   try {
     return await p;
@@ -64,6 +123,9 @@ export async function ensureCircuitAssets(
     // drop the rejected promise so a later open retries instead of re-throwing forever.
     delete inflight[circuit];
     throw e;
+  } finally {
+    delete downloadState[circuit];
+    emitDownload(circuit);
   }
 }
 

@@ -195,6 +195,86 @@ body {
   border-radius: 999px;
   padding: 2px 8px;
 }
+/* The empty-balance deposit screen leads with the mint guide, so it borrows the
+   primary border weight the amount form otherwise has. */
+.faucet-hero { border-color: var(--border-strong); }
+
+/* --- deposit info hierarchy ------------------------------------------------ */
+
+.deposit-explainer { margin: 0; }
+.deposit-avail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+.deposit-avail-label { font-size: 0.8rem; color: var(--muted); }
+.deposit-avail-amount {
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.deposit-avail-amount .unit { font-size: 0.9rem; font-weight: 600; color: var(--muted); }
+
+/* --- proving-key download (progress + ETA) -------------------------------- */
+
+.dl {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+.dl-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.dl-title { font-size: 0.85rem; font-weight: 600; }
+.dl-note { font-size: 0.72rem; color: var(--muted); }
+.dl-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.dl-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--primary);
+  transition: width 0.25s ease;
+}
+/* No Content-Length => no percentage; sweep instead of pretending. */
+.dl-fill-indeterminate {
+  width: 35%;
+  animation: dl-sweep 1.2s ease-in-out infinite;
+}
+@keyframes dl-sweep {
+  0% { margin-left: 0; }
+  50% { margin-left: 65%; }
+  100% { margin-left: 0; }
+}
+.dl-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- home get-started (loaded-zero private balance) ------------------------ */
+
+.get-started {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+.get-started-title { font-size: 0.95rem; font-weight: 700; margin: 0; }
 
 /* --- onboarding ----------------------------------------------------------- */
 
@@ -213,6 +293,32 @@ body {
 .onboarding-title { font-size: 2rem; margin: 0 0 4px; letter-spacing: -0.02em; color: var(--primary); }
 .onboarding-tag { color: var(--muted); margin: 0; }
 .onboarding-fine { font-size: 0.8rem; color: var(--muted); text-align: center; margin: 0; }
+.onboarding-steps {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.onboarding-step {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 0.88rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.onboarding-step strong { color: var(--ink); }
+.onboarding-step-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--primary);
+  margin-top: 2px;
+}
 
 /* --- home ----------------------------------------------------------------- */
 

@@ -17,12 +17,13 @@ import { DEFAULTS } from "../../config.js";
 import { ensureCircuitAssets, prewarmProver } from "../../lib/prove.js";
 import { runSpend, type SpendStage, type SpendOutcome } from "../../lib/spendFlow.js";
 import { useWallet } from "../App.js";
-import { navigate, useElapsedSeconds } from "../hooks.js";
+import { navigate, useCircuitDownload, useElapsedSeconds } from "../hooks.js";
 import { formatKkrw, parseKkrw } from "../../lib/money.js";
 import { normalizePubkey } from "../format.js";
 import { ScreenHeader } from "./ScreenHeader.js";
 import { StagedProgress } from "./StagedProgress.js";
 import { SuccessMark } from "./SuccessMark.js";
+import { DownloadProgress } from "./DownloadProgress.js";
 
 type Phase = "form" | "confirm" | "running" | "done";
 
@@ -59,19 +60,17 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
   const [amount, setAmount] = useState("");
   const [phase, setPhase] = useState<Phase>("form");
   const [stage, setStage] = useState<SpendStage>("assemble");
-  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<SpendOutcome | null>(null);
+  const download = useCircuitDownload(kind);
 
   const elapsed = useElapsedSeconds(phase === "running" && stage === "prove");
 
   // Prefetch the circuit assets + warm the curve on open (best-effort, non-blocking).
+  // Progress/disable state comes from useCircuitDownload — the prove.ts registry —
+  // not from this call's promise, so a remount mid-download stays honest.
   useEffect(() => {
-    void ensureCircuitAssets(kind, DEFAULTS.circuitBaseUrl, {
-      onDownloadStart: () => setDownloading(true),
-    })
-      .then(() => setDownloading(false))
-      .catch(() => setDownloading(false));
+    void ensureCircuitAssets(kind, DEFAULTS.circuitBaseUrl).catch(() => {});
     void prewarmProver();
   }, [kind]);
 
@@ -170,16 +169,15 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
             <dd>GIWA · chain {DEFAULTS.chainId}</dd>
           </dl>
           <p className="hint">
-            {downloading
-              ? "Preparing proving keys (one-time download)…"
-              : "Your proof is generated on this device — your key never leaves the browser."}
+            Your proof is generated on this device — your key never leaves the browser.
           </p>
+          <DownloadProgress view={download} />
           <div className="btn-row">
             <button className="btn btn-ghost" onClick={() => setPhase("form")}>
               Back
             </button>
-            <button className="btn btn-primary" onClick={submit}>
-              Confirm & prove
+            <button className="btn btn-primary" disabled={download.active} onClick={submit}>
+              {download.active ? "Preparing keys…" : "Confirm & prove"}
             </button>
           </div>
         </div>
@@ -224,19 +222,17 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
         </label>
 
         {error && <div className="banner banner-err">{error}</div>}
-        {downloading && (
-          <div className="banner banner-info">Downloading proving keys (one-time, ~28 MB)…</div>
-        )}
+        <DownloadProgress view={download} />
 
         <button
           className="btn btn-primary btn-block"
-          disabled={!formValid}
+          disabled={!formValid || download.active}
           onClick={() => {
             setError(null);
             setPhase("confirm");
           }}
         >
-          Review {title.toLowerCase()}
+          {download.active ? "Preparing keys…" : `Review ${title.toLowerCase()}`}
         </button>
       </div>
     </div>
