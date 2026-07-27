@@ -52,6 +52,7 @@ import { loadEthers } from "@bongtu/core/extern";
 // lives in the harness shared with apps/indexer/test/scenario.ts.
 import {
   H, GATE_B as B, dec, connectAnvil, deployStack, prove as harnessProve,
+  ok, step, failureCount,
   EMPLOYER, AUTHORITY, PAYEE, RCPTS, kemDraw, kemCtHex,
   sD0, sD1, sR, sPay, sChg, sPadT, sPadW, sRes,
   amounts, V,
@@ -61,21 +62,9 @@ import {
 // code (notes, keys, tree), not theirs.
 const ethers = loadEthers();
 
-// ---------------------------------------------------------------------------
-// tiny assert / logging harness
-// ---------------------------------------------------------------------------
-let failures = 0;
-const checks: { step: string; pass: boolean }[] = [];
-function ok(cond: unknown, msg: string): void {
-  const pass = !!cond;
-  if (!pass) failures++;
-  checks.push({ step: msg, pass });
-  console.log(`   ${pass ? "PASS" : "FAIL"}  ${msg}`);
-  if (!pass) throw new Error(`assertion failed: ${msg}`);
-}
-function step(title: string): void {
-  console.log(`\n=== ${title} ===`);
-}
+// ok() / step() and the failure count are the toolbox's (deploy/lib/proof_toolbox.ts),
+// shared with the GIWA driver.
+//
 // verbose: the human-watched DoD gate keeps its per-circuit timing log (the
 // scenario sibling runs the same harness prove() silent).
 const prove = (name: string, input: unknown) => harnessProve(name, input, { verbose: true });
@@ -482,6 +471,7 @@ async function main(): Promise<void> {
     console.log(`   CONSERVED  = V(${V}) == withdrawn(${withdrawnAmount}) + shielded(${shielded})`);
   }
 
+  const failures = failureCount();
   console.log(`\n${failures === 0 ? "E2E PASS — full cross-circuit spend cycle verified on live anvil" : `E2E FAIL — ${failures} assertion(s) failed`}`);
   process.exit(failures === 0 ? 0 : 1);
 }

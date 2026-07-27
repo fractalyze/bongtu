@@ -10,16 +10,20 @@
 // it, and it must never import from apps/ (the gates it serves test those apps
 // from the outside).
 //
-// It owns exactly the material the two drivers duplicated verbatim:
+// It owns exactly the ANVIL-SPECIFIC material the two drivers duplicated:
 //   - the anvil connection (E2E_RPC + anvil dev account #0),
-//   - the forge-artifact deploy helpers artifact() / deploy() / deployPoolProxy()
-//     — the ONE TS restatement of Deploy.s.sol's UUPS + initialize wiring, so a
-//     pool-initializer change is Deploy.s.sol plus one TS site, not three,
+//   - the deploy helpers deploy() / deployPoolProxy() — the ONE TS restatement
+//     of Deploy.s.sol's UUPS + initialize wiring, so a pool-initializer change
+//     is Deploy.s.sol plus one TS site, not three,
 //   - deployStack(): Poseidon-v1 + the 4 Groth16 verifiers + mock kKRW +
 //     BongtuPool behind its UUPS proxy on a live anvil, then driver-wallet
 //     funding (mint + approve),
-//   - the CPU snarkjs prove() wrapper (witness + groth16 + solidity calldata),
 //   - the shared actor / salt / amount fixture material both drivers assume.
+//
+// The chain-agnostic half — artifact(), the CPU snarkjs prove() wrapper, dec(),
+// and the ok()/step() assertion ledger — lives in ./proof_toolbox.ts, which the
+// GIWA live driver shares too. It is re-exported here so the two anvil drivers
+// keep one import site.
 //
 // What deliberately does NOT live here: each driver's scenario legs and
 // assertions, its per-tx ECDH ephemeral keys + encryption nonces (driver-local;
@@ -36,20 +40,27 @@ import { fileURLToPath } from "node:url";
 
 import { deriveKeypair } from "@bongtu/core/note";
 import type { Keypair } from "@bongtu/core/note";
-import type { FieldInput, PointInput } from "@bongtu/core/babyjub";
+import type { PointInput } from "@bongtu/core/babyjub";
 import { ml_kem768, kemSsToLimbs } from "@bongtu/core/kem";
-import { toWire } from "@bongtu/core/proving";
-import { loadEthers, loadSnarkjs } from "@bongtu/core/extern";
+import { loadEthers } from "@bongtu/core/extern";
+
+// THE fixture arbiter — bjj scalar and ML-KEM-768 keypair both. Deriving a
+// second arbiter here used to make an arbiter-mode indexer's AUTHORITY_KEM_KEY
+// depend on which gate had built the stack; there is one fixture arbiter and it
+// is declared in circuits/fixture_lib.ts.
+import { AUTHORITY_KEM, FIXTURE_ARBITER_SCALAR } from "../../circuits/fixture_lib.js";
+
+import { artifact, dec, prove } from "./proof_toolbox.js";
+
+// One import site for the drivers: the toolbox half of the harness surface.
+export { artifact, dec, prove, ok, step, failureCount } from "./proof_toolbox.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", ".."); // deploy/lib -> repo root
-const CIRC_OUT = join(ROOT, "circuits", "out");
-const CONTRACTS_OUT = join(ROOT, "contracts", "out");
 const POSEIDON_HEX = join(ROOT, "contracts", "test", "fixtures", "poseidon2.hex");
 
-// snarkjs + ethers v5 come back `any` from the shared external loader — we type
-// OUR code (notes, keys, tree), not theirs.
-const snarkjs = loadSnarkjs();
+// ethers v5 comes back `any` from the shared external loader — we type OUR code
+// (notes, keys, tree), not theirs.
 const ethers = loadEthers();
 
 export const RPC = process.env.E2E_RPC || "http://127.0.0.1:8545";
@@ -62,8 +73,6 @@ export { H } from "@bongtu/core/network"; // IMT depth — protocol constant, on
 // invites the wrong import.
 export const GATE_B = 16;
 
-export const dec = (x: FieldInput): string => BigInt(x).toString(); // BigInt -> decimal string for snarkjs / ethers
-
 /** Provider + driver wallet (anvil account #0) on the harness anvil (E2E_RPC). */
 export function connectAnvil(): { provider: any; wallet: any } {
   const provider = new ethers.providers.JsonRpcProvider(RPC);
@@ -72,29 +81,8 @@ export function connectAnvil(): { provider: any; wallet: any } {
 }
 
 // ---------------------------------------------------------------------------
-// proving: witness + groth16 prove + solidity calldata, all in-process
-// ---------------------------------------------------------------------------
-export async function prove(name: string, input: unknown, opts: { verbose?: boolean } = {}) {
-  const wasm = join(CIRC_OUT, `${name}_js`, `${name}.wasm`);
-  const zkey = join(CIRC_OUT, `${name}.zkey`);
-  const t0 = Date.now();
-  const { proof, publicSignals } = await snarkjs.groth16.fullProve(toWire(input), wasm, zkey);
-  const cd = await snarkjs.groth16.exportSolidityCallData(proof, publicSignals);
-  const [a, b, c, pub] = JSON.parse("[" + cd + "]");
-  if (opts.verbose) {
-    console.log(`   proved ${name} (${publicSignals.length} publics) in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
-  }
-  return { a, b, c, pub, publicSignals };
-}
-
-// ---------------------------------------------------------------------------
 // deployment helpers (ethers v5)
 // ---------------------------------------------------------------------------
-export function artifact(sol: string, contract: string): { abi: any; bytecode: any } {
-  const j = JSON.parse(readFileSync(join(CONTRACTS_OUT, `${sol}.sol`, `${contract}.json`), "utf8"));
-  return { abi: j.abi, bytecode: j.bytecode.object };
-}
-
 export async function deploy(wallet: any, sol: string, contract: string, args: unknown[] = []): Promise<any> {
   const { abi, bytecode } = artifact(sol, contract);
   const f = new ethers.ContractFactory(abi, bytecode, wallet);
@@ -161,21 +149,23 @@ export async function deployStack(
 
 // actors (bjj keypairs; scalars are index-derived, PRNG-free)
 export const EMPLOYER = deriveKeypair(111111111111111111111111n);
-export const AUTHORITY = deriveKeypair(555555555555555555555555n); // arbiter key
+export const AUTHORITY = deriveKeypair(FIXTURE_ARBITER_SCALAR); // arbiter key
 
 // The arbiter's ML-KEM-768 keypair (the PQ half of the hybrid authority
-// envelope, pq-envelope-design.md §2). Deterministic like the bjj actors so
-// both gate drivers and a later arbiter-mode indexer run agree on the key
-// without any shared state; the DECAPS key (secretKey) is what an arbiter-mode
-// consumer feeds to AUTHORITY_KEM_KEY.
+// envelope, pq-envelope-design.md §2) is the FIXTURE one, re-exported: the
+// committed proof fixtures, the forge deploy default (Deploy.s.sol reads the
+// same key out of realproofs.json) and these gates then all name one arbiter,
+// so an arbiter-mode indexer's AUTHORITY_KEM_KEY does not depend on which gate
+// built the stack. The DECAPS key (secretKey) is what such a consumer feeds to
+// AUTHORITY_KEM_KEY.
+export { AUTHORITY_KEM };
 const sha = (s: string): Uint8Array => new Uint8Array(createHash("sha256").update(s).digest());
-export const AUTHORITY_KEM = ml_kem768.keygen(
-  new Uint8Array([...sha("bongtu/e2e-harness/kem/seed/d"), ...sha("bongtu/e2e-harness/kem/seed/z")]),
-);
 
 /** Per-tx ML-KEM encapsulation against AUTHORITY_KEM: label-derived randomness
  *  keeps proofs reproducible AND every tx's (ss, ct) distinct — reusing one ct
- *  across ops would collapse the PQ compartment (design doc §6). */
+ *  across ops would collapse the PQ compartment (design doc §6). The label
+ *  prefix stays harness-local, so sharing the arbiter KEY with the committed
+ *  fixtures does not share a single CIPHERTEXT with them. */
 export function kemDraw(label: string): { kemSs: [bigint, bigint]; kemCiphertext: Uint8Array } {
   const { cipherText, sharedSecret } = ml_kem768.encapsulate(
     AUTHORITY_KEM.publicKey,

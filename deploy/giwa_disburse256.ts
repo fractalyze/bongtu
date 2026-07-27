@@ -27,16 +27,20 @@ import {
   poseidonEncrypt, ecdhSharedSecret, assertDistinctOwnerPubkeys,
 } from "@bongtu/core/note";
 import type { Keypair } from "@bongtu/core/note";
-import type { FieldInput } from "@bongtu/core/babyjub";
 import { toWire } from "@bongtu/core/proving";
 import type { Calldata, DisburseInput } from "@bongtu/core/proving";
-import { loadEthers, loadSnarkjs } from "@bongtu/core/extern";
+import { loadEthers } from "@bongtu/core/extern";
 import { B, GIWA_GAS_FLOOR_GWEI, H, RPC_URL, explorerTxUrl } from "@bongtu/core/network";
+
+// artifact / prove / dec and the ok()/step() ledger are the chain-agnostic
+// toolbox shared with the anvil drivers (deploy/lib/proof_toolbox.ts). This
+// script keeps its own connection + address material: it drives the canonical
+// LIVE pool, not a stack it deployed.
+import { artifact, dec, failureCount, ok, prove, step } from "./lib/proof_toolbox.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
-// snarkjs + ethers v5 come back `any` from the shared external loader.
-const snarkjs = loadSnarkjs();
+// ethers v5 comes back `any` from the shared external loader.
 const ethers = loadEthers();
 
 const RPC = process.env.GIWA_RPC || RPC_URL;
@@ -44,8 +48,6 @@ const PK = process.env.DEPLOYER_KEY;
 if (!PK) throw new Error("DEPLOYER_KEY env required");
 
 // H=32 / B=256 come from @bongtu/core/network — the live pool's parameters.
-const CIRC_OUT = join(ROOT, "circuits", "out");
-const CONTRACTS_OUT = join(ROOT, "contracts", "out");
 // The bongtu prover service (top-level prover/) holds the belted disburse256
 // zkey compiled on GPU0 and serves ProvingRequest -> calldata over HTTP. Boot it
 // (and wait for GET /ready == 200) before running this script.
@@ -65,23 +67,6 @@ const KEM_PK: Uint8Array = (() => {
 })();
 const kemHex = (b: Uint8Array): string => "0x" + Buffer.from(b).toString("hex");
 
-let failures = 0;
-const ok = (c: unknown, m: string): void => { const p = !!c; if (!p) failures++; console.log(`   ${p ? "PASS" : "FAIL"}  ${m}`); if (!p) throw new Error("assert: " + m); };
-const step = (t: string): void => console.log(`\n=== ${t} ===`);
-const dec = (x: FieldInput): string => BigInt(x).toString();
-
-function artifact(sol: string, contract: string): any {
-  const j = JSON.parse(readFileSync(join(CONTRACTS_OUT, `${sol}.sol`, `${contract}.json`), "utf8"));
-  return j.abi;
-}
-async function proveSnark(name: string, input: unknown) {
-  const wasm = join(CIRC_OUT, `${name}_js`, `${name}.wasm`);
-  const zkey = join(CIRC_OUT, `${name}.zkey`);
-  const { proof, publicSignals } = await snarkjs.groth16.fullProve(toWire(input), wasm, zkey);
-  const cd = await snarkjs.groth16.exportSolidityCallData(proof, publicSignals);
-  const [a, b, c, pub] = JSON.parse("[" + cd + "]");
-  return { a, b, c, pub };
-}
 async function proveDisburse256(input: DisburseInput): Promise<Calldata> {
   // POST the complete disburse ProvingRequest to the prover service; it runs
   // witness-gen + the rabbitsnark GPU proof and returns exportSolidityCallData-form
@@ -103,8 +88,8 @@ async function proveDisburse256(input: DisburseInput): Promise<Calldata> {
 async function main(): Promise<void> {
   const provider = new ethers.providers.JsonRpcProvider(RPC);
   const wallet = new ethers.Wallet(PK, provider);
-  const pool = new ethers.Contract(addr.pool, artifact("BongtuPool", "BongtuPool"), wallet);
-  const token = new ethers.Contract(addr.token, artifact("MockERC20", "MockERC20"), wallet);
+  const pool = new ethers.Contract(addr.pool, artifact("BongtuPool", "BongtuPool").abi, wallet);
+  const token = new ethers.Contract(addr.token, artifact("MockERC20", "MockERC20").abi, wallet);
   const ARBITER: [bigint, bigint] = [BigInt(addr.arbiterKeyX), BigInt(addr.arbiterKeyY)]; // pool's stored authority key
   // Explicit gas price: the GIWA gas floor lives in @bongtu/core/network
   // (ethers' auto-estimate overpays ~1500x and drains the faucet grant).
@@ -152,7 +137,7 @@ async function main(): Promise<void> {
   const dNoteV = commitment(V, sD0, EMPLOYER.publicKey);
   const dNote0 = commitment(0n, sD1, EMPLOYER.publicKey);
   {
-    const { a, b, c, pub } = await proveSnark("deposit", {
+    const { a, b, c, pub } = await prove("deposit", {
       outputCommitments: [dNoteV, dNote0], outputValues: [V, 0n],
       outputSalts: [sD0, sD1], outputOwnerPublicKeys: [EMPLOYER.publicKey, EMPLOYER.publicKey],
       ecdhPrivateKey: ECDH_DEP, kemSs: KEM_DEP.kemSs,
@@ -225,6 +210,7 @@ async function main(): Promise<void> {
   console.log(`   TOTAL cost   : ${total} wei = ${ethers.utils.formatEther(total.toString())} ETH`);
   console.log(`   per recipient: ${gasUsed / BigInt(B)} gas`);
   console.log(`   explorer     : ${explorerTxUrl(tx.hash)}`);
+  const failures = failureCount();
   console.log(`\n${failures === 0 ? "GIWA 256-DISBURSE PASS" : `FAIL ${failures}`}`);
   process.exit(failures === 0 ? 0 : 1);
 }

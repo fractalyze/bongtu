@@ -60,6 +60,8 @@ import {
   kemSsToLimbs,
   ml_kem768,
 } from "../src/kem.js";
+// THE fixture arbiter's bjj scalar, declared once for the whole repo.
+import { FIXTURE_ARBITER_SCALAR } from "../../../circuits/fixture_lib.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..", "..");
@@ -104,7 +106,7 @@ const PINS: Record<string, string> = {
 
 // ---- shared fixture actors --------------------------------------------------
 
-const AUTHORITY = deriveKeypair(555555555555555555555555n); // the ONE fixture arbiter key
+const AUTHORITY = deriveKeypair(FIXTURE_ARBITER_SCALAR); // the ONE fixture arbiter key
 
 // The fixture arbiter ML-KEM keypair + the disburse256 fixture encapsulation
 // (label-derived randomness), mirroring circuits/fixture_lib.ts — the committed

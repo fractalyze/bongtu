@@ -37,6 +37,8 @@ import { PostgresLedger } from "../src/postgres.js";
 import { Indexer, type ParsedLog } from "../src/ingest.js";
 import { ethers, abiKnowsKem } from "../src/chain.js";
 import { disclosureChain } from "@bongtu/core/envelope";
+// THE fixture arbiter's bjj scalar, declared once for the whole repo.
+import { FIXTURE_ARBITER_SCALAR } from "../../../circuits/fixture_lib.js";
 import { health } from "../src/api/routes/health.js";
 import { ViewTokenService } from "../src/api/viewtoken.js";
 
@@ -63,7 +65,7 @@ const B = 4;
 const DUMMY_RPC = "http://127.0.0.1:1"; // never contacted
 const DUMMY_POOL = "0x" + "12".repeat(20);
 
-const ARB = deriveKeypair(555555555555555555555555n);
+const ARB = deriveKeypair(FIXTURE_ARBITER_SCALAR);
 // Deterministic arbiter ML-KEM keypair + a per-label encapsulation, for the V2
 // (hybrid-envelope) legs — the V1 legs deliberately carry NO kem material.
 const ARB_KEM = ml_kem768.keygen(new Uint8Array(64).fill(21));

@@ -46,10 +46,18 @@ export const SENDER = deriveKeypair(
 /** Ephemeral ECDH key for output/authority encryption. */
 export const ECDH_SK = 987654321987654321987654321n;
 
+/** The bjj private scalar of THE fixture arbiter. Exported because the gate
+ *  drivers and the core/indexer unit tests all need the SAME arbiter, and each
+ *  had retyped this literal: deploy/lib/e2e_harness.ts, apps/indexer/test/
+ *  ingest.test.ts, packages/core/test/envelope.test.ts. (circuits/
+ *  auditor_decrypt_check.ts still restates it deliberately — it is the
+ *  independent parity check and imports nothing it is checking.) */
+export const FIXTURE_ARBITER_SCALAR = 555555555555555555555555n;
+
 /** THE fixture authority (arbiter) keypair. One constant, one key: every
  *  generator's authority envelope encrypts to it, so "all fixture proofs share
  *  one arbiter key" holds by construction. */
-export const AUTHORITY = deriveKeypair(555555555555555555555555n);
+export const AUTHORITY = deriveKeypair(FIXTURE_ARBITER_SCALAR);
 
 export const ENCRYPTION_NONCE = 424242424242n; // < 2^128
 
