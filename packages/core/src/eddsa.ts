@@ -23,7 +23,14 @@
 // NOT circomlib's Blake-hashed pruned-scalar EdDSA — it never has to match an
 // in-circuit gadget; it only gates an HTTP read. Threat model: signature ==
 // spending key (SPEC §5.1), which is exactly the disclosure boundary we want.
+//
+// The VIEW-TOKEN contract lives here too (domain tag, signed tuple, challenge
+// width + validity, host binding): it is the same read-auth question asked with a
+// server-drawn nonce instead of a timestamp, and both halves — the indexer that
+// issues and the client that signs — must agree on every piece of it. indexerApi.ts
+// re-exports the client-facing ones so the fetch flows keep one import path.
 
+import { sha256 } from "@noble/hashes/sha2.js";
 import { Base8, addPoint, mulPointEscalar, isOnCurve, P, IDENTITY, SUBGROUP_ORDER } from "./babyjub.js";
 import type { FieldInput, Point, PointInput } from "./babyjub.js";
 import { poseidonN } from "./poseidon.js";
@@ -70,7 +77,7 @@ export const VIEWTOKEN_DOMAIN_TAG = 0x626f6e6774752f76696577746f6b656e2f7631n;
  *   Poseidon(ownerPub.x, ownerPub.y, challenge, hostBinding, VIEWTOKEN_DOMAIN_TAG).
  *
  * `hostBinding` is a field-sized digest of the indexer origin the signer is
- * ACTUALLY talking to (`viewTokenHostBinding` in indexerApi.ts). Binding it stops
+ * ACTUALLY talking to (`viewTokenHostBinding`, below). Binding it stops
  * challenge relay: a hostile indexer can proxy a live server's challenge, but the
  * victim signs the HOSTILE origin's binding, and the real server verifies against
  * its OWN binding — so the relayed signature never redeems.
@@ -87,6 +94,64 @@ export function viewTokenAuthMessage(
     BigInt(hostBinding),
     VIEWTOKEN_DOMAIN_TAG,
   ]);
+}
+
+/** How many random bytes the challenge issuer draws — ONE constant for both
+ *  halves: the indexer's `randomBytes(CHALLENGE_BYTES)` (api/viewtoken.ts) and the
+ *  client's refusal bound below. 31 bytes is < 2^248, safely under the bn254 field
+ *  prime, so every drawn challenge is a valid Poseidon input on both sides. */
+export const CHALLENGE_BYTES = 31;
+const CHALLENGE_MAX_EXCLUSIVE = 1n << BigInt(8 * CHALLENGE_BYTES);
+
+/**
+ * Refuse to sign anything that is not a well-formed challenge. A signature is a
+ * blank cheque over whatever preimage the server chose, so the client checks the
+ * shape ITSELF rather than trusting the server: decimal digits only, no leading
+ * zero, nonzero, and inside the byte range the issuer draws from. A server that
+ * hands back an out-of-range or non-decimal "challenge" is malfunctioning or
+ * hostile — either way we stop before the key is used.
+ */
+export function assertValidChallenge(challenge: unknown): bigint {
+  if (typeof challenge !== "string" || !/^[1-9][0-9]{0,77}$/.test(challenge)) {
+    throw new Error(`indexer returned a malformed challenge (expected a positive decimal): ${JSON.stringify(challenge)}`);
+  }
+  const v = BigInt(challenge);
+  if (v >= CHALLENGE_MAX_EXCLUSIVE) {
+    throw new Error(`indexer returned an out-of-range challenge (expected < 2^${8 * CHALLENGE_BYTES})`);
+  }
+  return v;
+}
+
+/** How much of sha256(origin) the host binding keeps. Its own constant because it
+ *  answers a DIFFERENT question than CHALLENGE_BYTES — how many digest bytes a
+ *  Poseidon input may carry and stay under the field prime — and only happens to
+ *  land on the same number. Changing one must not silently move the other. */
+export const HOST_BINDING_BYTES = 31;
+
+/**
+ * The field element that pins a view-token signature to ONE indexer origin:
+ * the first 31 bytes of sha256(origin), as a decimal string.
+ *
+ * `origin` is scheme + host + port of the URL the caller is actually talking to
+ * (path, query and trailing slash dropped, lowercased) — so `http://host:8600`
+ * and `http://host:8600/notes` bind identically, while a different host or scheme
+ * never can. Both halves compute this from the URL THEY see: the wallet from the
+ * indexer base it dials, the indexer from PUBLIC_URL. That asymmetry is the
+ * anti-relay property (see viewTokenAuthMessage).
+ *
+ * A RELATIVE base (the wallet's default `/indexer`, a same-origin reverse proxy)
+ * resolves against the page origin — which is genuinely the origin the browser
+ * talks to, and therefore what the indexer's PUBLIC_URL must name in a proxied
+ * deployment. Outside a browser there is no page, so it resolves against
+ * localhost.
+ */
+export function viewTokenHostBinding(url: string): string {
+  const pageOrigin = (globalThis as { location?: { origin?: string } }).location?.origin;
+  const u = new URL(url.replace(/\/$/, ""), pageOrigin ?? "http://localhost");
+  const digest = sha256(new TextEncoder().encode(u.origin.toLowerCase()));
+  let x = 0n;
+  for (const b of digest.slice(0, HOST_BINDING_BYTES)) x = (x << 8n) | BigInt(b);
+  return x.toString();
 }
 
 /** Sign a field-element message with a BabyJubJub private scalar. Deterministic. */

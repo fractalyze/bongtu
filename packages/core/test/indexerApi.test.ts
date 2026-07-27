@@ -22,6 +22,10 @@ import {
 import {
   buildNotesUrl,
   buildHistoryUrl,
+  buildNotesTokenUrl,
+  buildHistoryTokenUrl,
+  signedReadUrl,
+  tokenReadUrl,
   assertValidChallenge,
   viewTokenHostBinding,
 } from "../src/indexerApi.js";
@@ -109,16 +113,31 @@ test("buildHistoryUrl output passes the indexer route's exact verification steps
   assert.ok(verifyNotesAuth(pub, notesAuthMessage(pub, ts), parsed), "client-built sig rejected by the server-side verifier");
 });
 
-test("buildHistoryUrl signs the SAME (pub, ts) message as buildNotesUrl (only the path differs)", () => {
+test("the /notes and /history builders are the SAME builder, differing only in path", () => {
+  // All four public names are one-line wrappers over signedReadUrl / tokenReadUrl,
+  // so what used to need a signature comparison is now structural.
   const kp = deriveKeypair(OWNER_SCALAR);
   const compressed = packPubkey(kp.publicKey);
-  const url = buildHistoryUrl("http://localhost:8600", compressed, kp.formattedPrivateKey);
-  const { ts, sig } = parts(url);
-  // Deterministic signing (Poseidon nonce): the sig must equal a direct sign over
-  // Poseidon(ownerPub.x, ownerPub.y, ts) — the exact construction the route expects.
-  const pub = unpackPubkey(compressed);
-  const expected = packSignature(signNotesAuth(kp.formattedPrivateKey, notesAuthMessage(pub, ts)));
-  assert.equal(sig, expected);
+  const base = "http://localhost:8600";
+
+  // The token builders take no clock, so they compare exactly.
+  const tokenUrl = buildNotesTokenUrl(base, compressed, "v1.tok.en");
+  assert.equal(tokenUrl, tokenReadUrl(base, "notes", compressed, "v1.tok.en"));
+  assert.equal(tokenUrl.replace("/notes?", "/history?"), buildHistoryTokenUrl(base, compressed, "v1.tok.en"));
+
+  // The signed builders stamp "now", so two calls can straddle a second boundary:
+  // compare the SHAPE (same params, same owner, only the route segment differs)
+  // and leave the sig itself to the per-route verification tests above.
+  const notesUrl = new URL(buildNotesUrl(base, compressed, kp.formattedPrivateKey));
+  const histUrl = new URL(buildHistoryUrl(base, compressed, kp.formattedPrivateKey));
+  assert.equal(notesUrl.pathname, "/notes");
+  assert.equal(histUrl.pathname, "/history");
+  assert.deepEqual([...notesUrl.searchParams.keys()], [...histUrl.searchParams.keys()]);
+  assert.equal(notesUrl.searchParams.get("owner"), histUrl.searchParams.get("owner"));
+  assert.equal(
+    new URL(signedReadUrl(base, "history", compressed, kp.formattedPrivateKey)).pathname,
+    histUrl.pathname,
+  );
 });
 
 test("buildHistoryUrl rejects a malformed compressed owner pubkey (client-side 400 guard)", () => {

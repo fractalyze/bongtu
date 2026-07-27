@@ -18,10 +18,22 @@
 // exact function the indexer route checks with — closing the auth loop inside
 // one repo (test/indexerApi.test.ts).
 
-import { sha256 } from "@noble/hashes/sha2.js";
-import { signNotesAuth, notesAuthMessage, viewTokenAuthMessage, packSignature } from "./eddsa.js";
+import {
+  signNotesAuth,
+  notesAuthMessage,
+  viewTokenAuthMessage,
+  packSignature,
+  assertValidChallenge,
+  viewTokenHostBinding,
+} from "./eddsa.js";
 import { unpackPubkey } from "./pubkey.js";
 import type { FieldInput } from "./babyjub.js";
+
+// The view-token signing contract (challenge width + validity, host binding) lives
+// with the signature primitives in eddsa.ts, because the SERVER needs it too and
+// must not import a fetch client to get it. Re-exported here so every existing
+// `@bongtu/core/indexerApi` import of these keeps working.
+export { assertValidChallenge, viewTokenHostBinding, CHALLENGE_BYTES } from "./eddsa.js";
 
 // --- wire shapes (what the indexer serves; what the apps consume) ---------------
 
@@ -183,15 +195,20 @@ export function getAlarms(indexerUrl: string): Promise<Alarm[]> {
   return getJson<Alarm[]>(`${trim(indexerUrl)}/alarms`);
 }
 
+/** The two arbiter-mode owner feeds. They share one read-auth (api/readAuth.ts on
+ *  the server), so they share one URL builder here — only the path differs. */
+export type OwnerReadRoute = "notes" | "history";
+
 /**
- * Build the signed `GET /notes` URL for an owner (SPEC §6b v2 read-auth) — the
- * ONE client-side implementation of the protocol. The signature is over
+ * Build the signed read URL for an owner feed (SPEC §6b v2 read-auth) — the ONE
+ * client-side implementation of the protocol. The signature is over
  * Poseidon(ownerPub.x, ownerPub.y, ts) and must verify against the queried
  * compressed pubkey, so the caller must hold that owner's private scalar
  * (`ownerPrivateKey` — the same formatted bjj scalar the notes are owned by).
  */
-export function buildNotesUrl(
+export function signedReadUrl(
   indexerUrl: string,
+  route: OwnerReadRoute,
   ownerCompressed: string,
   ownerPrivateKey: FieldInput,
 ): string {
@@ -200,7 +217,12 @@ export function buildNotesUrl(
   const ts = Math.floor(Date.now() / 1000); // unix seconds; server allows |now-ts| <= 300
   const msg = notesAuthMessage(pub, ts);
   const sig = signNotesAuth(ownerPrivateKey, msg);
-  return `${trim(indexerUrl)}/notes?owner=${encodeURIComponent(owner)}&ts=${ts}&sig=${packSignature(sig)}`;
+  return `${trim(indexerUrl)}/${route}?owner=${encodeURIComponent(owner)}&ts=${ts}&sig=${packSignature(sig)}`;
+}
+
+/** The signed `GET /notes` URL — the owner's decrypted note list. */
+export function buildNotesUrl(indexerUrl: string, ownerCompressed: string, ownerPrivateKey: FieldInput): string {
+  return signedReadUrl(indexerUrl, "notes", ownerCompressed, ownerPrivateKey);
 }
 
 /** Fetch a signed /notes URL (from `buildNotesUrl`) into the owner's note list. */
@@ -208,23 +230,9 @@ export function fetchNotes(url: string): Promise<OwnerNote[]> {
   return getJson<OwnerNote[]>(url);
 }
 
-/**
- * Build the signed `GET /history` URL for an owner — the arbiter-mode activity
- * feed. Mirrors `buildNotesUrl` EXACTLY (same owner/ts/sig params, same
- * Poseidon(ownerPub.x, ownerPub.y, ts) message the route verifies); only the
- * path differs (`/history`). The caller must hold the owner's private scalar.
- */
-export function buildHistoryUrl(
-  indexerUrl: string,
-  ownerCompressed: string,
-  ownerPrivateKey: FieldInput,
-): string {
-  const owner = ownerCompressed.trim();
-  const pub = unpackPubkey(owner); // validates the compressed pubkey
-  const ts = Math.floor(Date.now() / 1000); // unix seconds; server allows |now-ts| <= 300
-  const msg = notesAuthMessage(pub, ts);
-  const sig = signNotesAuth(ownerPrivateKey, msg);
-  return `${trim(indexerUrl)}/history?owner=${encodeURIComponent(owner)}&ts=${ts}&sig=${packSignature(sig)}`;
+/** The signed `GET /history` URL — the owner's arbiter-mode activity feed. */
+export function buildHistoryUrl(indexerUrl: string, ownerCompressed: string, ownerPrivateKey: FieldInput): string {
+  return signedReadUrl(indexerUrl, "history", ownerCompressed, ownerPrivateKey);
 }
 
 /** Fetch a signed /history URL (from `buildHistoryUrl`) into the owner's feed. */
@@ -257,56 +265,6 @@ export interface ViewChallenge {
   challenge: string;
   expiresAt: number;
   hostBindings: string[];
-}
-
-/** The challenge is 31 random bytes rendered as a decimal (viewtoken.ts), i.e.
- *  1 <= challenge < 2^248 — comfortably below the field prime. */
-const CHALLENGE_BYTES = 31;
-const CHALLENGE_MAX_EXCLUSIVE = 1n << BigInt(8 * CHALLENGE_BYTES);
-
-/**
- * Refuse to sign anything that is not a well-formed challenge. A signature is a
- * blank cheque over whatever preimage the server chose, so the client checks the
- * shape ITSELF rather than trusting the server: decimal digits only, no leading
- * zero, nonzero, and inside the 31-byte range the issuer draws from. A server
- * that hands back an out-of-range or non-decimal "challenge" is malfunctioning or
- * hostile — either way we stop before the key is used.
- */
-export function assertValidChallenge(challenge: unknown): bigint {
-  if (typeof challenge !== "string" || !/^[1-9][0-9]{0,77}$/.test(challenge)) {
-    throw new Error(`indexer returned a malformed challenge (expected a positive decimal): ${JSON.stringify(challenge)}`);
-  }
-  const v = BigInt(challenge);
-  if (v >= CHALLENGE_MAX_EXCLUSIVE) {
-    throw new Error(`indexer returned an out-of-range challenge (expected < 2^${8 * CHALLENGE_BYTES})`);
-  }
-  return v;
-}
-
-/**
- * The field element that pins a view-token signature to ONE indexer origin:
- * the first 31 bytes of sha256(origin), as a decimal string.
- *
- * `origin` is scheme + host + port of the URL the caller is actually talking to
- * (path, query and trailing slash dropped, lowercased) — so `http://host:8600`
- * and `http://host:8600/notes` bind identically, while a different host or scheme
- * never can. Both halves compute this from the URL THEY see: the wallet from the
- * indexer base it dials, the indexer from PUBLIC_URL. That asymmetry is the
- * anti-relay property (see viewTokenAuthMessage).
- *
- * A RELATIVE base (the wallet's default `/indexer`, a same-origin reverse proxy)
- * resolves against the page origin — which is genuinely the origin the browser
- * talks to, and therefore what the indexer's PUBLIC_URL must name in a proxied
- * deployment. Outside a browser there is no page, so it resolves against
- * localhost.
- */
-export function viewTokenHostBinding(url: string): string {
-  const pageOrigin = (globalThis as { location?: { origin?: string } }).location?.origin;
-  const u = new URL(trim(url), pageOrigin ?? "http://localhost");
-  const digest = sha256(new TextEncoder().encode(u.origin.toLowerCase()));
-  let x = 0n;
-  for (const b of digest.slice(0, CHALLENGE_BYTES)) x = (x << 8n) | BigInt(b);
-  return x.toString();
 }
 
 /**
@@ -357,16 +315,23 @@ export async function obtainViewToken(
   return JSON.parse(text) as ViewToken;
 }
 
-/** The token-authenticated `GET /notes` URL (no key material involved). */
-export function buildNotesTokenUrl(indexerUrl: string, ownerCompressed: string, token: string): string {
+/** The token-authenticated read URL for an owner feed — no key material involved,
+ *  which is the whole point of the token path. */
+export function tokenReadUrl(
+  indexerUrl: string,
+  route: OwnerReadRoute,
+  ownerCompressed: string,
+  token: string,
+): string {
   const owner = ownerCompressed.trim();
   unpackPubkey(owner); // validates the compressed pubkey
-  return `${trim(indexerUrl)}/notes?owner=${encodeURIComponent(owner)}&token=${encodeURIComponent(token)}`;
+  return `${trim(indexerUrl)}/${route}?owner=${encodeURIComponent(owner)}&token=${encodeURIComponent(token)}`;
 }
 
-/** The token-authenticated `GET /history` URL — mirrors buildNotesTokenUrl. */
+export function buildNotesTokenUrl(indexerUrl: string, ownerCompressed: string, token: string): string {
+  return tokenReadUrl(indexerUrl, "notes", ownerCompressed, token);
+}
+
 export function buildHistoryTokenUrl(indexerUrl: string, ownerCompressed: string, token: string): string {
-  const owner = ownerCompressed.trim();
-  unpackPubkey(owner); // validates the compressed pubkey
-  return `${trim(indexerUrl)}/history?owner=${encodeURIComponent(owner)}&token=${encodeURIComponent(token)}`;
+  return tokenReadUrl(indexerUrl, "history", ownerCompressed, token);
 }

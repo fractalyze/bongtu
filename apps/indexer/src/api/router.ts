@@ -111,13 +111,13 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
 /** Build (but do not start) the request handler for an Indexer. The route set is
  *  fixed at build time: arbiter mode adds /notes + /history + the /auth token
  *  endpoints, so an unauthorised indexer can never serve a user's decrypted notes
- *  even by request-path (the routes are absent). `tokens` is injectable for tests;
- *  the default draws the secret from TOKEN_SECRET (generated-if-absent, warned) —
- *  and ONLY in arbiter mode, since public mode has no route that takes a token and
- *  would otherwise warn about a TOKEN_SECRET it has no use for. */
-export function makeHandler(ix: Indexer, tokens?: ViewTokenService | null) {
+ *  even by request-path (the routes are absent). `tokens` is REQUIRED (null in
+ *  public mode, which has no route that takes a token): the service must be built
+ *  by whoever knows the origins it binds to — startApi, once the port is bound —
+ *  so there is exactly ONE assembly point and no path that can mint tokens for an
+ *  origin clients never dial. */
+export function makeHandler(ix: Indexer, tokens: ViewTokenService | null) {
   const activeRoutes = ix.arbiterMode ? [...routes, notes, history, authChallenge, authRedeem] : routes;
-  const svc = tokens !== undefined ? tokens : ix.arbiterMode ? new ViewTokenService(resolveTokenSecret()) : null;
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
@@ -142,7 +142,7 @@ export function makeHandler(ix: Indexer, tokens?: ViewTokenService | null) {
             return writeJson(res, 400, { error: `bad request body: ${(e as Error).message}` });
           }
         }
-        const { status, body: resBody, headers } = route.handle({ ix, tokens: svc, params, query: url.searchParams, body });
+        const { status, body: resBody, headers } = route.handle({ ix, tokens, params, query: url.searchParams, body });
         return writeJson(res, status, resBody, headers);
       }
       return writeJson(res, 404, { error: "not found", path: pathname });

@@ -11,10 +11,12 @@
 //      driven against the real routes via a fake fetch yields a token the real
 //      `verifyToken` accepts — closing the client/server loop in-process, the
 //      same pattern indexerApi.test.ts uses for the signed query.
-//   4. ROUTES — /notes and /history accept EITHER auth (signed query unchanged —
-//      old wallets/drivers keep working — or a token); a bad token is 401 and
-//      never falls through to the sig path; a tokenless (public-mode) server
-//      honours no token at all.
+//   4. READ-AUTH — the matrix /notes and /history share (api/readAuth.ts): EITHER
+//      auth is accepted (signed query unchanged — old wallets/drivers keep
+//      working — or a token); a bad token is 401 and never falls through to the
+//      sig path; a tokenless (public-mode) server honours no token at all. It
+//      runs ONCE against the extracted function, and each route then only has to
+//      prove it honours the verdict and serves its own projection.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -33,8 +35,11 @@ import {
   viewTokenAuthMessage,
   signNotesAuth,
   packSignature,
+  assertValidChallenge,
   VIEWTOKEN_DOMAIN_TAG,
+  CHALLENGE_BYTES,
 } from "@bongtu/core/eddsa";
+import { authorizeOwner, type OwnerAuth } from "../src/api/readAuth.js";
 import {
   ViewTokenService,
   TOKEN_TTL_SECONDS,
@@ -321,51 +326,117 @@ test("end-to-end relay: a hostile indexer proxying a live challenge gains nothin
   assert.equal(real.redeemChallenge(ownerCompressed, captured.challenge, captured.sig), null);
 });
 
-// ============================ (4) ROUTES =====================================
+// ============================ (4) READ-AUTH ==================================
 
-test("/notes and /history accept both auth paths; bad tokens 401 without sig fallback", () => {
+/** Drive the shared read-auth exactly as the router hands it to a route. */
+const authorize = (tokens: ViewTokenService | null, query: string): OwnerAuth =>
+  authorizeOwner({ ix: fakeIx, tokens, params: [], query: new URLSearchParams(query) });
+
+/** "ok" or the status the caller would have sent — the whole verdict in one value. */
+const verdict = (a: OwnerAuth): number | "ok" => (a.ok ? "ok" : a.denied.status);
+
+/** A signed query with an arbitrary signer and ts (the client builder always uses
+ *  the owner's own key and "now", which is only the happy path). */
+const signedQuery = (signer: typeof OWNER, ts: number): string =>
+  `owner=${ownerCompressed}&ts=${ts}&sig=${packSignature(
+    signNotesAuth(signer.formattedPrivateKey, notesAuthMessage(OWNER.publicKey, ts)),
+  )}`;
+
+test("read-auth: both proofs are accepted and every failing shape keeps its status", () => {
   const svc = svcAt();
   const { challenge } = svc.issueChallenge(ownerCompressed);
   const issued = svc.redeemChallenge(ownerCompressed, challenge, signFor(OWNER, challenge, HOME));
   assert.ok(issued);
+  const tokenQ = `owner=${ownerCompressed}&token=${encodeURIComponent(issued.token)}`;
+  const signedQ = new URL(buildNotesUrl("http://x", ownerCompressed, OWNER.formattedPrivateKey), "http://x")
+    .searchParams.toString();
+  const now = Math.floor(Date.now() / 1000);
+  const tampered = issued.token.slice(0, -1) + (issued.token.endsWith("0") ? "1" : "0");
+
+  // (a) the ORIGINAL signed query still authorises (backward compat), and the
+  // proven pubkey is the queried owner's — what the route looks the ledger up by.
+  const signed = authorize(svc, signedQ);
+  assert.equal(verdict(signed), "ok");
+  assert.deepEqual(signed.ok && signed.pub, OWNER.publicKey);
+
+  // (b) the token path authorises with NO sig/ts at all.
+  assert.equal(verdict(authorize(svc, tokenQ)), "ok");
+
+  // malformed REQUESTS are 400s, failing AUTH is a 401 — the split a client
+  // distinguishes "fix your URL" from "prove who you are" by.
+  assert.equal(verdict(authorize(svc, "")), 400, "no owner param");
+  assert.equal(verdict(authorize(svc, "owner=abc&ts=1&sig=0x00")), 400, "malformed compressed owner");
+  assert.equal(verdict(authorize(svc, `owner=${ownerCompressed}`)), 400, "no token and no ts/sig");
+  assert.equal(verdict(authorize(svc, `owner=${ownerCompressed}&ts=1.5&sig=0x00`)), 400, "ts not integer seconds");
+  assert.equal(verdict(authorize(svc, `owner=${ownerCompressed}&ts=${now}&sig=0xzz`)), 400, "malformed sig");
+  assert.equal(verdict(authorize(svc, signedQuery(OTHER, now))), 401, "signature by the wrong key");
+  assert.equal(verdict(authorize(svc, signedQuery(OWNER, now - 400))), 401, "ts outside the 300s replay window");
+  assert.equal(verdict(authorize(svc, signedQuery(OWNER, now - 299))), "ok", "…and inside it still passes");
+  assert.equal(
+    verdict(authorize(svc, `owner=${otherCompressed}&token=${encodeURIComponent(issued.token)}`)),
+    401,
+    "valid token, other owner",
+  );
+
+  // a bad token is terminal: presence of `token` selects that path exclusively,
+  // so a valid sig riding along must NOT rescue the request.
+  assert.equal(verdict(authorize(svc, `${signedQ}&token=${encodeURIComponent(tampered)}`)), 401);
+
+  // a server with NO token service (public mode) honours no token, valid or not…
+  assert.equal(verdict(authorize(null, tokenQ)), 401);
+  // …while the signed query still works there, so the guard is token-path-only.
+  assert.equal(verdict(authorize(null, signedQ)), "ok");
+});
+
+test("the issuer draws exactly the width the client's refusal bound allows", () => {
+  // ONE constant owns both halves (eddsa.ts): the indexer's randomBytes width and
+  // the client's out-of-range check. A drift here is a wallet that refuses to sign
+  // a challenge its own server drew.
+  const svc = svcAt();
+  const { challenge } = svc.issueChallenge(ownerCompressed);
+  assert.equal(assertValidChallenge(challenge), BigInt(challenge));
+  const widest = (1n << BigInt(8 * CHALLENGE_BYTES)) - 1n;
+  assert.equal(assertValidChallenge(widest.toString()), widest);
+  assert.throws(() => assertValidChallenge((widest + 1n).toString()), /out-of-range/);
+});
+
+// ============================ (5) ROUTES =====================================
+
+test("/notes and /history honour the auth verdict and serve their own projection", () => {
+  const svc = svcAt();
+  const { challenge } = svc.issueChallenge(ownerCompressed);
+  const issued = svc.redeemChallenge(ownerCompressed, challenge, signFor(OWNER, challenge, HOME));
+  assert.ok(issued);
+  const signedQ = new URL(buildNotesUrl("http://x", ownerCompressed, OWNER.formattedPrivateKey), "http://x")
+    .searchParams.toString();
 
   for (const [route, item] of [
     [notes, FAKE_NOTE],
     [history, FAKE_HISTORY],
   ] as const) {
-    // (a) the ORIGINAL signed query still works (backward compat).
-    const signedUrl = new URL(buildNotesUrl("http://x", ownerCompressed, OWNER.formattedPrivateKey), "http://x");
-    const signed = call(route, svc, signedUrl.searchParams.toString());
-    assert.equal(signed.status, 200);
-    assert.deepEqual(signed.body, [item]);
-
-    // (b) the token path works with NO sig/ts at all.
-    const tokenQ = `owner=${ownerCompressed}&token=${encodeURIComponent(issued.token)}`;
-    const viaToken = call(route, svc, tokenQ);
-    assert.equal(viaToken.status, 200);
-    assert.deepEqual(viaToken.body, [item]);
-
-    // wrong owner under a valid token -> 401.
-    const wrongOwner = call(route, svc, `owner=${otherCompressed}&token=${encodeURIComponent(issued.token)}`);
-    assert.equal(wrongOwner.status, 401);
-
-    // tampered token -> 401 EVEN IF a valid sig rides along (no fall-through).
-    const tampered = issued.token.slice(0, -1) + (issued.token.endsWith("0") ? "1" : "0");
-    const mixed = call(route, svc, `${signedUrl.searchParams.toString()}&token=${encodeURIComponent(tampered)}`);
-    assert.equal(mixed.status, 401);
-
-    // token absent AND no sig/ts -> still the original 400.
-    const bare = call(route, svc, `owner=${ownerCompressed}`);
-    assert.equal(bare.status, 400);
-
-    // a server with NO token service (public mode) honours no token, valid or not.
-    const tokenless = call(route, null, tokenQ);
-    assert.equal(tokenless.status, 401);
-    // …and the signed query still works there, so the guard is token-path-only.
-    assert.equal(call(route, null, signedUrl.searchParams.toString()).status, 200);
+    for (const q of [signedQ, `owner=${ownerCompressed}&token=${encodeURIComponent(issued.token)}`]) {
+      const served = call(route, svc, q);
+      assert.equal(served.status, 200);
+      assert.deepEqual(served.body, [item], "the authorized request reaches the ledger");
+      assert.match(served.headers?.["x-bongtu-auth"] ?? "", /ENFORCED/);
+    }
+    // a denial is returned verbatim, not swallowed into a 200 with an empty body.
+    assert.equal(call(route, svc, `owner=${ownerCompressed}`).status, 400);
   }
+});
 
-  // the /auth endpoints refuse to pretend when there is no service behind them.
+test("/notes and /history 503 while the arbiter ledger is still unbuilt", () => {
+  const preIngest = { arbiterMode: true, ledger: null } as unknown as Indexer;
+  const svc = svcAt();
+  const signedQ = new URL(buildNotesUrl("http://x", ownerCompressed, OWNER.formattedPrivateKey), "http://x")
+    .searchParams.toString();
+  for (const route of [notes, history]) {
+    const r = route.handle({ ix: preIngest, tokens: svc, params: [], query: new URLSearchParams(signedQ) });
+    assert.equal(r.status, 503);
+  }
+});
+
+test("the /auth endpoints refuse to pretend when there is no service behind them", () => {
   assert.equal(call(authChallenge, null, `owner=${ownerCompressed}`).status, 503);
   assert.equal(call(authRedeem, null, "", { owner: ownerCompressed, challenge: "1", sig: "0x00" }).status, 503);
 });

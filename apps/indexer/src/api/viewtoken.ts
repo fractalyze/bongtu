@@ -34,8 +34,13 @@
 
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { unpackPubkey } from "@bongtu/core/pubkey";
-import { parseSignature, verifyNotesAuth, viewTokenAuthMessage } from "@bongtu/core/eddsa";
-import { viewTokenHostBinding } from "@bongtu/core/indexerApi";
+import {
+  parseSignature,
+  verifyNotesAuth,
+  viewTokenAuthMessage,
+  viewTokenHostBinding,
+  CHALLENGE_BYTES,
+} from "@bongtu/core/eddsa";
 
 /** How long an issued token authorises reads (~24h — one working day per sign-in). */
 export const TOKEN_TTL_SECONDS = 24 * 60 * 60;
@@ -135,10 +140,11 @@ export class ViewTokenService {
   /** Draw a fresh single-use challenge bound to `owner`. Throws on a malformed owner. */
   issueChallenge(ownerCompressed: string): IssuedChallenge {
     unpackPubkey(ownerCompressed.trim()); // malformed owner -> throw (route maps to 400)
-    // 31 random bytes < 2^248: safely below the bn254 field prime, so the value is
-    // a valid Poseidon input on both sides.
+    // CHALLENGE_BYTES is the SAME constant the client's assertValidChallenge
+    // refuses beyond (@bongtu/core/eddsa), so the issuer can never draw a value
+    // its own clients reject.
     let x = 0n;
-    for (const b of randomBytes(31)) x = (x << 8n) | BigInt(b);
+    for (const b of randomBytes(CHALLENGE_BYTES)) x = (x << 8n) | BigInt(b);
     const challenge = (x === 0n ? 1n : x).toString();
     const exp = this.now() + CHALLENGE_TTL_SECONDS;
     this.sweep();
