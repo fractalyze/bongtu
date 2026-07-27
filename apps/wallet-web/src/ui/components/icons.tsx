@@ -15,7 +15,6 @@ import {
   RiDownload2Line,
   RiUpload2Line,
   RiArrowLeftDownLine,
-  RiArrowLeftRightLine,
   RiFileCopyLine,
   RiCheckLine,
   RiCloseLine,
@@ -76,12 +75,6 @@ export function IconWithdraw({ size = 18 }: IconProps): ReactNode {
 /** Incoming private transfer in the activity feed (counterpart of IconSend). */
 export function IconReceived({ size = 18 }: IconProps): ReactNode {
   return <RiArrowLeftDownLine size={size} aria-hidden="true" />;
-}
-
-/** A pure self-send in the activity feed: value moved but stayed with the owner,
- *  so the glyph points BOTH ways — neither the in nor the out arrow fits. */
-export function IconSelfSend({ size = 18 }: IconProps): ReactNode {
-  return <RiArrowLeftRightLine size={size} aria-hidden="true" />;
 }
 
 export function IconCopy({ size = 16 }: IconProps): ReactNode {

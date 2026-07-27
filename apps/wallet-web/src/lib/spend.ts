@@ -156,8 +156,20 @@ export function selectInputNotes(notes: readonly SelectableNote[], amount: strin
 }
 
 /** A fresh field element (decimal string) per call — the injectable randomness
- *  behind `freshSpendCrypto` (browser CSPRNG in main.ts; deterministic in tests). */
+ *  behind `freshSpendCrypto` (the platform CSPRNG via `randField` below; a
+ *  deterministic double in tests). */
 export type RandField = () => string;
+
+// Fresh per-tx field randomness, from the platform CSPRNG. A shared ephemeral ECDH key
+// + nonce across outputs of ONE tx is fine; reuse ACROSS txs is a two-time pad, so both
+// spend and deposit draw fresh values every action.
+export function randField(): string {
+  const b = new Uint8Array(31); // < 2^248, safely under the field prime
+  crypto.getRandomValues(b);
+  let x = 0n;
+  for (const byte of b) x = (x << 8n) | BigInt(byte);
+  return (x === 0n ? 1n : x).toString();
+}
 
 /** One ML-KEM encapsulation result in wire form: witness limbs + tx ct. */
 export interface KemMaterial {

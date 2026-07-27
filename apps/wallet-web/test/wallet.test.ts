@@ -55,7 +55,7 @@ import { CIRCUITS_VERSION, DEFAULTS, H, B } from "../src/config.js";
 import { ml_kem768, kemSsToLimbs, kemHexToBytes, kemBytesToHex } from "@bongtu/core/kem";
 import { ARBITER_KEM_PK } from "@bongtu/core/network";
 import type { KemMaterial } from "../src/lib/spend.js";
-import { resolveIndexerProxy } from "../vite.config.js";
+import { resolveWalletProxy } from "../vite.config.js";
 
 // Deterministic ML-KEM material (fixed encapsulation randomness against the real
 // arbiter pk) — the spend-fixture equivalent of the fixed ecdh/nonce scalars.
@@ -115,10 +115,12 @@ test("the Vite indexer proxy is on in development and auto-disabled in productio
   // The proxy is a dev-only convenience; in production the app is a static build served
   // behind an Nginx/ingress reverse-proxy that owns `/indexer/*`. `vite preview` defaults
   // to production mode, so gating on `mode` is what keeps a live proxy from masking a
-  // missing prod route. Pin both ends of that contract.
-  const dev = resolveIndexerProxy("development");
+  // missing prod route. Pin both ends of that contract. resolveWalletProxy composes the
+  // SHARED `/indexer` rule (root vite.shared.ts, also used by the admin app) with the
+  // wallet-only `/circuits` rule, so this gate covers both halves at once.
+  const dev = resolveWalletProxy("development");
   assert.ok(dev && "/indexer" in dev, "development must proxy /indexer");
-  assert.equal(resolveIndexerProxy("production"), undefined, "production must not proxy — infra owns /indexer");
+  assert.equal(resolveWalletProxy("production"), undefined, "production must not proxy — infra owns /indexer");
   // The proving assets have one home in every environment: dev must reach the SAME
   // versioned blob path the vercel.json /circuits rewrite serves in deployments.
   assert.ok(dev && "/circuits" in dev, "development must proxy /circuits to the blob store");
@@ -547,20 +549,21 @@ test("recipientError: accepts base58check, legacy hex AND the wallet's own addre
   const self = f.wallet.compressedPubkey;
   const b58 = encodeAddress(f.recipient);
 
-  assert.equal(recipientError(f.recipient, self), null, "legacy hex rejected");
-  assert.equal(recipientError(b58, self), null, "base58check rejected");
-  assert.equal(recipientError("  " + b58 + "  ", self), null, "whitespace-padded base58 rejected");
+  assert.equal(recipientError(f.recipient), null, "legacy hex rejected");
+  assert.equal(recipientError(b58), null, "base58check rejected");
+  assert.equal(recipientError("  " + b58 + "  "), null, "whitespace-padded base58 rejected");
 
   // A single flipped character must trip the checksum, not silently pay a stranger.
   const last = b58[b58.length - 1];
   const tampered = b58.slice(0, -1) + (last === "2" ? "5" : "2");
-  assert.equal(recipientError(tampered, self), "That doesn't look like a valid bongtu address.");
-  assert.equal(recipientError("", self), "Enter a recipient.");
-  assert.equal(recipientError("junk", self), "That doesn't look like a valid bongtu address.");
+  assert.equal(recipientError(tampered), "That doesn't look like a valid bongtu address.");
+  assert.equal(recipientError(""), "Enter a recipient.");
+  assert.equal(recipientError("junk"), "That doesn't look like a valid bongtu address.");
 
-  // Self-send is allowed in EITHER encoding (per-output nonce, §11-8 v1.1).
-  assert.equal(recipientError(self, self), null, "own address (hex) must be accepted");
-  assert.equal(recipientError(encodeAddress(self), self), null, "own address (base58) must be accepted");
+  // Self-send is allowed in EITHER encoding (per-output nonce, §11-8 v1.1) — the
+  // wallet's own address is judged exactly like any other, no self-pubkey passed in.
+  assert.equal(recipientError(self), null, "own address (hex) must be accepted");
+  assert.equal(recipientError(encodeAddress(self)), null, "own address (base58) must be accepted");
 });
 
 test("spend path: a base58 recipient normalized via decodeAddress builds the identical request", () => {

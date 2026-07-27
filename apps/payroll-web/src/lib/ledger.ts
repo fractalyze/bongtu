@@ -20,11 +20,12 @@
 import { parseEnvelope, authorityCiphertextLen, type OpKind } from "@bongtu/core/envelope";
 import { commitment as noteCommitment } from "@bongtu/core/note";
 import { packPubkey } from "@bongtu/core/pubkey";
-import type { FeedEvent } from "@bongtu/core/indexerApi";
+import type { FeedEvent } from "./indexerClient.js";
 
-// The /events wire shape is owned by @bongtu/core/indexerApi (consumer-adapter
-// side of the contract); re-exported for existing `./ledger.js` importers.
-export type { FeedEvent } from "@bongtu/core/indexerApi";
+// The /events wire shape is owned by @bongtu/core/indexerApi and reaches this app
+// through the ONE indexer barrel (./indexerClient.js); re-exported here for existing
+// `./ledger.js` importers.
+export type { FeedEvent } from "./indexerClient.js";
 
 /** A decrypted note in the auditor ledger. */
 export interface LedgerNote {

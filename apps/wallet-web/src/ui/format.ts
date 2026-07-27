@@ -41,11 +41,12 @@ export function downloadOnceSubtitle(totalBytes: number | null): string {
  * Reject an obviously-bad recipient before proving (the pure spend.ts rejects it
  * too, but a 28 MB proof is a bad place to learn you fat-fingered a key).
  * decodeAddress is the one normalization point — it accepts base58check AND
- * legacy hex, and its checksum catches typos. Sending to your own address is
- * allowed: the transfer circuit's per-output receiver nonce (§11-8 v1.1, U-X3)
- * removed the two-time pad that used to make a self-send unsafe.
+ * legacy hex, and its checksum catches typos. The address is judged on its own:
+ * sending to YOUR OWN address is allowed, since the transfer circuit's per-output
+ * receiver nonce (§11-8 v1.1, U-X3) removed the two-time pad that used to make a
+ * self-send unsafe — which is why this takes no self-pubkey to compare against.
  */
-export function recipientError(raw: string, _selfPubkey: string): string | null {
+export function recipientError(raw: string): string | null {
   const v = raw.trim();
   if (!v) return "Enter a recipient.";
   try {

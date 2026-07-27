@@ -115,10 +115,10 @@ src/
     disburse.ts        PURE: recipients + input note + membership -> ProvingRequest + ciphertext
     ledger.ts          PURE: /events + arbiter key -> decrypted auditor ledger
     csv.ts             recipient CSV parser
-    chain.ts           MetaMask disburseWithCiphertexts + pool reads (ethers v5)
+    chain.ts           MetaMask disburseWithCiphertexts + KEM-epoch guard (ethers v5)
     proverClient.ts    POST a request to the prover/ service
-    indexerClient.ts   /head /path /events /alarms fetch wrappers
-    notesAuth.ts       signed GET /notes URL builder (@bongtu/core/eddsa)
+    indexerClient.ts   the ONE indexer barrel: /head /path /events /alarms fetch
+                       wrappers + the signed GET /notes URL builder
     dom.ts             tiny framework-free DOM helpers
   views/
     employer.ts        employer-mode UI

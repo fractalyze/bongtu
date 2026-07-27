@@ -16,7 +16,7 @@ import { approveToken, assertPoolKemEpoch, ensureChain, readTokenState, submitDe
 import { keyCache, type KeyCache } from "./keyCache.js";
 import { assertDepositAffordable, buildDepositRequest, freshDepositCrypto } from "./deposit.js";
 import { proveInBrowser } from "./prove.js";
-import { randField } from "./spendFlow.js";
+import { randField } from "./spend.js";
 
 /** The coarse stages a deposit passes through. "unlock" is the signature that hands
  *  over the spending key and fires ONLY when the wallet is locked; "approve" is

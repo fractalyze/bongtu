@@ -58,7 +58,7 @@ import { LockIntro } from "./screens/LockIntro.js";
 import { Home } from "./screens/Home.js";
 import { Receive } from "./screens/Receive.js";
 import { Deposit } from "./screens/Deposit.js";
-import { SpendScreen } from "./components/SpendScreen.js";
+import { SpendScreen } from "./screens/SpendScreen.js";
 import { Activity } from "./screens/Activity.js";
 import { Settings } from "./screens/Settings.js";
 

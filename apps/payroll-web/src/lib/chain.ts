@@ -14,12 +14,11 @@ import {
 } from "@bongtu/core/network";
 
 // The shared per-function ABI fragments (@bongtu/core/network) — only the
-// functions the admin app touches.
+// functions the admin app touches: the disburse submit plus the KEM-epoch guard
+// it runs first. The pool head (root / nextLeafIndex / B) is NOT read here — the
+// indexer's /head is the live path for that (indexerClient.ts).
 const POOL_ABI = [
   POOL_ABI_FRAGMENTS.disburseWithCiphertexts,
-  POOL_ABI_FRAGMENTS.root,
-  POOL_ABI_FRAGMENTS.nextLeafIndex,
-  POOL_ABI_FRAGMENTS.B,
   POOL_ABI_FRAGMENTS.currentEpoch,
   POOL_ABI_FRAGMENTS.arbiterKemPkHash,
 ];
@@ -86,12 +85,4 @@ export async function submitDisburse(
   );
   await tx.wait();
   return { txHash: tx.hash, explorerUrl: explorerTxUrl(tx.hash, explorerBase) };
-}
-
-/** Read the live pool head (root + nextLeafIndex) over an RPC — no wallet needed. */
-export async function poolHead(rpc: string, poolAddr: string): Promise<{ root: string; nextLeafIndex: string; B: string }> {
-  const provider = new ethers.providers.JsonRpcProvider(rpc);
-  const pool = new ethers.Contract(poolAddr, POOL_ABI, provider);
-  const [root, nli, b] = await Promise.all([pool.root(), pool.nextLeafIndex(), pool.B()]);
-  return { root: root.toString(), nextLeafIndex: nli.toString(), B: b.toString() };
 }

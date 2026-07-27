@@ -19,6 +19,7 @@ import {
   buildWithdrawRequest,
   selectInputNotes,
   freshSpendCrypto,
+  randField,
   type WalletInputNote,
   type MembershipWitness,
 } from "./spend.js";
@@ -42,17 +43,6 @@ export interface SpendContext {
 export interface SpendOutcome {
   txHash: string;
   explorerUrl: string;
-}
-
-// Fresh per-tx field randomness (browser only). A shared ephemeral ECDH key + nonce
-// across outputs of ONE tx is fine; reuse ACROSS txs is a two-time pad, so we draw
-// fresh values every spend. (Was `randField` in main.ts.)
-export function randField(): string {
-  const b = new Uint8Array(31); // < 2^248, safely under the field prime
-  crypto.getRandomValues(b);
-  let x = 0n;
-  for (const byte of b) x = (x << 8n) | BigInt(byte);
-  return (x === 0n ? 1n : x).toString();
 }
 
 /** The network/proving I/O runSpend performs, injectable so the pure orchestration

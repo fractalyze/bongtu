@@ -21,11 +21,11 @@ import { useWallet } from "../App.js";
 import { useCircuitDownload, useElapsedSeconds } from "../hooks.js";
 import { formatKkrw, parseKkrw } from "../../lib/money.js";
 import { recipientError } from "../format.js";
-import { ScreenHeader } from "./ScreenHeader.js";
-import { SPEND_STEPS, StagedProgress, withUnlock } from "./StagedProgress.js";
-import { SuccessPanel } from "./SuccessPanel.js";
-import { DownloadProgress } from "./DownloadProgress.js";
-import { AmountInput, Button, ErrorBanner, Field, TextInput } from "./controls.js";
+import { ScreenHeader } from "../components/ScreenHeader.js";
+import { SPEND_STEPS, StagedProgress, withUnlock } from "../components/StagedProgress.js";
+import { SuccessPanel } from "../components/SuccessPanel.js";
+import { DownloadProgress } from "../components/DownloadProgress.js";
+import { AmountInput, Button, ErrorBanner, Field, TextInput } from "../components/controls.js";
 
 type Phase = "form" | "confirm" | "running" | "done";
 
@@ -63,7 +63,7 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
     void prewarmProver();
   }, [kind]);
 
-  const rcptErr = isTransfer && session ? recipientError(recipient, session.compressedPubkey) : null;
+  const rcptErr = isTransfer ? recipientError(recipient) : null;
   const amtErr = amountError(amount, balance);
   // Guard on a KNOWN balance: until /notes loads (balance===null) amountError can't
   // catch over-spend, so don't let the user start a proof that would revert on-chain.

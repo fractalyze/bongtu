@@ -180,7 +180,7 @@ test("freshDepositCrypto: kem draw — deterministic injection in tests, fresh e
 });
 
 test("freshDepositCrypto clamps the encryption nonce below 2^128 (circuit constraint)", () => {
-  // The browser CSPRNG (spendFlow randField) draws 248-bit fields; SymmetricEncrypt
+  // The platform CSPRNG (spend.ts randField) draws 248-bit fields; SymmetricEncrypt
   // constrains nonce < 2^128, so an unclamped draw kills witness generation with
   // "Assert Failed … SymmetricEncrypt" (live-repro'd 2026-07-26). Salts and the
   // ephemeral key must KEEP the full draw width.

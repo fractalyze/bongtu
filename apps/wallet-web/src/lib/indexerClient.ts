@@ -1,7 +1,9 @@
-// Consumer adapter over the indexer read API (SPEC §6b): the wire shapes AND the
-// fetch wrappers are owned by @bongtu/core/indexerApi — one owner for both apps,
-// server-adapter-typed on the indexer side. This file only keeps the wallet's
-// import path stable. The wallet uses:
+// The ONE indexer import home for the wallet (SPEC §6b). Every read of the indexer —
+// the fetch wrappers AND the wire types — enters the app through this file; nothing
+// else in apps/wallet-web imports @bongtu/core/indexerApi directly. The wire shapes and
+// the fetch wrappers themselves are owned by @bongtu/core/indexerApi — one owner for
+// both apps, server-adapter-typed on the indexer side — so this barrel adds no logic.
+// The wallet uses:
 //   - signed `GET /notes` (arbiter mode) for the balance path — the
 //     sdk `buildNotesUrl` signs with the wallet's OWN key (byte-identical to the
 //     indexer's verifier, tested headlessly in the sdk suite), so only the owner

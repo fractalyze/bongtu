@@ -8,9 +8,8 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { decodeAddress } from "@bongtu/core/pubkey";
 import { DEFAULTS } from "../config.js";
-import { getEvents, getAlarms, type Alarm } from "../lib/indexerClient.js";
+import { buildNotesUrl, fetchNotes, getEvents, getAlarms, type Alarm } from "../lib/indexerClient.js";
 import { buildAuditorLedger, type AuditorLedger, type LedgerNote } from "../lib/ledger.js";
-import { buildNotesUrl, fetchNotes } from "../lib/notesAuth.js";
 import {
   Button,
   Field,

@@ -26,23 +26,20 @@ export const DEFAULTS = {
   batchSize: B,
   // The pool's stored arbiter PUBLIC key (addresses.91342.json arbiterKeyX/Y).
   arbiterPubKey: [ARBITER_PUBKEY_X, ARBITER_PUBKEY_Y] as [string, string],
+  // Build-time env is read as `import.meta.env?.VITE_X || default` throughout — the
+  // repo-wide convention, matching the wallet. The optional chain survives Vite's
+  // static replacement (measured 2026-07-27: probe values appear in both apps' prod
+  // bundles) and keeps the plain node test runtime, where `import.meta.env` is
+  // undefined, from throwing.
+  //
   // The bongtu prover service (top-level prover/, Python FastAPI over rabbitsnark)
-  // on the employer's GPU box. Overridable at build time via VITE_PROVER_URL —
-  // the exact dotted expression below is what Vite statically replaces (a cast
-  // or optional-chained form defeats the replacement and makes the override
-  // inert); the typeof guard keeps the node test runtime (tsx, no Vite) alive.
-  proverUrl:
-    (typeof import.meta.env !== "undefined" && import.meta.env.VITE_PROVER_URL) ||
-    "http://127.0.0.1:8700/prove",
+  // on the employer's GPU box.
+  proverUrl: import.meta.env?.VITE_PROVER_URL || "http://127.0.0.1:8700/prove",
   // A public-mode indexer for /head + /path; auditor-mode points at an arbiter indexer.
   // Defaults to the relative path `/indexer` (like the wallet): in dev the Vite proxy
   // forwards it to a localhost indexer, in prod the Vercel rewrite (vercel.json) forwards
-  // it to the Funnel indexer — the browser only ever talks to its own origin. Overridable
-  // at build time via VITE_INDEXER_URL; the dotted+typeof form matches proverUrl so Vite's
-  // static replacement actually fires (an optional-chained form would make it inert).
-  indexerUrl:
-    (typeof import.meta.env !== "undefined" && import.meta.env.VITE_INDEXER_URL) ||
-    "/indexer",
+  // it to the Funnel indexer — the browser only ever talks to its own origin.
+  indexerUrl: import.meta.env?.VITE_INDEXER_URL || "/indexer",
 } as const;
 
 export { H, B } from "@bongtu/core/network";

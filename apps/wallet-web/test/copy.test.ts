@@ -83,7 +83,7 @@ test("SuccessPanel says the balance is catching up only while syncing", () => {
 
 test("the success headlines are the corrected ones", () => {
   const deposit = readFileSync(`${UI_DIR}screens/Deposit.tsx`, "utf8");
-  const spend = readFileSync(`${UI_DIR}components/SpendScreen.tsx`, "utf8");
+  const spend = readFileSync(`${UI_DIR}screens/SpendScreen.tsx`, "utf8");
   assert.match(deposit, /headline="Deposit completed"/);
   assert.doesNotMatch(deposit, /Deposit complete[^d]/);
   // "sent" headlines were already correct and stay untouched.
@@ -143,7 +143,7 @@ test("the on-your-device reassurance is gone from the action screens", () => {
 });
 
 test("Confirm Send / Confirm Withdraw no longer restate the source of the money", () => {
-  const spend = readFileSync(`${UI_DIR}components/SpendScreen.tsx`, "utf8");
+  const spend = readFileSync(`${UI_DIR}screens/SpendScreen.tsx`, "utf8");
   assert.doesNotMatch(spend, /Your private balance/);
   // the rows that carry real information stay
   assert.match(spend, />To</);
