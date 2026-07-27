@@ -1,5 +1,5 @@
 // Headless gate for the spending key's SESSION BINDING as the two action flows see it
-// (lib/identity.ts + lib/keyCache.ts, enforced in spendFlow.runSpend and
+// (lib/identity.ts + lib/keyCache.ts, enforced in spendFlow.runSpendChain and
 // depositFlow.runDeposit). The lock's own state machine — reuse, both idle-wipe
 // layers, the indicator — is gated in keyCache.test.ts; this file is about what the
 // FLOWS do with it.
@@ -11,7 +11,7 @@
 //
 //   (1) PREDICATE — assertSessionIdentity accepts only the session's own key, and is
 //       insensitive to hex case / stray whitespace (the same key written two ways).
-//   (2) SPEND — a mismatched key aborts runSpend before ANY indexer read, proof or
+//   (2) SPEND — a mismatched key aborts runSpendChain before ANY indexer read, proof or
 //       submit happens (for transfer AND withdraw).
 //   (3) DEPOSIT — a mismatched key aborts runDeposit before the approve tx, the proof
 //       and the submit.
@@ -30,7 +30,7 @@ import { ImtTree, foldToRoot } from "@bongtu/core/imt";
 import { deriveIdentityFromSignature } from "../src/lib/derive.js";
 import { ACCOUNT_MISMATCH_MESSAGE, assertSessionIdentity } from "../src/lib/identity.js";
 import { KeyCache } from "../src/lib/keyCache.js";
-import { runSpend, type RunSpendDeps, type SpendContext } from "../src/lib/spendFlow.js";
+import { runSpendChain, type RunSpendDeps, type SpendContext } from "../src/lib/spendFlow.js";
 import { runDeposit, type DepositContext, type RunDepositDeps } from "../src/lib/depositFlow.js";
 import type { OwnerNote } from "../src/lib/indexerClient.js";
 
@@ -136,6 +136,11 @@ const spendCtx = (): SpendContext => ({
   indexerUrl: "http://localhost:8600",
   notes: NOTES,
   sessionPubkey: SESSION.compressedPubkey,
+  // The single note below funds every amount here in ONE transaction, so no chain
+  // ever reaches the between-legs read — a call would be the bug, not the fixture.
+  reloadNotes: async () => {
+    throw new Error("reloadNotes must not be reached by a one-transaction spend");
+  },
 });
 
 function depositDeps(trace: Trace, keyCache: KeyCache): Partial<RunDepositDeps> {
@@ -181,11 +186,11 @@ test("assertSessionIdentity accepts only the session's key, case- and space-inse
 // ============================ (2) SPEND ======================================
 
 for (const kind of ["transfer", "withdraw"] as const) {
-  test(`runSpend (${kind}) aborts on a switched account before any read, proof or submit`, async () => {
+  test(`runSpendChain (${kind}) aborts on a switched account before any read, proof or submit`, async () => {
     const trace = newTrace();
     const wallet: FakeWallet = { sig: OTHER_SIG, account: ACCOUNT };
     await assert.rejects(
-      runSpend(
+      runSpendChain(
         kind,
         spendCtx(),
         { to: OTHER.compressedPubkey, amount: "100" },
@@ -221,7 +226,7 @@ test("runDeposit aborts on a switched account before the approve tx, proof or su
 
 test("the same flows complete when the derived key IS the session's", async () => {
   const spendTrace = newTrace();
-  const spent = await runSpend(
+  const spent = await runSpendChain(
     "withdraw",
     spendCtx(),
     { amount: "100" },
@@ -250,12 +255,12 @@ test("one signature covers a whole page session: action 2 reuses the key and ski
   const cache = testCache(trace, sessionWallet());
 
   const first: string[] = [];
-  await runSpend("withdraw", spendCtx(), { amount: "100" }, (s) => first.push(s), spendDeps(trace, cache));
+  await runSpendChain("withdraw", spendCtx(), { amount: "100" }, (s) => first.push(s), spendDeps(trace, cache));
   assert.equal(trace.derive, 1, "the first action pays the one signature");
   assert.deepEqual(first, ["unlock", "assemble", "prove", "submit"], "and the user is told why");
 
   const second: string[] = [];
-  await runSpend("withdraw", spendCtx(), { amount: "100" }, (s) => second.push(s), spendDeps(trace, cache));
+  await runSpendChain("withdraw", spendCtx(), { amount: "100" }, (s) => second.push(s), spendDeps(trace, cache));
   assert.equal(trace.derive, 1, "the second action derives NOTHING — no second popup");
   assert.deepEqual(second, ["assemble", "prove", "submit"], "and shows no stage the user isn't asked to do");
 
@@ -270,7 +275,7 @@ test("an account switch between two actions blocks the second one in both flows"
   const wallet = sessionWallet();
   const trace = newTrace();
   const cache = testCache(trace, wallet);
-  await runSpend("withdraw", spendCtx(), { amount: "100" }, () => {}, spendDeps(trace, cache));
+  await runSpendChain("withdraw", spendCtx(), { amount: "100" }, () => {}, spendDeps(trace, cache));
   assert.equal(trace.submit, 1);
 
   // The user picks another account in MetaMask: a different signature, hence a
@@ -282,7 +287,7 @@ test("an account switch between two actions blocks the second one in both flows"
   // derivations into `trace` (it was built with it).
   const after = newTrace();
   await assert.rejects(
-    runSpend("withdraw", spendCtx(), { amount: "100" }, () => {}, spendDeps(after, cache)),
+    runSpendChain("withdraw", spendCtx(), { amount: "100" }, () => {}, spendDeps(after, cache)),
     new RegExp(ACCOUNT_MISMATCH_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
   );
   assert.equal(trace.derive, 1, "the held key proves the mismatch — the switch costs no signature");
@@ -302,13 +307,13 @@ test("an account switch between two actions blocks the second one in both flows"
 test("signing out re-locks: the next action derives again", async () => {
   const trace = newTrace();
   const cache = testCache(trace, sessionWallet());
-  await runSpend("withdraw", spendCtx(), { amount: "100" }, () => {}, spendDeps(trace, cache));
+  await runSpendChain("withdraw", spendCtx(), { amount: "100" }, () => {}, spendDeps(trace, cache));
   assert.equal(trace.derive, 1);
 
   cache.lock(); // what App.endSession does on Disconnect
 
   const stages: string[] = [];
-  await runSpend("withdraw", spendCtx(), { amount: "100" }, (s) => stages.push(s), spendDeps(trace, cache));
+  await runSpendChain("withdraw", spendCtx(), { amount: "100" }, (s) => stages.push(s), spendDeps(trace, cache));
   assert.equal(trace.derive, 2, "a signed-out wallet holds nothing");
   assert.equal(stages[0], "unlock");
 });

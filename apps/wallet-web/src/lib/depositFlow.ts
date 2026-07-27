@@ -1,5 +1,5 @@
 // The approve+prove+submit orchestration for the public wallet's deposit/shield action
-// (SPEC §7). Modeled on spendFlow.ts runSpend: instead of DOM status lines it reports a
+// (SPEC §7). Modeled on spendFlow.ts runSpendChain: instead of DOM status lines it reports a
 // coarse stage ("approve" → "prove" → "submit") through a callback the React Deposit
 // screen renders as a staged progress bar. The witness assembly (deposit.ts), in-browser
 // proof (prove.ts) and MetaMask approve/submit (metamask.ts) are the same tested pure

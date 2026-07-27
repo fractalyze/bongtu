@@ -17,10 +17,15 @@
 // disables that slot's membership and the §5.2 value-belt forces its value to 0 (no
 // mint). The wallet PICKS the circuit from how many notes the payment needs
 // (planSpendAction): ≤2 notes stay on the cheap 2×2 transfer, 3–10 go to transfer10,
-// and a withdraw — which has no arity-10 circuit — stays at 2 and asks the user to
-// merge first. All of them emit their ciphertext as circuit outputs (public
-// signals), so — unlike disburse — the wallet assembles NO separate ciphertext blob;
-// the tx is just (a, b, c, pub, kemCiphertext).
+// and a withdraw — which has no arity-10 circuit — stays at 2. All of them emit their
+// ciphertext as circuit outputs (public signals), so — unlike disburse — the wallet
+// assembles NO separate ciphertext blob; the tx is just (a, b, c, pub, kemCiphertext).
+//
+// WHEN THE ARITY IS NOT ENOUGH, the wallet does not stop and ask the user to go merge
+// their notes first. planSpendChain plans the WHOLE way through: however many
+// transfer10 self-sends it takes to fold the balance down to something the terminal
+// circuit can spend, then the payment or withdrawal itself. One plan, run as one
+// flow — see spendFlow.runSpendChain.
 
 import {
   deriveKeypair,
@@ -130,14 +135,15 @@ export interface SpendResult<C extends SpendCircuit> {
 
 // --- note selection + per-tx crypto ---------------------------------------------
 
-/** Why a spend cannot go ahead, in the two shapes the UI answers differently:
- *  `insufficient` — the wallet simply does not hold enough; `needs-merge` — it
- *  does, but across more notes than the circuit can spend at once, so the way
- *  forward is a self-merge rather than a smaller amount. */
+/** Why a selection cannot go ahead, in the two shapes that get answered differently:
+ *  `insufficient` — the wallet simply does not hold enough, which only a smaller
+ *  amount fixes; `needs-merge` — it does hold enough, but across more notes than
+ *  ONE transaction can spend. Only the first reaches the user: `needs-merge` is
+ *  planSpendChain's signal to itself that another merge leg is needed. */
 export type SpendBlocker = "insufficient" | "needs-merge";
 
-/** A selection failure carrying WHICH of the two it is, so the form can offer the
- *  merge action instead of leaving the user at a dead-end error. */
+/** A selection failure carrying WHICH of the two it is, so the caller can tell a
+ *  wallet that cannot afford the amount from one that just needs another leg. */
 export class SpendSelectionError extends Error {
   constructor(
     readonly blocker: SpendBlocker,
@@ -222,9 +228,9 @@ export function selectInputNotes(
 
 // --- circuit choice (the wallet's auto-pick) -------------------------------------
 
-/** The kinds of value-moving spend the wallet runs. `merge` is the guided
- *  self-consolidation: a transfer10 whose every output is the user's own key. */
-export type SpendKind = "transfer" | "withdraw" | "merge";
+/** The kinds of value-moving spend the wallet runs. A merge is not one of them: it is
+ *  never something the user asks for, only a leg inside a chain (planSpendChain). */
+export type SpendKind = "transfer" | "withdraw";
 
 /** A resolved spend: which circuit proves it, which notes it consumes, who is paid
  *  and how much — everything the flow needs before it touches the network. */
@@ -237,32 +243,27 @@ export interface SpendAction {
   amount: string;
 }
 
+/** How many input notes each terminal circuit can spend at once. */
+export const terminalArity = (kind: SpendKind): number =>
+  kind === "withdraw" ? 2 : TRANSFER10_ARITY;
+
 /**
- * Resolve a spend to its circuit and its input notes — the wallet's circuit
+ * Resolve ONE transaction to its circuit and its input notes — the wallet's circuit
  * AUTO-PICK, PURE and the single place the rule lives:
  *
  *   transfer  ≤2 notes  -> transfer   (the cheap 2×2 zkey, ~29 MB)
  *   transfer  3–10 notes-> transfer10 (~114 MB, fetched only when needed)
- *   transfer  >10 notes -> needs-merge
- *   withdraw  ≤2 notes  -> withdraw   (there is no withdraw10 circuit…)
- *   withdraw  >2 notes  -> needs-merge (…so consolidating is the only way through)
- *   merge               -> transfer10 over the up-to-10 largest notes, all outputs
- *                          to `self`, amount = their total
+ *   withdraw  ≤2 notes  -> withdraw   (there is no withdraw10 circuit)
  *
- * Throws SpendSelectionError for both blocked cases; previewSpend below is the
- * non-throwing form the form uses while the user is still typing.
+ * Throws SpendSelectionError when the amount does not fit that arity — which is not
+ * a dead end for the user: planSpendChain below answers it by planning the merges
+ * that make it fit.
  */
 export function planSpendAction(
   kind: SpendKind,
   notes: readonly SelectableNote[],
-  /** the wallet's own compressed pubkey — the payee of a merge. */
-  self: string,
   args: { to?: string; amount: string },
 ): SpendAction {
-  if (kind === "merge") {
-    const inputs = selectMergeNotes(notes);
-    return { circuit: "transfer10", inputs, to: self, amount: totalValue(inputs) };
-  }
   const { amount } = args;
   if (kind === "withdraw") {
     return { circuit: "withdraw", inputs: selectInputNotes(notes, amount, 2), to: "", amount };
@@ -271,57 +272,126 @@ export function planSpendAction(
   return { circuit: inputs.length > 2 ? "transfer10" : "transfer", inputs, to: args.to ?? "", amount };
 }
 
-/**
- * What the Send/Withdraw form needs while the user types: which circuit this
- * amount would use (so the screen can start the right one-time zkey download) and
- * whether it is blocked. Never throws — an amount that is empty or unparseable is
- * simply "not decided yet": the default circuit and no blocker, since the form's
- * own amountError already says what is wrong with it.
- */
-export function previewSpend(
-  kind: "transfer" | "withdraw",
-  notes: readonly SelectableNote[],
-  amount: string,
-): { circuit: SpendCircuit; blocker: SpendBlocker | null } {
-  const fallback: SpendCircuit = kind === "withdraw" ? "withdraw" : "transfer";
-  try {
-    return { circuit: planSpendAction(kind, notes, "", { amount }).circuit, blocker: null };
-  } catch (e) {
-    return { circuit: fallback, blocker: e instanceof SpendSelectionError ? e.blocker : null };
-  }
-}
-
 /** Sum of a selection's note values, as a decimal string. */
 function totalValue(inputs: readonly WalletInputNote[]): string {
   return inputs.reduce((s, n) => s + BigInt(n.value), 0n).toString();
 }
 
+// --- the spend CHAIN (merges, then the payment) ----------------------------------
+
 /**
- * The notes ONE self-merge consolidates: the up-to-10 largest unspent, which is
- * the most a transfer10 can take. Merging fewer than two would spend a proof to
- * change nothing, so that is refused.
+ * One transaction of a spend. A `merge` leg is a transfer10 self-send that folds its
+ * inputs into a single note worth `mergedValue`; the last leg is the payment or
+ * withdrawal the user actually asked for, and names its own circuit.
  */
-export function selectMergeNotes(notes: readonly SelectableNote[]): WalletInputNote[] {
-  const unspent = unspentLargestFirst(notes);
-  if (unspent.length < 2) {
-    throw new SpendSelectionError(
-      "insufficient",
-      `merging needs at least 2 unspent notes, got ${unspent.length}`,
-    );
+export type SpendLeg =
+  | { leg: "merge"; inputs: WalletInputNote[]; mergedValue: string }
+  | { leg: SpendCircuit; inputs: WalletInputNote[] };
+
+/** Which circuit proves a leg (a merge is always the arity-10 transfer). */
+export const legCircuit = (leg: SpendLeg): SpendCircuit =>
+  leg.leg === "merge" ? "transfer10" : leg.leg;
+
+/**
+ * The leafIndex a PLAN gives the note a merge leg will create. That note does not
+ * exist yet — it gets a real leaf only once its transaction lands — so the plan
+ * marks it with a negative index naming the leg that produces it, and the runner
+ * substitutes the real note before building the leg that spends it.
+ */
+export const pendingLeaf = (legIndex: number): number => -(legIndex + 1);
+
+/** The merge leg a pending input is waiting on, or null for a real note. */
+export const pendingLegOf = (leafIndex: number): number | null =>
+  leafIndex < 0 ? -leafIndex - 1 : null;
+
+/**
+ * Plan the WHOLE way from the balance the wallet holds to the payment the user asked
+ * for: zero or more merge legs, then the terminal spend. PURE and deterministic — the
+ * same notes and amount always give the same legs, which is what lets the confirm
+ * sheet promise a number of approvals before anything is signed.
+ *
+ * The rule is "merge only as far as you must". Each merge folds the ten largest notes
+ * of the working set into one, and planning STOPS the moment the amount is coverable
+ * within the terminal circuit's arity — so a 20-note wallet spending an amount its
+ * top 19 notes cover takes one merge, and only a near-full-balance spend takes two.
+ * In general a wallet of N notes needs ⌈(N - arity) / 9⌉ merges at worst (each merge
+ * turns 10 notes into 1, a net loss of 9).
+ *
+ * Throws the `insufficient` SpendSelectionError — before planning a single leg —
+ * when the wallet simply does not hold the amount. It never throws `needs-merge`:
+ * that blocker is exactly what this function exists to answer.
+ */
+export function planSpendChain(
+  kind: SpendKind,
+  notes: readonly SelectableNote[],
+  amount: string,
+): SpendLeg[] {
+  const arity = terminalArity(kind);
+  const legs: SpendLeg[] = [];
+  let working = unspentLargestFirst(notes);
+
+  // Bounded by construction: every pass either returns or replaces ≥2 notes with 1,
+  // so the working set strictly shrinks until one note holds the whole balance.
+  for (;;) {
+    try {
+      // selectInputNotes owns the amount validation and the `insufficient` verdict,
+      // and it runs BEFORE any merge is planned — a wallet that cannot afford the
+      // amount is told so, not offered a chain that would not help.
+      const inputs = selectInputNotes(working, amount, arity);
+      const circuit: SpendCircuit =
+        kind === "withdraw" ? "withdraw" : inputs.length > 2 ? "transfer10" : "transfer";
+      legs.push({ leg: circuit, inputs });
+      return legs;
+    } catch (e) {
+      if (!(e instanceof SpendSelectionError) || e.blocker !== "needs-merge") throw e;
+    }
+
+    const fold = working.slice(0, TRANSFER10_ARITY);
+    const mergedValue = totalValue(fold);
+    legs.push({ leg: "merge", inputs: fold.map(pickNote), mergedValue });
+    // The folded notes leave the working set and the note they will become takes
+    // their place, so the next pass plans against what the wallet will actually hold.
+    working = unspentLargestFirst([
+      { value: mergedValue, salt: "", leafIndex: pendingLeaf(legs.length - 1), spent: false },
+      ...working.slice(TRANSFER10_ARITY),
+    ]);
   }
-  return unspent.slice(0, TRANSFER10_ARITY).map(pickNote);
 }
 
-/** What a self-merge would do right now — how many notes it folds together and
- *  into what value — for the confirm sheet. null when there is nothing to merge. */
-export function previewMerge(
+/** What the Send/Withdraw form shows while the user types. */
+export interface SpendPreview {
+  /** Which circuit's one-time key the screen should be fetching: the FIRST leg's,
+   *  because that is the proof the user waits on next (every merge is transfer10). */
+  circuit: SpendCircuit;
+  /** The only thing that can still block a spend outright: not holding enough. */
+  blocker: SpendBlocker | null;
+  /** Transactions this spend takes — one wallet approval each. 1 is the plain case. */
+  legCount: number;
+  /** How many unspent notes the balance is currently spread across. */
+  pieces: number;
+}
+
+/**
+ * What the Send/Withdraw form needs on every keystroke: which circuit this amount
+ * would use (so the screen can start the right one-time zkey download) and how many
+ * transactions it would take (so the confirm sheet can say so). Never throws — an
+ * amount that is empty or unparseable is simply "not decided yet": the default
+ * circuit and no blocker, since the form's own amountError already says what is
+ * wrong with it.
+ */
+export function previewSpend(
+  kind: SpendKind,
   notes: readonly SelectableNote[],
-): { count: number; total: string } | null {
+  amount: string,
+): SpendPreview {
+  const pieces = unspentLargestFirst(notes).length;
+  const fallback: SpendCircuit = kind === "withdraw" ? "withdraw" : "transfer";
   try {
-    const inputs = selectMergeNotes(notes);
-    return { count: inputs.length, total: totalValue(inputs) };
-  } catch {
-    return null;
+    const legs = planSpendChain(kind, notes, amount);
+    return { circuit: legCircuit(legs[0]), blocker: null, legCount: legs.length, pieces };
+  } catch (e) {
+    const blocker = e instanceof SpendSelectionError ? e.blocker : null;
+    return { circuit: fallback, blocker, legCount: 1, pieces };
   }
 }
 

@@ -37,6 +37,43 @@ export function withUnlock(steps: StagedStep[]): StagedStep[] {
   return [{ key: "unlock", label: "Unlocking" }, ...steps];
 }
 
+/**
+ * The steps a CHAINED spend shows: one per transaction, because one transaction is
+ * one wallet approval and that is what the user is counting. The merges are numbered
+ * so the confirm sheet's promise — "3 approvals: 2 to combine, then the payment" — is
+ * the same thing they then watch happen. Each leg's own assemble/prove/submit stages
+ * become the line under whichever step is active.
+ */
+export function chainSteps(legCount: number, terminalLabel: string): StagedStep[] {
+  const merges = legCount - 1;
+  return [
+    ...Array.from({ length: merges }, (_, i) => ({
+      key: legStepKey(i),
+      label: `Combining (${i + 1} of ${merges})`,
+    })),
+    { key: legStepKey(merges), label: terminalLabel },
+  ];
+}
+
+const legStepKey = (index: number): string => `leg${index}`;
+
+/**
+ * Which step the rail highlights, and which stage writes the line under it. A
+ * one-transaction run is unchanged: its stage IS its step key, exactly as deposit and
+ * every plain send have always rendered. A chain highlights the LEG it is on and lets
+ * the inner stage speak underneath — except while unlocking, which is its own step in
+ * front of everything.
+ */
+export function activeStep(run: { stage: string; legIndex: number; legCount: number }): {
+  stage: string;
+  describeKey: string;
+} {
+  if (run.legCount <= 1 || run.stage === "unlock") {
+    return { stage: run.stage, describeKey: run.stage };
+  }
+  return { stage: legStepKey(run.legIndex), describeKey: run.stage };
+}
+
 /** One plain-words line per stage, shown under the ACTIVE step only. The unlock line
  *  names the connected wallet; the prove line carries the honest elapsed clock. */
 function stepDescription(key: string, walletName: string, elapsed: number): ReactNode {
@@ -56,6 +93,8 @@ function stepDescription(key: string, walletName: string, elapsed: number): Reac
       );
     case "submit":
       return <>Sending to the network and waiting for it to confirm.</>;
+    case "waiting":
+      return <>Waiting for the network to record the combined note.</>;
     default:
       return null;
   }
@@ -74,11 +113,16 @@ const BULLET_STATE = {
 
 export function StagedProgress({
   stage,
+  describeKey = stage,
   elapsed,
   steps = SPEND_STEPS,
   walletName = NEUTRAL_WALLET_NAME,
 }: {
   stage: string;
+  /** Which line to write under the active step, when that is not the step's own key
+   *  — a chained spend's steps are its transactions, described by the stage inside
+   *  the one in flight. Defaults to `stage`, which is every single-transaction run. */
+  describeKey?: string;
   elapsed: number;
   steps?: StagedStep[];
   /** The connected wallet's own name for the unlock line — never a hardcoded brand. */
@@ -131,7 +175,7 @@ export function StagedProgress({
                   replays as progress moves down. */}
               {cls === "active" && (
                 <p className="animate-desc-in ml-[38px] mt-1 text-sm text-muted">
-                  {stepDescription(s.key, walletName, elapsed)}
+                  {stepDescription(describeKey, walletName, elapsed)}
                 </p>
               )}
             </li>

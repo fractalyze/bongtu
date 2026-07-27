@@ -8,82 +8,48 @@
 // the three phases every action screen shares. What stays below is what a SPEND is —
 // its recipient field, its amount field, and its confirm rows.
 //
-// CIRCUIT AUTO-PICK. The user never chooses a circuit. previewSpend answers, from the
-// amount typed so far, which one this payment needs — a send covered by ≤2 notes on
-// the small transfer, 3–10 notes on transfer10 — and that answer drives the one-time
-// key download, so the ~114 MB arity-10 key is fetched only for a payment that
-// genuinely needs it. When even the widest circuit cannot reach the amount (>10 notes
-// for a send, >2 for a withdraw, which has no arity-10 circuit), the form does NOT
-// dead-end on an error: it offers the merge below, which folds up to ten notes into
-// one through the same machine and hands the user back to what they were doing.
+// CIRCUIT AUTO-PICK, AND HOW MANY TRANSACTIONS. The user never chooses a circuit, and
+// never has to go and tidy their notes first. previewSpend answers, from the amount
+// typed so far, which circuit this payment needs — driving the one-time key download,
+// so the ~114 MB arity-10 key is fetched only when it is genuinely needed — and how
+// many transactions it takes. A balance spread across more notes than one circuit can
+// spend does not block the form: the plan simply grows the merge legs that make it
+// fit, the confirm sheet says how many approvals that is, and the running screen
+// counts them off. Nothing about it is a separate screen the user has to visit.
 //
 // Amounts: the form takes DECIMAL kKRW (parseKkrw, ≤6 fraction digits, 2^100 belt) and
 // converts to raw wei at the UI edge — the flow/witness layer still receives raw wei
 // strings, unchanged.
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { decodeAddress, encodeAddress } from "@bongtu/core/pubkey";
 import { DEFAULTS } from "../../config.js";
-import { runSpend, type SpendOutcome } from "../../lib/spendFlow.js";
-import { previewMerge, previewSpend } from "../../lib/spend.js";
+import { runSpendChain, type SpendOutcome } from "../../lib/spendFlow.js";
+import { previewSpend } from "../../lib/spend.js";
 import { useWallet } from "../App.js";
-import { useActionMachine } from "../actionMachine.js";
+import { useActionMachine, stepsForRun } from "../actionMachine.js";
 import { formatKkrw, parseKkrw } from "../../lib/money.js";
 import { amountError, recipientError } from "../format.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
-import { SPEND_STEPS } from "../components/StagedProgress.js";
+import { activeStep, chainSteps, SPEND_STEPS } from "../components/StagedProgress.js";
 import { SuccessPanel } from "../components/SuccessPanel.js";
-import { ConfirmPanel, DownloadingPanel, FlowHint, RunningPanel } from "../components/ActionPanels.js";
+import {
+  ApprovalPlan,
+  ConfirmPanel,
+  DownloadingPanel,
+  FlowHint,
+  RunningPanel,
+} from "../components/ActionPanels.js";
 import { AmountInput, Button, ErrorBanner, Field, TextInput } from "../components/controls.js";
 
-/** What the user is told when their balance is real but too scattered to spend at
- *  once, and the way out. Deliberately not an ErrorBanner: nothing is wrong with
- *  what they typed, there is just a step to take first. */
-function MergePrompt({
-  maxNotes,
-  verb,
-  mergeable,
-  onMerge,
-}: {
-  maxNotes: number;
-  /** "send" / "withdrawal" — what they were trying to do. */
-  verb: string;
-  /** what one merge would fold together, or null when there is nothing to fold. */
-  mergeable: { count: number; total: string } | null;
-  onMerge: () => void;
-}): ReactNode {
-  return (
-    <div className="flex flex-col gap-2.5 p-3.5 bg-surface border border-border rounded-xl">
-      <p className="text-[0.95rem] font-semibold">Your balance is split across too many notes</p>
-      <p className="text-muted text-[0.88rem]">
-        Your money arrives in separate pieces, and one {verb} can use at most {maxNotes} of
-        them at a time. Merge your pieces into one, then try this amount again.
-      </p>
-      {mergeable && (
-        <p className="text-muted text-[0.88rem]">
-          This merges your {mergeable.count} largest pieces into a single{" "}
-          {formatKkrw(BigInt(mergeable.total))} kKRW note.
-        </p>
-      )}
-      <Button variant="primary" block disabled={!mergeable} onClick={onMerge}>
-        Merge your notes
-      </Button>
-    </div>
-  );
-}
-
 export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactNode {
-  const { session, connection, wallet, indexerUrl, notes, balance, refreshAfterAction } =
+  const { session, connection, wallet, indexerUrl, notes, balance, reloadNotes, refreshAfterAction } =
     useWallet();
   const isTransfer = kind === "transfer";
 
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
-  // The merge is a spend of its own, run through the SAME machine: entering merge
-  // mode freezes what it will fold, so a background /notes refresh cannot change the
-  // sheet under the user mid-confirm.
-  const [merging, setMerging] = useState<{ count: number; total: string } | null>(null);
 
   // The raw-wei amount the protocol layer receives; 0n while the input is invalid.
   const amountWei = useMemo(() => {
@@ -91,63 +57,38 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
     return p.ok ? p.wei : 0n;
   }, [amount]);
 
-  // Which circuit this amount needs, and whether it is out of reach at any arity.
+  // Which circuit this amount needs, how many transactions, and whether the wallet
+  // simply cannot afford it.
   const plan = useMemo(
     () => previewSpend(kind, notes, amountWei.toString()),
     [kind, notes, amountWei],
   );
-  const mergeable = useMemo(() => previewMerge(notes), [notes]);
-  const action = useActionMachine<SpendOutcome>({
-    circuit: merging ? "transfer10" : plan.circuit,
-    steps: SPEND_STEPS,
-  });
+  const action = useActionMachine<SpendOutcome>({ circuit: plan.circuit, steps: SPEND_STEPS });
 
   const rcptErr = isTransfer ? recipientError(recipient) : null;
   const amtErr = amountError(amount, balance);
-  const needsMerge = plan.blocker === "needs-merge";
   // Guard on a KNOWN balance: until /notes loads (balance===null) amountError can't
   // catch over-spend, so don't let the user start a proof that would revert on-chain.
-  const formValid = balance !== null && !amtErr && !needsMerge && (!isTransfer || !rcptErr);
+  const formValid = balance !== null && !amtErr && !plan.blocker && (!isTransfer || !rcptErr);
 
-  const title = merging ? "Merge notes" : isTransfer ? "Send" : "Withdraw";
-  // The amount in play: the payment, or — in merge mode — what the merge consolidates.
-  const review = formatKkrw(merging ? BigInt(merging.total) : amountWei);
-
-  // A failed run lands back on the form. Leave merge mode with it, so the user is
-  // returned to the payment they were making — reading the failure over the Send
-  // form, with the merge offer still there to retry — instead of a Send form wearing
-  // a "Merge notes" title.
-  useEffect(() => {
-    if (merging && action.phase === "form" && action.error) setMerging(null);
-  }, [merging, action.phase, action.error]);
-
-  function startMerge(): void {
-    if (!mergeable) return;
-    setMerging(mergeable);
-    action.review();
-  }
-
-  /** Back from a finished merge to the payment that sent the user here, with the
-   *  refreshed balance behind it. */
-  function leaveMerge(): void {
-    setMerging(null);
-    action.cancel();
-  }
+  const title = isTransfer ? "Send" : "Withdraw";
+  const terminalWord = isTransfer ? "payment" : "withdrawal";
+  const review = formatKkrw(amountWei);
 
   function confirm(): void {
     if (!connection || !session) return;
-    // The spending key comes from the wallet's lock INSIDE runSpend — this component
-    // never holds it. The session pubkey rides along so the flow can refuse a key that
-    // isn't this session's.
+    // The spending key comes from the wallet's lock INSIDE runSpendChain — this
+    // component never holds it. The session pubkey rides along so the flow can refuse
+    // a key that isn't this session's, and is the payee of every merge leg.
     void action.submit(
       (onStage) =>
-        runSpend(
-          merging ? "merge" : kind,
-          { connection, indexerUrl, notes, sessionPubkey: session.compressedPubkey },
+        runSpendChain(
+          kind,
+          { connection, indexerUrl, notes, sessionPubkey: session.compressedPubkey, reloadNotes },
           // The flow/witness layer only ever sees the canonical hex form — base58
-          // stops at this edge. A merge pays the wallet itself, so it takes neither.
+          // stops at this edge.
           {
-            to: isTransfer && !merging ? decodeAddress(recipient.trim()) : undefined,
+            to: isTransfer ? decodeAddress(recipient.trim()) : undefined,
             amount: amountWei.toString(),
           },
           onStage,
@@ -161,24 +102,30 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
     return (
       <SuccessPanel
         title={title}
-        headline={merging ? "Notes merged" : isTransfer ? "Payment sent" : "Withdrawal sent"}
+        headline={isTransfer ? "Payment sent" : "Withdrawal sent"}
         amount={review}
         explorerUrl={action.outcome.explorerUrl}
-        doneLabel={merging ? `Back to ${isTransfer ? "Send" : "Withdraw"}` : "Done"}
-        onDone={merging ? leaveMerge : undefined}
       />
     );
   }
 
   // --- running ---------------------------------------------------------------
   if (action.phase === "running") {
+    // A chain shows its TRANSACTIONS as the steps, each described by the stage it is
+    // in; a plain spend keeps the assemble/prove/submit rail it always had.
+    const chained = action.legCount > 1;
+    const steps = chained
+      ? stepsForRun(chainSteps(action.legCount, isTransfer ? "Sending" : "Withdrawing"), action.unlocking)
+      : action.steps;
+    const { stage, describeKey } = activeStep(action);
     return (
       <RunningPanel
         title={title}
         amount={review}
-        stage={action.stage}
+        stage={stage}
+        describeKey={describeKey}
         elapsed={action.elapsed}
-        steps={action.steps}
+        steps={steps}
         walletName={wallet.name}
       />
     );
@@ -190,41 +137,25 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
       <ConfirmPanel
         title={title}
         amount={review}
-        hint={
-          !isTransfer && !merging ? (
-            <FlowHint direction="unshield" />
-          ) : undefined
-        }
+        hint={!isTransfer ? <FlowHint direction="unshield" /> : undefined}
         note={
-          merging ? (
-            <p className="text-muted text-[0.88rem]">
-              This sends your balance to yourself as one note. It takes one signature and
-              one transaction, and your balance does not change.
-            </p>
+          plan.legCount > 1 ? (
+            <ApprovalPlan pieces={plan.pieces} legCount={plan.legCount} terminal={terminalWord} />
           ) : undefined
         }
         download={action.download}
-        onCancel={merging ? leaveMerge : action.cancel}
+        onCancel={action.cancel}
         onConfirm={confirm}
       >
-        {merging ? (
+        {isTransfer && (
           <>
-            <dt className="text-muted text-sm">Merging</dt>
-            <dd className="text-right text-[0.9rem]">{merging.count} notes into 1</dd>
             <dt className="text-muted text-sm">To</dt>
-            <dd className="text-right text-[0.9rem]">Your own wallet</dd>
+            <dd className="font-mono text-right text-[0.9rem] [overflow-wrap:anywhere]">
+              {/* canonical base58 regardless of which form was typed — what
+                  the user confirms is the address, not their keystrokes */}
+              {encodeAddress(decodeAddress(recipient.trim()))}
+            </dd>
           </>
-        ) : (
-          isTransfer && (
-            <>
-              <dt className="text-muted text-sm">To</dt>
-              <dd className="font-mono text-right text-[0.9rem] [overflow-wrap:anywhere]">
-                {/* canonical base58 regardless of which form was typed — what
-                    the user confirms is the address, not their keystrokes */}
-                {encodeAddress(decodeAddress(recipient.trim()))}
-              </dd>
-            </>
-          )
         )}
         <dt className="text-muted text-sm">Network</dt>
         <dd className="text-right text-[0.9rem] [overflow-wrap:anywhere]">
@@ -272,18 +203,9 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
 
         {action.error && <ErrorBanner message={action.error} />}
 
-        {needsMerge ? (
-          <MergePrompt
-            maxNotes={isTransfer ? 10 : 2}
-            verb={isTransfer ? "send" : "withdrawal"}
-            mergeable={mergeable}
-            onMerge={startMerge}
-          />
-        ) : (
-          <Button variant="primary" block disabled={!formValid} onClick={action.review}>
-            Continue
-          </Button>
-        )}
+        <Button variant="primary" block disabled={!formValid} onClick={action.review}>
+          Continue
+        </Button>
       </div>
     </div>
   );

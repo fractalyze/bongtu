@@ -106,11 +106,48 @@ export interface PollForActionResult {
 
 const realSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+/** What a bounded poll ended up with: whether `accept` ever said yes, and the last
+ *  value that loaded at all (null when every attempt threw). */
+export interface PollResult<T> {
+  landed: boolean;
+  last: T | null;
+}
+
+/**
+ * The wallet's ONE bounded-poll policy, over any read: call `load` every
+ * `intervalMs` until `accept` accepts a value or `capMs` runs out. A failing load
+ * (indexer hiccup) is skipped, not fatal — the next tick retries — and the last
+ * value that DID load comes back either way, so a cap-out can still render
+ * something fresh.
+ *
+ * Two callers, both waiting on the same lag: pollForAction below (the post-action
+ * balance refresh) and the spend chain, which cannot build its next leg until the
+ * indexer has recorded the note the previous leg created (spendFlow.ts).
+ */
+export async function pollUntil<T>(
+  load: () => Promise<T>,
+  accept: (value: T) => boolean,
+  opts: PollForActionOptions = {},
+): Promise<PollResult<T>> {
+  const intervalMs = opts.intervalMs ?? 3000;
+  const capMs = opts.capMs ?? 30000;
+  const sleep = opts.sleep ?? realSleep;
+  let last: T | null = null;
+  for (let elapsed = 0; elapsed < capMs; elapsed += intervalMs) {
+    await sleep(intervalMs);
+    try {
+      const cur = await load();
+      last = cur;
+      if (accept(cur)) return { landed: true, last };
+    } catch {
+      // transient indexer failure — keep polling until the cap
+    }
+  }
+  return { landed: false, last };
+}
+
 /**
  * Poll `load` until `actionReflected(pre, snapshot, txHash)` or the cap runs out.
- * A failing load (indexer hiccup) is skipped, not fatal — the next tick retries.
- * Always returns the last good snapshot so the caller can render SOMETHING fresh
- * even on a cap-out (the action may just be slow to index).
  */
 export async function pollForAction(
   load: () => Promise<OwnerSnapshot>,
@@ -118,19 +155,5 @@ export async function pollForAction(
   txHash: string,
   opts: PollForActionOptions = {},
 ): Promise<PollForActionResult> {
-  const intervalMs = opts.intervalMs ?? 3000;
-  const capMs = opts.capMs ?? 30000;
-  const sleep = opts.sleep ?? realSleep;
-  let last: OwnerSnapshot | null = null;
-  for (let elapsed = 0; elapsed < capMs; elapsed += intervalMs) {
-    await sleep(intervalMs);
-    try {
-      const cur = await load();
-      last = cur;
-      if (actionReflected(pre, cur, txHash)) return { landed: true, last };
-    } catch {
-      // transient indexer failure — keep polling until the cap
-    }
-  }
-  return { landed: false, last };
+  return pollUntil(load, (cur) => actionReflected(pre, cur, txHash), opts);
 }

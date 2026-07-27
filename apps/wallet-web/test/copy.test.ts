@@ -14,12 +14,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { ActivityList } from "../src/ui/components/ActivityList.js";
-import { ConfirmPanel, FlowHint, RunningPanel } from "../src/ui/components/ActionPanels.js";
+import { ApprovalPlan, ConfirmPanel, FlowHint, RunningPanel } from "../src/ui/components/ActionPanels.js";
 import { ExplorerLink } from "../src/ui/components/ExplorerLink.js";
 import { LockChip } from "../src/ui/components/LockChip.js";
 import { MintModal, MintSuccess } from "../src/ui/components/MintModal.js";
 import { SyncDot, syncState } from "../src/ui/components/SyncDot.js";
-import { StagedProgress, SPEND_STEPS, withUnlock } from "../src/ui/components/StagedProgress.js";
+import { activeStep, chainSteps, StagedProgress, SPEND_STEPS, withUnlock } from "../src/ui/components/StagedProgress.js";
 import { SuccessPanel } from "../src/ui/components/SuccessPanel.js";
 import { NEUTRAL_WALLET_NAME } from "../src/lib/walletBrand.js";
 
@@ -375,6 +375,41 @@ test("Confirm waits while the proving assets are still streaming in", () => {
   assert.match(html, /Downloading security files/, "the download says why the wait exists");
 });
 
+test("a multi-transaction spend says how many approvals it takes, and what each is for", () => {
+  const send = renderToStaticMarkup(
+    h(ApprovalPlan, { pieces: 20, legCount: 3, terminal: "payment" }),
+  );
+  assert.match(
+    send.replace(/<!-- -->/g, ""),
+    /Your balance is in 20 pieces, so this takes 3 approvals: 2 to combine them, then the payment\./,
+  );
+  const withdraw = renderToStaticMarkup(
+    h(ApprovalPlan, { pieces: 3, legCount: 2, terminal: "withdrawal" }),
+  );
+  assert.match(withdraw.replace(/<!-- -->/g, ""), /takes 2 approvals: 1 to combine them, then the withdrawal\./);
+});
+
+test("a one-transaction spend says nothing about approvals — there is nothing to explain", () => {
+  // The sheet renders ApprovalPlan only past one leg (SpendScreen), so the plain send
+  // keeps the confirm sheet it has always had.
+  const spend = readFileSync(`${UI_DIR}screens/SpendScreen.tsx`, "utf8");
+  assert.match(spend, /plan\.legCount > 1 \?/);
+});
+
+test("the standalone merge detour is gone — a scattered balance is no longer a dead end", () => {
+  for (const { file, text } of uiSources()) {
+    for (const retired of [
+      /Your balance is split across too many notes/,
+      /Merge your notes/,
+      /Merge your pieces into one/,
+      /largest pieces into a single/,
+      /Notes merged/,
+    ]) {
+      assert.doesNotMatch(text, retired, `${file} still offers the retired merge detour`);
+    }
+  }
+});
+
 test("the running panel shows the amount in play and the stage the run has reached", () => {
   const html = renderToStaticMarkup(
     h(RunningPanel, {
@@ -392,6 +427,39 @@ test("the running panel shows the amount in play and the stage the run has reach
   assert.match(html, /Proving/);
   assert.match(html, /Usually 5 to 20 seconds/, "never a promise of sub-5s");
   assert.match(html, /· 7s/, "the honest elapsed clock");
+});
+
+test("a chained run's steps are its TRANSACTIONS, described by the stage inside one", () => {
+  // Two folds then the payment: the rail counts approvals, and the line under the
+  // active one says what that approval is currently doing.
+  const steps = chainSteps(3, "Sending");
+  assert.deepEqual(steps.map((s) => s.label), ["Combining (1 of 2)", "Combining (2 of 2)", "Sending"]);
+
+  const midChain = { stage: "waiting", legIndex: 1, legCount: 3 };
+  assert.deepEqual(activeStep(midChain), { stage: "leg1", describeKey: "waiting" });
+  const html = renderToStaticMarkup(
+    h(RunningPanel, {
+      title: "Send",
+      amount: "2,000",
+      ...activeStep(midChain),
+      elapsed: 0,
+      steps,
+      walletName: "Rabby",
+    }),
+  );
+  assert.match(html, /Combining \(2 of 2\)/);
+  assert.match(html, /Waiting for the network to record the combined note\./);
+
+  // The unlock signature stays its own step in front, not one of the transactions.
+  assert.deepEqual(
+    activeStep({ stage: "unlock", legIndex: 0, legCount: 3 }),
+    { stage: "unlock", describeKey: "unlock" },
+  );
+  // A single-transaction run is untouched: its stage IS its step.
+  assert.deepEqual(
+    activeStep({ stage: "prove", legIndex: 0, legCount: 1 }),
+    { stage: "prove", describeKey: "prove" },
+  );
 });
 
 test("no screen hardcodes a wallet brand in what the user reads", () => {

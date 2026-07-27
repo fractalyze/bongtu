@@ -28,15 +28,29 @@ export interface ActionResult {
   explorerUrl: string;
 }
 
+/** Which transaction of a multi-transaction run is reporting. A flow that takes one
+ *  transaction (every deposit, most spends) never sends this and stays at leg 0 of 1. */
+export interface ActionLeg {
+  index: number;
+  count: number;
+}
+
 /** One run of a flow, reporting its coarse stages as they begin. The stage strings are
  *  the flow's own (SpendStage / DepositStage); the machine only knows that "unlock"
- *  means the wallet asked for a signature. */
-export type ActionRun<O extends ActionResult> = (onStage: (stage: string) => void) => Promise<O>;
+ *  means the wallet asked for a signature, and that a run may take several
+ *  transactions (spendFlow.runSpendChain), each with its own pass through the stages. */
+export type ActionRun<O extends ActionResult> = (
+  onStage: (stage: string, leg?: ActionLeg) => void,
+) => Promise<O>;
 
 export interface ActionSnapshot<O extends ActionResult> {
   phase: ActionPhase;
   /** the flow's current stage key — matched against the step list by StagedProgress. */
   stage: string;
+  /** which transaction of the run is in flight, and how many it takes. A single-
+   *  transaction run stays at 0 of 1, which is what every screen renders today. */
+  legIndex: number;
+  legCount: number;
   /** whether THIS run needs the unlock signature: the flow tells us by reporting
    *  "unlock" first, and the step list grows a step to match. */
   unlocking: boolean;
@@ -57,7 +71,15 @@ export class ActionMachine<O extends ActionResult> {
   /** `firstStage` is the flow's own opening stage (spend "assemble", deposit
    *  "approve"), shown as active until the flow reports otherwise. */
   constructor(private readonly firstStage: string) {
-    this.snap = { phase: "form", stage: firstStage, unlocking: false, error: null, outcome: null };
+    this.snap = {
+      phase: "form",
+      stage: firstStage,
+      legIndex: 0,
+      legCount: 1,
+      unlocking: false,
+      error: null,
+      outcome: null,
+    };
   }
 
   snapshot = (): ActionSnapshot<O> => this.snap;
@@ -88,10 +110,19 @@ export class ActionMachine<O extends ActionResult> {
    * refresh here would usually read the pre-action state).
    */
   submit = async (run: ActionRun<O>, afterAction: (txHash: string) => unknown): Promise<void> => {
-    this.set({ phase: "running", stage: this.firstStage, unlocking: false, error: null });
+    this.set({
+      phase: "running",
+      stage: this.firstStage,
+      legIndex: 0,
+      legCount: 1,
+      unlocking: false,
+      error: null,
+    });
     try {
-      const outcome = await run((stage) => {
-        this.set(stage === "unlock" ? { stage, unlocking: true } : { stage });
+      const outcome = await run((stage, leg) => {
+        // A flow that reports no leg is a one-transaction flow: it keeps 0 of 1.
+        const at = leg ? { legIndex: leg.index, legCount: leg.count } : {};
+        this.set(stage === "unlock" ? { stage, unlocking: true, ...at } : { stage, ...at });
       });
       this.set({ phase: "done", outcome });
       void afterAction(outcome.txHash);

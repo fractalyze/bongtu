@@ -54,6 +54,7 @@ export function RunningPanel({
   title,
   amount,
   stage,
+  describeKey,
   elapsed,
   steps,
   walletName,
@@ -61,6 +62,8 @@ export function RunningPanel({
   title: string;
   amount: string;
   stage: string;
+  /** which stage writes the line under the active step — see StagedProgress. */
+  describeKey?: string;
   elapsed: number;
   steps: StagedStep[];
   walletName: string;
@@ -68,7 +71,13 @@ export function RunningPanel({
   return (
     <Panel title={title}>
       <AmountHero amount={amount} />
-      <StagedProgress stage={stage} elapsed={elapsed} steps={steps} walletName={walletName} />
+      <StagedProgress
+        stage={stage}
+        describeKey={describeKey}
+        elapsed={elapsed}
+        steps={steps}
+        walletName={walletName}
+      />
     </Panel>
   );
 }
@@ -115,6 +124,28 @@ export function FlowHint({ direction }: { direction: "shield" | "unshield" }): R
       </svg>
       {to}
     </div>
+  );
+}
+
+/** What a spend that takes several transactions tells the user before they start it:
+ *  how many approvals, and what each one is for. Deliberately not a warning — nothing
+ *  is wrong, this is simply what moving a balance held in many pieces costs. It is the
+ *  same count the running screen then steps through. */
+export function ApprovalPlan({
+  pieces,
+  legCount,
+  terminal,
+}: {
+  pieces: number;
+  legCount: number;
+  /** "payment" / "withdrawal" — what the last approval does. */
+  terminal: string;
+}): ReactNode {
+  return (
+    <p className="text-muted text-[0.88rem]">
+      Your balance is in {pieces} pieces, so this takes {legCount} approvals:{" "}
+      {legCount - 1} to combine them, then the {terminal}.
+    </p>
   );
 }
 

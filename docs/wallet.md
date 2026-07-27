@@ -158,8 +158,8 @@ does, from amount-aware largest-first selection:
 | the payment needs | send | withdraw |
 |---|---|---|
 | 1–2 notes | `transfer` (2-in / 2-out) | `withdraw` (2-in / 1-out) |
-| 3–10 notes | `transfer10` (10-in / 10-out) | — blocked, offer a merge |
-| more than 10 notes | — blocked, offer a merge | — blocked, offer a merge |
+| 3–10 notes | `transfer10` (10-in / 10-out) | — past its arity |
+| more than 10 notes | — past its arity | — past its arity |
 
 Largest-first is what makes that a decision and not a guess: if any *k* notes cover the amount, the
 largest *k* do, so a selection that overruns the arity proves no *k*-note cover exists. Unused input
@@ -169,14 +169,46 @@ the §5.2 value belt forces its value to 0, so a pad can neither prove membershi
 *output* slots are real value-0 notes back to the sender. This is the convention
 `circuits/inputs/transfer10.json` carries, and `test/transfer10.test.ts` checks both sides against it.
 
-**Withdraw has no arity-10 circuit**, so a scattered balance cannot be withdrawn directly at all.
-Rather than dead-end, both screens turn the blocked state into an offer: **merge your notes** — a
-`transfer10` self-send that folds the ten largest notes into one, every output owned by the sender.
-Duplicate output owners are safe here because receiver ciphertext *i* is encrypted under
-`encryptionNonce + i` (§11-8 v1.1), the property that also made self-send legal; the shared-keystream
-ban applies only to `disburse`. A merge runs through the same action machine as any spend (one
-signature, one transaction), refreshes the balance, and hands the user back to what they were doing.
-More than ten notes takes more than one merge — each round folds ten, and the user retries.
+## A spend is a chain, not a transaction
+
+Money arrives in separate notes — every deposit, every payment received, every disburse line is one —
+and no circuit above can spend more than ten at once. Withdraw is stricter still: it has no arity-10
+circuit, so three notes is already past it. That state is common, not exotic, and the wallet does not
+answer it by sending the user off to tidy up first.
+
+`planSpendChain` (`src/lib/spend.ts`) plans the **whole** way from the balance held to the payment
+asked for: zero or more merge legs — `transfer10` self-sends folding the ten largest notes into one,
+every output owned by the sender — then the terminal payment or withdrawal. `runSpendChain`
+(`src/lib/spendFlow.ts`) runs the legs back to back. One Confirm starts the whole thing; each leg is
+one wallet approval. Duplicate output owners are safe in a merge because receiver ciphertext *i* is
+encrypted under `encryptionNonce + i` (§11-8 v1.1), the property that also made self-send legal; the
+shared-keystream ban applies only to `disburse`.
+
+**Merge only as far as you must.** Planning stops the moment the amount is coverable within the
+terminal circuit's arity. A 20-note wallet spending what its top 19 notes cover takes *one* fold;
+only a near-full-balance spend takes two, because each fold turns 10 notes into 1 — a net loss of 9,
+so *N* notes need ⌈(N − arity) / 9⌉ folds at worst. The confirm sheet states the result in the terms
+the user is actually counting: "Your balance is in 20 pieces, so this takes 3 approvals: 2 to combine
+them, then the payment." The running screen then steps through exactly those, one step per
+transaction, with the assemble/prove/submit stage of the leg in flight written underneath.
+
+**Between legs the chain waits.** A merge's output note has no leaf index and no membership path
+until the indexer has seen the transaction, so leg *n+1* literally cannot be built until then. The
+plan marks that note with a negative leaf index naming the leg that will produce it (`pendingLeaf`);
+the runner polls `reloadNotes` for the commitment it knows the merge created — the same bounded-poll
+policy as the post-action refresh (`pollUntil`, `src/lib/refresh.ts`) — and substitutes the real note
+with its real leaf. This is a reported stage of its own, so the screen says what the pause is for.
+Freshly appended transfer outputs *do* have paths: the indexer's 422 "no path" applies only to
+leaves inside a `disburse` batch (§11-7).
+
+**A chain that breaks partway is honest about it.** The error carries the leg's own cause plus what
+it means for the money — nothing was sent, the balance is unchanged, and the folds that landed stay
+folded. Retrying re-plans from the refreshed notes, so it is a *shorter* chain: the completed merges
+are real and are not repeated. The single-transaction case is untouched by all of this — it fails
+exactly as it always did, with no chain wording bolted on.
+
+`test/spendChain.test.ts` gates both halves: the plan as a table, and the run against a fake
+chain+indexer where a submit appends the transaction's outputs and only then does `/notes` show them.
 
 ## Proving in the browser
 
@@ -212,9 +244,12 @@ one-time WASM compile early; it is best-effort and never blocks the UI.
 **`transfer10` is fetched lazily, and only it.** Send/Withdraw prefetch their 2-arity key on screen
 open, but the arity-10 key is four times the size — pulling it on open would make every send wait on
 114 MB it will almost never use. So the screen fetches it only once selection says this amount needs
-3+ notes (or the user starts a merge): `useActionMachine` takes the circuit the form currently
-implies, and re-fetches when it changes. Each circuit is fetched at most once per session, and the
-existing download panel — progress, ETA, disabled Confirm — covers the switch unchanged.
+3+ notes, or a chain whose first leg is a fold: `useActionMachine` takes the circuit the form
+currently implies — the FIRST leg's, which is the proof the user waits on next — and re-fetches when
+it changes. A chained withdraw therefore ends up holding both keys, having prefetched `withdraw` on
+screen open and `transfer10` when the plan grew a merge. Each circuit is fetched at most once per
+session, and the existing download panel — progress, ETA, disabled Confirm — covers the switch
+unchanged.
 
 ## Encapsulating to the arbiter
 

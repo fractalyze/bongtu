@@ -57,6 +57,8 @@ test("a fresh machine sits on the form, already on the flow's first stage", () =
   assert.deepEqual(m.snapshot(), {
     phase: "form",
     stage: "assemble",
+    legIndex: 0,
+    legCount: 1,
     unlocking: false,
     error: null,
     outcome: null,
@@ -169,6 +171,75 @@ test("reviewing again clears the last failure, and the retry starts clean", asyn
   await m.submit(reports("assemble", "prove", "submit"), () => {});
   assert.equal(m.snapshot().phase, "done");
   assert.equal(m.snapshot().error, null);
+});
+
+// ======================= (3b) MULTI-TRANSACTION RUNS ========================
+// A spend whose balance is too scattered to pay in one go runs as several
+// transactions (spendFlow.runSpendChain). The machine carries which one is in flight
+// so the screen can count them off; a flow that reports no leg keeps 0 of 1, which is
+// every deposit and every plain send.
+
+test("a flow that reports no leg stays a single transaction", async () => {
+  const m = spendMachine();
+  await m.submit(reports("assemble", "prove", "submit"), () => {});
+  assert.equal(m.snapshot().legIndex, 0);
+  assert.equal(m.snapshot().legCount, 1);
+});
+
+test("a chained run carries which transaction is in flight, and how many there are", async () => {
+  const m = spendMachine();
+  const seen: string[] = [];
+  m.subscribe(() => {
+    const s = m.snapshot();
+    seen.push(`${s.phase}:${s.stage}@${s.legIndex + 1}/${s.legCount}`);
+  });
+
+  const chain = async (onStage: (s: string, leg?: { index: number; count: number }) => void) => {
+    for (const index of [0, 1]) {
+      const leg = { index, count: 3 };
+      for (const s of ["assemble", "prove", "submit", "waiting"]) onStage(s, leg);
+    }
+    for (const s of ["assemble", "prove", "submit"]) onStage(s, { index: 2, count: 3 });
+    return OUTCOME;
+  };
+  const refreshed: string[] = [];
+  await m.submit(chain, (tx) => refreshed.push(tx));
+
+  assert.deepEqual(seen, [
+    "running:assemble@1/1", // submit opens before the flow has said how long the chain is
+    "running:assemble@1/3",
+    "running:prove@1/3",
+    "running:submit@1/3",
+    "running:waiting@1/3", // …the indexer catching up is a stage of its own
+    "running:assemble@2/3",
+    "running:prove@2/3",
+    "running:submit@2/3",
+    "running:waiting@2/3",
+    "running:assemble@3/3",
+    "running:prove@3/3",
+    "running:submit@3/3",
+    "done:submit@3/3",
+  ]);
+  assert.deepEqual(
+    refreshed,
+    [OUTCOME.txHash],
+    "ONE post-action refresh, on the terminal transaction: the between-legs waits are " +
+      "the chain's own business, and refreshing per leg would poll for money that has " +
+      "not moved yet",
+  );
+});
+
+test("the next run starts from one transaction again, whatever the last one took", async () => {
+  const m = spendMachine();
+  await m.submit(async (onStage) => {
+    onStage("submit", { index: 1, count: 2 });
+    return OUTCOME;
+  }, () => {});
+  assert.equal(m.snapshot().legCount, 2);
+
+  await m.submit(reports("assemble", "prove", "submit"), () => {});
+  assert.equal(m.snapshot().legCount, 1, "a plain send does not inherit the last chain's length");
+  assert.equal(m.snapshot().legIndex, 0);
 });
 
 // ======================= (4) REPAINTS =======================================

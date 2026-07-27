@@ -1,23 +1,22 @@
 // Headless gate for the wallet's ARITY-10 spend path (U-Z1): the circuit auto-pick,
-// the transfer10 witness, and the guided self-merge that rescues a balance too
-// scattered to spend at once.
+// the transfer10 witness, and the ten-into-one fold a spend chain's merge leg proves.
 //
 // The wallet never asks the user which circuit to prove. It infers it from how many
 // notes the payment needs, which makes that inference — and its two blocked cases —
 // the thing worth gating:
 //
-//   (1) ROUTING — ≤2 notes stay on the cheap 2×2 transfer, 3–10 move to transfer10,
-//       >10 is blocked as `needs-merge`; withdraw has no arity-10 circuit, so >2 is
-//       blocked the same way. previewSpend answers the same questions without
-//       throwing, because the form asks it on every keystroke.
+//   (1) ROUTING — ≤2 notes stay on the cheap 2×2 transfer, 3–10 move to transfer10;
+//       past that one transaction cannot pay at all (`needs-merge`), and withdraw,
+//       which has no arity-10 circuit, hits that at 3. previewSpend answers the same
+//       questions without throwing, because the form asks it on every keystroke.
 //   (2) WITNESS — a transfer10 request whose output commitments are the sdk's, whose
 //       value is conserved across all ten slots, and whose padded slots carry the
 //       SAME convention the committed circuits/inputs/transfer10.json fixture does
 //       (that file is what the circuit is proved against, so a drift here is a
 //       witness that only fails at proving time).
-//   (3) MERGE — a self-consolidation of up to ten notes into one, every output owned
-//       by the sender (legal since the §11-8 v1.1 per-output nonce), and the flow
-//       routing that submits it through pool.transfer10 rather than pool.transfer.
+//   (3) MERGE LEG — the witness a chain's fold proves: up to ten notes into one,
+//       every output owned by the sender (legal since the §11-8 v1.1 per-output
+//       nonce). How chains are PLANNED and run is test/spendChain.test.ts.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -32,16 +31,16 @@ import type { Calldata } from "@bongtu/core/proving";
 
 import { deriveIdentityFromSignature } from "../src/lib/derive.js";
 import { KeyCache } from "../src/lib/keyCache.js";
-import { runSpend, type RunSpendDeps, type SpendContext } from "../src/lib/spendFlow.js";
+import { runSpendChain, type RunSpendDeps, type SpendContext } from "../src/lib/spendFlow.js";
 import type { OwnerNote } from "../src/lib/indexerClient.js";
 import {
   buildTransfer10Request,
   buildTransferRequest,
+  legCircuit,
   planSpendAction,
-  previewMerge,
+  planSpendChain,
   previewSpend,
   selectInputNotes,
-  selectMergeNotes,
   SpendSelectionError,
   type MembershipWitness,
   type SelectableNote,
@@ -106,55 +105,60 @@ const selectable = (values: bigint[]): SelectableNote[] =>
 
 test("a send picks the circuit from how many notes it needs: ≤2 transfer, 3–10 transfer10", () => {
   const notes = selectable([100n, 100n, 100n, 100n]);
-  const plan1 = planSpendAction("transfer", notes, WALLET.compressedPubkey, { to: PAYEE_ADDR, amount: "100" });
+  const plan1 = planSpendAction("transfer", notes, { to: PAYEE_ADDR, amount: "100" });
   assert.equal(plan1.circuit, "transfer");
   assert.equal(plan1.inputs.length, 1);
 
-  const plan2 = planSpendAction("transfer", notes, WALLET.compressedPubkey, { to: PAYEE_ADDR, amount: "200" });
+  const plan2 = planSpendAction("transfer", notes, { to: PAYEE_ADDR, amount: "200" });
   assert.equal(plan2.circuit, "transfer", "two notes still fit the small circuit");
 
-  const plan3 = planSpendAction("transfer", notes, WALLET.compressedPubkey, { to: PAYEE_ADDR, amount: "250" });
+  const plan3 = planSpendAction("transfer", notes, { to: PAYEE_ADDR, amount: "250" });
   assert.equal(plan3.circuit, "transfer10", "the third note is what moves it to arity 10");
   assert.equal(plan3.inputs.length, 3);
   assert.equal(plan3.to, PAYEE_ADDR, "the payee is the typed recipient, not the wallet");
 });
 
-test("a send needing more than 10 notes is blocked as needs-merge, not as poverty", () => {
+test("one transaction cannot spend more than 10 notes — needs-merge, not poverty", () => {
   const many = selectable(Array.from({ length: 12 }, () => 100n)); // 1200 spendable
   assert.throws(
-    () => planSpendAction("transfer", many, WALLET.compressedPubkey, { amount: "1100" }),
+    () => planSpendAction("transfer", many, { amount: "1100" }),
     (e: unknown) => e instanceof SpendSelectionError && e.blocker === "needs-merge",
   );
   // …and the same wallet genuinely cannot fund more than it holds.
   assert.throws(
-    () => planSpendAction("transfer", many, WALLET.compressedPubkey, { amount: "9999" }),
+    () => planSpendAction("transfer", many, { amount: "9999" }),
     (e: unknown) => e instanceof SpendSelectionError && e.blocker === "insufficient",
   );
   // exactly ten notes is the last amount that goes through
   assert.equal(
-    planSpendAction("transfer", many, WALLET.compressedPubkey, { amount: "1000" }).inputs.length,
+    planSpendAction("transfer", many, { amount: "1000" }).inputs.length,
     10,
   );
 });
 
-test("withdraw stays at arity 2 — there is no withdraw10 — so >2 notes needs a merge first", () => {
+test("withdraw stays at arity 2 — there is no withdraw10 — so >2 notes is over its arity", () => {
   const notes = selectable([100n, 100n, 100n, 100n]);
-  assert.equal(planSpendAction("withdraw", notes, WALLET.compressedPubkey, { amount: "200" }).circuit, "withdraw");
+  assert.equal(planSpendAction("withdraw", notes, { amount: "200" }).circuit, "withdraw");
   assert.throws(
-    () => planSpendAction("withdraw", notes, WALLET.compressedPubkey, { amount: "250" }),
+    () => planSpendAction("withdraw", notes, { amount: "250" }),
     (e: unknown) => e instanceof SpendSelectionError && e.blocker === "needs-merge",
   );
 });
 
 test("previewSpend answers the form's question on every keystroke without throwing", () => {
   const notes = selectable([100n, 100n, 100n, 100n]);
-  assert.deepEqual(previewSpend("transfer", notes, "200"), { circuit: "transfer", blocker: null });
-  assert.deepEqual(previewSpend("transfer", notes, "250"), { circuit: "transfer10", blocker: null });
-  assert.deepEqual(previewSpend("withdraw", notes, "250"), { circuit: "withdraw", blocker: "needs-merge" });
-  assert.deepEqual(previewSpend("transfer", notes, "9999"), { circuit: "transfer", blocker: "insufficient" });
+  const p = (kind: "transfer" | "withdraw", amount: string) => previewSpend(kind, notes, amount);
+  assert.deepEqual(p("transfer", "200"), { circuit: "transfer", blocker: null, legCount: 1, pieces: 4 });
+  assert.deepEqual(p("transfer", "250"), { circuit: "transfer10", blocker: null, legCount: 1, pieces: 4 });
+  // a withdraw over arity 2 is no longer blocked: it becomes a merge then the withdraw,
+  // and the circuit named is the FIRST leg's — the merge the user waits on next.
+  assert.deepEqual(p("withdraw", "250"), { circuit: "transfer10", blocker: null, legCount: 2, pieces: 4 });
+  assert.deepEqual(p("withdraw", "200"), { circuit: "withdraw", blocker: null, legCount: 1, pieces: 4 });
+  // only poverty still blocks the form
+  assert.deepEqual(p("transfer", "9999"), { circuit: "transfer", blocker: "insufficient", legCount: 1, pieces: 4 });
   // a half-typed amount is not a verdict: the form's own amountError owns that case
-  assert.deepEqual(previewSpend("transfer", notes, "0"), { circuit: "transfer", blocker: null });
-  assert.deepEqual(previewSpend("transfer", notes, ""), { circuit: "transfer", blocker: null });
+  assert.deepEqual(p("transfer", "0"), { circuit: "transfer", blocker: null, legCount: 1, pieces: 4 });
+  assert.deepEqual(p("transfer", ""), { circuit: "transfer", blocker: null, legCount: 1, pieces: 4 });
 });
 
 test("selectInputNotes takes the arity as a parameter and names the limit it hit", () => {
@@ -290,23 +294,29 @@ test("transfer10 rejects what it cannot represent: >10 inputs, over-spend, missi
   );
 });
 
-// ============================= (3) MERGE =====================================
+// ============================= (3) MERGE LEG =================================
+// A merge is no longer something the user asks for — it is a leg planSpendChain
+// inserts (test/spendChain.test.ts owns the planning). What belongs HERE is the
+// witness that leg proves: a full-arity transfer10 whose every output is the
+// sender's own key.
 
-test("a merge folds the ten largest notes into one, every output the sender's own", () => {
+test("a merge leg folds the ten largest notes into one, every output the sender's own", () => {
   const values = Array.from({ length: 12 }, (_, i) => BigInt(100 * (i + 1))); // 100…1200
   const f = fixture(values);
-  const plan = planSpendAction("merge", f.notes, WALLET.compressedPubkey, { amount: "ignored" });
-
-  assert.equal(plan.circuit, "transfer10");
-  assert.equal(plan.inputs.length, 10, "one merge takes at most the circuit's arity");
-  assert.equal(plan.to, WALLET.compressedPubkey, "a merge pays the wallet itself");
+  // 7600 is past what any ten of these notes cover (the largest ten total 7500), so
+  // the chain has to fold before it can pay.
+  const [first] = planSpendChain("transfer", f.notes, "7600");
+  assert.equal(first.leg, "merge");
+  if (first.leg !== "merge") return;
+  assert.equal(legCircuit(first), "transfer10");
+  assert.equal(first.inputs.length, 10, "one merge takes at most the circuit's arity");
   // largest-first: the two smallest notes (100, 200) are the ones left behind
-  assert.deepEqual(plan.inputs.map((n) => n.value), ["1200", "1100", "1000", "900", "800", "700", "600", "500", "400", "300"]);
-  assert.equal(plan.amount, "7500", "the merged amount is the total of what it consumes");
+  assert.deepEqual(first.inputs.map((n) => n.value), ["1200", "1100", "1000", "900", "800", "700", "600", "500", "400", "300"]);
+  assert.equal(first.mergedValue, "7500", "the merged note is worth everything it consumes");
 
-  const memberships = plan.inputs.map((n) => f.memberships[n.leafIndex]);
+  const memberships = first.inputs.map((n) => f.memberships[n.leafIndex]);
   const { request, meta } = buildTransfer10Request(
-    WALLET, plan.inputs, memberships, plan.to, plan.amount, CRYPTO,
+    WALLET, first.inputs, memberships, WALLET.compressedPubkey, first.mergedValue, CRYPTO,
   );
   const inp = request.input;
   // every output owner is the wallet — safe since §11-8 v1.1 gives output i its own
@@ -315,22 +325,10 @@ test("a merge folds the ten largest notes into one, every output the sender's ow
     assert.deepEqual(owner, [SELF[0].toString(), SELF[1].toString()]);
   }
   assert.equal(new Set(inp.outputCommitments as string[]).size, 10, "distinct salts -> distinct notes");
-  assert.equal(inp.outputValues[0], "7500", "the whole balance lands in ONE note");
+  assert.equal(inp.outputValues[0], "7500", "the whole fold lands in ONE note");
   assert.deepEqual((inp.outputValues as string[]).slice(1), Array(9).fill("0"));
   assert.deepEqual(inp.enabled, Array(10).fill("1"), "a full-arity merge pads nothing");
   assert.equal(meta.membershipOk, true);
-});
-
-test("merging needs something to merge, and previewMerge says so without throwing", () => {
-  const one = selectable([500n]);
-  assert.throws(() => selectMergeNotes(one), /at least 2 unspent notes/);
-  assert.equal(previewMerge(one), null);
-  assert.equal(previewMerge([]), null);
-  assert.deepEqual(previewMerge(selectable([100n, 200n, 300n])), { count: 3, total: "600" });
-  // spent notes are not merge material
-  const withSpent: SelectableNote[] = [...selectable([100n, 200n])];
-  withSpent[0] = { ...withSpent[0], spent: true };
-  assert.equal(previewMerge(withSpent), null);
 });
 
 // The flow's own routing: the SAME machine the screens run, with every I/O edge
@@ -372,20 +370,25 @@ function flowDeps(f: ReturnType<typeof fixture>, trace: { circuit: string | null
   };
 }
 
-test("runSpend routes by arity: a 4-note send proves transfer10 and submits to transfer10", async () => {
-  const f = fixture([400n, 300n, 200n, 100n]);
-  const ctx: SpendContext = {
+function flowCtx(f: ReturnType<typeof fixture>): SpendContext {
+  return {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     connection: { address: "0x1", provider: {}, signer: {} } as any,
     indexerUrl: "http://indexer",
     notes: f.notes,
     sessionPubkey: WALLET.compressedPubkey,
+    reloadNotes: async () => f.notes,
   };
+}
+
+test("runSpendChain routes by arity: a 4-note send proves transfer10 and submits to transfer10", async () => {
+  const f = fixture([400n, 300n, 200n, 100n]);
+  const ctx = flowCtx(f);
   const stages: string[] = [];
 
   // 800 needs three notes (400+300+200); 700 would have fit in two.
   const wide = { circuit: null as string | null, submitted: [] as string[] };
-  const out = await runSpend("transfer", ctx, { to: PAYEE_ADDR, amount: "800" }, (s) => stages.push(s), flowDeps(f, wide));
+  const out = await runSpendChain("transfer", ctx, { to: PAYEE_ADDR, amount: "800" }, (s) => stages.push(s), flowDeps(f, wide));
   assert.equal(wide.circuit, "transfer10");
   assert.deepEqual(wide.submitted, ["transfer10"]);
   assert.equal(out.txHash, "0xt10");
@@ -393,27 +396,9 @@ test("runSpend routes by arity: a 4-note send proves transfer10 and submits to t
 
   // the same wallet, an amount one note covers: back on the small circuit
   const small = { circuit: null as string | null, submitted: [] as string[] };
-  await runSpend("transfer", ctx, { to: PAYEE_ADDR, amount: "400" }, () => {}, flowDeps(f, small));
+  await runSpendChain("transfer", ctx, { to: PAYEE_ADDR, amount: "400" }, () => {}, flowDeps(f, small));
   assert.equal(small.circuit, "transfer");
   assert.deepEqual(small.submitted, ["transfer"]);
-});
-
-test("runSpend('merge') consolidates to the wallet's own key through transfer10", async () => {
-  const f = fixture([400n, 300n, 200n, 100n]);
-  const ctx: SpendContext = {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    connection: { address: "0x1", provider: {}, signer: {} } as any,
-    indexerUrl: "http://indexer",
-    notes: f.notes,
-    sessionPubkey: WALLET.compressedPubkey,
-  };
-  const trace = { circuit: null as string | null, submitted: [] as string[] };
-  // The amount argument is the form's, and a merge ignores it entirely — it spends
-  // what the wallet holds, to the wallet.
-  const out = await runSpend("merge", ctx, { amount: "0" }, () => {}, flowDeps(f, trace));
-  assert.equal(trace.circuit, "transfer10");
-  assert.deepEqual(trace.submitted, ["transfer10"]);
-  assert.equal(out.explorerUrl, "https://x/tx/0xt10");
 });
 
 // ============================ (4) ASSETS =====================================

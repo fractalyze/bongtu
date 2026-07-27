@@ -46,6 +46,7 @@ import {
   classifyReadFailure,
   pollForAction,
   refreshPlan,
+  RECONNECT_NOTICE,
   type OwnerSnapshot,
 } from "../lib/refresh.js";
 import { useHashRoute, navigate, useWalletDescription } from "./hooks.js";
@@ -92,6 +93,12 @@ export interface WalletContextValue {
   refresh: () => Promise<void>;
   /** post-action refresh: poll until `txHash` is reflected, then apply the data. */
   refreshAfterAction: (txHash: string) => Promise<void>;
+  /** One read of the owner's notes, applied to the app as it lands. A spend chain
+   *  calls this between its transactions: it cannot build the leg that spends a
+   *  freshly merged note until the indexer says which leaf that note landed on. It
+   *  also leaves the screen holding fresh notes, so a chain that fails partway is
+   *  retried against what the wallet NOW holds — a shorter chain. */
+  reloadNotes: () => Promise<OwnerNote[]>;
 }
 
 const WalletContext = createContext<WalletContextValue | null>(null);
@@ -352,6 +359,21 @@ export function App(): ReactNode {
     [session, notes, history, loadOwnerData, applySnapshot, refresh],
   );
 
+  // The between-legs read a spend chain waits on. It applies what it reads (so the
+  // balance on screen keeps up with a chain in flight) but never clears anything on
+  // failure — the chain's own bounded poll decides when the wait has gone on too long.
+  const reloadNotes = useCallback(async (): Promise<OwnerNote[]> => {
+    if (!session || refreshPlan(session).kind === "notice") {
+      throw new Error(RECONNECT_NOTICE); // tokenless: no way to read, so no way to chain
+    }
+    const snap = await loadOwnerData(
+      buildNotesTokenUrl(INDEXER_URL, session.compressedPubkey, session.token),
+      buildHistoryTokenUrl(INDEXER_URL, session.compressedPubkey, session.token),
+    );
+    applySnapshot(snap);
+    return snap.notes;
+  }, [session, loadOwnerData, applySnapshot]);
+
   const value = useMemo<WalletContextValue>(
     () => ({
       connection,
@@ -371,10 +393,12 @@ export function App(): ReactNode {
       disconnect,
       refresh,
       refreshAfterAction,
+      reloadNotes,
     }),
     [
       connection, wallet, session, balance, notes, history, loading, syncing, dataError,
       dataNotice, connecting, connectError, connectWallet, disconnect, refresh, refreshAfterAction,
+      reloadNotes,
     ],
   );
 
