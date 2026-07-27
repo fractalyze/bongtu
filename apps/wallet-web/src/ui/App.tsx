@@ -12,7 +12,7 @@ import {
   deriveIdentityFromSignature,
   type WalletIdentity,
 } from "../lib/derive.js";
-import { connect, signKeyDerivation, type Connection } from "../lib/metamask.js";
+import { connect, signKeyDerivation, walletErrorMessage, type Connection } from "../lib/metamask.js";
 import { balanceViaNotes } from "../lib/balance.js";
 import {
   buildHistoryUrl,
@@ -134,7 +134,7 @@ export function App(): ReactNode {
       setIdentity(id);
       navigate("home");
     } catch (e) {
-      setConnectError(e instanceof Error ? e.message : String(e));
+      setConnectError(walletErrorMessage(e));
     } finally {
       setConnecting(false);
     }

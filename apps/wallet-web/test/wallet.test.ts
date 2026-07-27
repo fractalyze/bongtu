@@ -39,6 +39,7 @@ import {
   type WalletIdentity,
 } from "../src/lib/derive.js";
 import { sumUnspent, trialDecryptEvents } from "../src/lib/balance.js";
+import { walletErrorMessage } from "../src/lib/metamask.js";
 import type { FeedEvent } from "../src/lib/indexerClient.js";
 import {
   buildTransferRequest,
@@ -435,4 +436,20 @@ test("freshSpendCrypto clamps the encryption nonce below 2^128 (circuit constrai
   assert.ok(BigInt(c.encryptionNonce) < 1n << 128n, "nonce must satisfy nonce < 2^128");
   assert.equal(c.changeSalt, wide, "salts keep the full draw");
   assert.equal(c.ecdhPrivateKey, wide, "ephemeral key keeps the full draw");
+});
+
+test("walletErrorMessage: provider error objects render as words, never [object Object]", () => {
+  // MetaMask's ProviderRpcError and ethers' wrapped errors are NOT Error
+  // instances — the old `String(e)` path showed "[object Object]" to users.
+  assert.equal(walletErrorMessage({ code: 4001, message: "User rejected the request." }),
+    "Transaction rejected in your wallet.");
+  assert.equal(walletErrorMessage({ code: "ACTION_REJECTED", message: "user rejected transaction" }),
+    "Transaction rejected in your wallet.");
+  assert.match(walletErrorMessage({ code: -32603, message: "insufficient funds for gas * price + value" }),
+    /GIWA Sepolia ETH/);
+  assert.equal(walletErrorMessage({ reason: "execution reverted: InvalidProof" }),
+    "execution reverted: InvalidProof");
+  assert.equal(walletErrorMessage({ data: { message: "nested node error" } }), "nested node error");
+  assert.equal(walletErrorMessage(new Error("plain")), "plain");
+  assert.equal(walletErrorMessage({ weird: true }), '{"weird":true}');
 });

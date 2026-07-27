@@ -16,7 +16,7 @@ import type { ReactNode } from "react";
 import { DEFAULTS } from "../../config.js";
 import { ensureCircuitAssets, prewarmProver } from "../../lib/prove.js";
 import { runDeposit, type DepositStage, type DepositOutcome } from "../../lib/depositFlow.js";
-import { readTokenState, mintTestToken } from "../../lib/metamask.js";
+import { mintTestToken, readGasBalance, readTokenState, walletErrorMessage } from "../../lib/metamask.js";
 import { FAUCET_AMOUNT } from "../../lib/faucet.js";
 import { useWallet } from "../App.js";
 import { navigate, useCircuitDownload, useElapsedSeconds } from "../hooks.js";
@@ -112,11 +112,18 @@ export function Deposit(): ReactNode {
     setError(null);
     setFaucetTxUrl(null);
     try {
+      // The mint is permissionless but still a tx: an account with ZERO gas ETH
+      // fails inside MetaMask with an opaque object — say it plainly instead.
+      if ((await readGasBalance(connection)) === 0n) {
+        throw new Error(
+          "This account has no GIWA Sepolia ETH to pay gas — get a little testnet ETH onto GIWA Sepolia first, then mint.",
+        );
+      }
       const res = await mintTestToken(connection, DEFAULTS.token, connection.address, FAUCET_AMOUNT);
       setFaucetTxUrl(res.explorerUrl);
       await refreshTokenState();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(walletErrorMessage(e));
     } finally {
       setFaucetPending(false);
     }
@@ -136,7 +143,7 @@ export function Deposit(): ReactNode {
       setPhase("done");
       void refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(walletErrorMessage(e));
       setPhase("form");
     }
   }

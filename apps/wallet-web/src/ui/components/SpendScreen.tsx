@@ -15,6 +15,7 @@ import type { ReactNode } from "react";
 import { unpackPubkey } from "@bongtu/core/pubkey";
 import { DEFAULTS } from "../../config.js";
 import { ensureCircuitAssets, prewarmProver } from "../../lib/prove.js";
+import { walletErrorMessage } from "../../lib/metamask.js";
 import { runSpend, type SpendStage, type SpendOutcome } from "../../lib/spendFlow.js";
 import { useWallet } from "../App.js";
 import { navigate, useCircuitDownload, useElapsedSeconds } from "../hooks.js";
@@ -105,7 +106,7 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
       setPhase("done");
       void refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(walletErrorMessage(e));
       setPhase("form");
     }
   }

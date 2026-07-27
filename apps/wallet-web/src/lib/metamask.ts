@@ -63,6 +63,40 @@ export function hasInjectedWallet(): boolean {
   return Boolean((globalThis as { ethereum?: unknown }).ethereum);
 }
 
+/**
+ * A human-readable message from ANY wallet/RPC failure. MetaMask's
+ * ProviderRpcError and ethers' wrapped errors are plain objects, so the naive
+ * `String(e)` renders "[object Object]"; dig the conventional fields instead
+ * and translate the two failures every tester hits (user rejection, no gas
+ * ETH) into plain words.
+ */
+export function walletErrorMessage(e: unknown): string {
+  const o = e as {
+    code?: number | string;
+    reason?: string;
+    message?: string;
+    error?: { message?: string };
+    data?: { message?: string };
+  } | null;
+  if (o?.code === 4001 || o?.code === "ACTION_REJECTED") return "Transaction rejected in your wallet.";
+  const raw = o?.reason ?? o?.error?.message ?? o?.data?.message ?? o?.message;
+  if (raw && /insufficient funds/i.test(raw)) {
+    return "Not enough GIWA Sepolia ETH to pay gas — this account needs a little testnet ETH on GIWA first.";
+  }
+  if (raw) return raw;
+  try {
+    return JSON.stringify(e);
+  } catch {
+    return String(e);
+  }
+}
+
+/** The connected account's native (gas) ETH balance on the current chain. */
+export async function readGasBalance(connection: Connection): Promise<bigint> {
+  const b = await connection.provider.getBalance(connection.address);
+  return BigInt(b.toString());
+}
+
 /** MetaMask Mobile deep link that reopens THIS page inside the app's dapp
  *  browser (which injects window.ethereum). Universal-link form, so it also
  *  routes to the app store when the app is missing. */
