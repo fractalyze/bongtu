@@ -52,6 +52,7 @@ import {
   pollForAction,
   refreshPlan,
   runRefresh,
+  AUTO_REFRESH_MS,
   RECONNECT_NOTICE,
   type OwnerSnapshot,
 } from "../lib/refresh.js";
@@ -221,9 +222,9 @@ export function App(): ReactNode {
   // the surface routing itself is headless (refresh.ts runRefresh, tested), this
   // callback only wires the sinks to React state.
   const refresh = useCallback(
-    async (manual = false): Promise<void> => {
+    async (manual = false, quiet = false): Promise<void> => {
       if (!session) return;
-      setLoading(true);
+      if (!quiet) setLoading(true); // an auto tick must not flash loading UI every 3 s
       try {
         // Reads authenticate with the VIEW token only — no key, no signature popup.
         await runRefresh(session, loadFirstPage, {
@@ -232,18 +233,42 @@ export function App(): ReactNode {
           toast: toastError,
           signOut: (notice) => endSession(notice), // back to onboarding — retrying can only 401 again
           setNotice: setDataNotice,
-        }, { manual, indexerUrl: INDEXER_URL });
+        }, {
+          manual,
+          indexerUrl: INDEXER_URL,
+          // An unchanged read never touches the screen: applying wholesale resets
+          // activity paging, a pure loss when the data is identical.
+          skipUnchangedFrom: { notes, history, historyNextBefore },
+        });
       } finally {
-        setLoading(false);
+        if (!quiet) setLoading(false);
       }
     },
-    [session, loadFirstPage, applySnapshot, endSession],
+    [session, loadFirstPage, applySnapshot, endSession, notes, history, historyNextBefore],
   );
 
   // Auto-load whenever the session changes (after a connect or a silent restore).
   useEffect(() => {
     if (session) void refresh();
   }, [session, refresh]);
+
+  // The indexer advances without us (its own ~3 s chain tail poll), so re-read it
+  // on the same cadence while the tab is visible — money sent TO this account
+  // appears unprompted, ~6 s worst case end to end. Quiet: no loading flash, no
+  // toast, failures move only the banner; a tick never overlaps itself or a
+  // post-action poll (`syncing`).
+  useEffect(() => {
+    if (!session) return;
+    let inflight = false;
+    const id = setInterval(() => {
+      if (document.visibilityState !== "visible" || inflight || syncing) return;
+      inflight = true;
+      void refresh(false, true).finally(() => {
+        inflight = false;
+      });
+    }, AUTO_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [session, refresh, syncing]);
 
   // Class 5 (unexpected/bug): whatever still reaches the window's error and
   // unhandledrejection events was caught by NO deliberate surface — toast it with

@@ -112,7 +112,7 @@ Env knobs (`src/index.ts`):
 | `CHAIN_ID` | `91342` | chain id for the addresses file |
 | `START_BLOCK` | `0` | first block to replay |
 | `PORT` | `8600` | HTTP port |
-| `POLL_MS` | `5000` | incremental re-ingest interval (`0` = off) |
+| `POLL_MS` | `3000` | incremental re-ingest interval (`0` = off) |
 | `AUTHORITY_KEY` | unset | arbiter bjj private key → arbiter mode |
 | `TOKEN_SECRET` | generated per boot | HMAC secret for `/auth` view tokens (arbiter mode). When generated, boot warns that issued tokens reset on restart — set it to keep wallet logins across restarts |
 | `PUBLIC_URL` | loopback listen address | comma-separated origin(s) clients reach this indexer on. `/auth` signatures are bound to one of them, so **a wallet served through the same-origin `/indexer` proxy must list the WALLET's origin(s)**, not the indexer's (`https://bongtu.fractalyze.io,https://…vercel.app`). A wrong value is not fatal but silently drops every login to the tokenless path (balance loads once, then cannot refresh); boot prints what was resolved |

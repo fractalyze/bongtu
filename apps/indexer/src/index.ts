@@ -6,7 +6,7 @@
 //   CHAIN_ID                   chain id for the addresses file (default 91342)
 //   START_BLOCK                first block to replay (default 0)
 //   PORT                       HTTP port (default 8600)
-//   POLL_MS                    incremental re-ingest interval (default 5000; 0 = off)
+//   POLL_MS                    incremental re-ingest interval (default 3000; 0 = off)
 //   DATABASE_URL               REQUIRED — Postgres connection string (the indexer
 //                              is Postgres-only; it refuses to boot without it)
 //   LOG_CHUNK                  getLogs chunk size in blocks (default 50000)
@@ -47,7 +47,7 @@ async function main(): Promise<void> {
   }
   const cfg = resolveConfig();
   const port = Number(process.env.PORT || 8600);
-  const pollMs = process.env.POLL_MS !== undefined ? Number(process.env.POLL_MS) : 5000;
+  const pollMs = process.env.POLL_MS !== undefined ? Number(process.env.POLL_MS) : 3000;
 
   // Mode is logged; the arbiter key and the DATABASE_URL (may carry a password)
   // are NEVER printed.

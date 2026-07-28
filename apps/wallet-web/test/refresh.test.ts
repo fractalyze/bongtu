@@ -22,6 +22,8 @@ import {
   loadOwnerSnapshot,
   pollForAction,
   refreshPlan,
+  runRefresh,
+  snapshotChanged,
   EXPIRED_MESSAGE,
   RECONNECT_NOTICE,
   type OwnerSnapshot,
@@ -210,4 +212,37 @@ test("a failing balance read rejects — a wrong balance is worse than an error"
     /-> 401/,
     "the 401 must reach classifyReadFailure, not be swallowed into an empty snapshot",
   );
+});
+
+// --- the 3 s auto-refresh: unchanged reads must not touch the screen -------------
+
+test("snapshotChanged: identical data is quiet; any real change is loud", () => {
+  const note = (c: string, spent: boolean) => ({ commitment: c, spent }) as unknown as OwnerNote;
+  const item = (seq: number) => ({ seq }) as unknown as HistoryItem;
+  const base: OwnerSnapshot = { notes: [note("a", false)], history: [item(5)], historyNextBefore: null };
+  assert.equal(snapshotChanged(base, { ...base }), false, "same data -> quiet");
+  assert.equal(snapshotChanged(base, { ...base, notes: [note("a", true)] }), true, "spent flip");
+  assert.equal(snapshotChanged(base, { ...base, notes: [note("a", false), note("b", false)] }), true, "new note");
+  assert.equal(snapshotChanged(base, { ...base, history: [item(6)] }), true, "new history head");
+  assert.equal(snapshotChanged(base, { ...base, historyNextBefore: 3 }), true, "paging cursor moved");
+});
+
+test("runRefresh with skipUnchangedFrom: unchanged read clears the banner but never re-applies", async () => {
+  const applied: unknown[] = [];
+  let banner: string | null = "stale";
+  const cur: OwnerSnapshot = { notes: [], history: [], historyNextBefore: null };
+  await runRefresh(
+    { token: "t", compressedPubkey: "p" },
+    async () => ({ notes: [], history: [], historyNextBefore: null }),
+    {
+      applySnapshot: (s) => applied.push(s),
+      setBanner: (m) => { banner = m; },
+      toast: () => { throw new Error("background must not toast"); },
+      signOut: () => {},
+      setNotice: () => {},
+    },
+    { indexerUrl: "http://x", skipUnchangedFrom: cur },
+  );
+  assert.equal(applied.length, 0, "identical snapshot skipped — paging survives the tick");
+  assert.equal(banner, null, "a successful quiet read still clears the degraded banner");
 });

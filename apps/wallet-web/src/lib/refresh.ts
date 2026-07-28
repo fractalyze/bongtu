@@ -128,6 +128,28 @@ export const REFRESH_FAILED_TOAST = "Refresh failed. Showing the last loaded dat
  *   signOut       — the 401 route: back to onboarding, carrying the notice;
  *   setNotice     — the calm tokenless-session strip (never an error).
  */
+/** How often the wallet re-reads the indexer with NO user action, while the tab
+ *  is visible — money sent TO this account must appear unprompted. Paired with
+ *  the indexer's own ~3 s chain tail poll, incoming funds show in ~6 s worst
+ *  case. Quiet ticks are cheap: an unchanged read never touches the screen
+ *  (see `snapshotChanged`), so paging and scroll positions survive. */
+export const AUTO_REFRESH_MS = 3000;
+
+/**
+ * Whether a fresh read differs from what the screen already shows. The auto
+ * refresh loop applies a snapshot ONLY when this is true: applying wholesale
+ * resets activity paging to page one (by design — older pages were read against
+ * a feed that has moved), which is the right cost for NEW data and pure loss
+ * for identical data arriving every few seconds.
+ */
+export function snapshotChanged(pre: OwnerSnapshot, cur: OwnerSnapshot): boolean {
+  if (pre.notes.length !== cur.notes.length || pre.history.length !== cur.history.length) return true;
+  if (pre.historyNextBefore !== cur.historyNextBefore) return true;
+  if ((pre.history[0]?.seq ?? -1) !== (cur.history[0]?.seq ?? -1)) return true;
+  const keys = new Set(pre.notes.map((n) => `${n.commitment}:${n.spent}`));
+  return cur.notes.some((n) => !keys.has(`${n.commitment}:${n.spent}`));
+}
+
 export interface RefreshSinks {
   applySnapshot(snap: OwnerSnapshot): void;
   setBanner(message: string | null): void;
@@ -147,7 +169,7 @@ export async function runRefresh(
   session: { token: string; compressedPubkey: string } | null,
   load: (token: string, owner: string) => Promise<OwnerSnapshot>,
   sinks: RefreshSinks,
-  opts: { manual?: boolean; indexerUrl: string },
+  opts: { manual?: boolean; indexerUrl: string; skipUnchangedFrom?: OwnerSnapshot },
 ): Promise<void> {
   const plan = refreshPlan(session);
   if (plan.kind === "notice" || !session) {
@@ -158,7 +180,10 @@ export async function runRefresh(
   }
   sinks.setNotice(null);
   try {
-    sinks.applySnapshot(await load(session.token, session.compressedPubkey));
+    const snap = await load(session.token, session.compressedPubkey);
+    if (!(opts.skipUnchangedFrom && !snapshotChanged(opts.skipUnchangedFrom, snap))) {
+      sinks.applySnapshot(snap);
+    }
     sinks.setBanner(null); // recovery clears the state banner
   } catch (e) {
     const failure = classifyReadFailure(e, opts.indexerUrl);
