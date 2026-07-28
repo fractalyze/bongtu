@@ -21,7 +21,7 @@
 // unit-tested in spend.ts, and the asset caching is unit-tested in assets.test.ts.
 
 import type { ProvingRequest, Calldata } from "@bongtu/core/proving";
-import { CIRCUITS_VERSION, type BrowserCircuit } from "../config.js";
+import { CIRCUITS_VERSION, CIRCUIT_ASSET_BYTES, type BrowserCircuit } from "../config.js";
 import {
   prefetchCircuitAssets,
   type AssetDownloadProgress,
@@ -114,7 +114,13 @@ export async function ensureCircuitAssets(
     ...deps,
     onDownloadStart: (url) => {
       downloadState[circuit] ??= { startedAt: Date.now(), assets: {} };
-      downloadState[circuit].assets[url] = { url, received: 0, total: null };
+      // Seed the total from the pinned byte table, not the stream: the view's
+      // aggregate only shows percent/ETA once EVERY in-flight asset has a total,
+      // and the 95 MB zkey's first chunk can lag the wasm by seconds — a null
+      // here is exactly the "0.1 MB, no bar" hang the card exists to prevent.
+      const pinned = CIRCUIT_ASSET_BYTES[circuit];
+      const total = url.endsWith(".wasm") ? pinned.wasm : url.endsWith(".zkey") ? pinned.zkey : null;
+      downloadState[circuit].assets[url] = { url, received: 0, total };
       emitDownload(circuit);
       deps.onDownloadStart?.(url);
     },
