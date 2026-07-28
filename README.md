@@ -30,9 +30,9 @@ When you use a bank, you take four things for granted:
 |   | You expect… | Public stablecoin | **bongtu** |
 |---|---|---|---|
 | 1 | your balance & history are yours alone | ❌ world-readable | ✅ |
-| 2 | outsiders can't see how much you send | ❌ | ✅ |
-| 3 | outsiders can't see who you send to | ❌ | ✅ |
-| 4 | but a regulator can still audit you | "✅" (all public) | ✅ cryptographically enforced |
+| 2 | outsiders can't see how much you send | ❌ every amount public | ✅ |
+| 3 | outsiders can't see who you send to | ❌ every transfer public | ✅ |
+| 4 | but a regulator can still audit you | ⚠️ only by exposing everything | ✅ built into every tx |
 
 A public stablecoin fails the first three. Privacy tools (mixers like Tornado) fix those but lack
 built-in auditability, which is why [Tornado Cash was
@@ -49,22 +49,25 @@ Verified against each project's source and deployed artifacts:
 | **Mass payout / tx** | ✅ **256** | 10 | 5 | 127 | ❌ |
 | Hides amount | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Hides graph (from↔to) | ✅ | ✅ | ✅ | ✅ | ❌ |
-| Hides recipient count | ✅ | ⚠️ | ⚠️ | ⚠️ | ❌ |
-| **Involuntary audit** | ✅ | ✅ | ❌ | ❌ | ✅ |
-| Per-period disclosure | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Post-quantum (HNDL) | ✅ | ⚠️ | ❌ | ❌ | ❌ |
-| Own-notes lookup | ✅ | ❌ | ❌ | ❌ | n/a |
+| Hides recipient count | ✅ padded to 256 | ⚠️ | ⚠️ | ⚠️ | ❌ |
+| **Involuntary audit** | ✅ circuit-enforced | ✅ | ❌ voluntary | ❌ voluntary | ✅ |
+| Per-period disclosure | ✅ epoch rotation | ❌ | ❌ | ❌ | ❌ |
+| Post-quantum (HNDL) | ✅ hybrid ML-KEM | ⚠️ | ❌ | ❌ | ❌ |
+| Own-notes lookup | ✅ indexer `/notes` | ❌ scan all | ❌ scan all | ❌ scan all | n/a |
 | Live | ✅ | ✅ | ✅ | ❌ sunset | ✅ |
 
-Railgun's 5 rises to 13 only with a single input; zkBob's 127 shipped but the pools are shut down.
-"Hides recipient count": bongtu pads every batch to 256 with no per-leaf events, while the others
-hide *who* is paid but leak *how many*. "Post-quantum (HNDL)": all of these publish encrypted data
-on-chain, but Railgun (ECDH over curve25519) and Token-2022 (ElGamal) key it with classical,
-discrete-log crypto whose public keys sit on-chain forever, so a future quantum computer decrypts
-every past amount; bongtu mixes a lattice (ML-KEM-768) secret into the envelope key, so breaking the
-classical half alone reveals nothing. The bottom three rows are the empty column no live system
-fills: enforced-and-scoped audit, post-quantum on-chain ciphertext, and an own-notes lookup instead
-of scanning the whole pool.
+- **Mass payout**: Railgun's 5 rises to 13 only when spending a single input; zkBob's 127 shipped,
+  but its pools are shut down.
+- **Recipient count**: bongtu pads every batch to 256 with no per-leaf events, so the count is
+  invisible; the others hide *who* is paid but reveal *how many*.
+- **Post-quantum**: all three encrypt on-chain, but Railgun (ECDH) and Token-2022 (ElGamal) use
+  classical crypto whose keys stay on-chain forever, so a future quantum computer can decrypt every
+  past amount. bongtu mixes in a lattice (ML-KEM-768) secret, so breaking the classical half alone
+  reveals nothing.
+
+The bottom three rows are what no live system offers together: audit that is both enforced and
+scoped, post-quantum on-chain ciphertext, and a per-user note lookup instead of scanning the whole
+pool.
 
 ## The headline: mass private disbursement
 
