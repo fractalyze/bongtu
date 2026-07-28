@@ -2,7 +2,7 @@
 
 `apps/wallet-web` is the self-custody public app: a wallet in (an injected extension, or WalletConnect when
 the build is configured for it), a BabyJubJub spending key derived on the fly, notes read from an arbiter
-indexer, and transfer / transfer10 / withdraw / deposit proved **in the browser**. It imports `@bongtu/core` source directly, so every commitment, nullifier and
+indexer, and transfer / transfer10x2 / withdraw / deposit proved **in the browser**. It imports `@bongtu/core` source directly, so every commitment, nullifier and
 Poseidon-sponge ciphertext it builds is byte-identical to what the provers prove and the contract
 verifies. Run commands and the test layout are owned by `apps/wallet-web/README.md`.
 
@@ -158,7 +158,7 @@ does, from amount-aware largest-first selection:
 | the payment needs | send | withdraw |
 |---|---|---|
 | 1–2 notes | `transfer` (2-in / 2-out) | `withdraw` (2-in / 1-out) |
-| 3–10 notes | `transfer10` (10-in / 10-out) | — past its arity |
+| 3–10 notes | `transfer10x2` (10-in / 2-out) | — past its arity |
 | more than 10 notes | — past its arity | — past its arity |
 
 Largest-first is what makes that a decision and not a guess: if any *k* notes cover the amount, the
@@ -166,8 +166,18 @@ largest *k* do, so a selection that overruns the arity proves no *k*-note cover 
 slots are padded (`nullifier 0`, `value 0`, `enabled 0`, zeros path, and a real value-0 self-owned
 commitment on its own salt) — the contract-derived `enabled=0` disables the slot's membership and
 the §5.2 value belt forces its value to 0, so a pad can neither prove membership nor mint. Unused
-*output* slots are real value-0 notes back to the sender. This is the convention
-`circuits/inputs/transfer10.json` carries, and `test/transfer10.test.ts` checks both sides against it.
+This is the convention `circuits/inputs/transfer10x2.json` carries, and
+`test/transfer10x2.test.ts` checks both sides against it.
+
+**`transfer10` is deprecated** (user decision, 2026-07-28): the 10-in / 10-*out* circuit and its V4
+entrypoint stay deployed on chain, but the wallet routes **nothing** to it anymore. An output is a
+depth-32 IMT append — the dominant per-op gas — and a real spend only ever needs two outputs
+(payment-or-merged-note + change), so transfer10 paid for eight zero-value pads on every use.
+`transfer10x2` keeps the identical 10-slot input side and sheds those outputs; zero change is legal
+(a merge's change note is value-0 — still a real note with a nonzero commitment). Its assets also
+left the wallet's download set. `test/transfer10x2.test.ts` and `test/spendChain.test.ts` carry
+deprecation pins that fail the moment any plan, merge leg or submit routes to `transfer10` again;
+`deploy/giwa_transfer10x2_e2e.ts` is the live driver (`--dry` for a network-free structural check).
 
 ## A spend is a chain, not a transaction
 
@@ -177,8 +187,9 @@ circuit, so three notes is already past it. That state is common, not exotic, an
 answer it by sending the user off to tidy up first.
 
 `planSpendChain` (`src/lib/spend.ts`) plans the **whole** way from the balance held to the payment
-asked for: zero or more merge legs — `transfer10` self-sends folding the ten largest notes into one,
-every output owned by the sender — then the terminal payment or withdrawal. `runSpendChain`
+asked for: zero or more merge legs — `transfer10x2` self-sends folding the ten largest notes into
+ONE merged note plus a zero-value change note, both the sender's own — then the terminal payment or
+withdrawal. `runSpendChain`
 (`src/lib/spendFlow.ts`) runs the legs back to back. One Confirm starts the whole thing; each leg is
 one wallet approval. Duplicate output owners are safe in a merge because receiver ciphertext *i* is
 encrypted under `encryptionNonce + i` (§11-8 v1.1), the property that also made self-send legal; the
@@ -212,18 +223,18 @@ chain+indexer where a submit appends the transaction's outputs and only then doe
 
 ## Proving in the browser
 
-The wallet proves `transfer`, `transfer10`, `withdraw` and `deposit` locally with snarkjs — a
+The wallet proves `transfer`, `transfer10x2`, `withdraw` and `deposit` locally with snarkjs — a
 self-custody wallet must never send spending-key witnesses to a server. `disburse` is GPU-only and is
 not a wallet operation. snarkjs is GPL-3.0 and shipping it to the page *is* distribution; the PoC
 accepts that deliberately and dynamically imports it so it loads only when the user actually proves.
 
 Circuit assets are **not bundled** (`transfer.zkey` ≈ 29 MB, `withdraw.zkey` ≈ 25 MB, and
-`transfer10.zkey` ≈ 114 MB). They are served as static files at
+`transfer10x2.zkey` ≈ 95 MB). They are served as static files at
 `${circuitBaseUrl}/<circuit>.{wasm,zkey}` (`circuitBaseUrl` defaults to `/circuits`) and fetched once
 into a version-keyed Cache Storage bucket (`src/lib/assets.ts`):
 
 ```
-   CIRCUITS_VERSION = first 8 of sha256(transfer.zkey || transfer10.zkey || withdraw.zkey || deposit.zkey)
+   CIRCUITS_VERSION = first 8 of sha256(transfer.zkey || transfer10x2.zkey || withdraw.zkey || deposit.zkey)
                                  |
    cache bucket  "bongtu-circuits-v<CIRCUITS_VERSION>"     <- kept, disk-backed
    other buckets "bongtu-circuits-*"                       <- evicted on prefetch
@@ -241,19 +252,19 @@ the stale one and forces a one-time re-download.
 `prewarmProver()` builds and immediately terminates a bn128 curve during the prefetch to pay the
 one-time WASM compile early; it is best-effort and never blocks the UI.
 
-**`transfer10` is fetched lazily, and only it.** Send/Withdraw prefetch their 2-arity key on screen
-open, but the arity-10 key is four times the size — pulling it on open would make every send wait on
-114 MB it will almost never use. So the screen fetches it only once selection says this amount needs
-3+ notes, or a chain whose first leg is a fold: `useActionMachine` takes the circuit the form
-currently implies — the FIRST leg's, which is the proof the user waits on next — and re-fetches when
-it changes. A chained withdraw therefore ends up holding both keys, having prefetched `withdraw` on
-screen open and `transfer10` when the plan grew a merge. Each circuit is fetched at most once per
+**`transfer10x2` is fetched lazily, and only it.** Send/Withdraw prefetch their 2-arity key on
+screen open, but the arity-10 key is three times the size — pulling it on open would make every send
+wait on 95 MB it will almost never use. So the screen fetches it only once selection says this
+amount needs 3+ notes, or a chain whose first leg is a fold: `useActionMachine` takes the circuit
+the form currently implies — the FIRST leg's, which is the proof the user waits on next — and
+re-fetches when it changes. A chained withdraw therefore ends up holding both keys, having
+prefetched `withdraw` on screen open and `transfer10x2` when the plan grew a merge. Each circuit is fetched at most once per
 session, and the existing download panel — progress, ETA, disabled Confirm — covers the switch
 unchanged.
 
 ## Encapsulating to the arbiter
 
-Every operation the wallet builds — deposit, transfer, transfer10, withdraw — draws fresh ML-KEM-768 material
+Every operation the wallet builds — deposit, transfer, transfer10x2, withdraw — draws fresh ML-KEM-768 material
 against the arbiter's encapsulation key: the shared secret joins the witness as `kemSs`, and the
 1088-byte ciphertext joins the transaction calldata. Encapsulation is sub-millisecond
 (`@noble/post-quantum`), invisible next to a multi-second browser proof. It is fresh per

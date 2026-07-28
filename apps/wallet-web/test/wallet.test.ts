@@ -302,8 +302,8 @@ function fixture(values: bigint[]) {
     kemSs: FIXED_KEM.kemSs,
     kemCiphertext: FIXED_KEM.kemCiphertext,
     changeSalt: "7000002",
-    // one salt per padded input slot (9 = arity 10 with a single real note), and one
-    // per zero-value output slot transfer10 pads with.
+    // one salt per padded input slot (9 = arity 10 with a single real note); the
+    // outputPadSalts exist only for the deprecated transfer10 builder's 8 output pads.
     padSalts: Array.from({ length: 9 }, (_, i) => `${7100001 + i}`),
     payeeSalt: "7000001",
     outputPadSalts: Array.from({ length: 8 }, (_, i) => `${7200001 + i}`),

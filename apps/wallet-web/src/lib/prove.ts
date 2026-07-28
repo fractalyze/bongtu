@@ -30,8 +30,9 @@ import {
 } from "./assets.js";
 
 // The circuits the public wallet proves in-browser on CPU (SPEC §6): the spends
-// (transfer, its arity-10 form transfer10, and withdraw) plus the 0-in/2-out
-// deposit/shield. disburse is GPU-only (prover/).
+// (transfer, its 10-in/2-out form transfer10x2, and withdraw) plus the 0-in/2-out
+// deposit/shield. disburse is GPU-only (prover/); transfer10 (10-out) is
+// deprecated (2026-07-28) and is no longer a circuit the wallet proves.
 type CpuCircuit = BrowserCircuit;
 
 // Session-scoped in-flight prefetch, one per circuit: the version-keyed Cache Storage
@@ -77,11 +78,13 @@ export function subscribeCircuitDownload(
   return () => downloadListeners[circuit]?.delete(cb);
 }
 
-/** Whether `circuit` is one the wallet proves in-browser. */
+/** Whether `circuit` is one the wallet proves in-browser. The deprecated
+ *  transfer10 deliberately fails this check: its assets left the download set,
+ *  so proving it could only ever 404. */
 export function isCpuCircuit(circuit: string): circuit is CpuCircuit {
   return (
     circuit === "transfer" ||
-    circuit === "transfer10" ||
+    circuit === "transfer10x2" ||
     circuit === "withdraw" ||
     circuit === "deposit"
   );
@@ -90,7 +93,7 @@ export function isCpuCircuit(circuit: string): circuit is CpuCircuit {
 export function assertCpuCircuit(circuit: string): asserts circuit is CpuCircuit {
   if (!isCpuCircuit(circuit)) {
     throw new Error(
-      `the public wallet only proves transfer/transfer10/withdraw/deposit in-browser, not ${circuit}`,
+      `the public wallet only proves transfer/transfer10x2/withdraw/deposit in-browser, not ${circuit}`,
     );
   }
 }

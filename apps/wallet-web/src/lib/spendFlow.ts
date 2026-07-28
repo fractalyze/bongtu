@@ -8,24 +8,27 @@
 // A SPEND IS A CHAIN, not a transaction. A spending circuit takes a fixed number of
 // input notes, so a balance spread across more notes than that cannot be paid in one
 // go. The wallet does not stop and send the user off to merge first: planSpendChain
-// (spend.ts) plans the whole way through — however many transfer10 self-sends it takes
-// to fold the balance down, then the payment itself — and runSpendChain below runs the
-// legs back to back, one wallet approval each. A plain send is simply a chain of one,
-// and runs byte-identically to what it always did.
+// (spend.ts) plans the whole way through — however many transfer10x2 self-sends it
+// takes to fold the balance down, then the payment itself — and runSpendChain below
+// runs the legs back to back, one wallet approval each. A plain send is simply a chain
+// of one, and runs byte-identically to what it always did. (transfer10 is deprecated,
+// 2026-07-28: no leg of any chain proves or submits it anymore.)
 //
 // Between legs the chain WAITS. A merge leg's output note does not exist for the next
 // leg until the indexer has seen the transaction: only then does the note have a leaf
 // index and a membership path to prove against. That wait is a reported stage of its
 // own ("waiting"), so the screen can say what it is waiting for.
 
+import { ethers } from "ethers";
 import { commitment } from "@bongtu/core/note";
+import { GIWA_GAS_FLOOR_GWEI, explorerTxUrl } from "@bongtu/core/network";
+import type { Calldata } from "@bongtu/core/proving";
 import { DEFAULTS } from "../config.js";
-import type { Connection } from "./metamask.js";
+import type { Connection, SubmitResult } from "./metamask.js";
 import {
   assertPoolKemEpoch,
   ensureChain,
   submitTransfer,
-  submitTransfer10,
   submitWithdraw,
   walletErrorMessage,
 } from "./metamask.js";
@@ -34,7 +37,7 @@ import { getHead, getPath, type OwnerNote } from "./indexerClient.js";
 import { pollUntil, type PollForActionOptions } from "./refresh.js";
 import {
   buildTransferRequest,
-  buildTransfer10Request,
+  buildTransfer10x2Request,
   buildWithdrawRequest,
   planSpendChain,
   pendingLegOf,
@@ -85,6 +88,37 @@ export interface SpendOutcome {
   explorerUrl: string;
 }
 
+// --- the transfer10x2 submit edge -------------------------------------------------
+// This belongs beside submitTransfer/submitWithdraw in metamask.ts and should move
+// there in the next touch of that file (owned by a parallel change right now).
+// Same contract-call shape as every other op: (a, b, c, pub, kemCiphertext) at the
+// GIWA gas floor (ethers' auto-estimate once overpaid ~1500x), pub = 68 signals.
+
+const TRANSFER10X2_FRAGMENT =
+  "function transfer10x2(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[68] pub, bytes kemCiphertext)";
+
+/** Submit a proven transfer10x2 (BongtuPool V5): what every >2-input spend and
+ *  every merge leg lands on since transfer10's deprecation (2026-07-28). */
+export async function submitTransfer10x2(
+  connection: Connection,
+  poolAddr: string,
+  calldata: Calldata,
+  kemCiphertext: string,
+  explorerBase: string,
+): Promise<SubmitResult> {
+  // Pre-check the KEM ct length so the contract's WrongKemCiphertextLength revert
+  // becomes a readable client error (mirrors metamask.ts assertKemCiphertext).
+  if (!/^0x[0-9a-fA-F]+$/.test(kemCiphertext) || (kemCiphertext.length - 2) / 2 !== 1088) {
+    throw new Error(`kemCiphertext must be 1088 bytes of 0x-hex (got ${kemCiphertext.length} chars)`);
+  }
+  const pool = new ethers.Contract(poolAddr, [TRANSFER10X2_FRAGMENT], connection.signer);
+  const tx = await pool.transfer10x2(calldata.a, calldata.b, calldata.c, calldata.pub, kemCiphertext, {
+    gasPrice: ethers.utils.parseUnits(GIWA_GAS_FLOOR_GWEI, "gwei"),
+  });
+  await tx.wait();
+  return { txHash: tx.hash, explorerUrl: explorerTxUrl(tx.hash, explorerBase) };
+}
+
 /** The network/proving I/O a spend performs, injectable so the pure orchestration
  *  (guard order, stage order, leg order) is unit-testable with fakes — the same seam
  *  depositFlow.ts uses (RunDepositDeps). Defaults are the real edges. */
@@ -97,7 +131,7 @@ export interface RunSpendDeps {
   getPath: typeof getPath;
   proveInBrowser: typeof proveInBrowser;
   submitTransfer: typeof submitTransfer;
-  submitTransfer10: typeof submitTransfer10;
+  submitTransfer10x2: typeof submitTransfer10x2;
   submitWithdraw: typeof submitWithdraw;
   /** interval/cap/sleep for the between-legs wait — the wallet's one bounded-poll
    *  policy (refresh.ts), so tests can run a chain without real seconds. */
@@ -111,7 +145,7 @@ const DEFAULT_DEPS: RunSpendDeps = {
   getPath,
   proveInBrowser,
   submitTransfer,
-  submitTransfer10,
+  submitTransfer10x2,
   submitWithdraw,
   poll: {},
 };
@@ -134,7 +168,7 @@ async function fetchMemberships(
 }
 
 // Each circuit's builder gets exactly the witness its `main` takes; withdraw has no
-// payee, and transfer10 serves both the 3–10-note payment and the merge legs.
+// payee, and transfer10x2 serves both the 3–10-note payment and the merge legs.
 function buildRequest(
   action: SpendAction,
   identity: WalletIdentity,
@@ -143,8 +177,8 @@ function buildRequest(
 ) {
   const { circuit, inputs, to, amount } = action;
   if (circuit === "withdraw") return buildWithdrawRequest(identity, inputs, memberships, amount, crypto);
-  if (circuit === "transfer10") {
-    return buildTransfer10Request(identity, inputs, memberships, to, amount, crypto);
+  if (circuit === "transfer10x2") {
+    return buildTransfer10x2Request(identity, inputs, memberships, to, amount, crypto);
   }
   return buildTransferRequest(identity, inputs, memberships, to, amount, crypto);
 }
@@ -205,7 +239,7 @@ async function runLeg(
   // limbs at the arbiter and burn the envelope into an alarm.
   const submitFor = {
     transfer: io.submitTransfer,
-    transfer10: io.submitTransfer10,
+    transfer10x2: io.submitTransfer10x2,
     withdraw: io.submitWithdraw,
   }[action.circuit];
   const res = await submitFor(
@@ -238,13 +272,14 @@ function legAction(
     return real;
   });
   if (step.leg === "merge") {
-    return { circuit: "transfer10", inputs, to: ctx.sessionPubkey, amount: step.mergedValue };
+    return { circuit: "transfer10x2", inputs, to: ctx.sessionPubkey, amount: step.mergedValue };
   }
   return { circuit: step.leg, inputs, to: args.to ?? "", amount: args.amount };
 }
 
 /** What a merge leg's note will look like once the indexer has it: output 0 of the
- *  transfer10, worth the whole fold, owned by the wallet, on this run's payee salt. */
+ *  transfer10x2, worth the whole fold, owned by the wallet, on this run's payee salt
+ *  (output 1 is the zero-value change note). */
 function mergedNoteCommitment(
   identity: WalletIdentity,
   mergedValue: string,

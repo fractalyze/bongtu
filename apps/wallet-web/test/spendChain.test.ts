@@ -63,14 +63,14 @@ const shape = (legs: SpendLeg[]): string[] =>
 test("a spend that fits one transaction plans one transaction", () => {
   const notes = selectable([100n, 100n, 100n, 100n]);
   assert.deepEqual(shape(planSpendChain("transfer", notes, "150")), ["transfer(2)"]);
-  assert.deepEqual(shape(planSpendChain("transfer", notes, "250")), ["transfer10(3)"]);
+  assert.deepEqual(shape(planSpendChain("transfer", notes, "250")), ["transfer10x2(3)"]);
   assert.deepEqual(shape(planSpendChain("withdraw", notes, "150")), ["withdraw(2)"]);
   // the arity boundaries themselves
   assert.deepEqual(shape(planSpendChain("transfer", notes, "200")), ["transfer(2)"]);
   assert.deepEqual(shape(planSpendChain("withdraw", notes, "200")), ["withdraw(2)"]);
   assert.deepEqual(
     shape(planSpendChain("transfer", selectable(Array(10).fill(100n)), "1000")),
-    ["transfer10(10)"],
+    ["transfer10x2(10)"],
     "exactly ten notes is the widest one transaction can do",
   );
 });
@@ -78,7 +78,7 @@ test("a spend that fits one transaction plans one transaction", () => {
 test("past the arity, the plan grows the merges that make the amount reachable", () => {
   const eleven = selectable(Array(11).fill(100n)); // 1100 across 11 notes
   // 1000 is still one transaction: the ten largest cover it.
-  assert.deepEqual(shape(planSpendChain("transfer", eleven, "1000")), ["transfer10(10)"]);
+  assert.deepEqual(shape(planSpendChain("transfer", eleven, "1000")), ["transfer10x2(10)"]);
   // 1050 is not — so ten notes fold into one, and the payment spends that plus the
   // note left over.
   assert.deepEqual(shape(planSpendChain("transfer", eleven, "1050")), ["merge(10)", "transfer(2)"]);
@@ -90,7 +90,7 @@ test("merging stops the moment the amount is within reach, not when the notes ru
   // whose largest ten are worth 1900).
   assert.deepEqual(shape(planSpendChain("transfer", twenty, "1900")), [
     "merge(10)",
-    "transfer10(10)",
+    "transfer10x2(10)",
   ]);
   // only a near-full-balance spend pays for the second fold — the "3 approvals: 2 to
   // combine, 1 to pay" case the confirm sheet describes.
@@ -128,7 +128,33 @@ test("the note a merge will create is marked as pending, and named by the leg ma
   assert.equal(pendingLegOf(legs[1].inputs[0].leafIndex), 0);
   // …and the payment spends what leg 2 will produce.
   assert.equal(pendingLegOf(legs[2].inputs[0].leafIndex), 1);
-  assert.deepEqual(legs.map(legCircuit), ["transfer10", "transfer10", "transfer"]);
+  assert.deepEqual(legs.map(legCircuit), ["transfer10x2", "transfer10x2", "transfer"]);
+});
+
+test("DEPRECATION PIN: no plan, and no merge leg, ever selects transfer10 again", () => {
+  // User decision 2026-07-28: transfer10 (10-in/10-out) stays deployed but the
+  // wallet must never route to it — merges and >2-input spends are transfer10x2
+  // (10-in/2-out). This test sweeps every leg of a representative grid of plans;
+  // if legCircuit or planSpendChain ever answers "transfer10", it FAILS.
+  const wallets = [
+    selectable([100n, 100n, 100n]),
+    selectable(Array(10).fill(100n)),
+    selectable(Array(11).fill(100n)),
+    selectable(Array(20).fill(100n)),
+    selectable(Array(35).fill(100n)),
+  ];
+  for (const notes of wallets) {
+    const total = notes.reduce((s, n) => s + BigInt(n.value), 0n);
+    for (const kind of ["transfer", "withdraw"] as const) {
+      for (const amount of ["250", (total / 2n).toString(), total.toString()]) {
+        for (const leg of planSpendChain(kind, notes, amount)) {
+          const circuit = legCircuit(leg);
+          assert.notEqual(circuit, "transfer10", `deprecated transfer10 resurfaced in ${kind}(${amount})`);
+          if (leg.leg === "merge") assert.equal(circuit, "transfer10x2", "a merge is always transfer10x2");
+        }
+      }
+    }
+  }
 });
 
 test("not holding the amount is still poverty, decided BEFORE any leg is planned", () => {
@@ -263,7 +289,7 @@ function chainWorld(values: bigint[]) {
       return { a: ["0", "0"], b: [["0", "0"], ["0", "0"]], c: ["0", "0"], pub: [] };
     },
     submitTransfer: land("transfer"),
-    submitTransfer10: land("transfer10"),
+    submitTransfer10x2: land("transfer10x2"),
     submitWithdraw: land("withdraw"),
     poll: { sleep: async () => {} }, // the wait is real; only its seconds are not
     ...over,
@@ -297,11 +323,11 @@ test("a one-transaction send runs exactly as it always did", async () => {
   const log = stageLog();
   const out = await runSpendChain("transfer", w.ctx(), { to: PAYEE_ADDR, amount: "800" }, log.on, w.deps());
 
-  assert.deepEqual(w.proved, ["transfer10"]);
-  assert.deepEqual(w.submitted, ["transfer10"]);
+  assert.deepEqual(w.proved, ["transfer10x2"]);
+  assert.deepEqual(w.submitted, ["transfer10x2"]);
   assert.deepEqual(log.seen, ["unlock@1/1", "assemble@1/1", "prove@1/1", "submit@1/1"]);
   assert.deepEqual(w.reloads, [], "nothing to wait for when there is nothing after this");
-  assert.equal(out.txHash, "0xtransfer101");
+  assert.equal(out.txHash, "0xtransfer10x21");
 });
 
 test("a chained send runs merge, merge, payment — each leg waiting for the one before", async () => {
@@ -309,8 +335,8 @@ test("a chained send runs merge, merge, payment — each leg waiting for the one
   const log = stageLog();
   const out = await runSpendChain("transfer", w.ctx(), { to: PAYEE_ADDR, amount: "2000" }, log.on, w.deps());
 
-  assert.deepEqual(w.proved, ["transfer10", "transfer10", "transfer"]);
-  assert.deepEqual(w.submitted, ["transfer10", "transfer10", "transfer"]);
+  assert.deepEqual(w.proved, ["transfer10x2", "transfer10x2", "transfer"]);
+  assert.deepEqual(w.submitted, ["transfer10x2", "transfer10x2", "transfer"]);
   assert.deepEqual(log.seen, [
     "unlock@1/3", "assemble@1/3", "prove@1/3", "submit@1/3", "waiting@1/3",
     // the key is held from here on, so no second signature is asked for or announced
@@ -329,8 +355,9 @@ test("a chained send runs merge, merge, payment — each leg waiting for the one
 test("the second merge spends the note the first one created", async () => {
   const w = chainWorld(Array(20).fill(100n));
   await runSpendChain("transfer", w.ctx(), { to: PAYEE_ADDR, amount: "2000" }, () => {}, w.deps());
-  // 20 seeds + 10 outputs + 10 outputs + 2 outputs
-  assert.equal(w.tree.getNextLeafIndex(), 42);
+  // 20 seeds + 2 outputs + 2 outputs + 2 outputs: a merge appends only its merged
+  // note and a zero-value change note — the whole point of the 2-out circuit.
+  assert.equal(w.tree.getNextLeafIndex(), 26);
   // the note the first merge made is worth the whole fold, and it is spent by the second
   const folded = w.notes.find((n) => n.value === "1000" && n.leafIndex >= 20);
   assert.ok(folded, "the first merge's note reached the indexer");
@@ -344,7 +371,7 @@ test("a chain the indexer never catches up with stops rather than proving a note
     runSpendChain("transfer", ctx, { to: PAYEE_ADDR, amount: "2000" }, () => {}, w.deps()),
     new RegExp(MERGE_NOT_INDEXED_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
   );
-  assert.deepEqual(w.submitted, ["transfer10"], "and it does not blindly submit the next leg");
+  assert.deepEqual(w.submitted, ["transfer10x2"], "and it does not blindly submit the next leg");
 });
 
 // ============================ (3) FAILURE ====================================
@@ -365,7 +392,7 @@ test("a leg that fails partway says the money did not move, and what did survive
       return true;
     },
   );
-  assert.deepEqual(w.submitted, ["transfer10", "transfer10"], "the merges stand");
+  assert.deepEqual(w.submitted, ["transfer10x2", "transfer10x2"], "the merges stand");
 });
 
 test("retrying after a mid-chain failure plans a SHORTER chain, because the merges are real", async () => {

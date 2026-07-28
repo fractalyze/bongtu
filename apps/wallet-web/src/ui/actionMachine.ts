@@ -153,7 +153,7 @@ export interface ActionMachineView<O extends ActionResult> extends ActionSnapsho
  * not from that call's promise — so a remount mid-download stays honest.
  *
  * `circuit` may CHANGE while the form is open: Send starts on the 2×2 transfer and
- * switches to transfer10 the moment the typed amount needs 3+ notes. Each value is
+ * switches to transfer10x2 the moment the typed amount needs 3+ notes. Each value is
  * fetched at most once per session (prove.ts coalesces), so the switch adds the
  * arity-10 key without re-fetching the first — which is exactly why the ~114 MB key
  * is never pulled on screen open.

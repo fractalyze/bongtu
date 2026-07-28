@@ -1,5 +1,5 @@
 // PURE wallet-side witness assembly for the CPU circuits the public app proves in
-// the browser: transfer (2-in / 2-out), transfer10 (10-in / 10-out) and withdraw
+// the browser: transfer (2-in / 2-out), transfer10x2 (10-in / 2-out) and withdraw
 // (2-in / 1-out), SPEC §4 / §7. Framework- and network-free so the exact code runs
 // in the browser view AND the headless spend-witness gate. It imports the sdk crypto
 // DIRECTLY, so every commitment / nullifier is byte-identical to what snarkjs proves
@@ -9,23 +9,30 @@
 //
 // What it does NOT do (SPEC §6 boundary): it does not prove (browser snarkjs, see
 // prove.ts) and does not send the tx (MetaMask, see metamask.ts). It stops at "a
-// valid transfer/transfer10/withdraw ProvingRequest", ready to prove and submit.
+// valid transfer/transfer10x2/withdraw ProvingRequest", ready to prove and submit.
 //
 // ARITY, and who picks it. Every circuit here takes a FIXED number of inputs — 2 for
-// transfer/withdraw, 10 for transfer10 — so a spend that needs fewer pads the rest
+// transfer/withdraw, 10 for transfer10x2 — so a spend that needs fewer pads the rest
 // with {nullifier:0, value:0, enabled:0, path:zeros}: the contract-derived enabled=0
 // disables that slot's membership and the §5.2 value-belt forces its value to 0 (no
 // mint). The wallet PICKS the circuit from how many notes the payment needs
-// (planSpendAction): ≤2 notes stay on the cheap 2×2 transfer, 3–10 go to transfer10,
+// (planSpendAction): ≤2 notes stay on the cheap 2×2 transfer, 3–10 go to transfer10x2,
 // and a withdraw — which has no arity-10 circuit — stays at 2. All of them emit their
 // ciphertext as circuit outputs (public signals), so — unlike disburse — the wallet
 // assembles NO separate ciphertext blob; the tx is just (a, b, c, pub, kemCiphertext).
 //
 // WHEN THE ARITY IS NOT ENOUGH, the wallet does not stop and ask the user to go merge
 // their notes first. planSpendChain plans the WHOLE way through: however many
-// transfer10 self-sends it takes to fold the balance down to something the terminal
+// transfer10x2 self-sends it takes to fold the balance down to something the terminal
 // circuit can spend, then the payment or withdrawal itself. One plan, run as one
 // flow — see spendFlow.runSpendChain.
+//
+// TRANSFER10 IS DEPRECATED (user decision 2026-07-28): the 10-in/10-OUT circuit
+// stays deployed on chain, but the wallet never routes to it — every >2-input spend
+// AND every merge leg proves transfer10x2 (10-in / 2-OUT), because an output is a
+// depth-32 IMT append and transfer10 paid for eight zero-value pads every time.
+// buildTransfer10Request below survives only for the committed transfer10 e2e
+// driver; nothing reachable from the wallet UI produces a "transfer10" request.
 
 import {
   deriveKeypair,
@@ -42,6 +49,7 @@ import { toWire } from "@bongtu/core/proving";
 import type {
   TransferInput,
   Transfer10Input,
+  Transfer10x2Input,
   WithdrawInput,
   ProvingRequest,
 } from "@bongtu/core/proving";
@@ -92,18 +100,20 @@ export interface SpendCrypto {
   changeSalt: string;
   /** salts for the padded (value-0) input slots — one per slot the spend does not
    *  fill, so no two pads land on the same commitment. A 2-arity spend of one note
-   *  uses the first; transfer10 can use all nine. */
+   *  uses the first; transfer10x2 can use all nine. */
   padSalts: string[];
-  /** transfer only: salt for the payment output to the recipient. */
+  /** transfer/transfer10x2: salt for the payment output to the recipient (a merge's
+   *  merged note is this output, paid to the wallet itself). */
   payeeSalt?: string;
-  /** transfer10 only: salts for the zero-value output slots after payment + change
-   *  (8 of them at arity 10). */
+  /** DEPRECATED transfer10 only: salts for its 8 zero-value output slots after
+   *  payment + change. transfer10x2 has no output pads (its 2 outputs are the 2 a
+   *  spend needs); still drawn so the retained transfer10 builder keeps working. */
   outputPadSalts: string[];
 }
 
 /** Pad slots a spend can have to fill: 9 unused inputs (arity 10, one real note)
- *  and 8 unused outputs (arity 10, payment + change). Drawn on every spend so one
- *  SpendCrypto bundle serves either arity. */
+ *  and — for the deprecated transfer10 builder only — 8 unused outputs. Drawn on
+ *  every spend so one SpendCrypto bundle serves whichever builder runs. */
 const MAX_INPUT_PADS = TRANSFER10_ARITY - 1;
 const MAX_OUTPUT_PADS = TRANSFER10_ARITY - 2;
 
@@ -124,11 +134,13 @@ export interface SpendMeta {
   outputValues: string[];
 }
 
-/** The circuits a spend can land on. transfer10 is picked only when the payment
- *  genuinely needs 3–10 notes — its zkey is ~4x the 2×2 one to download. */
-export type SpendCircuit = "transfer" | "transfer10" | "withdraw";
+/** The circuits a spend can land on. transfer10x2 is picked only when the payment
+ *  genuinely needs 3–10 notes — its zkey is ~3x the 2×2 one to download. The
+ *  deprecated "transfer10" is deliberately NOT a member: the type is the routing
+ *  pin that keeps the wallet off the 10-output circuit for good. */
+export type SpendCircuit = "transfer" | "transfer10x2" | "withdraw";
 
-export interface SpendResult<C extends SpendCircuit> {
+export interface SpendResult<C extends ProvingRequest["circuit"]> {
   request: Extract<ProvingRequest, { circuit: C }>;
   meta: SpendMeta;
 }
@@ -251,9 +263,9 @@ export const terminalArity = (kind: SpendKind): number =>
  * Resolve ONE transaction to its circuit and its input notes — the wallet's circuit
  * AUTO-PICK, PURE and the single place the rule lives:
  *
- *   transfer  ≤2 notes  -> transfer   (the cheap 2×2 zkey, ~29 MB)
- *   transfer  3–10 notes-> transfer10 (~114 MB, fetched only when needed)
- *   withdraw  ≤2 notes  -> withdraw   (there is no withdraw10 circuit)
+ *   transfer  ≤2 notes  -> transfer     (the cheap 2×2 zkey, ~29 MB)
+ *   transfer  3–10 notes-> transfer10x2 (~95 MB, fetched only when needed)
+ *   withdraw  ≤2 notes  -> withdraw     (there is no withdraw10 circuit)
  *
  * Throws SpendSelectionError when the amount does not fit that arity — which is not
  * a dead end for the user: planSpendChain below answers it by planning the merges
@@ -269,7 +281,7 @@ export function planSpendAction(
     return { circuit: "withdraw", inputs: selectInputNotes(notes, amount, 2), to: "", amount };
   }
   const inputs = selectInputNotes(notes, amount, TRANSFER10_ARITY);
-  return { circuit: inputs.length > 2 ? "transfer10" : "transfer", inputs, to: args.to ?? "", amount };
+  return { circuit: inputs.length > 2 ? "transfer10x2" : "transfer", inputs, to: args.to ?? "", amount };
 }
 
 /** Sum of a selection's note values, as a decimal string. */
@@ -280,17 +292,18 @@ function totalValue(inputs: readonly WalletInputNote[]): string {
 // --- the spend CHAIN (merges, then the payment) ----------------------------------
 
 /**
- * One transaction of a spend. A `merge` leg is a transfer10 self-send that folds its
- * inputs into a single note worth `mergedValue`; the last leg is the payment or
- * withdrawal the user actually asked for, and names its own circuit.
+ * One transaction of a spend. A `merge` leg is a transfer10x2 self-send that folds
+ * its inputs into a single note worth `mergedValue` (zero change); the last leg is
+ * the payment or withdrawal the user actually asked for, and names its own circuit.
  */
 export type SpendLeg =
   | { leg: "merge"; inputs: WalletInputNote[]; mergedValue: string }
   | { leg: SpendCircuit; inputs: WalletInputNote[] };
 
-/** Which circuit proves a leg (a merge is always the arity-10 transfer). */
+/** Which circuit proves a leg (a merge is always the 10-in/2-out transfer10x2 —
+ *  never the deprecated 10-out transfer10). */
 export const legCircuit = (leg: SpendLeg): SpendCircuit =>
-  leg.leg === "merge" ? "transfer10" : leg.leg;
+  leg.leg === "merge" ? "transfer10x2" : leg.leg;
 
 /**
  * The leafIndex a PLAN gives the note a merge leg will create. That note does not
@@ -339,7 +352,7 @@ export function planSpendChain(
       // amount is told so, not offered a chain that would not help.
       const inputs = selectInputNotes(working, amount, arity);
       const circuit: SpendCircuit =
-        kind === "withdraw" ? "withdraw" : inputs.length > 2 ? "transfer10" : "transfer";
+        kind === "withdraw" ? "withdraw" : inputs.length > 2 ? "transfer10x2" : "transfer";
       legs.push({ leg: circuit, inputs });
       return legs;
     } catch (e) {
@@ -361,7 +374,7 @@ export function planSpendChain(
 /** What the Send/Withdraw form shows while the user types. */
 export interface SpendPreview {
   /** Which circuit's one-time key the screen should be fetching: the FIRST leg's,
-   *  because that is the proof the user waits on next (every merge is transfer10). */
+   *  because that is the proof the user waits on next (every merge is transfer10x2). */
   circuit: SpendCircuit;
   /** The only thing that can still block a spend outright: not holding enough. */
   blocker: SpendBlocker | null;
@@ -454,7 +467,7 @@ export function toEncryptionNonce(fieldDraw: string): string {
  * before verifying, so a different target fails the proof. `drawKem` adds the
  * fresh per-tx ML-KEM encapsulation (hybrid envelope, injectable for tests).
  *
- * The pad salts are drawn for the WIDEST arity (transfer10) on every spend, so one
+ * The pad salts are drawn for the WIDEST arity (transfer10x2) on every spend, so one
  * bundle serves whichever circuit the auto-pick lands on — a 2×2 spend simply uses
  * the first of them. Drawing 21 field elements is microseconds next to the proof.
  */
@@ -553,7 +566,8 @@ function assembleInputs(
   // Pad the unused slots with value-0 notes owned by the wallet: nullifier 0,
   // enabled 0, zeros path (membership disabled; the value belt forces value 0 -> no
   // mint), each on its OWN salt so no two pads share a commitment. This is the
-  // convention the committed circuits/inputs/transfer10.json fixture carries.
+  // convention the committed circuits/inputs/transfer10x2_merge.json (and
+  // transfer10.json) fixtures carry.
   for (let i = 0; i < padCount; i++) {
     const s = BigInt(padSalts[i]);
     nullifiers.push(0n);
@@ -652,7 +666,7 @@ export function buildTransferRequest(
   };
 }
 
-// --- transfer10 (10-in / 10-out) ------------------------------------------------
+// --- transfer10x2 (10-in / 2-out) -------------------------------------------------
 
 /** The recipient's point from its compressed form, with a message that names the
  *  field the user typed rather than the crypto that rejected it. */
@@ -665,6 +679,92 @@ function parsePayee(recipientCompressed: string): Point {
 }
 
 /**
+ * Assemble a transfer10x2 ProvingRequest: spend 1–10 of the wallet's notes, pay
+ * `recipientCompressed` `amount`, send the change back to the wallet. The input
+ * side is buildTransfer10Request's exactly — extra slots padded (nullifier 0,
+ * value 0, enabled 0, zeros path, a value-0 self-owned commitment) — but there
+ * are only TWO outputs, the two a spend needs: output 0 the payment, output 1
+ * the change. That is the whole point of the circuit: an output is a depth-32
+ * IMT append, and transfer10's eight zero-value output pads were pure gas.
+ *
+ * The two uses, both through this one builder (the shape the committed
+ * circuits/inputs/transfer10x2_merge.json fixture carries):
+ *   - a payment needing 3–10 notes (recipient = the payee, change back home);
+ *   - a self-merge (recipient = the wallet's own address, amount = the full
+ *     input total), which lands everything in ONE note with a ZERO-value change
+ *     note — zero change is legal, the commitment is still nonzero.
+ * Duplicate output owners are safe: receiver ciphertext i is encrypted under
+ * encryptionNonce + i (§11-8 v1.1), so the shared-keystream ban that applies to
+ * disburse does not apply here.
+ */
+export function buildTransfer10x2Request(
+  identity: WalletIdentity,
+  inputs: WalletInputNote[],
+  memberships: MembershipWitness[],
+  recipientCompressed: string,
+  amount: string,
+  crypto: SpendCrypto,
+): SpendResult<"transfer10x2"> {
+  if (crypto.payeeSalt === undefined) throw new Error("transfer10x2 needs crypto.payeeSalt for the payment output");
+  const self = identity.keypair;
+  const ins = assembleInputs(identity, inputs, memberships, crypto.padSalts, TRANSFER10_ARITY);
+
+  const payee = parsePayee(recipientCompressed);
+  const payVal = BigInt(amount);
+  if (payVal <= 0n) throw new Error(`transfer amount must be positive, got ${payVal}`);
+  if (payVal > ins.inputTotal) {
+    throw new Error(`amount ${payVal} exceeds spendable input total ${ins.inputTotal}`);
+  }
+  const changeVal = ins.inputTotal - payVal;
+
+  // Fixed output order, mirrored by the circuit's per-output nonces: output 0 =
+  // payment (or the merged note), output 1 = change (value 0 for a full-total
+  // merge — still a real note on its own salt).
+  const outputOwnerPublicKeys: Point[] = [payee, self.publicKey];
+  const payeeSalt = BigInt(crypto.payeeSalt);
+  const changeSalt = BigInt(crypto.changeSalt);
+  const outputValues = [payVal, changeVal];
+  const outputSalts = [payeeSalt, changeSalt];
+  const outputCommitments = [
+    commitment(payVal, payeeSalt, payee),
+    commitment(changeVal, changeSalt, self.publicKey),
+  ];
+
+  const inputBig: Transfer10x2Input = {
+    nullifiers: ins.nullifiers,
+    inputCommitments: ins.inputCommitments,
+    inputValues: ins.inputValues,
+    inputSalts: ins.inputSalts,
+    inputOwnerPrivateKey: self.formattedPrivateKey,
+    ecdhPrivateKey: BigInt(crypto.ecdhPrivateKey),
+    root: ins.root,
+    pathElements: ins.pathElements,
+    leafIndices: ins.leafIndices,
+    enabled: ins.enabled,
+    outputCommitments,
+    outputValues,
+    outputSalts,
+    outputOwnerPublicKeys,
+    kemSs: [BigInt(crypto.kemSs[0]), BigInt(crypto.kemSs[1])],
+    encryptionNonce: BigInt(crypto.encryptionNonce),
+    authorityPublicKey: [BigInt(crypto.authorityPubKey[0]), BigInt(crypto.authorityPubKey[1])],
+  };
+
+  const request = { circuit: "transfer10x2", input: toWire(inputBig), backend: "cpu" } as const;
+  return {
+    request,
+    meta: spendMeta(ins, payVal.toString(), changeVal.toString(), outputCommitments, outputValues),
+  };
+}
+
+// --- transfer10 (10-in / 10-out) — DEPRECATED -------------------------------------
+
+/**
+ * @deprecated The wallet routes NOTHING here anymore (user decision 2026-07-28):
+ * transfer10 stays deployed on chain, but every >2-input spend and every merge
+ * leg proves transfer10x2 above. Kept only for the committed
+ * deploy/giwa_transfer10_e2e.ts driver of the still-live V4 entrypoint.
+ *
  * Assemble a transfer10 ProvingRequest: spend 1–10 of the wallet's notes, pay
  * `recipientCompressed` `amount`, send the change back to the wallet. Same shape as
  * buildTransferRequest at arity 10 — the extra input slots are padded (nullifier 0,
