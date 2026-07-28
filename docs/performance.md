@@ -12,13 +12,14 @@ hybrid ML-KEM-768 envelope upgrade) or **hybrid** (after it).
 ## Live chain, hybrid envelope
 
 Whole-transaction `gasUsed` from the GIWA receipts of the end-to-end run against the live pool
-`0x93365980784ef504613EF5822ce1289CF858Fc10` on arbiter epoch 1, **measured 2026-07-27**:
+`0x93365980784ef504613EF5822ce1289CF858Fc10` on arbiter epoch 1, **measured 2026-07-28**
+(`deploy/giwa_gas_survey.ts`, fresh identities per run):
 
 | operation | L2 gas | L1 data fee | tx |
 |---|---|---|---|
-| `deposit` | 2,630,914 | 1.22e-7 ETH over 27,599 L1 gas | `0xa18ef3c12ae19fd06ba8eff1684b0d9610af861c8c5cb28cf4a539dc403521e1` |
-| `transfer` | 2,769,948 | 1.59e-7 ETH over 34,772 L1 gas | `0x7112ed922bc7a7c143f2fcd55a94dbf7a93fc89c5f204c8ddddc17814acddf1c` |
-| `withdraw` | 1,729,696 | 1.37e-7 ETH over 29,606 L1 gas | `0x174c28a654f59a4032e576f84cc7fc014a72ce57283fbe9a71ae6ad548ed4ba9` |
+| `deposit` | 2,632,809 | 1.27e-7 ETH over 27,665 L1 gas | `0x80cd480b7cea057cabf7686453b178d8644bac709e1b13a3bc97c4423e5a07f4` |
+| `transfer` | 2,769,900 | 1.59e-7 ETH over 34,759 L1 gas | `0x2f63c928ea8b72ead869b8172f18056cbf594b494abe743be5da8f5eaf9a728c` |
+| `withdraw` | 1,707,621 | 1.36e-7 ETH over 29,700 L1 gas | `0x360441fba2c5d571096491178c7b1362dcba0f369ad9a50c1a11b8a0e470bbe9` |
 | `transfer10` | 11,592,399 | (V4 pool, measured 2026-07-28) | `0x40c45cb9cb3e5d3df92277eacc3eb39c8c017261670f6ba3238926fef380d921` |
 
 All at the pinned 0.005 gwei L2 price, so a 2-arity operation costs ≈ 0.9–1.4e-5 ETH.
