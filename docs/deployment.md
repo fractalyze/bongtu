@@ -118,6 +118,36 @@ the V4 payload. Read it there rather than from the live-address table above: whi
 `deploy/addresses.91342.json` carries no such entry, GIWA is still pre-V4 and `transfer10` reverts
 there.
 
+## The transfer10x2 upgrade
+
+The fourth UUPS upgrade adds the 10-in/2-out `transfer10x2` entry point (U-Z3). Its payload is
+`initializeV5`, which installs a **new** `Transfer10x2Verifier` and changes nothing else — `transfer`
+and `transfer10` keep their own verifiers and verifying keys, `deposit` / `withdraw` / `disburse` are
+untouched, and no epoch is minted. Like V4 it is purely additive, and like V4 the new verifier lives
+in a **new storage slot appended after every earlier one**, zero until the payload runs — so a bare
+`upgradeTo` would advertise the entry point and revert on every call to it, which is why the swap and
+the payload travel in one `upgradeToAndCall`.
+
+`deploy/UpgradeTransfer10x2.s.sol` is the reusable form. Two pre-flight requires, both read from the
+Initializable version slot before anything is broadcast (`BongtuPool.initializeV5`'s natspec names
+this script as where the ordering is enforced):
+
+| require | why |
+|---|---|
+| version ≥ 4 | `reinitializer(5)` would accept a never-V2..V4 pool and burn the version past all three payloads, stranding it on pre-PQ verifiers or without a `transfer10` verifier. |
+| version < 5 | already-upgraded pools are refused with a sentence instead of a reinitializer revert deep inside `upgradeToAndCall`, after paying for two deploys. |
+
+One shape difference from the V4 script: the version requires run **before** the before-values are
+pinned, because those values now include `transfer10Verifier()` — a getter that only exists on a
+≥ V4 implementation, so reading it first would raw-revert on exactly the pools the pre-flight exists
+to refuse. The post-check then requires the five earlier verifiers, arbiter key material, epoch, and
+the IMT root + `nextLeafIndex` all unchanged (the tree pair again guards the appended slot).
+
+`transfer10x2Verifier` is an optional field of `addresses.<chainid>.json` — absent until this script
+runs, same marker convention as `transfer10Verifier`. `deploy/test_upgrade_ladder_v5.sh` drills the
+full V1→V5 ladder on a scratch anvil, cast-verifies the end state (B=256, verifier set, version slot
+5), and asserts the negative: the V5 script against a fresh V1-only pool must die in pre-flight.
+
 ## Chain facts
 
 | fact | value |
@@ -143,9 +173,11 @@ the faucet grant. `packages/core/src/network.ts` exports
 | `deploy/UpgradePq.s.sol` | the UUPS migration of an already-deployed pool to the hybrid PQ implementation: deploys the four regenerated verifiers + the new impl, then one `upgradeToAndCall` whose `initializeV2` payload swaps the verifier addresses and mints the epoch carrying both keys; rewrites the verifier/impl entries in `addresses.<chainid>.json` |
 | `deploy/UpgradeSelfSend.s.sol` | the UUPS migration to the self-send transfer circuit: deploys the regenerated `TransferVerifier` + the new impl, then one `upgradeToAndCall` whose `initializeV3` payload swaps only that verifier and mints no epoch; pre-flight asserts the pool is already V2 |
 | `deploy/UpgradeTransfer10.s.sol` | the UUPS migration that adds the `transfer10` entry point: deploys `Transfer10Verifier` + the new impl, then one `upgradeToAndCall` whose `initializeV4` payload installs only that verifier and mints no epoch; pre-flight asserts the pool is V3 and not already V4, and the post-check asserts the IMT root did not move |
-| `deploy/AddressBook.sol` | the field list of `addresses.<chainid>.json`, declared once, with a read + merge-write the four scripts above share (each names only the fields it changes) |
+| `deploy/UpgradeTransfer10x2.s.sol` | the UUPS migration that adds the `transfer10x2` entry point: deploys `Transfer10x2Verifier` + the new impl, then one `upgradeToAndCall` whose `initializeV5` payload installs only that verifier and mints no epoch; pre-flight asserts the pool is V4 and not already V5 (version requires first — see the section above), and the post-check asserts the IMT root did not move |
+| `deploy/AddressBook.sol` | the field list of `addresses.<chainid>.json`, declared once, with a read + merge-write the scripts above share (each names only the fields it changes) |
 | `deploy/Smoke.s.sol` | a real `deposit` against the deployed pool using the committed proof fixture |
 | `deploy/deploy_local.sh` | anvil + Deploy + getter read-back + Smoke — the local gate |
+| `deploy/test_upgrade_ladder_v5.sh` | scratch-anvil drill of the full live-pool ladder (Deploy → PQ → self-send → transfer10 → transfer10x2) + cast end-state checks + the V5-vs-V1 negative pre-flight |
 | `deploy/giwa_disburse256.ts` | the live 256-recipient disburse runner (rebuild mirror → deposit → prover service → `disburseWithCiphertexts` → measure L2 gas and L1 data fee) |
 | `deploy/e2e_m0.sh`, `deploy/e2e_orchestrator.ts` | the cross-circuit spend-cycle end-to-end on a local anvil |
 | `deploy/upload_circuits.sh` | uploads the wallet's proving assets (wasm + zkey) to the Vercel Blob store under a `CIRCUITS_VERSION` path, refusing assets whose zkey hash misses the pin in the wallet's `config.ts` |

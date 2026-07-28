@@ -21,6 +21,9 @@ import {VmSafe} from "forge-std/Vm.sol";
 ///     pre-V4 pool's `transfer10Verifier` really is `address(0)` (which is why
 ///     `transfer10` reverts there), so the field appearing at all is the marker
 ///     that the V4 payload landed.
+///   - `transfer10x2Verifier` — absent until `UpgradeTransfer10x2.s.sol` runs,
+///     for exactly the same reason one version later: the field appearing at
+///     all is the marker that the V5 payload landed.
 struct AddressRecord {
     uint256 chainId;
     address owner;
@@ -35,6 +38,7 @@ struct AddressRecord {
     address disburseVerifier;
     address transferVerifier;
     address transfer10Verifier; // optional — absent on a pre-V4 chain
+    address transfer10x2Verifier; // optional — absent on a pre-V5 chain
     address token;
     address poolImpl;
     address pool;
@@ -86,6 +90,9 @@ library AddressBook {
         if (vm.keyExists(j, ".transfer10Verifier")) {
             r.transfer10Verifier = vm.parseJsonAddress(j, ".transfer10Verifier");
         }
+        if (vm.keyExists(j, ".transfer10x2Verifier")) {
+            r.transfer10x2Verifier = vm.parseJsonAddress(j, ".transfer10x2Verifier");
+        }
         r.token = vm.parseJsonAddress(j, ".token");
         r.poolImpl = vm.parseJsonAddress(j, ".poolImpl");
         r.pool = vm.parseJsonAddress(j, ".pool");
@@ -119,6 +126,9 @@ library AddressBook {
         vm.serializeAddress(o, "transferVerifier", r.transferVerifier);
         if (r.transfer10Verifier != address(0)) {
             vm.serializeAddress(o, "transfer10Verifier", r.transfer10Verifier);
+        }
+        if (r.transfer10x2Verifier != address(0)) {
+            vm.serializeAddress(o, "transfer10x2Verifier", r.transfer10x2Verifier);
         }
         vm.serializeAddress(o, "token", r.token);
         vm.serializeAddress(o, "poolImpl", r.poolImpl);
