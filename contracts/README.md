@@ -39,7 +39,7 @@ test/
 ## Test
 
 ```sh
-forge test    # 70 tests, all committed-fixture-driven — no network, no GPU
+forge test    # 87 tests, all committed-fixture-driven — no network, no GPU
 ```
 
 `foundry.toml`: solc 0.8.24, `ffi = true`, and `fs_permissions` granting read on
@@ -58,7 +58,7 @@ first, see [`circuits/README.md`](../circuits/README.md)):
 |---|---|
 | `gen_poseidon.ts` | `poseidon2.hex` (circomlibjs Poseidon(2) creation bytecode) + `poseidon_ref.txt` (the parity reference hash) |
 | `gen_differential.ts` | `differential.json` — the interleaved deposit → transfer → disburse → withdraw insert sequence with the SDK-oracle root after every insert |
-| `gen_realproofs.ts` | `realproofs.json` — Solidity-ready calldata for the real deposit/transfer/transfer10/withdraw/disburse proofs + the precomputed input commitments, plus the shared `arbiterKey`. `groth16 prove` is randomized, so a re-run rewrites every entry's proof points (publics and roots are stable); regenerate deliberately, not as a side effect |
+| `gen_realproofs.ts` | `realproofs.json` — Solidity-ready calldata for the real deposit/transfer/transfer10/transfer10x2/withdraw/disburse proofs + the precomputed input commitments, plus the shared `arbiterKey`. `groth16 prove` is randomized, so a re-run rewrites every entry's proof points (publics and roots are stable); regenerate deliberately, not as a side effect |
 | `gen_disburse256_oracle.ts` | `disburse256.oracle.json` — the B=256 insert-sequence oracle for the real GPU proof (`disburse256.{proof,public,calldata,input,vkey}.json` are committed outputs of the GPU proving run itself) |
 
 ## Deploy

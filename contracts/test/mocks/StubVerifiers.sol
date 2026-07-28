@@ -6,7 +6,8 @@ import {
     IWithdrawVerifier,
     IDisburseVerifier,
     ITransferVerifier,
-    ITransfer10Verifier
+    ITransfer10Verifier,
+    ITransfer10x2Verifier
 } from "../../src/interfaces/IVerifiers.sol";
 
 // Always-accept stubs: the differential test isolates the single-frontier IMT
@@ -53,6 +54,16 @@ contract StubTransferVerifier is ITransferVerifier {
 
 contract StubTransfer10Verifier is ITransfer10Verifier {
     function verifyProof(uint[2] calldata, uint[2][2] calldata, uint[2] calldata, uint[141] calldata)
+        external
+        pure
+        returns (bool)
+    {
+        return true;
+    }
+}
+
+contract StubTransfer10x2Verifier is ITransfer10x2Verifier {
+    function verifyProof(uint[2] calldata, uint[2][2] calldata, uint[2] calldata, uint[68] calldata)
         external
         pure
         returns (bool)

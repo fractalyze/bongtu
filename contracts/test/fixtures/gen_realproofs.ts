@@ -137,6 +137,24 @@ async function main(): Promise<void> {
     out[name] = { ...cd, seedLeaves: seed.map(s), rootAfter: s(t.getRoot()), ...kemFor(name, cd.pub[106]) };
   }
 
+  // --- transfer10x2 (10-in / 2-out) ----------------------------------------
+  // The same input side as transfer10, TWO outputs: the partly-filled spend
+  // (4 real inputs, payment + change) and the pure merge (all 10 real, merged
+  // note + zero self change). Only the two real output commitments are
+  // appended — shedding transfer10's eight zero-value pads is the arity's
+  // reason to exist. transfer10x2 publics (68): [41]=kemBinding [42..51]=nf
+  // [52]=root [63..64]=oc [66..67]=authorityPubKey.
+  for (const name of ["transfer10x2", "transfer10x2_merge"]) {
+    const cd = await calldata(name);
+    const inp = rd(join(INPUTS, `${name}.json`));
+    const seed = (inp.inputCommitments as string[]).filter((_, i) => BigInt(inp.enabled[i]) === 1n).map(BigInt);
+    assertEq(rootAfterAppends(seed), cd.pub[52], `${name} membership root != pub[52]`);
+    const t = new ImtTree(H, B);
+    for (const c of seed) t.appendLeaf(c);
+    for (let i = 0; i < 2; i++) t.appendLeaf(BigInt(cd.pub[63 + i]));
+    out[name] = { ...cd, seedLeaves: seed.map(s), rootAfter: s(t.getRoot()), ...kemFor(name, cd.pub[41]) };
+  }
+
   // --- withdraw (2-in / 1-out) ---------------------------------------------
   // withdraw publics (26): [0]=out [1..2]=ecdhPub [3..15]=cipherTextAuthority[13]
   //   [16]=kemBinding [17..18]=nf [19]=root [20..21]=enabled [22]=oc0(change)
@@ -184,6 +202,10 @@ async function main(): Promise<void> {
   for (const name of ["transfer10", "transfer10_consolidate"]) {
     assertEq(out[name].pub[139], out.arbiterKey[0], `${name} authX != disburse authX`);
     assertEq(out[name].pub[140], out.arbiterKey[1], `${name} authY != disburse authY`);
+  }
+  for (const name of ["transfer10x2", "transfer10x2_merge"]) {
+    assertEq(out[name].pub[66], out.arbiterKey[0], `${name} authX != disburse authX`);
+    assertEq(out[name].pub[67], out.arbiterKey[1], `${name} authY != disburse authY`);
   }
 
   // --- arbiter ML-KEM-768 encapsulation key (PQ half of the hybrid envelope) --

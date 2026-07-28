@@ -1,7 +1,7 @@
 # Contracts
 
 `contracts/src/BongtuPool.sol` is the whole consensus surface: one shielded pool holding the
-single-frontier IMT, the nullifier set, ERC-20 custody, the arbiter epoch list, and five Groth16
+single-frontier IMT, the nullifier set, ERC-20 custody, the arbiter epoch list, and six Groth16
 verifier calls. Everything else in `contracts/src/` is a generated verifier, an interface, or a
 proxy/ownership util. How to build and test the folder is owned by
 [`contracts/README.md`](../contracts/README.md).
@@ -13,6 +13,7 @@ proxy/ownership util. How to build and test the folder is owned by
 | `deposit(a,b,c,pub,kemCiphertext)` | `uint[19]` | permissionless | appends 2 leaves, pulls `pub[0]` tokens |
 | `transfer(a,b,c,pub,kemCiphertext)` | `uint[37]` | permissionless | spends 2 nullifiers, appends 2 leaves |
 | `transfer10(a,b,c,pub,kemCiphertext)` | `uint[141]` | permissionless | spends 10 nullifiers, appends 10 leaves |
+| `transfer10x2(a,b,c,pub,kemCiphertext)` | `uint[68]` | permissionless | spends 10 nullifiers, appends 2 leaves |
 | `withdraw(a,b,c,pub,kemCiphertext)` | `uint[26]` | permissionless | spends 2 nullifiers, appends 1 change leaf, pushes `pub[0]` tokens |
 | `disburseWithCiphertexts(a,b,c,pub,receiverCiphertexts,kemCiphertext)` | `uint[11]` + `uint256[]` | owner or `disburseAllowed[msg.sender]` | spends 1 nullifier, attaches a `B`-leaf subtree |
 
@@ -35,7 +36,7 @@ The contract never trusts calldata for the two fields that decide soundness. Bef
 
 | injected field | value | why |
 |---|---|---|
-| `enabled[i]` | `nullifier[i] != 0` (transfer, transfer10, withdraw); constant `1` (disburse) | a prover that could set `enabled = 0` on a value-carrying input would skip membership — mint-from-nothing |
+| `enabled[i]` | `nullifier[i] != 0` (transfer, transfer10, transfer10x2, withdraw); constant `1` (disburse) | a prover that could set `enabled = 0` on a value-carrying input would skip membership — mint-from-nothing |
 | `authorityPublicKey[2]` | `currentArbiterKey()` from storage | a sender that could name the key would encrypt the envelope to itself and silently kill non-repudiation |
 
 A proof made against different values simply fails verification (`InvalidProof`). The circuit-side
@@ -77,16 +78,17 @@ provable `mismatch` alarm from the indexer. That split (chain enforces availabil
 enforces correctness) is the honest statement of the guarantee; see
 [security-model.md](security-model.md).
 
-deposit, transfer, transfer10 and withdraw need no such argument: their authority envelopes ride
-inside the public-signal vector, so the verifier itself binds them, and the contract copies those
-exact words into the event. transfer10 in particular publishes 40 receiver elements and a
-64-element authority envelope that way — bound by the proof, not by a length rule on free calldata.
+deposit, transfer, transfer10, transfer10x2 and withdraw need no such argument: their authority
+envelopes ride inside the public-signal vector, so the verifier itself binds them, and the contract
+copies those exact words into the event. transfer10 in particular publishes 40 receiver elements
+and a 64-element authority envelope that way (transfer10x2: 8 and 31) — bound by the proof, not by
+a length rule on free calldata.
 
 ## Output commitments
 
 - **Zero output commitments are rejected** on every appending path (`ZeroOutputCommitment`), and on
-  transfer10 that means all ten output slots, not just the first — an unused slot there is a real
-  value-0 note with a salt, so its commitment is nonzero too.
+  transfer10 that means all ten output slots — transfer10x2 both — not just the first: an unused
+  slot there is a real value-0 note with a salt, so its commitment is nonzero too.
   A zero leaf is a non-note; appending one would put a value-unbound leaf in the tree, which is
   precisely what the circuit-side zero-commitment guard forbids as a *spend* input. Closing it on
   the write side too is defence in depth (`contracts/test/Enforcement.t.sol`).
@@ -107,6 +109,7 @@ one exception is `DisburseCiphertexts`, whose payload is length-checked and hash
 | `Deposited` | epoch, first leaf index, both commitments, amount, `ecdhPublicKey`, `uint256[10]` authority envelope, nonce, root, `kemBinding`, `kemCiphertext` |
 | `Transferred` | epoch, 2 nullifiers, 2 commitments, `ecdhPublicKey`, 2×`uint256[4]` receiver ciphertexts, `uint256[16]` authority envelope, nonce, root, `kemBinding`, `kemCiphertext` |
 | `Transferred10` | epoch, 10 nullifiers, 10 commitments, `ecdhPublicKey`, `uint256[40]` receiver ciphertexts (10x4, leaf order), `uint256[64]` authority envelope, nonce, root, `kemBinding`, `kemCiphertext` |
+| `Transferred10x2` | epoch, 10 nullifiers, 2 commitments, `ecdhPublicKey`, `uint256[8]` receiver ciphertexts (2x4, leaf order), `uint256[31]` authority envelope, nonce, root, `kemBinding`, `kemCiphertext` |
 | `Withdrawn` | epoch, 2 nullifiers, amount, change commitment, `ecdhPublicKey`, `uint256[13]` authority envelope, nonce, root, `kemBinding`, `kemCiphertext` |
 | `Disbursed` | epoch, nullifier, `subtreeRoot`, `disclosureHash`, `ecdhPublicKey`, nonce, root, `kemBinding`, `kemCiphertext` |
 | `DisburseCiphertexts(startLeafIndex, receiverCiphertexts)` | the 2054-element array |
@@ -131,7 +134,7 @@ built against the previous key become invalid at rotation — there is no grace 
 The struct is **frozen**: appending a field would re-stride the dynamic array and corrupt live
 epochs across an upgrade. So the per-epoch ML-KEM-768 encapsulation-key hash lives in a sibling
 `mapping(uint256 => bytes32) public arbiterKemPkHash`, added in V2 out of the first slot of the
-original `uint256[50] __gap` (now `uint256[48]`, after V4 took a second word).
+original `uint256[50] __gap` (now `uint256[47]`, after V4 and V5 each took another word).
 
 `rotateArbiter(newKey, newKemPkHash)` writes both and emits both events. The bjj-only overload was
 **removed**, not kept alongside: a rotation that skipped the hash would mint a zero-hash epoch
@@ -159,6 +162,10 @@ is simply unreachable — and touches nothing else. The 2-in `transfer` path kee
 and keeps working across the upgrade, and no epoch is minted because no arbiter key material moves.
 Ordering is pinned the same way as V3, by the deploy script's storage pre-flight.
 
+`initializeV5` (`reinitializer(5)`) is the transfer10x2 migration payload (U-Z3), shaped exactly
+like V4: add-only (`transfer10x2Verifier`, previously `address(0)`, so `transfer10x2` is
+unreachable until it runs), no epoch, ordering pinned by the deploy script's storage pre-flight.
+
 ## Proxy and wiring
 
 The pool is deployed behind a **UUPS (ERC-1967) proxy**. The implementation constructor only calls
@@ -175,9 +182,9 @@ carries consensus meaning.
                                  |  delegatecall
    poolImpl ─────────────>  BongtuPool implementation
                                  |
-        +────────────+───────────+────────────+────────────+──────────────+
-        v            v           v            v            v              v
-    poseidon    depositVerif  withdrawV   disburseV    transferV    transfer10V   + token
+        +──────────+──────────+──────────+──────────+─────────────+──────────────+
+        v          v          v          v          v             v              v
+    poseidon  depositVerif withdrawV  disburseV  transferV  transfer10V  transfer10x2V  + token
 ```
 
 - **Poseidon** is a deployed contract, not a library: the circomlibjs creation bytecode
@@ -191,7 +198,7 @@ carries consensus meaning.
 - An `nPublic`-changing circuit edit is breaking: new verifier, new `IVerifiers` arity, new impl.
   The hybrid-envelope upgrade was exactly that — `kemBinding` took each vector to 19/37/26/11 — and
   it shipped as one atomic `upgradeToAndCall` carrying impl and verifiers together.
-- `uint256[48] __gap` reserves trailing storage for a future implementation.
+- `uint256[47] __gap` reserves trailing storage for a future implementation.
   `contracts/test/Upgrade.t.sol` pins state preservation, owner-only upgrade, re-init rejection and
   implementation locking.
 

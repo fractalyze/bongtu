@@ -62,4 +62,8 @@ contract VerifierDriftTest is Test {
     function testTransfer10VerifierIsTheGeneratedOneRenamed() public view {
         _assertRenameOnly("transfer10_verifier.sol", "Transfer10Verifier");
     }
+
+    function testTransfer10x2VerifierIsTheGeneratedOneRenamed() public view {
+        _assertRenameOnly("transfer10x2_verifier.sol", "Transfer10x2Verifier");
+    }
 }
