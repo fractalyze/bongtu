@@ -10,6 +10,10 @@
    controls.tsx), not CSS classes. */
 
 @import "tailwindcss";
+/* The shared UI package (toast host, banner) is classname-based on THIS app's
+   tokens and lives outside the Vite root, so Tailwind must be told to scan it —
+   without this line its classes would silently compile to nothing. */
+@source "../../../packages/ui/src";
 
 @theme {
   --color-*: initial;

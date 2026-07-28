@@ -12,7 +12,14 @@
 
 import { DEFAULTS } from "../config.js";
 import type { Connection } from "./connection.js";
-import { approveToken, assertPoolKemEpoch, ensureChain, readTokenState, submitDeposit } from "./connection.js";
+import {
+  approveToken,
+  assertPoolKemEpoch,
+  ensureChain,
+  readTokenState,
+  submitDeposit,
+  walletErrorMessage,
+} from "./connection.js";
 import { keyCache, type KeyCache } from "./keyCache.js";
 import { assertDepositAffordable, buildDepositRequest, freshDepositCrypto } from "./deposit.js";
 import { proveInBrowser } from "./prove.js";
@@ -123,15 +130,31 @@ export async function runDeposit(
     approved = true;
   }
 
-  onStage("prove");
-  const crypto = freshDepositCrypto(randField);
-  const built = buildDepositRequest(identity, amount, crypto);
-  const calldata = await io.proveInBrowser(built.request, DEFAULTS.circuitBaseUrl);
+  try {
+    onStage("prove");
+    const crypto = freshDepositCrypto(randField);
+    const built = buildDepositRequest(identity, amount, crypto);
+    const calldata = await io.proveInBrowser(built.request, DEFAULTS.circuitBaseUrl);
 
-  onStage("submit");
-  // The tx carries the SAME encapsulation the proof's kemBinding committed to
-  // (crypto.kemCiphertext) — a different ct would decapsulate to mismatching
-  // limbs at the arbiter and burn the envelope into an alarm.
-  const res = await io.submitDeposit(ctx.connection, DEFAULTS.pool, calldata, crypto.kemCiphertext, DEFAULTS.explorer);
-  return { txHash: res.txHash, explorerUrl: res.explorerUrl, amount, approved };
+    onStage("submit");
+    // The tx carries the SAME encapsulation the proof's kemBinding committed to
+    // (crypto.kemCiphertext) — a different ct would decapsulate to mismatching
+    // limbs at the arbiter and burn the envelope into an alarm.
+    const res = await io.submitDeposit(ctx.connection, DEFAULTS.pool, calldata, crypto.kemCiphertext, DEFAULTS.explorer);
+    return { txHash: res.txHash, explorerUrl: res.explorerUrl, amount, approved };
+  } catch (e) {
+    // The CHAIN_FAILURE_REASSURANCE pattern generalized (error-surface standard):
+    // once the approve tx has landed, a later failure must say where the money
+    // stands — an approval went through but nothing moved, and it is reused on
+    // retry. A failure with no approve landed stays a plain single-transaction
+    // failure (the reassurance would only confuse — nothing partial can exist).
+    if (!approved) throw e;
+    throw new Error(`${walletErrorMessage(e)} ${DEPOSIT_FAILURE_REASSURANCE}`);
+  }
 }
+
+/** What a deposit says when it fails AFTER its approve tx landed. Same money-state
+ *  rule as spendFlow's CHAIN_FAILURE_REASSURANCE: name what stands (the approval)
+ *  and what didn't move (every token). */
+export const DEPOSIT_FAILURE_REASSURANCE =
+  "No kKRW left your account. The approval stays in place and is reused when you retry.";

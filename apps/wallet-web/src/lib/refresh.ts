@@ -10,6 +10,7 @@
 // Pure core + injected sleep/load so the loop is unit-tested in milliseconds
 // (test/refresh.test.ts); App.tsx wires the real token-authed fetches.
 
+import { classifyIndexerRead } from "@bongtu/core/errors";
 import type { OwnerNote, HistoryItem, HistoryPage } from "./indexerClient.js";
 
 /** One consistent read of the owner's indexer state. `history` is the FIRST page
@@ -86,17 +87,88 @@ export const EXPIRED_MESSAGE = "Your login expired. Please reconnect.";
  * longer valid — the app must return to onboarding rather than show a retry button
  * that can only fail again. A 404/403 is the wrong-indexer case (a public-mode
  * instance has no /notes at all) and anything else is a transport failure.
+ *
+ * The structural verdict (which the sdk's `"url -> status"` message contract feeds)
+ * comes from the shared classifier in @bongtu/core/errors; only the wallet's own
+ * words live here.
  */
 export function classifyReadFailure(err: unknown, indexerUrl: string): ReadFailure {
-  const msg = err instanceof Error ? err.message : String(err);
-  if (/->\s*401/.test(msg)) return { kind: "expired", message: EXPIRED_MESSAGE };
-  if (/->\s*(404|403)/.test(msg)) {
-    return { kind: "error", message: "Can't load your balance right now. Check the indexer connection and retry." };
+  const verdict = classifyIndexerRead(err);
+  switch (verdict.kind) {
+    case "unauthorized":
+      return { kind: "expired", message: EXPIRED_MESSAGE };
+    case "wrong_endpoint":
+      return { kind: "error", message: "Can't load your balance right now. Check the indexer connection and retry." };
+    case "unreachable":
+      return {
+        kind: "error",
+        message: `Couldn't reach the indexer at ${indexerUrl}. Check it's running and the URL in Settings. (${verdict.detail})`,
+      };
   }
-  return {
-    kind: "error",
-    message: `Couldn't reach the indexer at ${indexerUrl}. Check it's running and the URL in Settings. (${msg})`,
-  };
+}
+
+// --- the refresh orchestration (which error surface a failed read gets) -----------
+
+/** What a refresh failure toasts for a MANUAL refresh. The banner already names the
+ *  holding condition in detail; the toast only announces the event the user's tap
+ *  produced (toast = event, banner = state — .dev/error-surface-design.md). */
+export const REFRESH_FAILED_TOAST = "Refresh failed. Showing the last loaded data.";
+
+/**
+ * The side effects one refresh may produce, as injectable sinks so the whole
+ * surface policy is testable without React (App.tsx wires its setState calls in):
+ *
+ *   applySnapshot — a successful read, applied wholesale;
+ *   setBanner     — the ONE degraded-state slot (App's `dataError`): set on a
+ *                   failed read, cleared (null) by the next success. Deliberately
+ *                   the only failure sink for background reads — there is no sink
+ *                   that blanks on-screen data, because a failed background read
+ *                   must never blank it (locked rule);
+ *   toast         — fired ONLY for a manual refresh (class-1 event);
+ *   signOut       — the 401 route: back to onboarding, carrying the notice;
+ *   setNotice     — the calm tokenless-session strip (never an error).
+ */
+export interface RefreshSinks {
+  applySnapshot(snap: OwnerSnapshot): void;
+  setBanner(message: string | null): void;
+  toast(message: string): void;
+  signOut(notice: string): void;
+  setNotice(message: string | null): void;
+}
+
+/**
+ * ONE refresh, start to finish: plan (tokenless sessions never issue a doomed
+ * read), load, then route the outcome to exactly one surface. `manual` says the
+ * user asked for this refresh right now — the only case that may toast; the
+ * background loop and the post-action fallback run with manual=false and can only
+ * move the banner.
+ */
+export async function runRefresh(
+  session: { token: string; compressedPubkey: string } | null,
+  load: (token: string, owner: string) => Promise<OwnerSnapshot>,
+  sinks: RefreshSinks,
+  opts: { manual?: boolean; indexerUrl: string },
+): Promise<void> {
+  const plan = refreshPlan(session);
+  if (plan.kind === "notice" || !session) {
+    // No token to read with: keep the snapshot already on screen and say so.
+    sinks.setNotice(plan.kind === "notice" ? plan.message : RECONNECT_NOTICE);
+    sinks.setBanner(null);
+    return;
+  }
+  sinks.setNotice(null);
+  try {
+    sinks.applySnapshot(await load(session.token, session.compressedPubkey));
+    sinks.setBanner(null); // recovery clears the state banner
+  } catch (e) {
+    const failure = classifyReadFailure(e, opts.indexerUrl);
+    if (failure.kind === "expired") {
+      sinks.signOut(failure.message); // retrying can only 401 again
+      return;
+    }
+    sinks.setBanner(failure.message);
+    if (opts.manual) sinks.toast(REFRESH_FAILED_TOAST);
+  }
 }
 
 /**

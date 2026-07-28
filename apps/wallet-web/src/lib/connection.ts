@@ -7,7 +7,7 @@
 // derivation, balance, witness assembly) lives in the PURE modules and is
 // unit-tested; the wagmi-facing half of this file is the thin I/O edge (no wallet in
 // the headless env), while the viem half (signing, submits, reads) is gated in
-// test/connection.test.ts over fake EIP-1193 transports.
+// test/accountWatch.test.ts over fake EIP-1193 transports.
 
 import {
   createPublicClient,
@@ -20,6 +20,7 @@ import {
   type WalletClient,
 } from "viem";
 import { disconnect, getAccount, reconnect, watchAccount } from "wagmi/actions";
+import { causeChain, classifyChainFailure, errorCode } from "@bongtu/core/errors";
 import type { KeyDerivationTypedData } from "./derive.js";
 import type { WalletTransport } from "./loginGuard.js";
 import type { Calldata } from "@bongtu/core/proving";
@@ -112,49 +113,30 @@ export interface Connection {
  *  never through the wallet (a phone over WalletConnect shouldn't relay eth_call). */
 const publicClient: PublicClient = createPublicClient({ chain: giwaSepolia, transport: http() });
 
-/** Walk an error and its `cause` chain (viem nests the actionable failure several
- *  levels deep); bounded so a cyclic cause cannot spin. */
-function causeChain(e: unknown): Record<string, unknown>[] {
-  const chain: Record<string, unknown>[] = [];
-  for (let cur = e; cur !== null && typeof cur === "object" && chain.length < 8; ) {
-    chain.push(cur as Record<string, unknown>);
-    cur = (cur as { cause?: unknown }).cause;
-  }
-  return chain;
-}
-
 /**
  * A human-readable message from ANY wallet/RPC failure. Provider errors
  * (EIP-1193 ProviderRpcError) and viem's layered errors are plain objects or
- * deep cause chains, so the naive `String(e)` renders "[object Object]"; dig the
- * conventional fields at every level and translate the two failures every tester
- * hits (user rejection, no gas ETH) into plain words.
+ * deep cause chains, so the naive `String(e)` renders "[object Object]". The
+ * structural digging (cause chain, conventional fields, viem's typed error names)
+ * lives in the shared classifier (@bongtu/core/errors classifyChainFailure); this
+ * function is only the wallet's WORDS for each verdict — the two failures every
+ * tester hits (user rejection, no gas ETH) in plain language, viem's own best
+ * text for everything else.
  */
 export function walletErrorMessage(e: unknown): string {
-  const chain = causeChain(e);
-  for (const o of chain) {
-    // EIP-1193 code 4001, ethers-style ACTION_REJECTED, viem's typed error.
-    if (o.code === 4001 || o.code === "ACTION_REJECTED" || o.name === "UserRejectedRequestError") {
+  const failure = classifyChainFailure(e);
+  switch (failure.kind) {
+    case "user_rejected":
       return "Transaction rejected in your wallet.";
-    }
+    case "insufficient_gas":
+      return "Not enough GIWA Sepolia ETH to pay gas. This account needs a little ETH on GIWA Sepolia first.";
+    case "chain_switch":
+      if (failure.rejected) return "Transaction rejected in your wallet.";
+      break; // an un-rejected switch failure reads best in viem's own words below
+    default:
+      break;
   }
-  const texts = chain.flatMap((o) =>
-    [
-      o.reason,
-      (o.error as { message?: string } | undefined)?.message,
-      (o.data as { message?: string } | undefined)?.message,
-      o.shortMessage,
-      o.details,
-      o.message,
-    ].filter((t): t is string => typeof t === "string"),
-  );
-  if (texts.some((t) => /user rejected|user denied/i.test(t))) {
-    return "Transaction rejected in your wallet.";
-  }
-  if (texts.some((t) => /insufficient funds/i.test(t))) {
-    return "Not enough GIWA Sepolia ETH to pay gas. This account needs a little ETH on GIWA Sepolia first.";
-  }
-  if (texts.length > 0) return texts[0];
+  if (failure.text !== null) return failure.text;
   try {
     return JSON.stringify(e);
   } catch {
@@ -251,28 +233,60 @@ export async function currentAccount(): Promise<string | null> {
   return getAccount(wagmiConfig).address?.toLowerCase() ?? null;
 }
 
+export interface WalletWatchHandlers {
+  accountsChanged?: () => void;
+  disconnected?: () => void;
+}
+
+/** The slice of wagmi's account snapshot the watcher compares. */
+export interface WatchedAccount {
+  address?: string;
+  status: string;
+}
+
+/**
+ * The account-transition logic behind watchWallet, as a pure closure over wagmi's
+ * (account, prev) change pairs — exported so the sequences gate headlessly
+ * (test/accountWatch.test.ts) with no wagmi store.
+ *
+ * `accountsChanged` fires whenever the connected address DIFFERS from the last
+ * address that was ever connected — including across a disconnected gap. The gap
+ * case is the security-relevant one: an extension lock → unlock as a DIFFERENT
+ * account arrives as connected(A) → disconnected → connected(B), where the naive
+ * prev/account comparison sees no A→B pair and would leave account A's spending
+ * key unlocked for account B's user. The closure remembers the last non-null
+ * address, so B still fires the switch path (App locks the keyCache on it).
+ */
+export function accountWatchHandler(
+  handlers: WalletWatchHandlers,
+): (account: WatchedAccount, prev: WatchedAccount) => void {
+  let last: string | null = null;
+  return (account, prev) => {
+    // Seed from `prev` when the watcher attached after the connect happened (the
+    // first event it sees may already be the disconnect).
+    if (last === null && prev.address) last = prev.address.toLowerCase();
+    if (account.address) {
+      const now = account.address.toLowerCase();
+      if (last !== null && now !== last) handlers.accountsChanged?.();
+      last = now;
+    }
+    if (prev.status === "connected" && account.status === "disconnected") {
+      handlers.disconnected?.();
+    }
+  };
+}
+
 /**
  * Subscribe to wallet-account changes through wagmi's one account store; returns
- * one unsubscribe. `accountsChanged` fires on a switch to a DIFFERENT address;
+ * one unsubscribe. `accountsChanged` fires on a switch to a DIFFERENT address —
+ * even when the switch transits a disconnected state (see accountWatchHandler);
  * `disconnected` when a live connection ends (the WalletConnect peer hanging up,
  * an extension revoking access). What `disconnected` should DO stays the
  * CALLER's choice: App signs out only a WalletConnect session (a remote peer
  * ending the session is a real sign-out; an extension hiccup is not).
  */
-export function watchWallet(handlers: {
-  accountsChanged?: () => void;
-  disconnected?: () => void;
-}): () => void {
-  return watchAccount(wagmiConfig, {
-    onChange(account, prev) {
-      if (prev.address && account.address && account.address !== prev.address) {
-        handlers.accountsChanged?.();
-      }
-      if (prev.status === "connected" && account.status === "disconnected") {
-        handlers.disconnected?.();
-      }
-    },
-  });
+export function watchWallet(handlers: WalletWatchHandlers): () => void {
+  return watchAccount(wagmiConfig, { onChange: accountWatchHandler(handlers) });
 }
 
 // EIP-3085/3326 params for GIWA Sepolia, derived from the ONE network module so a
@@ -285,13 +299,6 @@ const GIWA_CHAIN_PARAMS = {
   blockExplorerUrls: [EXPLORER_BASE],
   nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
 };
-
-function errorCode(e: unknown): number | string | undefined {
-  for (const o of causeChain(e)) {
-    if (typeof o.code === "number" || typeof o.code === "string") return o.code;
-  }
-  return undefined;
-}
 
 /**
  * Put the wallet on GIWA Sepolia: switch if it already knows the chain, otherwise
@@ -328,10 +335,13 @@ export async function ensureChain(connection: Connection): Promise<void> {
   }
 }
 
-/** What to tell a WalletConnect user whose wallet would not move to GIWA Sepolia. */
+/** What to tell a WalletConnect user whose wallet would not move to GIWA Sepolia.
+ *  The rejection verdict comes from the shared classifier — a declined EIP-3326
+ *  request in any of its shapes (code 4001 / ACTION_REJECTED, viem's typed error,
+ *  a SwitchChainError wrapping the user's refusal). */
 export function chainSwitchMessage(e: unknown): string {
-  const code = errorCode(e);
-  if (code === 4001 || code === "ACTION_REJECTED") {
+  const failure = classifyChainFailure(e);
+  if (failure.kind === "user_rejected" || (failure.kind === "chain_switch" && failure.rejected)) {
     return "You declined the network switch. bongtu only works on GIWA Sepolia.";
   }
   return (

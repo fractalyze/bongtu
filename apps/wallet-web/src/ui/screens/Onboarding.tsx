@@ -15,24 +15,32 @@ import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { DEFAULTS } from "../../config.js";
 import { useWallet } from "../App.js";
 import { hasInjectedWallet, metamaskDeepLink } from "../../lib/connection.js";
+import { LOGIN_IDLE, loginPendingStep, startLoginPending } from "../../lib/loginPending.js";
 import { walletConnectEnabled } from "../../lib/wagmi.js";
 import { EnvelopeLogo, IconDeposit, IconSend, IconWallet } from "../components/icons.js";
 import { Button, ErrorBanner, TestnetTag } from "../components/controls.js";
+import { Banner } from "@bongtu/ui/Banner";
 
 export function Onboarding(): ReactNode {
-  const { connectWallet, connecting, connectError } = useWallet();
+  const { connectWallet, connecting, connectError, dataError } = useWallet();
   const { isConnected } = useAccount();
   const { openConnectModal, connectModalOpen } = useConnectModal();
-  // Set when the user presses Connect while no wallet is live: the modal opens, and
-  // the moment wagmi reports a connection the login runs — one press, one flow.
-  const [loginPending, setLoginPending] = useState(false);
+  // Armed when the user presses Connect while no wallet is live: the modal opens,
+  // and the moment wagmi reports a connection the login runs — one press, one flow.
+  // The transitions (fire on connect, DISARM on a dismissed modal — else the stale
+  // flag would auto-fire a signature popup at the next unrelated connect) are the
+  // pure machine in lib/loginPending.ts; this effect only feeds it and executes
+  // its verdict.
+  const [loginPending, setLoginPending] = useState(LOGIN_IDLE);
 
   useEffect(() => {
-    if (loginPending && isConnected) {
-      setLoginPending(false);
-      void connectWallet();
-    }
-  }, [loginPending, isConnected, connectWallet]);
+    const { state, effect } = loginPendingStep(loginPending, {
+      modalOpen: connectModalOpen,
+      connected: isConnected,
+    });
+    if (state !== loginPending) setLoginPending(state);
+    if (effect === "login") void connectWallet();
+  }, [loginPending, isConnected, connectModalOpen, connectWallet]);
 
   const onConnect = (): void => {
     if (isConnected) {
@@ -41,7 +49,7 @@ export function Onboarding(): ReactNode {
       void connectWallet();
       return;
     }
-    setLoginPending(true);
+    setLoginPending(startLoginPending());
     openConnectModal?.();
   };
 
@@ -99,6 +107,10 @@ export function Onboarding(): ReactNode {
       </ol>
 
       {connectError && <ErrorBanner message={connectError} />}
+      {/* The session-fatal notice (class 3): why the app routed back here — an
+          expired login, a wallet that ended its session. Calm info tone: nothing is
+          wrong with what the user is about to do. A fresh visit has none. */}
+      {!connectError && dataError && <Banner tone="info" message={dataError} />}
 
       {(injected || remote) && (
         <Button variant="primary" size="lg" block onClick={onConnect} disabled={busy}>

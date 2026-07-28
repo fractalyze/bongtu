@@ -1,0 +1,30 @@
+{
+  "name": "@bongtu/ui",
+  "version": "0.0.0",
+  "description": "bongtu shared UI — the error-surface components both apps render (toast host = events, banner = state, Copy details for the bug class) with the headless queue/dedup/timing logic split out so it gates under node:test without a DOM. Styling is classname-based on the apps' shared Tailwind tokens; each app compiles its own CSS.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "private": true,
+  "exports": {
+    "./toastQueue": "./src/toastQueue.ts",
+    "./clipboard": "./src/clipboard.ts",
+    "./Toast": "./src/Toast.tsx",
+    "./Banner": "./src/Banner.tsx"
+  },
+  "scripts": {
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.12",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

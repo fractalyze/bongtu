@@ -117,6 +117,8 @@ jobs:
         run: npm run typecheck --workspaces
       - name: core tests
         run: npm test -w @bongtu/core
+      - name: ui tests
+        run: npm test -w @bongtu/ui
       - name: payroll-web tests
         run: npm test -w @bongtu/payroll-web
       - name: wallet-web tests

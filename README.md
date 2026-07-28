@@ -123,6 +123,8 @@ System guarantees and inter-component contracts live in [`docs/`](docs/) — one
   API with its read-auth, and the arbiter-mode trust boundary.
 - [Wallet](docs/wallet.md) — key derivation from a MetaMask signature, in-browser proving and the stale-zkey
   hazard, the deposit/faucet shape, and the indexer dependency.
+- [Error surfaces](docs/errors.md) — the five consequence classes and their surfaces (toast = event,
+  banner = state), the money-state line, and the no-telemetry stance.
 - [Security model](docs/security-model.md) — who sees what, the enforced-auditor-disclosure invariant, the
   zero-commitment guard, and the residual gaps and testnet caveats.
 - [Performance](docs/performance.md) — measured gas per operation, the live 256-disburse run, proof times,

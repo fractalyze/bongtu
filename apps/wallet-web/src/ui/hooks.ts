@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useAccount } from "wagmi";
 import { copyText } from "../lib/clipboard.js";
+import { toastError, COPY_FAILED_TOAST } from "../lib/toasts.js";
 import { isWalletUnlocked, subscribeLock } from "../lib/keyCache.js";
 import { describeWallet, type WalletDescription } from "../lib/walletBrand.js";
 import { subscribeCircuitDownload, type CircuitDownloadState } from "../lib/prove.js";
@@ -148,6 +149,8 @@ export function useCircuitDownload(circuit: BrowserCircuit): CircuitDownloadView
 
 /** Copy `text` and flip a short-lived `copied` flag — only on a REAL clipboard write
  *  (copyText's boolean), so the UI never claims "Copied" when the browser refused.
+ *  A refused copy is a failed user-initiated one-shot (class 1) with no inline slot
+ *  of its own, so it TOASTS — the full text stays on screen as the manual fallback.
  *  The timeout lives in an effect so unmount can't fire a setState on a dead tree. */
 export function useCopyFeedback(text: string, resetMs = 1500): { copied: boolean; copy: () => void } {
   const [copied, setCopied] = useState(false);
@@ -159,6 +162,7 @@ export function useCopyFeedback(text: string, resetMs = 1500): { copied: boolean
   const copy = useCallback((): void => {
     void copyText(text).then((ok) => {
       if (ok) setCopied(true);
+      else toastError(COPY_FAILED_TOAST);
     });
   }, [text]);
   return { copied, copy };

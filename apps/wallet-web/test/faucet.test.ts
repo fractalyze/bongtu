@@ -24,6 +24,7 @@ import { assertDepositAffordable } from "../src/lib/deposit.js";
 import { KeyCache } from "../src/lib/keyCache.js";
 import {
   runDeposit,
+  DEPOSIT_FAILURE_REASSURANCE,
   type DepositContext,
   type RunDepositDeps,
 } from "../src/lib/depositFlow.js";
@@ -209,4 +210,51 @@ test("testnetFromEnv: default-true, only literal 'false' disables", () => {
 
 test("DEFAULTS.testnet is true where import.meta.env is absent (node runner)", () => {
   assert.equal(DEFAULTS.testnet, true);
+});
+
+// ============================ (5) MONEY-STATE LINE ==========================
+// The error-surface standard (.dev/error-surface-design.md): a money-touching
+// failure carries the money-state line ONCE something partial has landed. For a
+// deposit that is the approve tx: fail after it and the message must say the
+// tokens never moved and the approval is reused; fail before it and the line
+// must NOT appear (nothing partial can exist — it would only confuse).
+
+test("a deposit failing AFTER its approve landed carries the money-state line", async () => {
+  const deps: Partial<RunDepositDeps> = {
+    ...fakeWalletDeps(),
+    readTokenState: async () => ({ balance: 1_000n, allowance: 0n }), // approve needed
+    approveToken: async () => "0xapprove",
+    proveInBrowser: async () => {
+      throw new Error("proof worker crashed");
+    },
+    submitDeposit: async () => {
+      throw new Error("unreachable");
+    },
+  };
+  await assert.rejects(runDeposit(fakeContext(), { amount: "500" }, () => {}, deps), (e: Error) => {
+    assert.match(e.message, /proof worker crashed/, "the specific cause leads");
+    assert.ok(e.message.endsWith(DEPOSIT_FAILURE_REASSURANCE), "the money-state line closes it");
+    return true;
+  });
+});
+
+test("a deposit failing with NO approve landed stays a plain failure (no reassurance)", async () => {
+  const deps: Partial<RunDepositDeps> = {
+    ...fakeWalletDeps(),
+    readTokenState: async () => ({ balance: 1_000n, allowance: 10_000n }), // approve skipped
+    approveToken: async () => {
+      throw new Error("approve must not run when the allowance covers V");
+    },
+    proveInBrowser: async () => {
+      throw new Error("proof worker crashed");
+    },
+    submitDeposit: async () => {
+      throw new Error("unreachable");
+    },
+  };
+  await assert.rejects(runDeposit(fakeContext(), { amount: "500" }, () => {}, deps), (e: Error) => {
+    assert.match(e.message, /proof worker crashed/);
+    assert.ok(!e.message.includes(DEPOSIT_FAILURE_REASSURANCE), "single-tx failure carries no line");
+    return true;
+  });
 });

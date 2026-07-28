@@ -48,13 +48,15 @@ import { appendHistoryPage } from "../lib/activity.js";
 import { clearKeyBindings, clearSession, loadSession, type StoredSession } from "../lib/session.js";
 import { markLockIntroSeen, shouldShowLockIntro } from "../lib/lockIntro.js";
 import {
-  classifyReadFailure,
   loadOwnerSnapshot,
   pollForAction,
   refreshPlan,
+  runRefresh,
   RECONNECT_NOTICE,
   type OwnerSnapshot,
 } from "../lib/refresh.js";
+import { installGlobalErrorSurface, toastError, toasts } from "../lib/toasts.js";
+import { ToastHost } from "@bongtu/ui/Toast";
 import { useHashRoute, navigate, useWalletDescription } from "./hooks.js";
 import { Onboarding } from "./screens/Onboarding.js";
 import { LockIntro } from "./screens/LockIntro.js";
@@ -105,7 +107,10 @@ export interface WalletContextValue {
    *  Onboarding screen opens the modal first when nothing is connected yet. */
   connectWallet: () => Promise<void>;
   disconnect: () => void;
-  refresh: () => Promise<void>;
+  /** `manual=true` marks a user-initiated refresh (sync dot, banner Retry): the one
+   *  invocation allowed to toast on failure. Background callers omit it — their
+   *  only failure surface is the dataError banner (never a toast). */
+  refresh: (manual?: boolean) => Promise<void>;
   /** post-action refresh: poll until `txHash` is reflected, then apply the data. */
   refreshAfterAction: (txHash: string) => Promise<void>;
   /** append the next activity page. REJECTS on a failed read so the screen that
@@ -190,6 +195,7 @@ export function App(): ReactNode {
   // and that record is what catches a wallet whose signatures drift (loginGuard.ts).
   const endSession = useCallback((reason: string | null, forget = false): void => {
     keyCache.lock(); // signing out drops the spending key too, not just the token
+    toasts.clear(); // stale event toasts must not follow the user to onboarding
     clearSession();
     if (forget) {
       clearKeyBindings();
@@ -208,41 +214,42 @@ export function App(): ReactNode {
     navigate("home");
   }, []);
 
-  const refresh = useCallback(async (): Promise<void> => {
-    if (!session) return;
-    const plan = refreshPlan(session);
-    if (plan.kind === "notice") {
-      // No token to read with: keep the snapshot already on screen (refresh.ts).
-      setDataNotice(plan.message);
-      setDataError(null);
-      return;
-    }
-    setLoading(true);
-    setDataError(null);
-    setDataNotice(null);
-    try {
-      // Reads authenticate with the VIEW token only — no key, no signature popup.
-      applySnapshot(await loadFirstPage(session.token, session.compressedPubkey));
-    } catch (e) {
-      const failure = classifyReadFailure(e, INDEXER_URL);
-      if (failure.kind === "expired") {
-        endSession(failure.message); // back to onboarding — retrying can only 401 again
-        return;
+  // ONE refresh path for both invocations of it. `manual` marks the user-initiated
+  // one-shot (the sync-dot tap, a banner Retry): only that may toast on failure
+  // (class 1); the background invocations (session change, post-action fallback)
+  // can only move the dataError BANNER — never a toast, and never a blanked screen:
+  // the surface routing itself is headless (refresh.ts runRefresh, tested), this
+  // callback only wires the sinks to React state.
+  const refresh = useCallback(
+    async (manual = false): Promise<void> => {
+      if (!session) return;
+      setLoading(true);
+      try {
+        // Reads authenticate with the VIEW token only — no key, no signature popup.
+        await runRefresh(session, loadFirstPage, {
+          applySnapshot,
+          setBanner: setDataError,
+          toast: toastError,
+          signOut: (notice) => endSession(notice), // back to onboarding — retrying can only 401 again
+          setNotice: setDataNotice,
+        }, { manual, indexerUrl: INDEXER_URL });
+      } finally {
+        setLoading(false);
       }
-      setBalance(null);
-      setNotes([]);
-      setHistory([]);
-      setHistoryNextBefore(null);
-      setDataError(failure.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [session, loadFirstPage, applySnapshot, endSession]);
+    },
+    [session, loadFirstPage, applySnapshot, endSession],
+  );
 
   // Auto-load whenever the session changes (after a connect or a silent restore).
   useEffect(() => {
     if (session) void refresh();
   }, [session, refresh]);
+
+  // Class 5 (unexpected/bug): whatever still reaches the window's error and
+  // unhandledrejection events was caught by NO deliberate surface — toast it with
+  // Copy details. Every intentional failure path below is caught before it gets
+  // here, so background loops cannot reach this (they only move the banner).
+  useEffect(() => installGlobalErrorSurface(), []);
 
   // A held spending key belongs to ONE wallet account, so a switch drops it at the
   // moment it happens — the flows re-check anyway, this just makes the header honest
@@ -448,7 +455,8 @@ export function App(): ReactNode {
   return (
     <WalletContext.Provider value={value}>
       <div className="min-h-full flex justify-center items-stretch p-[clamp(0px,3vw,28px)]">
-        <div className="w-full max-w-[420px] bg-bg border border-border rounded-[clamp(0px,3vw,20px)] shadow-[0_8px_28px_-18px_rgba(17,24,39,0.18)] overflow-hidden flex flex-col min-h-[min(760px,calc(100vh-56px))]">
+        {/* relative: the toast host floats over this frame's bottom edge. */}
+        <div className="relative w-full max-w-[420px] bg-bg border border-border rounded-[clamp(0px,3vw,20px)] shadow-[0_8px_28px_-18px_rgba(17,24,39,0.18)] overflow-hidden flex flex-col min-h-[min(760px,calc(100vh-56px))]">
           {!session ? (
             <Onboarding />
           ) : lockIntro ? (
@@ -461,6 +469,7 @@ export function App(): ReactNode {
           ) : (
             <Router route={route} />
           )}
+          <ToastHost queue={toasts} />
         </div>
       </div>
     </WalletContext.Provider>

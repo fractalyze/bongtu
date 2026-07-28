@@ -14,6 +14,11 @@ import { DEFAULTS } from "../../config.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
 import { ActivityList } from "../components/ActivityList.js";
 import { Button } from "../components/controls.js";
+import { Banner } from "@bongtu/ui/Banner";
+
+/** "Load more" failing reports HERE, under the button that asked (class 1's nearer
+ *  inline slot — closer than any toast), and leaves the rows on screen alone. */
+export const LOAD_MORE_ERROR = "Couldn't load more activity. Try again.";
 
 export function Activity(): ReactNode {
   const { history, historyNextBefore, historyLoadingMore, loadMoreHistory, loading, dataError, dataNotice, refresh } =
@@ -21,37 +26,29 @@ export function Activity(): ReactNode {
   const [moreError, setMoreError] = useState<string | null>(null);
   const onLoadMore = (): void => {
     setMoreError(null);
-    void loadMoreHistory().catch(() => setMoreError("Couldn't load more activity. Try again."));
+    void loadMoreHistory().catch(() => setMoreError(LOAD_MORE_ERROR));
   };
   return (
     <div className="flex flex-col gap-4.5 px-4.5 pt-4.5 pb-6.5">
       <ScreenHeader title="Activity" />
-      {dataError ? (
-        <div className="rounded-xl px-3.5 py-3 text-[0.88rem] flex gap-2.5 items-center justify-between flex-wrap border border-warn-border bg-warn-bg text-warn">
-          {dataError}
-          <Button variant="ghost" size="sm" onClick={() => void refresh()}>
-            Retry
+      {/* The same state banner as Home (class 4): the whole read failed, but the
+          feed already on screen stays below it — stale beats blank. */}
+      {dataError && <Banner message={dataError} onRetry={() => void refresh(true)} />}
+      {/* Calm strip, not the warn banner: the feed below is real, just frozen. */}
+      {!dataError && dataNotice && <p className="text-muted text-[0.85rem] px-0.5">{dataNotice}</p>}
+      <ActivityList
+        history={history}
+        loading={loading}
+        explorerBase={DEFAULTS.explorer}
+        heading={null}
+      />
+      {historyNextBefore !== null && (
+        <div className="flex flex-col gap-1.5 items-center">
+          <Button onClick={onLoadMore} disabled={historyLoadingMore}>
+            {historyLoadingMore ? "Loading…" : "Load more"}
           </Button>
+          {moreError && <p className="text-err text-[0.82rem]">{moreError}</p>}
         </div>
-      ) : (
-        <>
-          {/* Calm strip, not the warn banner: the feed below is real, just frozen. */}
-          {dataNotice && <p className="text-muted text-[0.85rem] px-0.5">{dataNotice}</p>}
-          <ActivityList
-            history={history}
-            loading={loading}
-            explorerBase={DEFAULTS.explorer}
-            heading={null}
-          />
-          {historyNextBefore !== null && (
-            <div className="flex flex-col gap-1.5 items-center">
-              <Button onClick={onLoadMore} disabled={historyLoadingMore}>
-                {historyLoadingMore ? "Loading…" : "Load more"}
-              </Button>
-              {moreError && <p className="text-err text-[0.82rem]">{moreError}</p>}
-            </div>
-          )}
-        </>
       )}
     </div>
   );

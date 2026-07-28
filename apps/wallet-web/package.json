@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@bongtu/core": "*",
+    "@bongtu/ui": "*",
     "@rainbow-me/rainbowkit": "^2.2.11",
     "@remixicon/react": "^4.9.0",
     "@tanstack/react-query": "^5.101.4",

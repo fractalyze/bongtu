@@ -19,6 +19,7 @@ import { LockChip } from "../components/LockChip.js";
 import { ReceiveModal } from "../components/ReceiveModal.js";
 import { WalletMark } from "../components/WalletMark.js";
 import { Button, IconButton, TestnetTag } from "../components/controls.js";
+import { Banner } from "@bongtu/ui/Banner";
 import {
   EnvelopeLogo,
   IconGear,
@@ -57,7 +58,7 @@ export function Home(): ReactNode {
             indexerUrl={indexerUrl}
             refreshing={refreshing}
             dataError={dataError !== null}
-            onRefresh={() => void refresh()}
+            onRefresh={() => void refresh(true)}
           />
           <LockChip walletName={wallet.name} />
           <IconButton aria-label="Settings" onClick={() => navigate("settings")}>
@@ -147,25 +148,19 @@ export function Home(): ReactNode {
         </div>
       )}
 
-      {dataError ? (
-        <div className="rounded-xl px-3.5 py-3 text-[0.88rem] flex gap-2.5 items-center justify-between flex-wrap border border-warn-border bg-warn-bg text-warn">
-          {dataError}
-          <Button variant="ghost" size="sm" onClick={() => void refresh()}>
-            Retry
-          </Button>
-        </div>
-      ) : (
-        <>
-          {/* Calm strip, not the warn banner: the data below is real, just frozen. */}
-          {dataNotice && <p className="text-muted text-[0.85rem] px-0.5">{dataNotice}</p>}
-          <ActivityList
-            history={history.slice(0, RECENT_COUNT)}
-            loading={loading}
-            explorerBase={DEFAULTS.explorer}
-            onViewAll={() => navigate("activity")}
-          />
-        </>
-      )}
+      {/* The standardized state banner (class 4): set by a failed read, cleared by
+          the next success — and the data already on screen stays below it (a failed
+          background read never blanks the screen). Retry is the MANUAL refresh, so
+          its own failure may toast. */}
+      {dataError && <Banner message={dataError} onRetry={() => void refresh(true)} />}
+      {/* Calm strip, not the warn banner: the data below is real, just frozen. */}
+      {!dataError && dataNotice && <p className="text-muted text-[0.85rem] px-0.5">{dataNotice}</p>}
+      <ActivityList
+        history={history.slice(0, RECENT_COUNT)}
+        loading={loading}
+        explorerBase={DEFAULTS.explorer}
+        onViewAll={() => navigate("activity")}
+      />
 
       {receiveOpen && (
         <ReceiveModal pubkey={encodeAddress(session.compressedPubkey)} onClose={() => setReceiveOpen(false)} />

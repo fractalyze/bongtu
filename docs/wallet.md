@@ -338,7 +338,12 @@ indexer (`src/lib/balance.ts`). The wallet proves control of its own key with an
 read-auth signature over `Poseidon(ownerPub.x, ownerPub.y, ts)`, so it can read only its own row
 even though the arbiter holds everyone's.
 
-**There is no fallback balance path.** If `/notes` fails the wallet shows an error. The pure
+**There is no fallback balance path.** If `/notes` fails the wallet says so on the surface the
+failure's class earns ([errors.md](errors.md)): a failed background refresh sets the stale-data
+*banner* and leaves the numbers already on screen alone (never a toast, never a blanked balance;
+the next successful read clears it), a failed *manual* refresh additionally toasts, and a 401 —
+the one conclusive verdict, since the view token is these reads' only auth — signs out back to
+onboarding with the notice. The pure
 `trialDecryptEvents` core still exists and is tested — it proves the protocol property that every
 receiver ciphertext slice is key-only recoverable (ECDH-decrypt `[value, salt]`, rebuild the
 commitment, accept iff it equals the on-chain leaf; the Poseidon sponge has no MAC, so the leaf
