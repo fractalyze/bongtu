@@ -15,7 +15,7 @@ import {
   type WalletIdentity,
 } from "./derive.js";
 import { assertDeterministicSignatures } from "./loginGuard.js";
-import { signKeyDerivation, type Connection } from "./metamask.js";
+import { signKeyDerivation, type Connection } from "./connection.js";
 
 /** Whether this derivation has to prove the wallet is deterministic before trusting
  *  what it signed (loginGuard.loginNeedsDeterminismCheck decides). */
@@ -65,7 +65,7 @@ export const ACCOUNT_MISMATCH_MESSAGE =
  * Refuse to act under a key that is not the logged-in session's.
  *
  * The derivation above resolves whatever account the wallet has selected AT DERIVE
- * TIME (the ethers signer follows the extension, not the stored session), so a
+ * TIME (the wagmi account store follows the wallet, not the stored session), so a
  * mid-session account switch would otherwise mint or spend under a different
  * person's bjj key — silently, since the flow only ever sees "an identity".
  * keyCache.unlock runs this on every key it derives, before handing it out.

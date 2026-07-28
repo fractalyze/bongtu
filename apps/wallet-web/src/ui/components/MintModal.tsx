@@ -16,7 +16,7 @@ import {
   readGasBalance,
   walletErrorMessage,
   type Connection,
-} from "../../lib/metamask.js";
+} from "../../lib/connection.js";
 import { parseKkrw } from "../../lib/money.js";
 import { shortenPubkey } from "../format.js";
 import { ExplorerLink } from "./ExplorerLink.js";

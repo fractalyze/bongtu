@@ -2,7 +2,7 @@
 // (SPEC §7). Modeled on spendFlow.ts runSpendChain: instead of DOM status lines it reports a
 // coarse stage ("approve" → "prove" → "submit") through a callback the React Deposit
 // screen renders as a staged progress bar. The witness assembly (deposit.ts), in-browser
-// proof (prove.ts) and MetaMask approve/submit (metamask.ts) are the same tested pure
+// proof (prove.ts) and wallet approve/submit (connection.ts) are the same tested pure
 // libs; this file is the un-tested browser wiring.
 //
 // A deposit is 0-in / 2-out (mint), so there is NO note selection and NO membership fetch
@@ -11,8 +11,8 @@
 // permissionless deposit tx).
 
 import { DEFAULTS } from "../config.js";
-import type { Connection } from "./metamask.js";
-import { approveToken, assertPoolKemEpoch, ensureChain, readTokenState, submitDeposit } from "./metamask.js";
+import type { Connection } from "./connection.js";
+import { approveToken, assertPoolKemEpoch, ensureChain, readTokenState, submitDeposit } from "./connection.js";
 import { keyCache, type KeyCache } from "./keyCache.js";
 import { assertDepositAffordable, buildDepositRequest, freshDepositCrypto } from "./deposit.js";
 import { proveInBrowser } from "./prove.js";

@@ -2,7 +2,7 @@
 // MockERC20 whose `mint(to, amount)` is fully permissionless, so any user can self-mint
 // test kKRW from their own MetaMask (paying their own GIWA gas) at ANY time — the
 // affordance is deliberately not gated on balance (a tester with funds still needs more).
-// The tx submission is ethers-bound and lives in metamask.ts (mintTestToken).
+// The tx submission is viem-bound and lives in connection.ts (mintTestToken).
 
 /**
  * The fixed raw-wei amount the dev faucet mints per tap: 1,000,000 kKRW at the token's

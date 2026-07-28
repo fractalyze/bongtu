@@ -1,15 +1,17 @@
 # Wallet
 
-`apps/wallet-web` is the self-custody public app: a wallet in (an injected extension, or WalletConnect when
-the build is configured for it), a BabyJubJub spending key derived on the fly, notes read from an arbiter
-indexer, and transfer / transfer10x2 / withdraw / deposit proved **in the browser**. It imports `@bongtu/core` source directly, so every commitment, nullifier and
+`apps/wallet-web` is the self-custody public app: a wallet in through the RainbowKit connect modal
+(every installed extension via EIP-6963, plus WalletConnect QR / deep-link when the build is
+configured for it — wagmi v2 + viem v2 underneath), a BabyJubJub spending key derived on the fly,
+notes read from an arbiter indexer, and transfer / transfer10x2 / withdraw / deposit proved
+**in the browser**. It imports `@bongtu/core` source directly, so every commitment, nullifier and
 Poseidon-sponge ciphertext it builds is byte-identical to what the provers prove and the contract
 verifies. Run commands and the test layout are owned by `apps/wallet-web/README.md`.
 
 ## Key derivation
 
 There is no seed and no persisted private key. The spending key is a pure function of a wallet
-signature over a domain-separated EIP-712 struct (`src/lib/derive.ts`, `src/lib/metamask.ts`):
+signature over a domain-separated EIP-712 struct (`src/lib/derive.ts`, `src/lib/connection.ts`):
 
 ```
 domain  = { name: "bongtu", version: keyVersion, chainId: 91342, verifyingContract: <pool> }
@@ -70,32 +72,42 @@ A held key belongs to exactly one wallet account. If the selected account change
 refuses the action outright (`ACCOUNT_MISMATCH_MESSAGE`) rather than derive and spend under a
 stranger's key — and when a held key already proves the mismatch, it refuses without a popup.
 
-The login itself is a flow, not component code: `runLogin` (`src/lib/loginFlow.ts`) opens the
-wallet, derives, runs the two checks below, trades the identity for a view token and persists —
-and when a check fails it throws having written **nothing**. `App.connectWallet` is left with the
-lock, the screen state and the one-shot read a tokenless session does.
+The login itself is a flow, not component code: `runLogin` (`src/lib/loginFlow.ts`) takes the
+wallet the connect modal just opened (`connection.ts requireConnection`), derives, runs the two
+checks below, trades the identity for a view token and persists — and when a check fails it throws
+having written **nothing**. `App.connectWallet` is left with the lock, the screen state and the
+one-shot read a tokenless session does; the Onboarding screen opens the RainbowKit modal first when
+no wallet is live and runs the login the moment one is.
 
-### WalletConnect
+### Connecting, and WalletConnect
 
-A second way in, dark unless the build carries `VITE_WC_PROJECT_ID` (`src/lib/walletconnect.ts`).
-Unset — the current default — there is no second button, no SDK fetch, and the wallet behaves
-exactly as it did when an injected extension was the only option. Set, Onboarding offers
-"WalletConnect" alongside (or, with no extension installed, instead of) the extension button; it
-opens the SDK's own QR / deep-link modal, and everything after the connect is the same flow.
+Pressing **Connect Wallet** opens the RainbowKit modal. Its contents are not a hardcoded wallet
+list: wagmi discovers every installed extension per-page over EIP-6963
+(`multiInjectedProviderDiscovery`) and RainbowKit renders each announcement in its "Installed"
+section, so whatever the user actually has is what they can pick. The one explicitly configured
+connector is WalletConnect (`src/lib/wagmi.ts buildConnectors`), and it is dark unless the build
+carries `VITE_WC_PROJECT_ID`: unset — the local-dev default — the modal lists extensions only, no
+WC connector joins the config, and the WC SDK is never fetched (the wagmi connector reaches
+`@walletconnect/ethereum-provider` through a dynamic `import()` only). Set — as in the Vercel prod
+env — the modal also offers the QR / deep-link path for phones and extension-less desktops.
 
-`connectWalletConnect` returns the same `Connection` the injected path returns — an ethers
-`Web3Provider` over the WalletConnect EIP-1193 object — so `identity.ts`, `keyCache.ts`, the action
-flows and every submit helper are untouched and cannot tell the difference. The SDK is reached
-**only** through a dynamic `import()`, so it never enters the default chunk; a test walks the static
-import graph from the entry to keep it that way. A session persists in the SDK's own storage and the
-stored record carries `transport: "walletconnect"`, so a returning visit restores silently over the
-same transport (`reconnectWalletConnect` reads the stored session and never calls `connect()` — a
-reload can't pop a QR code at anyone). `accountsChanged` re-locks; over WalletConnect a `disconnect`
-event is the peer hanging up and ends the session, while an injected wallet's `disconnect` means a
-dropped RPC socket and is deliberately ignored. Signing out ends the pairing rather than leaving the
-wallet app showing bongtu as connected.
+Whatever the modal connects, `src/lib/connection.ts` wraps it into the same `Connection` every
+other module works against: a viem wallet client over the connector's raw EIP-1193 provider
+(signatures and txs reach the wallet the user picked), the app's one viem public client on the GIWA
+RPC (reads and receipt waits never relay through a phone), and a `transport` tag — `"walletconnect"`
+for the WC connector, `"injected"` otherwise — that only the login guard and the chain guard read.
+`identity.ts`, `keyCache.ts`, the action flows and every submit helper cannot tell wallets apart.
 
-Two things genuinely differ from an extension, both about the same risk.
+Sessions restore silently over whatever connector made them: wagmi remembers its connector, and
+`restoreConnection` re-opens it via `eth_accounts` (extensions — never a popup) or the WC
+connector's own stored session (never a QR modal), then requires the stored account to still be
+reported. `reconnectOnMount` is off; the restore is driven explicitly by App's one effect, so a
+page load can never pop anything. `accountsChanged` re-locks the key; a `disconnected` transition
+signs out over WalletConnect only (the peer hanging up is a real sign-out; an extension hiccup is
+not). Signing out disconnects the wagmi connector, which for WalletConnect ends the pairing rather
+than leaving the wallet app showing bongtu as connected.
+
+Two things genuinely differ between transports, both about the same risk.
 
 **The determinism check.** The whole scheme assumes deterministic (RFC-6979) ECDSA — see *Key
 derivation*. MetaMask-class extensions satisfy it; some mobile wallets reachable over WalletConnect
@@ -117,37 +129,45 @@ moment its token expires: "this account derives key K" stays true regardless. It
 and a public key and nothing else, and an explicit Disconnect forgets it — a user asking to sign out
 gets a clean device, and the next login is a first login again.
 
-**Network switching** goes through the same `ensureChain`; over WalletConnect a wallet that won't
-move to GIWA Sepolia gets a message saying to switch in the wallet app, since the raw relay error
-says nothing a user can act on.
+**Network switching** goes through the same `ensureChain` (raw EIP-3085/3326 requests through the
+viem wallet client, so the same two RPCs reach an extension or relay to a phone); over WalletConnect
+a wallet that won't move to GIWA Sepolia gets a message saying to switch in the wallet app, since
+the raw relay error says nothing a user can act on.
 
-**Enabling it.** Create a project at [Reown Cloud](https://cloud.reown.com) and copy its project id
-(it is public — it identifies the dapp to the relay and has no secret half). Set
+**The derivation payload is migration-pinned.** The bjj key is a pure function of the EIP-712
+payload, so the wallet-stack migration to viem pinned it: `test/deriveDeterminism.test.ts` holds the
+payload's EIP-712 digest and the identity a fixed signature derives, both captured from the
+pre-migration (ethers v5) code, and drives the REAL signing path over a mock provider. Those
+constants are the compatibility contract with every existing user's key — never regenerate them.
+
+**Enabling WalletConnect.** Create a project at [Reown Cloud](https://cloud.reown.com) and copy its
+project id (it is public — it identifies the dapp to the relay and has no secret half). Set
 `VITE_WC_PROJECT_ID` in the Vercel project's environment variables and redeploy; it is a build-time
 inject, so an existing deployment does not pick it up. Nothing else changes — no contract, no
 indexer, no circuit.
 
 ## Which wallet the UI shows
 
-Any injected EIP-1193 wallet works, so nothing may be drawn or named as MetaMask by default
-(`src/lib/walletBrand.ts`, `src/lib/eip6963.ts`). Identification has two sources:
+Any wallet the modal can connect works, so nothing may be drawn or named as MetaMask by default
+(`src/lib/walletBrand.ts`). Identification has two sources:
 
-- **Vendor flags** on the injected object decide the *brand*. Order matters: nearly every wallet
-  also sets `isMetaMask: true` so that MetaMask-era dapps keep working, so the vendor's own flag
-  (`isRabby`, `isOkxWallet`, `isCoinbaseWallet`, …) is tested first and `isMetaMask` last. Testing
-  `isMetaMask` first is what showed the fox to everyone.
-- **Self-descriptions** supply the wallet's own display name and icon, which is the only way to name
-  a wallet this app has never heard of. Two sources feed one registry: EIP-6963 announcements from
-  extensions, and WalletConnect peer metadata (`registerAnnouncedWallet`). Neither is trusted:
-  `describeWallet` is the single place that length-caps names, strips control characters, and accepts
-  only `data:image/*` icons — a remote icon URL would report every render back to the vendor, and
-  peer icons are conventionally remote, so they are dropped. A remote wallet therefore shows its real
+- **Vendor flags** on the raw EIP-1193 provider behind the wagmi connector decide the *brand*.
+  Order matters: nearly every wallet also sets `isMetaMask: true` so that MetaMask-era dapps keep
+  working, so the vendor's own flag (`isRabby`, `isOkxWallet`, `isCoinbaseWallet`, …) is tested
+  first and `isMetaMask` last. Testing `isMetaMask` first is what showed the fox to everyone.
+- **Self-descriptions** supply the wallet's own display name and icon — the connector's `name` and
+  `icon`, which wagmi fills from the wallet's EIP-6963 announcement (an extension) or the wallet
+  metadata (a remote one). Neither is trusted: `describeWallet` is the single place that length-caps
+  names, strips control characters, and accepts only `data:image/*` icons — a remote icon URL would
+  report every render back to the vendor, so it is dropped. A remote wallet therefore shows its real
   name beside the generic glyph, and flies no vendor flag, so no brand is ever guessed for it.
 
 What cannot be identified is called "your wallet" in copy and drawn with the generic wallet glyph;
-the MetaMask fox is drawn only for a provider that identified itself as MetaMask. Nothing about the
-brand is persisted: a silently-restored session re-detects it, because `reconnect()` wraps the same
-injected object the announcement came from.
+the MetaMask fox is drawn only for a provider that identified itself as MetaMask. The connected-
+wallet card on Home is **icon-only** (user decision, viem wave): the wallet's name lives in the
+card's tooltip and aria-label, never as visible text. Nothing about the brand is persisted: a
+silently-restored session re-detects it from the reconnected connector (`ui/hooks.ts
+useWalletDescription`).
 
 ## Which circuit a spend uses
 

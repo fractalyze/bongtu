@@ -1,10 +1,11 @@
 // PURE identification of the connected wallet (framework-free, unit-tested headlessly):
 // which brand it is, what to call it in a sentence, and which icon to draw.
 //
-// Two sources feed it. The injected EIP-1193 object carries vendor flags, and the
-// EIP-6963 discovery event carries the wallet's OWN name and icon (see eip6963.ts) —
-// the only way to name a wallet this app has never heard of. The flags decide the
-// brand; the announcement, when there is one, supplies the display name and icon.
+// Two sources feed it. The raw EIP-1193 provider behind the wagmi connector carries
+// vendor flags, and the connector's own metadata (its EIP-6963 announcement for an
+// extension, the peer/wallet metadata for a remote one) carries the wallet's OWN name
+// and icon — the only way to name a wallet this app has never heard of. The flags
+// decide the brand; the metadata, when there is some, supplies the name and icon.
 
 export type WalletBrand =
   | "metamask"
@@ -59,8 +60,8 @@ const BRAND_NAMES: Record<WalletBrand, string | null> = {
 export const NEUTRAL_WALLET_NAME = "your wallet";
 
 /**
- * Classify the raw injected EIP-1193 provider object (ethers v5 keeps it at
- * `web3Provider.provider`). Every flag is matched STRICTLY against `true`: several
+ * Classify the raw EIP-1193 provider object (the wagmi connector's `getProvider()`,
+ * held at `connection.injected`). Every flag is matched STRICTLY against `true`: several
  * wallets spoof compatibility flags with truthy non-boolean values, and an
  * absent/foreign provider must degrade to "unknown", never throw.
  */
@@ -73,18 +74,9 @@ export function walletBrand(injected: unknown): WalletBrand {
   return "unknown";
 }
 
-/**
- * The raw EIP-1193 object to identify: the one behind an ethers connection, else the
- * page's own injected wallet. A silently-restored session goes through the same
- * ethers Web3Provider over the same injected object as a fresh connect, so the wallet
- * re-identifies itself on restore and nothing about it has to be persisted.
- */
-export function injectedFrom(connection: unknown, pageInjected: unknown): unknown {
-  const behind = (connection as { provider?: { provider?: unknown } } | null)?.provider?.provider;
-  return behind ?? pageInjected ?? null;
-}
-
-/** What the EIP-6963 announcement told us about this provider (eip6963.ts). */
+/** What the wallet says about ITSELF — the wagmi connector's own name and icon
+ *  (EIP-6963 announcement metadata for an extension; RainbowKit/WC metadata for a
+ *  remote wallet). Untrusted strings; describeWallet below sanitises. */
 export interface AnnouncedWallet {
   name?: unknown;
   icon?: unknown;

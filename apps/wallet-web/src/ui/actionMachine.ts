@@ -16,7 +16,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { DEFAULTS, type BrowserCircuit } from "../config.js";
 import { ensureCircuitAssets, prewarmProver } from "../lib/prove.js";
-import { walletErrorMessage } from "../lib/metamask.js";
+import { walletErrorMessage } from "../lib/connection.js";
 import { withUnlock, type StagedStep } from "./components/StagedProgress.js";
 import { useCircuitDownload, useElapsedSeconds, type CircuitDownloadView } from "./hooks.js";
 

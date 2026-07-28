@@ -12,25 +12,26 @@
 import type { WalletIdentity } from "./derive.js";
 import { deriveLoginIdentity, type LoginSignaturePlan } from "./identity.js";
 import { obtainViewToken } from "./indexerClient.js";
-import {
-  assertKeyUnchanged,
-  loginNeedsDeterminismCheck,
-  type WalletTransport,
-} from "./loginGuard.js";
-import { connect } from "./metamask.js";
-import type { Connection } from "./metamask.js";
+import { assertKeyUnchanged, loginNeedsDeterminismCheck } from "./loginGuard.js";
+import { ensureChain, requireConnection } from "./connection.js";
+import type { Connection } from "./connection.js";
 import { loadKeyBinding, saveKeyBinding, saveSession, type StoredSession } from "./session.js";
-import { connectWalletConnect } from "./walletconnect.js";
 
 export interface LoginContext {
-  transport: WalletTransport;
   indexerUrl: string;
 }
 
 /** Every I/O edge a login touches, injectable so the refusals gate headlessly. */
 export interface RunLoginDeps {
-  connectInjected: () => Promise<Connection>;
-  connectWalletConnect: () => Promise<Connection>;
+  /** The wallet the connect modal just opened (connection.ts requireConnection).
+   *  Its `transport` decides the determinism rule below — a WalletConnect wallet
+   *  this browser has never derived under pays the double signature. */
+  openConnection: () => Promise<Connection>;
+  /** Prompt the wallet onto GIWA BEFORE anything signs: the derivation's typed
+   *  data pins domain.chainId to GIWA, and wallets reject a v4 request whose
+   *  domain chain differs from the active one — a wallet on another network
+   *  must get the add/switch prompt, not raw provider text. */
+  ensureChain: (connection: Connection) => Promise<void>;
   deriveIdentity: (connection: Connection, plan: LoginSignaturePlan) => Promise<WalletIdentity>;
   obtainViewToken: typeof obtainViewToken;
   loadKeyBinding: (eoaAddress: string) => string | null;
@@ -39,8 +40,8 @@ export interface RunLoginDeps {
 }
 
 const DEFAULT_DEPS: RunLoginDeps = {
-  connectInjected: connect,
-  connectWalletConnect,
+  openConnection: requireConnection,
+  ensureChain,
   deriveIdentity: deriveLoginIdentity,
   obtainViewToken,
   loadKeyBinding,
@@ -69,13 +70,13 @@ export async function runLogin(
   deps: Partial<RunLoginDeps> = {},
 ): Promise<LoginResult> {
   const io = { ...DEFAULT_DEPS, ...deps };
-  const connection =
-    ctx.transport === "walletconnect" ? await io.connectWalletConnect() : await io.connectInjected();
+  const connection = await io.openConnection();
+  await io.ensureChain(connection);
 
   // What this browser last saw this account derive — the reference both checks use.
   const known = io.loadKeyBinding(connection.address);
   const identity = await io.deriveIdentity(connection, {
-    doubleSign: loginNeedsDeterminismCheck(ctx.transport, known),
+    doubleSign: loginNeedsDeterminismCheck(connection.transport, known),
   });
   assertKeyUnchanged(identity.compressedPubkey, known);
 
@@ -92,7 +93,7 @@ export async function runLogin(
       compressedPubkey: identity.compressedPubkey,
       token: view.token,
       exp: view.exp,
-      transport: ctx.transport,
+      transport: connection.transport,
     };
     io.saveSession(session); // address + pubkey + view token; never key material
   } catch {
@@ -103,7 +104,7 @@ export async function runLogin(
       compressedPubkey: identity.compressedPubkey,
       token: "",
       exp: 0,
-      transport: ctx.transport,
+      transport: connection.transport,
     };
     tokenless = true;
   }

@@ -1,15 +1,16 @@
 # bongtu wallet (public PoC)
 
-A minimal, functional self-custody MetaMask wallet (SPEC §7 public app). No seed to
-store: the wallet **derives** a BabyJubJub spending key from a MetaMask signature, so
+A minimal, functional self-custody wallet (SPEC §7 public app) — connect any installed
+extension (EIP-6963) or WalletConnect through the RainbowKit modal. No seed to
+store: the wallet **derives** a BabyJubJub spending key from a wallet signature, so
 the same account regenerates the same key every session. It imports the `@bongtu/core`
 **source directly** (the indexer is reached over HTTP only), so every commitment /
 nullifier / Poseidon-sponge ciphertext it builds is byte-identical to what the
 provers prove and the contract verifies. All proving happens **in the browser** —
 a self-custody wallet never sends spending-key witnesses to a server.
 
-Vite + TypeScript, minimal deps (`ethers` v5 for MetaMask + keccak, `poseidon-lite`
-via the sdk, `snarkjs` for in-browser proving).
+Vite + TypeScript + React, minimal deps (`wagmi` v2 + `viem` v2 + RainbowKit for the
+wallet edge, `poseidon-lite` via the sdk, `snarkjs` for in-browser proving).
 
 ## The flow
 
@@ -36,7 +37,7 @@ key = deriveKeypair(s)  ->  { formattedPrivateKey: s, publicKey: s·Base8 }
   yields the spending key.
 - **Threat model** (SPEC §5.1): *the signature IS the spending key.* v1 = EOA +
   deterministic ECDSA only (MetaMask pinned); 4337 accounts need a different derivation
-  (v1.1). Code: `src/lib/derive.ts` (pure) + `src/lib/metamask.ts` (the signing edge).
+  (v1.1). Code: `src/lib/derive.ts` (pure) + `src/lib/connection.ts` (the signing edge).
 
 ### Receive address (the receive-key UX)
 
@@ -85,8 +86,8 @@ assembles the witness the same way `deploy/e2e_orchestrator.ts` does by hand, in
   `(a, b, c, pub)` — no separate ciphertext arg (unlike disburse).
 
 Then **prove in-browser** (`src/lib/prove.ts`, `snarkjs.groth16.fullProve` over the
-transfer/withdraw `wasm` + `zkey`) → **submit** `pool.transfer` / `pool.withdraw` via
-MetaMask (`src/lib/metamask.ts`).
+transfer/withdraw `wasm` + `zkey`) → **submit** `pool.transfer` / `pool.withdraw` through
+the connected wallet (`src/lib/connection.ts`, viem `writeContract` at the pinned gas floor).
 
 ## Run
 
@@ -109,7 +110,7 @@ npm run build      # vite production build (snarkjs splits into its own dynamic 
 ### Gate reality (what is tested vs the un-tested edge)
 
 MetaMask and the live circuit assets are not present in the build env, so the
-**connect → sign → prove → submit** I/O edge (`metamask.ts`, `prove.ts`) is wired but
+**connect → sign → prove → submit** I/O edge (`connection.ts`, `prove.ts`) is wired but
 not exercised here. The **pure, security-critical logic IS covered** headless
 (`test/wallet.test.ts`, 18 tests): (1) a fixed signature hex derives a stable, pinned
 bjj keypair; a different signature a different key; (2) mock notes (some spent) sum to
@@ -155,7 +156,9 @@ src/
     balance.ts         PURE: sumUnspent + /events trial-decrypt; signed /notes orchestration
     spend.ts           PURE: input notes + recipient + membership -> transfer/withdraw ProvingRequest
     indexerClient.ts   /head /path /events /nullifiers + signed /notes URL (@bongtu/core/eddsa)
-    metamask.ts        connect + eth_signTypedData_v4 + pool.transfer/withdraw (ethers v5)
+    chain.ts           GIWA Sepolia as a viem chain + the pinned gas price
+    wagmi.ts           the one wagmi config (EIP-6963 discovery + flag-guarded WalletConnect)
+    connection.ts      Connection + eth_signTypedData_v4 + pool submits (wagmi + viem)
     prove.ts           browser snarkjs.groth16.fullProve over fetched wasm/zkey
     dom.ts             tiny framework-free DOM helpers
 test/

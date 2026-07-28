@@ -39,7 +39,7 @@ import {
   type WalletIdentity,
 } from "../src/lib/derive.js";
 import { sumUnspent, trialDecryptEvents } from "../src/lib/balance.js";
-import { walletErrorMessage } from "../src/lib/metamask.js";
+import { walletErrorMessage } from "../src/lib/connection.js";
 import type { FeedEvent } from "../src/lib/indexerClient.js";
 import {
   buildTransferRequest,

@@ -80,10 +80,15 @@ export function Home(): ReactNode {
           aria-label="Connected wallet"
         >
           <IconLink size={16} />
-          <WalletMark wallet={wallet} />
-          {/* Name it only when we actually know which wallet it is — "your wallet"
-              next to the address would be noise, not information. */}
-          {wallet.named && <span className="text-[0.8rem]">{wallet.name}</span>}
+          {/* ICON-ONLY (user decision, viem wave): the wallet's mark carries the
+              identity; its NAME lives in the tooltip/aria, never as visible text. */}
+          <span
+            className="inline-flex"
+            title={wallet.named ? wallet.name : undefined}
+            aria-label={wallet.named ? `Connected via ${wallet.name}` : "Connected wallet"}
+          >
+            <WalletMark wallet={wallet} />
+          </span>
           <span className="relative inline-flex group">
             <span
               className="font-mono text-[0.78rem] rounded-md focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2"

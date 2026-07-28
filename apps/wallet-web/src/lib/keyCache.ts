@@ -32,7 +32,7 @@
 
 import type { WalletIdentity } from "./derive.js";
 import { ACCOUNT_MISMATCH_MESSAGE, assertSessionIdentity, deriveTransientIdentity } from "./identity.js";
-import { currentAccount, type Connection } from "./metamask.js";
+import { currentAccount, type Connection } from "./connection.js";
 
 /** How long an unused spending key is kept before the wallet re-locks itself. */
 export const IDLE_WIPE_MS = 10 * 60 * 1000;
@@ -41,7 +41,7 @@ export const IDLE_WIPE_MS = 10 * 60 * 1000;
  *  including both idle-wipe layers — gates headlessly (test/keyCache.test.ts). */
 export interface KeyCacheDeps {
   derive: (connection: Connection) => Promise<WalletIdentity>;
-  currentAccount: (connection: Connection) => Promise<string | null>;
+  currentAccount: () => Promise<string | null>;
   now: () => number;
   idleMs: number;
   /** Arms the idle wipe and returns its canceller. A test can pass a no-op to
@@ -140,7 +140,7 @@ export class KeyCache {
     sessionPubkey: string,
     onDerive?: () => void,
   ): Promise<WalletIdentity> {
-    const account = await this.deps.currentAccount(connection);
+    const account = await this.deps.currentAccount();
     const held = this.held;
     if (held) {
       if (account !== null && account !== held.account) {

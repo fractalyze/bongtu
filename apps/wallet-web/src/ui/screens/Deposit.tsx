@@ -17,7 +17,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { DEFAULTS } from "../../config.js";
 import { runDeposit, type DepositOutcome } from "../../lib/depositFlow.js";
-import { readTokenState } from "../../lib/metamask.js";
+import { readTokenState } from "../../lib/connection.js";
 import { useWallet } from "../App.js";
 import { useActionMachine } from "../actionMachine.js";
 import { formatKkrw, parseKkrw } from "../../lib/money.js";

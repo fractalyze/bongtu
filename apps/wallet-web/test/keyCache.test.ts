@@ -28,7 +28,7 @@ import { readFileSync } from "node:fs";
 import { deriveIdentityFromSignature } from "../src/lib/derive.js";
 import { ACCOUNT_MISMATCH_MESSAGE } from "../src/lib/identity.js";
 import { IDLE_WIPE_MS, KeyCache, type KeyCacheDeps } from "../src/lib/keyCache.js";
-import type { Connection } from "../src/lib/metamask.js";
+import type { Connection } from "../src/lib/connection.js";
 
 const SESSION_SIG = "0x" + "a1".repeat(32) + "b2".repeat(32) + "1c";
 const OTHER_SIG = "0x" + "c3".repeat(32) + "d4".repeat(32) + "1b";

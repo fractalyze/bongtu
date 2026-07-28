@@ -1,6 +1,6 @@
 // The shared prove+submit orchestration for the public wallet's two spend actions
 // (SPEC §7). The witness assembly, membership fold, in-browser proof and wallet submit
-// stay in the same tested pure libs (spend.ts / prove.ts / metamask.ts); this file is
+// stay in the same tested pure libs (spend.ts / prove.ts / connection.ts); this file is
 // the browser wiring, with its I/O behind an injectable seam so the ORDER of its
 // guards — in particular that the session-account check precedes every read, proof and
 // submit — gates headlessly (test/accountBinding.test.ts).
@@ -19,19 +19,17 @@
 // index and a membership path to prove against. That wait is a reported stage of its
 // own ("waiting"), so the screen can say what it is waiting for.
 
-import { ethers } from "ethers";
 import { commitment } from "@bongtu/core/note";
-import { GIWA_GAS_FLOOR_GWEI, explorerTxUrl } from "@bongtu/core/network";
-import type { Calldata } from "@bongtu/core/proving";
 import { DEFAULTS } from "../config.js";
-import type { Connection, SubmitResult } from "./metamask.js";
+import type { Connection } from "./connection.js";
 import {
   assertPoolKemEpoch,
   ensureChain,
   submitTransfer,
+  submitTransfer10x2,
   submitWithdraw,
   walletErrorMessage,
-} from "./metamask.js";
+} from "./connection.js";
 import { keyCache, type KeyCache } from "./keyCache.js";
 import { getHead, getPath, type OwnerNote } from "./indexerClient.js";
 import { pollUntil, type PollForActionOptions } from "./refresh.js";
@@ -86,37 +84,6 @@ export interface SpendContext {
 export interface SpendOutcome {
   txHash: string;
   explorerUrl: string;
-}
-
-// --- the transfer10x2 submit edge -------------------------------------------------
-// This belongs beside submitTransfer/submitWithdraw in metamask.ts and should move
-// there in the next touch of that file (owned by a parallel change right now).
-// Same contract-call shape as every other op: (a, b, c, pub, kemCiphertext) at the
-// GIWA gas floor (ethers' auto-estimate once overpaid ~1500x), pub = 68 signals.
-
-const TRANSFER10X2_FRAGMENT =
-  "function transfer10x2(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[68] pub, bytes kemCiphertext)";
-
-/** Submit a proven transfer10x2 (BongtuPool V5): what every >2-input spend and
- *  every merge leg lands on since transfer10's deprecation (2026-07-28). */
-export async function submitTransfer10x2(
-  connection: Connection,
-  poolAddr: string,
-  calldata: Calldata,
-  kemCiphertext: string,
-  explorerBase: string,
-): Promise<SubmitResult> {
-  // Pre-check the KEM ct length so the contract's WrongKemCiphertextLength revert
-  // becomes a readable client error (mirrors metamask.ts assertKemCiphertext).
-  if (!/^0x[0-9a-fA-F]+$/.test(kemCiphertext) || (kemCiphertext.length - 2) / 2 !== 1088) {
-    throw new Error(`kemCiphertext must be 1088 bytes of 0x-hex (got ${kemCiphertext.length} chars)`);
-  }
-  const pool = new ethers.Contract(poolAddr, [TRANSFER10X2_FRAGMENT], connection.signer);
-  const tx = await pool.transfer10x2(calldata.a, calldata.b, calldata.c, calldata.pub, kemCiphertext, {
-    gasPrice: ethers.utils.parseUnits(GIWA_GAS_FLOOR_GWEI, "gwei"),
-  });
-  await tx.wait();
-  return { txHash: tx.hash, explorerUrl: explorerTxUrl(tx.hash, explorerBase) };
 }
 
 /** The network/proving I/O a spend performs, injectable so the pure orchestration

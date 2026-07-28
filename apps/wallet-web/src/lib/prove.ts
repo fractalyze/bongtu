@@ -166,7 +166,7 @@ export async function prewarmProver(): Promise<void> {
 /**
  * Prove a transfer/withdraw ProvingRequest in the browser and return the on-chain
  * calldata `(a, b, c, pub)`. `pub` already carries the ciphertext (circuit outputs),
- * so the caller submits it straight to pool.transfer / pool.withdraw (metamask.ts).
+ * so the caller submits it straight to pool.transfer / pool.withdraw (connection.ts).
  *
  * Uses the KEPT wasm/zkey buffers (via `ensureCircuitAssets`) and the two-step
  * witness→prove path, so the zkey is not re-fetched per proof. Same external contract

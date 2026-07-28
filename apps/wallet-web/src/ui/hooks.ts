@@ -2,9 +2,9 @@
 // an elapsed-seconds counter for the proving stage, and copy-with-feedback.
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useAccount } from "wagmi";
 import { copyText } from "../lib/clipboard.js";
 import { isWalletUnlocked, subscribeLock } from "../lib/keyCache.js";
-import { announcedWallet, subscribeWallets, walletDiscoveryVersion } from "../lib/eip6963.js";
 import { describeWallet, type WalletDescription } from "../lib/walletBrand.js";
 import { subscribeCircuitDownload, type CircuitDownloadState } from "../lib/prove.js";
 import type { BrowserCircuit } from "../config.js";
@@ -43,17 +43,42 @@ export function useWalletUnlocked(): boolean {
 }
 
 /**
- * Which wallet the user is on — brand, display name and icon for `injected` (the raw
- * EIP-1193 object). Re-renders when a late EIP-6963 announcement arrives, so a name
- * that lands after first paint still reaches the copy that interpolates it.
+ * Which wallet the user is on — brand, display name and icon, from the wagmi
+ * connector wagmi has live (its `name`/`icon` are the wallet's own EIP-6963
+ * announcement for an extension, the wallet metadata for a remote one). The raw
+ * EIP-1193 provider behind the connector resolves asynchronously and refines the
+ * BRAND (vendor flags) when it lands; the name is available immediately. Both go
+ * through describeWallet's one sanitisation path (walletBrand.ts) — a non-`data:`
+ * icon is dropped, never fetched.
  */
-export function useWalletDescription(injected: unknown): WalletDescription {
-  const discovered = useSyncExternalStore(subscribeWallets, walletDiscoveryVersion, () => 0);
+export function useWalletDescription(): WalletDescription {
+  const { connector } = useAccount();
+  const [injected, setInjected] = useState<unknown>(null);
+  useEffect(() => {
+    if (!connector) {
+      setInjected(null);
+      return;
+    }
+    let live = true;
+    connector
+      .getProvider()
+      .then((p) => {
+        if (live) setInjected(p);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [connector]);
   return useMemo(
-    () => describeWallet(injected, announcedWallet(injected)),
-    // `discovered` is the announcement counter: not read here, but a new
-    // announcement is exactly when this description can change.
-    [injected, discovered],
+    () =>
+      describeWallet(
+        // Before any connection, the page's own injected wallet is the subject —
+        // that is what Onboarding's copy can name.
+        injected ?? (globalThis as { ethereum?: unknown }).ethereum ?? null,
+        connector ? { name: connector.name, icon: connector.icon } : null,
+      ),
+    [injected, connector],
   );
 }
 

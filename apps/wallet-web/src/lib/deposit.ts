@@ -13,7 +13,7 @@
 // passes the contract's ZeroOutputCommitment check.
 //
 // What it does NOT do (SPEC §6 boundary): it does not prove (browser snarkjs, prove.ts),
-// approve the ERC-20, or send the tx (metamask.ts). It stops at "a valid deposit
+// approve the ERC-20, or send the tx (connection.ts). It stops at "a valid deposit
 // ProvingRequest", ready to prove and submit.
 
 import { commitment } from "@bongtu/core/note";

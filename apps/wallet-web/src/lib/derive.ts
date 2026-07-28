@@ -24,7 +24,7 @@
 // EOA + deterministic ECDSA only (MetaMask pinned); 4337 accounts need a different
 // derivation (v1.1).
 
-import { ethers } from "ethers";
+import { keccak256 } from "viem";
 import { deriveKeypair } from "@bongtu/core/note";
 import type { Keypair } from "@bongtu/core/note";
 import { packPubkey } from "@bongtu/core/pubkey";
@@ -97,7 +97,10 @@ export function keyDerivationTypedData(
  * degenerate all-zero reduction.
  */
 export function scalarFromSignature(signature: string): bigint {
-  const digest = BigInt(ethers.utils.keccak256(signature));
+  // keccak256 over the DECODED signature bytes (viem hashes the hex-decoded
+  // bytes exactly as ethers.utils.keccak256 did — the determinism fixture test
+  // pins the derived key against the pre-migration value).
+  const digest = BigInt(keccak256(signature as `0x${string}`));
   const s = digest % SUBGROUP_ORDER;
   if (s === 0n) {
     throw new Error("scalarFromSignature: signature hashed to 0 mod L (astronomically rare). Re-sign");

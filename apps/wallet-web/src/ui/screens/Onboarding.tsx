@@ -1,33 +1,55 @@
-// First run: a compact centered hero, three one-line steps, and the ways in — the
-// installed extension, named after itself (walletBrand.ts), and WalletConnect when
-// this build carries a project id. Whichever is pressed, connecting is ONE flow — the
-// wallet connect, the deterministic eth_signTypedData_v4 signature, and bjj key
-// derivation happen back to back (loginFlow.runLogin), so the user presses once and
-// lands on Home with a key.
+// First run: a compact centered hero, three one-line steps, and ONE way in — the
+// Connect button opens the RainbowKit modal, which lists every installed extension
+// (EIP-6963) and, when the build carries a WalletConnect project id, the QR /
+// deep-link path for phones. Whatever the modal connects, logging in is ONE flow —
+// the deterministic eth_signTypedData_v4 signature and bjj key derivation run the
+// moment the wallet is live (the effect below), so the user presses once and lands
+// on Home with a key.
 // Copy is deliberately short and non-technical (locked after a diagram round —
 // the user prefers text, one clause per step): never key/proof mechanics here.
 
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
+import { useAccount } from "wagmi";
+import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { DEFAULTS } from "../../config.js";
 import { useWallet } from "../App.js";
-import { hasInjectedWallet, metamaskDeepLink } from "../../lib/metamask.js";
-import { walletConnectEnabled } from "../../lib/walletconnect.js";
-import {
-  EnvelopeLogo,
-  IconDeposit,
-  IconSend,
-  IconWallet,
-  WalletConnectMark,
-} from "../components/icons.js";
+import { hasInjectedWallet, metamaskDeepLink } from "../../lib/connection.js";
+import { walletConnectEnabled } from "../../lib/wagmi.js";
+import { EnvelopeLogo, IconDeposit, IconSend, IconWallet } from "../components/icons.js";
 import { Button, ErrorBanner, TestnetTag } from "../components/controls.js";
 
 export function Onboarding(): ReactNode {
-  const { wallet, connectWallet, connecting, connectError } = useWallet();
-  const connectLabel = wallet.named ? `Connect ${wallet.name}` : "Connect Wallet";
+  const { connectWallet, connecting, connectError } = useWallet();
+  const { isConnected } = useAccount();
+  const { openConnectModal, connectModalOpen } = useConnectModal();
+  // Set when the user presses Connect while no wallet is live: the modal opens, and
+  // the moment wagmi reports a connection the login runs — one press, one flow.
+  const [loginPending, setLoginPending] = useState(false);
+
+  useEffect(() => {
+    if (loginPending && isConnected) {
+      setLoginPending(false);
+      void connectWallet();
+    }
+  }, [loginPending, isConnected, connectWallet]);
+
+  const onConnect = (): void => {
+    if (isConnected) {
+      // A wallet is already live (warm reconnect, or a previous modal round whose
+      // login failed) — no modal needed, go straight to the signature.
+      void connectWallet();
+      return;
+    }
+    setLoginPending(true);
+    openConnectModal?.();
+  };
+
   const injected = hasInjectedWallet();
-  // Absent VITE_WC_PROJECT_ID this is false at build time and the button below never
-  // exists — the extension is the only way in, exactly as before (walletconnect.ts).
+  // Absent VITE_WC_PROJECT_ID this is false at build time: the modal lists only the
+  // installed extensions, and the no-wallet fallback below stays the deep link.
   const remote = walletConnectEnabled();
+  const busy = connecting || connectModalOpen;
   return (
     <div className="px-5.5 py-6.5 flex flex-col justify-center gap-4 flex-1 bg-bg">
       {/* flex-col, not inline flow: an inline logo span sits on the text baseline
@@ -78,55 +100,30 @@ export function Onboarding(): ReactNode {
 
       {connectError && <ErrorBanner message={connectError} />}
 
-      {injected && (
-        <Button
-          variant="primary"
-          size="lg"
-          block
-          onClick={() => connectWallet("injected")}
-          disabled={connecting !== null}
-        >
-          {connecting === "injected" ? "Connecting…" : connectLabel}
+      {(injected || remote) && (
+        <Button variant="primary" size="lg" block onClick={onConnect} disabled={busy}>
+          {connecting ? "Connecting…" : "Connect Wallet"}
         </Button>
       )}
 
-      {remote && (
-        // Primary when there is no extension to be the primary — that is the whole
-        // point of the option: a phone wallet, or a desktop wallet with no extension.
-        <Button
-          variant={injected ? "ghost" : "primary"}
-          size="lg"
-          block
-          onClick={() => connectWallet("walletconnect")}
-          disabled={connecting !== null}
-          className="inline-flex items-center justify-center gap-2"
-        >
-          <WalletConnectMark size={20} />
-          {connecting === "walletconnect" ? "Connecting…" : "WalletConnect"}
-        </Button>
-      )}
-
-      {!injected && (
-        // No injected provider (plain mobile browser, or desktop without the
-        // extension): the deep link reopens this page inside MetaMask Mobile's
-        // dapp browser, where the normal connect flow works.
+      {!injected && !remote && (
+        // No injected provider AND no WalletConnect in this build (plain mobile
+        // browser, or desktop without an extension): the deep link reopens this page
+        // inside MetaMask Mobile's dapp browser, where the normal connect flow works.
         <>
           <a
             className={
               "block w-full rounded-xl border px-4.5 py-[15px] text-[1.02rem] font-semibold " +
               "cursor-pointer transition-colors text-center no-underline " +
-              (remote
-                ? "border-border bg-surface text-ink hover:border-border-strong"
-                : "border-transparent bg-primary text-primary-ink hover:bg-primary-hover")
+              "border-transparent bg-primary text-primary-ink hover:bg-primary-hover"
             }
             href={metamaskDeepLink()}
           >
             Open in MetaMask App
           </a>
           <p className="text-sm text-muted text-center">
-            {remote
-              ? "Or open this page inside the MetaMask app."
-              : "On mobile this opens the MetaMask app; on desktop, install the MetaMask extension and reload."}
+            On mobile this opens the MetaMask app; on desktop, install the MetaMask extension and
+            reload.
           </p>
         </>
       )}

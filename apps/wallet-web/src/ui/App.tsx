@@ -22,13 +22,17 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { DEFAULTS } from "../config.js";
-import { onWalletEvents, reconnect, walletErrorMessage, type Connection } from "../lib/metamask.js";
+import {
+  endWalletConnection,
+  restoreConnection,
+  warmReconnect,
+  watchWallet,
+  walletErrorMessage,
+  type Connection,
+} from "../lib/connection.js";
 import { runLogin } from "../lib/loginFlow.js";
-import type { WalletTransport } from "../lib/loginGuard.js";
-import { disconnectWalletConnect, reconnectWalletConnect } from "../lib/walletconnect.js";
 import { keyCache } from "../lib/keyCache.js";
-import { startWalletDiscovery } from "../lib/eip6963.js";
-import { injectedFrom, type WalletDescription } from "../lib/walletBrand.js";
+import type { WalletDescription } from "../lib/walletBrand.js";
 import { sumUnspent } from "../lib/balance.js";
 import {
   buildNotesUrl,
@@ -93,11 +97,13 @@ export interface WalletContextValue {
    *  cannot refresh). Never clears the balance the way dataError does. */
   dataNotice: string | null;
 
-  /** The transport mid-connect: both connect buttons disable, only the pressed one
-   *  says "Connecting…". */
-  connecting: WalletTransport | null;
+  /** True while a login is running (the Connect button disables and says so).
+   *  Which wallet to use is the RainbowKit modal's business, not this state's. */
+  connecting: boolean;
   connectError: string | null;
-  connectWallet: (transport: WalletTransport) => Promise<void>;
+  /** Log in with whatever wallet wagmi has connected (the modal's pick). The
+   *  Onboarding screen opens the modal first when nothing is connected yet. */
+  connectWallet: () => Promise<void>;
   disconnect: () => void;
   refresh: () => Promise<void>;
   /** post-action refresh: poll until `txHash` is reflected, then apply the data. */
@@ -147,16 +153,12 @@ export function App(): ReactNode {
   const [dataError, setDataError] = useState<string | null>(null);
   const [dataNotice, setDataNotice] = useState<string | null>(null);
 
-  const [connecting, setConnecting] = useState<WalletTransport | null>(null);
+  const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
 
-  // Ask every installed wallet to announce itself once, then describe the one in use.
-  // Before a connection exists the page's injected wallet is the subject — that is
-  // what Onboarding names its Connect button after.
-  useEffect(startWalletDiscovery, []);
-  const wallet = useWalletDescription(
-    injectedFrom(connection, (globalThis as { ethereum?: unknown }).ethereum),
-  );
+  // Which wallet the user is on — from the wagmi connector (its EIP-6963 metadata),
+  // refined with vendor brand flags once the raw provider resolves (hooks.ts).
+  const wallet = useWalletDescription();
 
   /** Used by every read path except the tokenless one-shot below, which cannot
    *  page and so cannot share this. */
@@ -191,7 +193,9 @@ export function App(): ReactNode {
     clearSession();
     if (forget) {
       clearKeyBindings();
-      void disconnectWalletConnect();
+      // wagmi drops + forgets the connector (for WalletConnect that ends the
+      // session, so the wallet app stops showing bongtu as connected).
+      void endWalletConnection();
     }
     setConnection(null);
     setSession(null);
@@ -244,19 +248,20 @@ export function App(): ReactNode {
   // moment it happens — the flows re-check anyway, this just makes the header honest
   // (and re-locks a wallet whose owner walked away from the account).
   //
-  // Re-subscribes when the connection changes, because that is when the emitter does:
-  // before a connection it is the page's injected wallet, after one it is whatever
-  // that connection talks through. `disconnect` is wired for WalletConnect ONLY —
-  // there it is the phone ending the session, while an injected wallet fires it for a
-  // dropped RPC socket, which is no reason to sign anyone out.
+  // wagmi's account store is the one emitter for every connector, so this watches it
+  // rather than any per-transport event surface. `disconnected` signs out for
+  // WalletConnect ONLY — there it is the phone ending the session, while an
+  // extension's disconnect can be a mere provider hiccup, which is no reason to sign
+  // anyone out.
   useEffect(
     () =>
-      onWalletEvents(connection, {
+      watchWallet({
         accountsChanged: () => keyCache.lock(),
-        disconnect:
-          connection?.transport === "walletconnect"
-            ? () => endSession("Your wallet ended the connection. Connect again to continue.")
-            : undefined,
+        disconnected: () => {
+          if (connection?.transport === "walletconnect") {
+            endSession("Your wallet ended the connection. Connect again to continue.");
+          }
+        },
       }),
     [connection, endSession],
   );
@@ -269,15 +274,17 @@ export function App(): ReactNode {
     if (restored.current) return; // StrictMode double-mount guard
     restored.current = true;
     const stored = loadSession();
-    if (!stored) return;
+    if (!stored) {
+      // Nothing to restore — still warm wagmi's remembered connector (silent), so
+      // the Connect button can skip the modal for a wallet that is already live.
+      warmReconnect();
+      return;
+    }
     void (async () => {
-      // Reopen the transport the session was made on. Both are silent by construction:
-      // eth_accounts never prompts, and the WalletConnect restore reads the SDK's own
-      // stored session rather than calling connect(), so no QR modal can appear here.
-      const conn =
-        stored.transport === "walletconnect"
-          ? await reconnectWalletConnect(stored.eoaAddress)
-          : await reconnect(stored.eoaAddress);
+      // Reopen whatever connector the session was made over. Silent by construction:
+      // wagmi re-opens its remembered connector via eth_accounts (never a prompt) or
+      // the WalletConnect connector's own stored session (never a QR modal).
+      const conn = await restoreConnection(stored.eoaAddress);
       if (!conn) {
         // account changed or no longer authorised — require a fresh connect.
         clearSession();
@@ -289,17 +296,18 @@ export function App(): ReactNode {
   }, []);
 
   const connectWallet = useCallback(
-    async (transport: WalletTransport): Promise<void> => {
-      setConnecting(transport);
+    async (): Promise<void> => {
+      setConnecting(true);
       setConnectError(null);
       try {
         // Everything security-relevant about a login — the derivation, the two
         // refusals, the token handshake, what gets persisted — lives in the flow
-        // (loginFlow.ts), which is gated headlessly. The identity it returns never
-        // enters React state: the only reference that outlives this function is the
-        // one keyCache.seed takes below (memory-only, idle-wiped).
+        // (loginFlow.ts), which is gated headlessly; it logs in with whatever wallet
+        // the RainbowKit modal connected (connection.ts requireConnection). The
+        // identity it returns never enters React state: the only reference that
+        // outlives this function is the one keyCache.seed takes below (memory-only,
+        // idle-wiped).
         const { connection: conn, identity: id, session: sess, tokenless } = await runLogin({
-          transport,
           indexerUrl: INDEXER_URL,
         });
         if (tokenless) {
@@ -338,7 +346,7 @@ export function App(): ReactNode {
       } catch (e) {
         setConnectError(walletErrorMessage(e));
       } finally {
-        setConnecting(null);
+        setConnecting(false);
       }
     },
     [applySnapshot],

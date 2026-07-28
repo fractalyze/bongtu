@@ -151,20 +151,6 @@ export function MetaMaskFox({ size = 18, className }: IconProps): ReactNode {
   );
 }
 
-/** The WalletConnect mark (the two-arc "signal"), in the current text colour so it
- *  sits on a button of any variant. Inline like the fox: a brand mark, and never a
- *  remote fetch — nothing about which wallets exist should reach a third party. */
-export function WalletConnectMark({ size = 18, className }: IconProps): ReactNode {
-  return (
-    <svg viewBox="0 0 32 32" width={size} height={size} aria-hidden="true" className={className}>
-      <path
-        d="M9.58 11.29c3.55-3.47 9.3-3.47 12.85 0l.43.42c.18.17.18.45 0 .62l-1.46 1.43a.23.23 0 0 1-.32 0l-.59-.58c-2.47-2.42-6.49-2.42-8.96 0l-.63.62a.23.23 0 0 1-.32 0L9.12 12.4a.44.44 0 0 1 0-.62zm15.87 2.96 1.3 1.27c.18.18.18.46 0 .63l-5.87 5.75a.46.46 0 0 1-.64 0l-4.17-4.08a.11.11 0 0 0-.16 0l-4.17 4.08a.46.46 0 0 1-.64 0l-5.87-5.75a.44.44 0 0 1 0-.63l1.3-1.27a.46.46 0 0 1 .64 0l4.17 4.08c.04.04.12.04.16 0l4.17-4.08a.46.46 0 0 1 .64 0l4.17 4.08c.04.04.12.04.16 0l4.17-4.08a.46.46 0 0 1 .64 0z"
-        fill="currentColor"
-      />
-    </svg>
-  );
-}
-
 export function IconShieldCheck({ size = 20, className }: IconProps): ReactNode {
   return <RiShieldCheckLine size={size} className={className} />;
 }

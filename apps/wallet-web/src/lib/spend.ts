@@ -8,7 +8,7 @@
 // ProvingRequest form (@bongtu/core/proving).
 //
 // What it does NOT do (SPEC §6 boundary): it does not prove (browser snarkjs, see
-// prove.ts) and does not send the tx (MetaMask, see metamask.ts). It stops at "a
+// prove.ts) and does not send the tx (the wallet, see connection.ts). It stops at "a
 // valid transfer/transfer10x2/withdraw ProvingRequest", ready to prove and submit.
 //
 // ARITY, and who picks it. Every circuit here takes a FIXED number of inputs — 2 for
