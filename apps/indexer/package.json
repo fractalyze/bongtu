@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@bongtu/core": "*",
-    "pg": "^8.22.0"
+    "pg": "^8.22.0",
+    "viem": "^2.55.10"
   },
   "scripts": {
     "start": "node --import tsx src/index.ts",
