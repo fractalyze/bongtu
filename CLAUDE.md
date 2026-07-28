@@ -40,6 +40,13 @@ not re-derive what those files own.
   test against a clean env before pushing — see `.dev/ci.md`. In particular, never call
   `loadEthers()` from a CI-run test (use `@noble/hashes` for hashing); and refresh
   `apps/indexer/abi/BongtuPool.abi.json` whenever the pool ABI changes (CI drift-gates it).
+- **package-lock.json regen**: npm 11.5 on this box reuses the actual node_modules tree and
+  silently DROPS the ~49 cross-platform optional entries (@esbuild/*, @rollup/rollup-*) —
+  the box tolerates it but Vercel's `npm ci` rejects the lock and every git-integration
+  deploy breaks. Never regen the lock casually; to regen, copy package.json + all workspace
+  package.jsons (NO node_modules, NO old lock) to a scratch dir, `npm install
+  --package-lock-only` there, copy back. Adding a dep with the complete lock as base is safe
+  (verified) — check `@esbuild/` entry count (=49) after any lock-touching operation.
 - **Pushing workflow-file changes**: the dev checkout's git PAT lacks the `workflow` scope —
   a push touching `.github/workflows/*` is rejected. Push those with the gh CLI token:
   `GHTOKEN=$(gh auth token); git -c credential.helper= -c "http.https://github.com/.extraheader=Authorization: Basic $(printf "x-access-token:%s" "$GHTOKEN" | base64 -w0)" push origin main`.
