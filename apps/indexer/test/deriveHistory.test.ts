@@ -95,6 +95,29 @@ test("consolidation merge with a zero payment slot: the pair carries the merged 
   ]);
 });
 
+test("transfer10x2 payee + change over 4 real inputs derives exactly a transfer's rows", () => {
+  // The 10-input arity must not leak into the feed: only the outputs drive the
+  // rows, so 4 real inputs + 6 zero pads with a payee + self change reads
+  // byte-identically to the arity-2 "self change" case above.
+  const ins = [note(A, 10n), note(A, 20n), note(A, 30n), note(A, 40n), ...Array.from({ length: 6 }, () => note(A, 0n))];
+  const drafts = deriveHistory(op("transfer10x2"), env(ins, [note(B, 70n), note(A, 30n)]), false);
+  assert.deepEqual(drafts.map(shape), [
+    ["B", "received", "A", "70"],
+    ["A", "sent", "B", "70"],
+  ]);
+});
+
+test("transfer10x2 merge with both outputs self surfaces as the self-send pair", () => {
+  // A consolidation merge would otherwise vanish under change suppression
+  // (fractalyze/bongtu#1) — the pair carries the payment slot (the merged sum).
+  const ins = [note(A, 60n), note(A, 40n), ...Array.from({ length: 8 }, () => note(A, 0n))];
+  const drafts = deriveHistory(op("transfer10x2"), env(ins, [note(A, 100n), note(A, 0n)]), false);
+  assert.deepEqual(drafts.map(shape), [
+    ["A", "sent", "A", "100"],
+    ["A", "received", "A", "100"],
+  ]);
+});
+
 test("transfer whose outputs are all zero yields nothing at all", () => {
   const drafts = deriveHistory(op("transfer"), env([note(A, 0n), note(A, 0n)], [note(A, 0n), note(B, 0n)]), false);
   assert.deepEqual(drafts, []);

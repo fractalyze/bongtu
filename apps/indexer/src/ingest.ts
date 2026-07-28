@@ -25,7 +25,7 @@ import { kemPkFromSecret } from "@bongtu/core/kem";
 import { isPreKemProbeError } from "@bongtu/core/network";
 
 import { MirrorTree } from "./tree.js";
-import { ethers, poolAbi, abiKnowsKem, kemBootGuardError, type ChainConfig } from "./chain.js";
+import { ethers, poolAbi, abiKnowsKem, kemBootGuardError, staleOpAbiError, type ChainConfig } from "./chain.js";
 import { InMemoryStore, type StorePort, type Slice } from "./store.js";
 import { verifyDisclosure } from "./disclosure.js";
 import { connect, PostgresStore, PostgresLedger } from "./postgres.js";
@@ -132,6 +132,10 @@ export class Indexer {
       if (!isPreKemProbeError(e)) throw e;
     }
     const kemKey = this.cfg.authorityKemKey ?? null;
+    // Stale-op-ABI check first: it is unconditional (the fragments ship
+    // in-repo), where the KEM guard only arms on a KEM-epoch pool.
+    const stale = staleOpAbiError(this.pool.interface);
+    if (stale !== null) return stale;
     return kemBootGuardError({
       kemPkHash,
       arbiterMode: this.arbiterMode,
@@ -419,8 +423,9 @@ export class Indexer {
     // order, consuming the pass-1 pairs as ordered per-tx queues. One tx may
     // hold several pool ops (multicall / Safe / 4337 bundle — transfer and
     // withdraw are permissionless, so third-party wrappers can batch them
-    // today): each Deposited/Transferred consumes 2 pairs, each Transferred10
-    // 10, each Withdrawn 1, and each Disbursed the next SubtreeAppended. Every
+    // today): consumption follows each op's OUTPUT arity, not its input arity —
+    // Deposited/Transferred/Transferred10x2 take 2 pairs, Transferred10 takes
+    // 10, Withdrawn 1, and each Disbursed the next SubtreeAppended. Every
     // consumed pair is cross-checked against the event's own commitment
     // argument — a correlation slip throws instead of recording a wrong leaf.
     const takeAppend = (txHash: string, expected: bigint, what: string): number => {
@@ -512,27 +517,31 @@ export class Indexer {
             });
           }
         }
-      } else if (l.name === "Transferred10") {
-        // The arity-10 transfer: same event grammar as Transferred, ten of
-        // everything, and the ten receiver ciphertexts arrive as ONE flat
-        // uint256[40] in leaf order — sliced at i*4, the same loop a disburse
-        // batch already uses. There is no V1 vintage to dual-parse: transfer10
-        // did not exist before the V4 upgrade, so a log of it always carries the
-        // KEM fields.
+      } else if (l.name === "Transferred10" || l.name === "Transferred10x2") {
+        // The 10-input transfers: same event grammar as Transferred, ten
+        // nullifiers, and the receiver ciphertexts arrive as ONE flat run in
+        // leaf order — sliced at i*4, the same loop a disburse batch already
+        // uses. Transferred10 (V4) publishes ten outputs; Transferred10x2 (V5)
+        // is the same ten-input spend but only two outputs (payment + change,
+        // receivers uint256[8], authority uint256[31]) — the output commitment
+        // count is what the branch dispatches on, everything else is shared.
+        // Neither has a V1 vintage to dual-parse: the entry points did not
+        // exist before their upgrade, so a log always carries the KEM fields.
+        const kind = l.name === "Transferred10" ? ("transfer10" as const) : ("transfer10x2" as const);
         const ocs = (l.args.outputCommitments as unknown[]).map(bn);
         const leaves = ocs.map((oc, i) => ({
-          leafIndex: takeAppend(l.txHash, oc, `Transferred10#out${i}`),
+          leafIndex: takeAppend(l.txHash, oc, `${l.name}#out${i}`),
           commitment: oc,
         }));
         for (const lf of leaves) this.tree.recordLeaf(lf.leafIndex, lf.commitment);
         const authorityCt = (l.args.encryptedValuesForAuthority as unknown[]).map(bn);
-        // ciphertext layout: receivers[10][4] (flat) ++ authority[64]
+        // ciphertext layout: receivers[nOut][4] (flat) ++ authority tail
         const ct: bigint[] = [...(l.args.encryptedValuesForReceivers as unknown[]).map(bn), ...authorityCt];
         const slices: Slice[] = leaves.map((lf, i) => ({ offset: i * 4, elts: 4, leafIndex: lf.leafIndex }));
         slices.push({ offset: 4 * leaves.length, elts: authorityCt.length, leafIndex: null }); // authority envelope (not a leaf)
         const t10Entry = this.store.addEvent({
           txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
-          kind: "transfer10", epoch: Number(bn(l.args.epoch)),
+          kind, epoch: Number(bn(l.args.epoch)),
           ecdhPublicKey: [dec(bn(l.args.ecdhPublicKey[0])), dec(bn(l.args.ecdhPublicKey[1]))],
           encryptionNonce: dec(bn(l.args.encryptionNonce)),
           slices, ciphertext: ct.map(dec),
@@ -543,7 +552,7 @@ export class Indexer {
           this.store.addNullifiers((l.args.nullifiers as unknown[]).map(bn));
           if (this.ledger) {
             this.ledger.apply({
-              kind: "transfer10", txHash: l.txHash, logIndex: l.logIndex, blockTimestamp: l.blockTimestamp,
+              kind, txHash: l.txHash, logIndex: l.logIndex, blockTimestamp: l.blockTimestamp,
               ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
               nonce: bn(l.args.encryptionNonce),
               authorityCt,

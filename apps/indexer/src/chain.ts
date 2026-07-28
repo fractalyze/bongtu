@@ -60,6 +60,25 @@ export function abiKnowsKem(iface: any): boolean {
   );
 }
 
+/** Op-event fragments the ingest dispatches on that postdate the V2 artifact
+ *  vintage. Unlike the KEM axis (conditioned on chain state), these ship
+ *  in-repo, so a build missing one is stale UNCONDITIONALLY — and a stale
+ *  build silently under-records: parseLog misses the unknown topic0 while the
+ *  unchanged Appended logs keep the mirror and /health green (the same
+ *  lagging-indexer failure of pq-envelope-design.md §7, one axis over).
+ *  Returns the one-line fatal error, else null. Pure, like kemBootGuardError. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function staleOpAbiError(iface: any): string | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const names = new Set(Object.values(iface.events as Record<string, any>).map((ev: any) => ev.name));
+  for (const wanted of ["Transferred10", "Transferred10x2"]) {
+    if (!names.has(wanted)) {
+      return `FATAL: this build's ABI lacks the ${wanted} event — a stale contracts/out (or apps/indexer/abi/BongtuPool.abi.json) silently skips every ${wanted} op while /health stays green. Rebuild the pool ABI (recipe: apps/indexer/abi/README.md).`;
+    }
+  }
+  return null;
+}
+
 /**
  * Resolve the pool address + RPC + start block from env / addresses.<chainId>.json.
  * - RPC:        env RPC or GIWA_RPC or E2E_RPC, else the anvil default.

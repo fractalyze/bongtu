@@ -10,6 +10,8 @@
 //   - a replayed log range (must converge, not double feed/notes/nullifiers);
 //   - transfer10, whose one op moves ten leaves through the correlation ladder
 //     at once (self-merge and fan-out, plus its own replay convergence);
+//   - transfer10x2, the same ten-input spend publishing only payment + change
+//     (payee history == an arity-2 transfer's, self-merge pair, ABI round-trip);
 //   - Disbursed with and without its DisburseCiphertexts log (withheld feed
 //     entry + alarm; the ledger only opens published batches);
 //   - PostgresLedger's own (txHash, logIndex) replay dedup;
@@ -239,6 +241,47 @@ function makeSim() {
     return logs;
   };
 
+  // transfer10x2 (V5) shares transfer10's input side — `ins` all owned by
+  // ins[0].owner, padded to 10 zero-value self notes — but publishes exactly
+  // TWO outputs (payment + change), each still keyed at `nonce + i`.
+  const transfer10x2 = (
+    txHash: string,
+    ins: NoteSpec[],
+    outs: [NoteSpec, NoteSpec],
+    eph: bigint,
+    nonce: bigint,
+    nfs: bigint[],
+    padSaltBase: bigint,
+  ): ParsedLog[] => {
+    tx();
+    const sender = ins[0].owner;
+    const inAll = [
+      ...ins,
+      ...Array.from({ length: 10 - ins.length }, (_, i) => note(sender, 0n, padSaltBase + BigInt(i))),
+    ];
+    const commits = outs.map(commitOf);
+    const logs = commits.map((c) => appended(txHash, c));
+    const plain = [
+      ...pub2(sender),
+      ...inAll.flatMap((n) => [n.v, n.s]),
+      ...outs.flatMap((n) => pub2(n.owner)),
+      ...outs.flatMap((n) => [n.v, n.s]),
+    ];
+    logs.push(
+      log("Transferred10x2", txHash, {
+        outputCommitments: commits,
+        nullifiers: nfs,
+        epoch: 1n,
+        ecdhPublicKey: pub2(deriveKeypair(eph)),
+        encryptedValuesForReceivers: outs.flatMap((o, i) =>
+          poseidonEncrypt([o.v, o.s], ecdhSharedSecret(eph, o.owner.publicKey), nonce + BigInt(i))),
+        encryptedValuesForAuthority: poseidonEncrypt(plain, ecdhSharedSecret(eph, ARB.publicKey), nonce),
+        encryptionNonce: nonce,
+      }),
+    );
+    return logs;
+  };
+
   const disburse = (
     txHash: string,
     input: NoteSpec,
@@ -280,7 +323,7 @@ function makeSim() {
     return { logs, start, commits };
   };
 
-  return { oracle, deposit, transfer, transfer10, disburse };
+  return { oracle, deposit, transfer, transfer10, transfer10x2, disburse };
 }
 
 // PostgresLedger is the ONLY ledger (Postgres-only, U-I4); its apply/notesOf/
@@ -504,6 +547,87 @@ async function main(): Promise<void> {
     ok(new Set(ixR.store.nullifiers()).size === 2, "nullifier set unchanged on replay");
   }
 
+  step("TRANSFER10X2: 4 real inputs + payee + change ingests as ONE op with transfer-identical rows");
+  {
+    const simX = makeSim();
+    const ixX = makeIndexer(true);
+    // Four notes for U1 across two deposits, all four spent through ONE
+    // transfer10x2: pay U2 70, change 30 back to U1. The history must read
+    // exactly like an arity-2 transfer's — one 'received' for the payee, one
+    // 'sent' for the payer, the self change suppressed.
+    const f = [note(U1, 10n, 9001n), note(U1, 20n, 9002n), note(U1, 30n, 9003n), note(U1, 40n, 9004n)];
+    const pay = note(U2, 70n, 9101n);
+    const chg = note(U1, 30n, 9102n);
+    const nfs = [801n, 802n, 803n, 804n, 0n, 0n, 0n, 0n, 0n, 0n];
+    const logsX = [
+      ...simX.deposit("0xx1", f[0], f[1], 670000000000000000037n, 811n),
+      ...simX.deposit("0xx2", f[2], f[3], 680000000000000000041n, 812n),
+      ...simX.transfer10x2("0xpay10x2", f, [pay, chg], 690000000000000000043n, 813n, nfs, 9200n),
+    ];
+    ixX.applyLogs(logsX);
+
+    ok(ixX.tree.root() === simX.oracle.getRoot(), "mirror root == reference oracle root after transfer10x2");
+    ok(ixX.tree.nextLeafIndex() === 6, `4 deposit leaves + 2 transfer10x2 leaves (got ${ixX.tree.nextLeafIndex()})`);
+    const feedX = ixX.store.allEvents();
+    ok(feedX.map((e) => e.kind).join(",") === "deposit,deposit,transfer10x2", "transfer10x2 joins the feed under its own kind");
+    const eX = feedX[2];
+    ok(eX.slices.length === 3, "two receiver slices + the authority tail");
+    ok(eX.slices[0].offset === 0 && eX.slices[0].elts === 4 && eX.slices[0].leafIndex === 4
+      && eX.slices[1].offset === 4 && eX.slices[1].elts === 4 && eX.slices[1].leafIndex === 5,
+      "receiver slice i sits at offset 4i and names leaf 4+i (flat uint256[8], leaf order)");
+    const tailX = eX.slices[2];
+    ok(tailX.offset === 8 && tailX.elts === 31 && tailX.leafIndex === null, "the authority envelope is a 31-element non-leaf tail at offset 8");
+    ok(eX.ciphertext.length === 39, "feed carries all 39 ciphertext elements (8 receiver + 31 authority)");
+    ok(new Set(ixX.store.nullifiers()).size === 4, "only the 4 real nullifiers are spent (the 6 padded 0s are skipped)");
+
+    const u1x = ixX.ledger!.notesOf(U1.publicKey[0], U1.publicKey[1]);
+    ok(f.every((n) => u1x.some((x) => x.commitment === commitOf(n).toString() && x.spent)),
+      "all four spent inputs marked spent from the envelope alone");
+    const u1live = u1x.filter((n) => !n.spent && n.value !== "0");
+    ok(u1live.length === 1 && u1live[0].value === "30" && u1live[0].leafIndex === 5,
+      "the payer keeps exactly the change note at the second output leaf");
+    const u2x = ixX.ledger!.notesOf(U2.publicKey[0], U2.publicKey[1]);
+    ok(u2x.length === 1 && u2x[0].value === "70" && u2x[0].leafIndex === 4 && !u2x[0].spent,
+      "the payee's note is recorded live at the first output leaf");
+
+    const payH = ixX.ledger!.historyOf(U2.publicKey[0], U2.publicKey[1]).filter((x) => x.txHash === "0xpay10x2");
+    ok(payH.length === 1 && payH[0].kind === "received" && payH[0].amount === "70"
+      && payH[0].counterparty === packPubkey(U1.publicKey),
+      "payee history: one 'received 70 from the payer' — exactly a transfer's row");
+    const senderH = ixX.ledger!.historyOf(U1.publicKey[0], U1.publicKey[1]).filter((x) => x.txHash === "0xpay10x2");
+    ok(senderH.length === 1 && senderH[0].kind === "sent" && senderH[0].amount === "70"
+      && senderH[0].counterparty === packPubkey(U2.publicKey),
+      "payer history: one 'sent 70 to the payee' — the self change stays suppressed");
+
+    // Replay convergence rides along: the same range twice must not double
+    // anything (the poll loop retries from an unadvanced cursor after a throw).
+    ixX.applyLogs(logsX);
+    ok(ixX.store.allEvents().length === 3, "feed did not grow on replay");
+    ok(ixX.tree.nextLeafIndex() === 6 && ixX.tree.root() === simX.oracle.getRoot(), "tree unchanged on replay");
+    ok(ixX.ledger!.notesOf(U1.publicKey[0], U1.publicKey[1]).length === u1x.length, "ledger notes did not double on replay");
+    ok(new Set(ixX.store.nullifiers()).size === 4, "nullifier set unchanged on replay");
+  }
+
+  step("TRANSFER10X2: a merge with both outputs self surfaces as the self-send pair");
+  {
+    const simM = makeSim();
+    const ixM = makeIndexer(true);
+    const src = [note(U3, 60n, 9501n), note(U3, 40n, 9502n)];
+    const merged = note(U3, 100n, 9601n);
+    ixM.applyLogs([
+      ...simM.deposit("0xm10x2", src[0], src[1], 700000000000000000047n, 821n),
+      ...simM.transfer10x2("0xmerge10x2", src, [merged, note(U3, 0n, 9602n)], 710000000000000000051n, 822n,
+        [901n, 902n, 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n], 9700n),
+    ]);
+    const hM = ixM.ledger!.historyOf(U3.publicKey[0], U3.publicKey[1]).filter((x) => x.txHash === "0xmerge10x2");
+    ok(hM.length === 2, "the self-merge yields exactly the two-item pair");
+    ok(hM[0].kind === "received" && hM[1].kind === "sent", "received-above-sent in the seq-desc feed");
+    ok(hM.every((x) => x.amount === "100" && x.counterparty === packPubkey(U3.publicKey)),
+      "both carry the merged sum and name the merger's own key");
+    const liveM = ixM.ledger!.notesOf(U3.publicKey[0], U3.publicKey[1]).filter((n) => !n.spent && n.value !== "0");
+    ok(liveM.length === 1 && liveM[0].value === "100", "after the merge exactly one live nonzero note remains");
+  }
+
   step("DISBURSE: published batch opens; withheld batch stays a sentinel + alarms");
   ok(feed[3].disclosure?.status === "verified", "published disburse disclosure checks out");
   ok(feed[4].disclosure?.status === "withheld", "ciphertext-less disburse → withheld feed entry");
@@ -638,6 +762,34 @@ async function main(): Promise<void> {
       "epoch and encryptionNonce decode where the feed entry reads them");
   }
 
+  step("TRANSFER10X2 ABI: the pool's own event fragment decodes into the names ingest destructures");
+  {
+    // Same silent-skip risk as Transferred10: the synthetic scenarios cannot
+    // catch the branch reading a field the emitted V5 event does not carry (or
+    // at another width), so round-trip through the real built ABI. One shape
+    // only — the entry point ships with the V5 upgrade.
+    const iface = ix.pool.interface;
+    const raw = iface.encodeEventLog(iface.getEvent("Transferred10x2"), [
+      1n,
+      Array.from({ length: 10 }, (_, i) => BigInt(100 + i)),
+      [201n, 202n],
+      [1n, 2n],
+      new Array(8).fill(3n),
+      new Array(31).fill(4n),
+      42n, 99n, 77n, "0x" + "ab".repeat(1088),
+    ]);
+    const p = iface.parseLog({ topics: raw.topics, data: raw.data });
+    ok(p.name === "Transferred10x2", "the built ABI models Transferred10x2");
+    ok(p.args.nullifiers.length === 10 && p.args.outputCommitments.length === 2,
+      "ten nullifiers but only TWO output commitments");
+    ok(p.args.encryptedValuesForReceivers.length === 8, "receiver ciphertexts arrive as ONE flat 8-element run");
+    ok(p.args.encryptedValuesForAuthority.length === 31, "the authority envelope is 31 elements at 10-in/2-out");
+    ok(p.args.kemBinding !== undefined && ethers.utils.arrayify(p.args.kemCiphertext).length === 1088,
+      "kemBinding + a 1088-byte kemCiphertext ride along (kemOf dispatches on their presence)");
+    ok(Number(p.args.epoch) === 1 && Number(p.args.encryptionNonce) === 42,
+      "epoch and encryptionNonce decode where the feed entry reads them");
+  }
+
   step("V2 KEM: hybrid envelopes decapsulate + binding-check; a junk ct alarms and withholds");
   {
     const simK = makeSim();
@@ -733,7 +885,7 @@ async function main(): Promise<void> {
     ok(b3.ok === true && b3.lastSuccessAt !== null, "recovered → /health ok:true");
   }
 
-  console.log(`\n${failures === 0 ? "INGEST UNIT TEST PASS — multicall correlation, self-send history, transfer10 merge/fan-out, correlation guard, replay convergence, withheld disburse, ledger dedup, pollOnce/health" : `INGEST UNIT TEST FAIL — ${failures} assertion(s)`}`);
+  console.log(`\n${failures === 0 ? "INGEST UNIT TEST PASS — multicall correlation, self-send history, transfer10 merge/fan-out, transfer10x2 pay/merge, correlation guard, replay convergence, withheld disburse, ledger dedup, pollOnce/health" : `INGEST UNIT TEST FAIL — ${failures} assertion(s)`}`);
   process.exit(failures === 0 ? 0 : 1);
 }
 
