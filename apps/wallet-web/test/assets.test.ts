@@ -324,3 +324,87 @@ test("a broken Cache Storage (open throws) degrades to plain downloads", async (
   assert.equal(wasm.byteLength, 6, "proving assets still arrive with no cache at all");
   assert.equal(fetches, 2);
 });
+
+// --- streaming order + stall watchdog (the 95 MB zkey hang, observed live) -------
+
+function chunkStream(chunks: Uint8Array[], opts: { hangAfter?: number } = {}): Response {
+  let i = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (opts.hangAfter !== undefined && i >= opts.hangAfter) return new Promise(() => {});
+      if (i < chunks.length) controller.enqueue(chunks[i++]);
+      else controller.close();
+      return undefined;
+    },
+  });
+  return new Response(body);
+}
+
+function memCache(): { cache: CacheLike; putLog: Array<{ url: string; bytes: number }> } {
+  const store = new Map<string, Response>();
+  const putLog: Array<{ url: string; bytes: number }> = [];
+  return {
+    putLog,
+    cache: {
+      match: async (u) => store.get(u),
+      put: async (u, r) => {
+        const b = await r.arrayBuffer();
+        putLog.push({ url: u, bytes: b.byteLength });
+        store.set(u, new Response(b));
+      },
+    },
+  };
+}
+
+test("the cache write happens AFTER the stream is fully read, with the whole body", async () => {
+  const { cache, putLog } = memCache();
+  const progressed: number[] = [];
+  const chunks = [new Uint8Array(100_000), new Uint8Array(100_000), new Uint8Array(50_000)];
+  const storage: CacheStorageLike = { open: async () => cache, keys: async () => [], delete: async () => true };
+  const assets = await prefetchCircuitAssets("deposit", "/c", "vtest", {
+    cacheStorage: storage,
+    fetchFn: async () => chunkStream(chunks.map((c) => c.slice())),
+    onProgress: (p) => {
+      progressed.push(p.received);
+      assert.equal(putLog.length, 0, "no cache.put may run while the stream is still being read");
+    },
+  });
+  assert.equal(assets.wasm.byteLength, 250_000);
+  assert.equal(putLog.length, 2, "both assets cached");
+  for (const p of putLog) assert.equal(p.bytes, 250_000, "the cached body is the COMPLETE assembly");
+});
+
+test("a stalled stream retries once with a fresh fetch and succeeds", async () => {
+  const { cache } = memCache();
+  const storage: CacheStorageLike = { open: async () => cache, keys: async () => [], delete: async () => true };
+  let attempts = 0;
+  const assets = await prefetchCircuitAssets("deposit", "/c", "vtest2", {
+    cacheStorage: storage,
+    stallMs: 30,
+    fetchFn: async () => {
+      attempts++;
+      // first attempt per asset: one chunk then silence; retry: completes
+      return attempts <= 2
+        ? chunkStream([new Uint8Array(10)], { hangAfter: 1 })
+        : chunkStream([new Uint8Array(10), new Uint8Array(10)]);
+    },
+    onProgress: () => {},
+  });
+  assert.equal(assets.wasm.byteLength + assets.zkey.byteLength >= 20, true);
+  assert.ok(attempts >= 3, `stalled attempts were retried (attempts=${attempts})`);
+});
+
+test("a stream that stalls twice throws instead of hanging forever", async () => {
+  const { cache } = memCache();
+  const storage: CacheStorageLike = { open: async () => cache, keys: async () => [], delete: async () => true };
+  await assert.rejects(
+    () =>
+      prefetchCircuitAssets("deposit", "/c", "vtest3", {
+        cacheStorage: storage,
+        stallMs: 30,
+        fetchFn: async () => chunkStream([new Uint8Array(10)], { hangAfter: 1 }),
+        onProgress: () => {},
+      }),
+    /stalled/,
+  );
+});

@@ -79,6 +79,9 @@ export interface PrefetchDeps {
   /** Fires per received chunk of a MISSED asset — drives the progress bar + ETA.
    *  Never fires on a cache hit. */
   onProgress?: (progress: AssetDownloadProgress) => void;
+  /** No-chunk-for-this-long aborts the stream (one retry, then throw).
+   *  Injectable so the watchdog gates in tests without a 20 s wait. */
+  stallMs?: number;
 }
 
 /** The kept in-memory buffers for one circuit — reused across a session's proofs. */
@@ -115,10 +118,20 @@ export async function evictStaleCaches(version: string, deps: PrefetchDeps = {})
 }
 
 // One asset: serve it from the version bucket on a hit; on a miss download it,
-// announce the download, store a clone, and return the bytes. A Response body is
-// single-use, so we `put` a clone and read the bytes from the original — via a
-// streaming reader when progress is wanted (per-chunk onProgress with the
-// Content-Length total), else the plain arrayBuffer path.
+// announce the download, stream the bytes, then store the ASSEMBLED buffer.
+//
+// Order is load-bearing: never `await cache.put(res.clone())` before reading the
+// body. clone() tees the stream, and awaiting the put branch while nobody reads
+// the original stalls the whole download at the tee's buffer limit — on the
+// 95 MB zkey that was a permanent hang at a few hundred KB (observed live).
+// Reading first also means the cache write costs no second pass: put() gets a
+// fully-buffered Response.
+//
+// A stalled network stream (no chunk for STALL_MS) aborts and retries ONCE with
+// a fresh fetch; a second stall throws, so the flow's error surface takes over
+// instead of an indefinite hang behind disabled buttons.
+const STALL_MS = 20_000;
+
 async function cachedFetch(
   cache: CacheLike,
   url: string,
@@ -128,15 +141,36 @@ async function cachedFetch(
   const hit = await cache.match(url);
   if (hit) return hit.arrayBuffer();
   deps.onDownloadStart?.(url);
+  let bytes: ArrayBuffer;
+  try {
+    bytes = await downloadOnce(url, expectedTotal, deps);
+  } catch (e) {
+    if (!(e instanceof AssetStallError)) throw e;
+    bytes = await downloadOnce(url, expectedTotal, deps); // one fresh retry
+  }
+  try {
+    await cache.put(url, new Response(bytes));
+  } catch {
+    // QuotaExceededError (or any storage refusal): keep going without the cache —
+    // this download still succeeded; the next visit just re-downloads.
+  }
+  return bytes;
+}
+
+class AssetStallError extends Error {
+  constructor(url: string, received: number) {
+    super(`download stalled: ${url} stopped after ${received} bytes`);
+  }
+}
+
+async function downloadOnce(
+  url: string,
+  expectedTotal: number | null,
+  deps: PrefetchDeps,
+): Promise<ArrayBuffer> {
   const doFetch = deps.fetchFn ?? fetch;
   const res = await doFetch(url);
   if (!res.ok) throw new Error(`asset ${url} -> ${res.status} (is the circuit wasm/zkey served at ${new URL(url, "http://x").pathname}?)`);
-  try {
-    await cache.put(url, res.clone());
-  } catch {
-    // QuotaExceededError (or any storage refusal): keep going without the cache —
-    // this download still succeeds; the next visit just re-downloads.
-  }
   if (!deps.onProgress || !res.body) return res.arrayBuffer();
 
   // The pinned decoded size wins over Content-Length: the CDN's header is
@@ -148,10 +182,22 @@ async function cachedFetch(
   const chunks: Uint8Array[] = [];
   let received = 0;
   for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    received += value.byteLength;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stalled = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new AssetStallError(url, received)), deps.stallMs ?? STALL_MS);
+    });
+    let step: ReadableStreamReadResult<Uint8Array>;
+    try {
+      step = await Promise.race([reader.read(), stalled]);
+    } catch (e) {
+      void reader.cancel().catch(() => {});
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (step.done) break;
+    chunks.push(step.value);
+    received += step.value.byteLength;
     deps.onProgress({ url, received, total });
   }
   const out = new Uint8Array(received);
