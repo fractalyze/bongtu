@@ -20,12 +20,17 @@ Whole-transaction `gasUsed` from the GIWA receipts of the end-to-end run against
 | `deposit` | 2,632,809 | 1.27e-7 ETH over 27,665 L1 gas | `0x80cd480b7cea057cabf7686453b178d8644bac709e1b13a3bc97c4423e5a07f4` |
 | `transfer` | 2,769,900 | 1.59e-7 ETH over 34,759 L1 gas | `0x2f63c928ea8b72ead869b8172f18056cbf594b494abe743be5da8f5eaf9a728c` |
 | `withdraw` | 1,707,621 | 1.36e-7 ETH over 29,700 L1 gas | `0x360441fba2c5d571096491178c7b1362dcba0f369ad9a50c1a11b8a0e470bbe9` |
-| `transfer10` | 11,592,399 | (V4 pool, measured 2026-07-28) | `0x40c45cb9cb3e5d3df92277eacc3eb39c8c017261670f6ba3238926fef380d921` |
+| `transfer10` | 11,592,399 | (V4 pool, measured 2026-07-28; RETIRED from the wallet same day) | `0x40c45cb9cb3e5d3df92277eacc3eb39c8c017261670f6ba3238926fef380d921` |
+| `transfer10x2` (merge, 3-in, zero change) | 3,053,435 | 2.16e-7 ETH over 42,267 L1 gas | `0xf467e4d551fc91af12a7883c347763d41379b416c74f6a7fb86ade03ac8f7107` |
+| `transfer10x2` (payment, 3-in + change) | 3,048,442 | 2.18e-7 ETH over 42,254 L1 gas | `0x51534089ec07fdba42371137d0dfb7391755bb60cbd145c2999f64534c317501` |
 
 All at the pinned 0.005 gwei L2 price, so a 2-arity operation costs ≈ 0.9–1.4e-5 ETH.
-`transfer10`'s ~11.6M is the ten depth-32 leaf appends (~0.93M each — the Poseidon
-wall below), i.e. ~1.16M per consumed-or-created slot; a 3-note consolidation spend
-still beats three sequential 2×2 transfers on total gas and reveals one op, not three. Against the
+`transfer10`'s ~11.6M was the ten depth-32 leaf appends (~0.93M each — the Poseidon
+wall below); eight of them were zero padding on every real spend, which is why
+`transfer10x2` (same 10-input side, two outputs, **V5, measured 2026-07-28**) serves the
+same 3–10-note consolidation or payment for ~3.05M — a 3.8× cut that is exactly the
+eight dropped appends. The wallet now routes every >2-input spend and every merge leg
+through it; `transfer10` remains deployed for verification of historical txs only. Against the
 prior live measurements on the same pool pre-upgrade (2026-07-24: deposit ≈ 2.24M, transfer ≈ 2.48M,
 withdraw ≈ 1.28M) the hybrid delta is the 1088-byte `kemCiphertext` carried in calldata **and**
 re-emitted in the event, plus one extra Groth16 public input — the same double-pay lever flagged
