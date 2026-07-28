@@ -458,6 +458,20 @@ function envFor(kind: OpKind, B: number): ParsedEnvelope {
           salt: 662000n + BigInt(i),
         })),
       };
+    case "transfer10x2":
+      // The merge shape: ten spent notes folded into output 0, a zero change
+      // note at output 1, both outputs the sender's own key.
+      return {
+        inputs: Array.from({ length: 10 }, (_, i) => ({
+          owner: sender,
+          value: BigInt(i) * 100n,
+          salt: 663000n + BigInt(i),
+        })),
+        outputs: [
+          { owner: sender, value: 4500n, salt: 664000n },
+          { owner: sender, value: 0n, salt: 664001n },
+        ],
+      };
     case "disburse":
       return {
         inputs: [{ owner: sender, value: 4950n, salt: 660010n }],
@@ -475,7 +489,14 @@ test("round-trip: build -> encrypt -> parse == original fields (every op kind)",
   const ecdhPriv = 313373133731337n;
   const ecdhPub = deriveKeypair(ecdhPriv).publicKey;
   const nonce = 121212121212n;
-  for (const kind of ["deposit", "withdraw", "transfer", "transfer10", "disburse"] as OpKind[]) {
+  for (const kind of [
+    "deposit",
+    "withdraw",
+    "transfer",
+    "transfer10",
+    "transfer10x2",
+    "disburse",
+  ] as OpKind[]) {
     const env = envFor(kind, B);
     const plain = buildAuthorityPlaintext(kind, env);
     assert.equal(plain.length, envelopePlaintextLen(kind, B), `${kind} plaintext length`);
@@ -668,6 +689,144 @@ test("transfer10 fixture parity: the committed witness input agrees with the sdk
     0,
   );
   assert.deepEqual(parsed, env);
+});
+
+// =============================================================================
+// transfer10x2 (10-in / 2-out): the same base at ten inputs but two outputs
+// =============================================================================
+
+test("transfer10x2 envelope sizes: 30 plaintext fields -> 31 ciphertext elements", () => {
+  // The circuit publishes cipherTextAuthority[31]; the plaintext is
+  // 2 (shared input owner) + 2*10 (input value,salt) + 4*2 (output owner,value,salt).
+  assert.equal(envelopePlaintextLen("transfer10x2", 0), 30);
+  assert.equal(envelopePlaintextLen("transfer10x2", 0), 2 + 2 * 10 + 4 * 2);
+  // 30 is already a multiple of 3, so the sponge pads by nothing and the run is
+  // plaintext + the single final squeeze — the one arity where padding is zero.
+  assert.equal(authorityCiphertextLen("transfer10x2", 0), 31);
+  // B is a disburse-only parameter: transfer10x2's arity is fixed by the circuit.
+  assert.equal(envelopePlaintextLen("transfer10x2", 256), 30);
+  // Half of transfer10's envelope for the same ten spent notes: what the eight
+  // dropped output slots cost in disclosure as well as in gas.
+  assert.equal(envelopePlaintextLen("transfer10", 0) - envelopePlaintextLen("transfer10x2", 0), 32);
+});
+
+test("transfer10x2 layout: the field order the circuit encrypts, at (10, 2)", () => {
+  const kp = (s: bigint): Point => deriveKeypair(s).publicKey;
+  const sender = kp(555001n);
+  const env: ParsedEnvelope = {
+    inputs: Array.from({ length: 10 }, (_, i) => ({
+      owner: sender,
+      value: 10n + BigInt(i),
+      salt: 100n + BigInt(i),
+    })),
+    outputs: [
+      { owner: kp(556001n), value: 200n, salt: 300n }, // payment
+      { owner: sender, value: 201n, salt: 301n }, // change
+    ],
+  };
+  const p = buildAuthorityPlaintext("transfer10x2", env);
+  assert.equal(p.length, 30);
+  assert.deepEqual([p[0], p[1]], sender, "fields 0..1 are the shared input owner");
+  for (let i = 0; i < 10; i++) {
+    assert.equal(p[2 + 2 * i], env.inputs[i].value, `input ${i} value at ${2 + 2 * i}`);
+    assert.equal(p[3 + 2 * i], env.inputs[i].salt, `input ${i} salt at ${3 + 2 * i}`);
+  }
+  // The output run starts right after the ten input pairs — at 22, not at 42
+  // where transfer10 puts it. A layout that hardcoded transfer10's offsets would
+  // decrypt this envelope into garbage.
+  for (let i = 0; i < 2; i++) {
+    assert.equal(p[22 + 2 * i], env.outputs[i].owner[0], `output ${i} owner.x at ${22 + 2 * i}`);
+    assert.equal(p[23 + 2 * i], env.outputs[i].owner[1], `output ${i} owner.y at ${23 + 2 * i}`);
+    assert.equal(p[26 + 2 * i], env.outputs[i].value, `output ${i} value at ${26 + 2 * i}`);
+    assert.equal(p[27 + 2 * i], env.outputs[i].salt, `output ${i} salt at ${27 + 2 * i}`);
+  }
+});
+
+test("transfer10x2 builder rejects wrong arity and a mismatched input owner in ANY slot", () => {
+  const full = envFor("transfer10x2", 0);
+  assert.throws(
+    () => buildAuthorityPlaintext("transfer10x2", { inputs: full.inputs, outputs: [full.outputs[0]] }),
+    /exactly 2 outputs/,
+  );
+  // The ten outputs of a transfer10 envelope are NOT a transfer10x2 envelope.
+  assert.throws(
+    () =>
+      buildAuthorityPlaintext("transfer10x2", {
+        inputs: full.inputs,
+        outputs: envFor("transfer10", 0).outputs,
+      }),
+    /exactly 2 outputs/,
+  );
+  assert.throws(
+    () => buildAuthorityPlaintext("transfer10x2", { inputs: full.inputs.slice(0, 4), outputs: full.outputs }),
+    /exactly 10 inputs/,
+  );
+  // One circuit inputOwnerPrivateKey means input 7 cannot belong to someone else.
+  const oddSlot: ParsedEnvelope = {
+    inputs: full.inputs.map((n, i) => (i === 7 ? { ...n, owner: deriveKeypair(557007n).publicKey } : n)),
+    outputs: full.outputs,
+  };
+  assert.throws(() => buildAuthorityPlaintext("transfer10x2", oddSlot), /share ONE owner/);
+});
+
+test("transfer10x2 fixture parity: both committed witness inputs agree with the sdk", () => {
+  // circuits/inputs/transfer10x2{,_merge}.json are what the committed proofs were
+  // generated from: the partly-filled payment+change spend and the pure merge
+  // (all ten inputs real, output 1 a ZERO change note).
+  for (const fixture of ["transfer10x2", "transfer10x2_merge"]) {
+    const inp = JSON.parse(
+      readFileSync(join(ROOT, "circuits", "inputs", `${fixture}.json`), "utf8"),
+    ) as Record<string, string[] | string[][] | string>;
+    const arr = (k: string): bigint[] => (inp[k] as string[]).map(BigInt);
+    const owners = (inp.outputOwnerPublicKeys as unknown as string[][]).map(
+      (p) => [BigInt(p[0]), BigInt(p[1])] as Point,
+    );
+
+    const inValues = arr("inputValues");
+    const outValues = arr("outputValues");
+    const outSalts = arr("outputSalts");
+    const enabled = arr("enabled");
+    assert.equal(inValues.length, 10, `${fixture} spends ten slots`);
+    assert.equal(outValues.length, 2, `${fixture} creates two notes`);
+
+    const outCommits = arr("outputCommitments");
+    for (let i = 0; i < 2; i++) {
+      assert.equal(commitment(outValues[i], outSalts[i], owners[i]), outCommits[i], `${fixture} output ${i}`);
+    }
+    // conservation: CheckSum is an equality over all ten input slots, pads included.
+    assert.equal(
+      inValues.reduce((a, v) => a + v, 0n),
+      outValues.reduce((a, v) => a + v, 0n),
+      `${fixture} conserves value`,
+    );
+    // the §5.2 value belt on the fixture's own padding: enabled=0 ⟹ value=0.
+    for (let i = 0; i < 10; i++) {
+      if (enabled[i] === 0n) assert.equal(inValues[i], 0n, `${fixture} padded slot ${i} carries value 0`);
+    }
+
+    // The envelope over this fixture is the 30-field layout, and it round-trips.
+    const inOwner = deriveKeypair(BigInt(inp.inputOwnerPrivateKey as string)).publicKey;
+    const inSalts = arr("inputSalts");
+    const env: ParsedEnvelope = {
+      inputs: inValues.map((v, i) => ({ owner: inOwner, value: v, salt: inSalts[i] })),
+      outputs: outValues.map((v, i) => ({ owner: owners[i], value: v, salt: outSalts[i] })),
+    };
+    const plain = buildAuthorityPlaintext("transfer10x2", env);
+    assert.equal(plain.length, envelopePlaintextLen("transfer10x2", 0));
+    const ecdhPriv = 717171717171717n;
+    const nonce = BigInt(inp.encryptionNonce as string);
+    const ct = poseidonEncrypt(plain, ecdhSharedSecret(ecdhPriv, AUTHORITY.publicKey), nonce);
+    assert.equal(ct.length, authorityCiphertextLen("transfer10x2", 0));
+    const parsed = parseEnvelope(
+      AUTHORITY.formattedPrivateKey,
+      deriveKeypair(ecdhPriv).publicKey,
+      nonce,
+      ct,
+      "transfer10x2",
+      0,
+    );
+    assert.deepEqual(parsed, env, `${fixture} envelope round-trips`);
+  }
 });
 
 test("per-output nonces keep ten same-owner ciphertexts independent (§11-8 v1.1)", () => {

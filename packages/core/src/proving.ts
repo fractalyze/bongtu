@@ -25,14 +25,20 @@
 
 import type { FieldInput, PointInput } from "./babyjub.js";
 
-/** Proving backend. deposit/transfer/transfer10/withdraw prove on CPU (snarkjs);
- *  disburse (1×256, ~2.79M constraints) proves on GPU (rabbitsnark, via the
- *  prover/ service). */
+/** Proving backend. deposit/transfer/transfer10/transfer10x2/withdraw prove on
+ *  CPU (snarkjs); disburse (1×256, ~2.79M constraints) proves on GPU
+ *  (rabbitsnark, via the prover/ service). */
 export type Backend = "cpu" | "gpu";
 
-/** The v1 circuits (SPEC §4) plus `transfer10`, the arity-10 instantiation of the
- *  transfer base. */
-export type Circuit = "deposit" | "transfer" | "transfer10" | "withdraw" | "disburse";
+/** The v1 circuits (SPEC §4) plus the two 10-input instantiations of the transfer
+ *  base, `transfer10` (10-out) and `transfer10x2` (2-out). */
+export type Circuit =
+  | "deposit"
+  | "transfer"
+  | "transfer10"
+  | "transfer10x2"
+  | "withdraw"
+  | "disburse";
 
 // ---------------------------------------------------------------------------
 // Per-circuit witness inputs (the exact circom `main` input objects).
@@ -106,6 +112,36 @@ export interface Transfer10Input {
   authorityPublicKey: PointInput;
 }
 
+/** transfer10x2 (10-in / 2-out): the SAME base as transfer at 10 inputs but only
+ *  TWO outputs — 212,386 constraints, 68 public signals. Output arity is what a
+ *  spend pays for on chain (every output is a depth-32 IMT leaf append), and
+ *  transfer10's eight surplus outputs are zero-value padding on a real spend:
+ *  the two here are the two a spend needs, output 0 the payment (or, for a pure
+ *  merge, the merged note) and output 1 the change (zero when nothing is left
+ *  over). The input side is identical to Transfer10Input — unused slots padded
+ *  (nullifier=0, value=0, enabled=0, zeros path, a nonzero value-0 commitment).
+ *  Both outputs may share an owner (§11-8 v1.1 per-output nonce), which is what
+ *  makes the merge shape legal. */
+export interface Transfer10x2Input {
+  nullifiers: FieldInput[]; // length 10 (0 for a padded input)
+  inputCommitments: FieldInput[]; // length 10
+  inputValues: FieldInput[]; // length 10
+  inputSalts: FieldInput[]; // length 10
+  inputOwnerPrivateKey: FieldInput; // one owner spends every real input
+  ecdhPrivateKey: FieldInput;
+  root: FieldInput; // membership root (a live pool root)
+  pathElements: FieldInput[][]; // [10][H] merkle siblings
+  leafIndices: FieldInput[]; // [10]
+  enabled: FieldInput[]; // [10] 0/1 (contract re-derives, but the witness needs it)
+  outputCommitments: FieldInput[]; // length 2
+  outputValues: FieldInput[]; // length 2 — [payment, change]
+  outputSalts: FieldInput[]; // length 2
+  outputOwnerPublicKeys: PointInput[]; // length 2 (duplicates allowed: per-output nonce)
+  kemSs: FieldInput[]; // [2] LE-uint128 limbs of the ML-KEM-768 shared secret (hybrid envelope key, @bongtu/core/kem)
+  encryptionNonce: FieldInput;
+  authorityPublicKey: PointInput;
+}
+
 /** withdraw (2-in / 1-out): IMT membership + nullifiers; ERC-20 out. One change
  *  output (value may be 0 for a full withdrawal). Authority envelope over the spend. */
 export interface WithdrawInput {
@@ -162,6 +198,7 @@ export type ProvingRequest =
   | { circuit: "deposit"; input: DepositInput; backend?: Backend }
   | { circuit: "transfer"; input: TransferInput; backend?: Backend }
   | { circuit: "transfer10"; input: Transfer10Input; backend?: Backend }
+  | { circuit: "transfer10x2"; input: Transfer10x2Input; backend?: Backend }
   | { circuit: "withdraw"; input: WithdrawInput; backend?: Backend }
   | { circuit: "disburse"; input: DisburseInput; backend?: Backend };
 
@@ -170,6 +207,7 @@ export interface CircuitInputs {
   deposit: DepositInput;
   transfer: TransferInput;
   transfer10: Transfer10Input;
+  transfer10x2: Transfer10x2Input;
   withdraw: WithdrawInput;
   disburse: DisburseInput;
 }

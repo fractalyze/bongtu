@@ -8,8 +8,9 @@
 # (committed; they feed U3). Reports r1cs constraint + public-signal counts.
 #
 # A circuit may carry EXTRA fixtures beyond its same-named one (transfer10 has
-# both the partly-filled spend and the 10-input consolidation); those reuse the
-# circuit's zkey and count as their own gate legs.
+# both the partly-filled spend and the 10-input consolidation; transfer10x2 has
+# the partly-filled spend and the pure merge); those reuse the circuit's zkey and
+# count as their own gate legs.
 #
 #   cd circuits && bash prove_all.sh                # all circuits
 #   cd circuits && bash prove_all.sh transfer10     # just one (targeted regen)
@@ -42,13 +43,14 @@ echo '{ "type": "commonjs" }' > out/package.json
 echo "== regenerating input fixtures =="
 $NODE --import tsx gen_inputs.ts || { echo "FATAL: input generation failed"; exit 1; }
 
-ALL_CIRCUITS=(deposit disburse transfer transfer10 withdraw)
+ALL_CIRCUITS=(deposit disburse transfer transfer10 transfer10x2 withdraw)
 if [ "$#" -gt 0 ]; then CIRCUITS=("$@"); else CIRCUITS=("${ALL_CIRCUITS[@]}"); fi
 
 # Fixtures proved against a circuit's zkey ON TOP of its same-named one.
 extra_fixtures() {
   case "$1" in
     transfer10) echo "transfer10_consolidate" ;;
+    transfer10x2) echo "transfer10x2_merge" ;;
     *) echo "" ;;
   esac
 }

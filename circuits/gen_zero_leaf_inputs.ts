@@ -21,7 +21,7 @@
 // assertion string then names the spending base template. The shared material
 // (SENDER / AUTHORITY / zeros path) comes from fixture_lib.ts. Run through tsx:
 //
-//   npx tsx gen_zero_leaf_inputs.ts   # writes inputs/{transfer,transfer10,withdraw}_zero_leaf.json
+//   npx tsx gen_zero_leaf_inputs.ts   # writes inputs/{transfer,transfer10,transfer10x2,withdraw}_zero_leaf.json
 
 import { commitment, nullifier } from "@bongtu/core/note";
 import type { Point } from "@bongtu/core/babyjub";
@@ -93,22 +93,24 @@ function genTransferZeroLeaf(): TransferInput {
   };
 }
 
-// --- transfer10 (10-in / 10-out): the exploit hides in a PADDED slot ---------------
+// --- the 10-in circuits: the exploit hides in a PADDED slot ------------------------
 // At arity 10 most slots are padding on a typical spend, so slot 0 is the LEAST
 // interesting place to look: the exploit sits at slot 7, surrounded by genuine
 // disabled pads, and the belt must still reject it. (The belt is a per-slot
-// loop, so a slot-0-only fixture would leave nine unproven slots.)
+// loop, so a slot-0-only fixture would leave nine unproven slots.) The input
+// side is identical for transfer10 and transfer10x2, so one builder covers both
+// — only the output count differs.
 const EXPLOIT_SLOT = 7;
 
-function genTransfer10ZeroLeaf(): Transfer10Input {
+function genSpend10ZeroLeaf(label: string, nOut: number): Transfer10Input {
   const N = 10;
   const slot = <T>(exploit: T, pad: T): T[] =>
     Array.from({ length: N }, (_, i) => (i === EXPLOIT_SLOT ? exploit : pad));
 
   // Every output but the first is a value-0 self note, so CheckSum's equality
   // holds at sum == X and the ONLY unsatisfiable constraint is the belt.
-  const outValues = Array.from({ length: N }, (_, i) => (i === 0 ? X : 0n));
-  const owners: Point[] = Array.from({ length: N }, (_, i) => receiver(i % 2).publicKey);
+  const outValues = Array.from({ length: nOut }, (_, i) => (i === 0 ? X : 0n));
+  const owners: Point[] = Array.from({ length: nOut }, (_, i) => receiver(i % 2).publicKey);
   return {
     nullifiers: slot(exploitInput0.nullifier, padInput1.nullifier),
     inputCommitments: slot(exploitInput0.commitment, padInput1.commitment),
@@ -124,7 +126,7 @@ function genTransfer10ZeroLeaf(): Transfer10Input {
     outputValues: outValues,
     outputSalts: outValues.map((_, i) => salt(i)),
     outputOwnerPublicKeys: owners,
-    kemSs: kemDraw("transfer10_zero_leaf").kemSs,
+    kemSs: kemDraw(label).kemSs,
     encryptionNonce: ENCRYPTION_NONCE,
     authorityPublicKey: AUTHORITY.publicKey,
   };
@@ -159,6 +161,7 @@ function genWithdrawZeroLeaf(): WithdrawInput {
 }
 
 write("transfer_zero_leaf", genTransferZeroLeaf());
-write("transfer10_zero_leaf", genTransfer10ZeroLeaf());
+write("transfer10_zero_leaf", genSpend10ZeroLeaf("transfer10_zero_leaf", 10));
+write("transfer10x2_zero_leaf", genSpend10ZeroLeaf("transfer10x2_zero_leaf", 2));
 write("withdraw_zero_leaf", genWithdrawZeroLeaf());
 console.log("zero-leaf exploit input generation OK");

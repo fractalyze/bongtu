@@ -18,9 +18,8 @@
 //   3. NEGATIVES: a WRONG kemSs decrypts to garbage, and the LEGACY ECDH-only
 //      key (the raw shared point) no longer decrypts a hybrid envelope;
 //   4. FIXTURE envelopes: every committed fixture proof's envelope decrypts
-//      (deposit/withdraw/transfer/transfer10 publics carry the ciphertext; the
-//      disburse arities carry only kemBinding on-chain, so their KEM leg is
-//      checked via binding == Poseidon(3) over the decapsulated limbs).
+//      (the disburse arities carry only kemBinding on-chain, so their KEM leg is
+//      checked via binding == Poseidon(3) over the decapsulated limbs instead).
 //
 //   npx tsx auditor_decrypt_check.ts   # exits 0 iff all assertions hold
 //
@@ -450,6 +449,100 @@ async function checkTransfer10SelfMerge(): Promise<void> {
   ok(outputsOk, "authority envelope: all 10 created (owner, value, salt) triples recovered");
 }
 
+// --- TRANSFER10X2 merge (10 inputs -> payment + change, only 2 outputs) ------
+
+async function checkTransfer10x2Merge(): Promise<void> {
+  console.log("\n=== TRANSFER10X2 merge (10 inputs -> 2 outputs, both to ONE owner) ===");
+  // The shape the wallet's spend chain uses: ten notes folded into output 0, a
+  // ZERO-value change note at output 1, both owned by the sender. Two outputs
+  // instead of ten is the whole point of the arity (eight fewer IMT leaf
+  // appends), and the envelope must still carry all ten spent notes.
+  const owner: Keypair = deriveKeypair(77770003n);
+  const inValues = Array.from({ length: 10 }, (_, i) => BigInt(100 * (i + 1))); // 5500
+  const inSalts = Array.from({ length: 10 }, (_, i) => 840001n + BigInt(i));
+  const inCommits = inValues.map((v, i) => commitment(v, inSalts[i], owner.publicKey));
+  const { root, pathElements, leafIndices } = membership(inCommits);
+  const outValues = [5500n, 0n]; // merged note + zero change
+  const outSalts = [850001n, 850002n];
+  const outCommits = outValues.map((v, i) => commitment(v, outSalts[i], owner.publicKey));
+
+  const ecdhPrivateKey = 90909090909090909090909n;
+  const encryptionNonce = 959595959595n;
+  const kem = encap("bongtu/gate/kem/encap/transfer10x2-merge");
+
+  const pub = await prove("transfer10x2", {
+    nullifiers: inValues.map((v, i) => nullifier(v, inSalts[i], owner.formattedPrivateKey)),
+    inputCommitments: inCommits,
+    inputValues: inValues,
+    inputSalts: inSalts,
+    inputOwnerPrivateKey: owner.formattedPrivateKey,
+    root,
+    pathElements,
+    leafIndices,
+    enabled: Array.from({ length: 10 }, () => 1n),
+    outputCommitments: outCommits,
+    outputValues: outValues,
+    outputSalts: outSalts,
+    outputOwnerPublicKeys: [owner.publicKey, owner.publicKey],
+    ecdhPrivateKey,
+    kemSs: kem.kemSs,
+    encryptionNonce,
+    authorityPublicKey: AUTHORITY.publicKey,
+  });
+  ok(pub.length === 68, `transfer10x2 publics length == 68 (got ${pub.length})`);
+
+  // chain-carried: ecdhPublicKey = pub[0..1]; receiver ct_i = pub[2+4i .. 5+4i];
+  // cipherTextAuthority = pub[10..40]; kemBinding = pub[41];
+  // outputCommitments = pub[63..64].
+  const ecdhPublicKey: [bigint, bigint] = [pub[0], pub[1]];
+  const shared = ecdhSharedSecret(owner.formattedPrivateKey, ecdhPublicKey);
+  for (let i = 0; i < 2; i++) {
+    const [v, s] = poseidonDecrypt(
+      pub.slice(2 + 4 * i, 2 + 4 * i + 4),
+      shared,
+      BigInt(encryptionNonce) + BigInt(i),
+      2,
+    );
+    eq(v, outValues[i], `merge output ${i} value recovered with nonce+${i}`);
+    eq(s, outSalts[i], `merge output ${i} salt recovered with nonce+${i}`);
+    eq(commitment(v, s, owner.publicKey), pub[63 + i], `merge output ${i} rebuilds pub[${63 + i}]`);
+  }
+
+  // NEGATIVE: the shared nonce cannot open ct_1 — the two-time pad §11-8 v1.1
+  // removed, and both outputs here share ONE owner.
+  const [vw, sw] = poseidonDecrypt(pub.slice(6, 10), shared, encryptionNonce, 2);
+  ok(
+    commitment(vw, sw, owner.publicKey) !== pub[64],
+    "shared (un-offset) nonce on ct_1: garbage does NOT rebuild the commitment",
+  );
+
+  // AUDITOR: one 30-field envelope over all 10 inputs + both outputs.
+  const ssArb = decap(kem.kemCiphertext);
+  eq(binding(ssArb), pub[41], "kemBinding (pub[41]) == Poseidon(3)(TAG_BIND, Decaps limbs)");
+  const ecdh = ecdhSharedSecret(AUTHORITY.formattedPrivateKey, ecdhPublicKey);
+  const m = poseidonDecrypt(pub.slice(10, 10 + 31), hybridKey([ecdh[0], ecdh[1]], ssArb), encryptionNonce, 30);
+  // layout: [inOwner(2), (inVal,inSalt)*10, (outOwner)*2, (outVal,outSalt)*2]
+  eq(m[0], owner.publicKey[0], "authority envelope: recovered input owner pub.x");
+  eq(m[1], owner.publicKey[1], "authority envelope: recovered input owner pub.y");
+  let inputsOk = true;
+  for (let i = 0; i < 10; i++) {
+    inputsOk = inputsOk && m[2 + 2 * i] === inValues[i] && m[3 + 2 * i] === inSalts[i];
+  }
+  ok(inputsOk, "authority envelope: all 10 spent (value, salt) pairs recovered at 2..21");
+  let outputsOk = true;
+  for (let i = 0; i < 2; i++) {
+    outputsOk =
+      outputsOk &&
+      m[22 + 2 * i] === owner.publicKey[0] &&
+      m[23 + 2 * i] === owner.publicKey[1] &&
+      m[26 + 2 * i] === outValues[i] &&
+      m[27 + 2 * i] === outSalts[i];
+  }
+  ok(outputsOk, "authority envelope: both created (owner, value, salt) triples recovered at 22..29");
+  // The zero change note is disclosed as a real note, not omitted.
+  eq(m[28], 0n, "authority envelope: the ZERO change note is carried (value 0 at field 28)");
+}
+
 // --- FIXTURE envelopes (the committed prove_all.sh proofs) -------------------
 
 const rd = (p: string): any => JSON.parse(readFileSync(p, "utf8"));
@@ -464,6 +557,8 @@ const FIXTURES = [
   { name: "transfer", ecdhAt: 0, ctAt: 10, ctLen: 16, bindAt: 26, nPub: 37, plainLen: 14, nOut: 2, ocAt: 32 },
   { name: "transfer10", ecdhAt: 0, ctAt: 42, ctLen: 64, bindAt: 106, nPub: 141, plainLen: 62, nOut: 10, ocAt: 128 },
   { name: "transfer10_consolidate", ecdhAt: 0, ctAt: 42, ctLen: 64, bindAt: 106, nPub: 141, plainLen: 62, nOut: 10, ocAt: 128 },
+  { name: "transfer10x2", ecdhAt: 0, ctAt: 10, ctLen: 31, bindAt: 41, nPub: 68, plainLen: 30, nOut: 2, ocAt: 63 },
+  { name: "transfer10x2_merge", ecdhAt: 0, ctAt: 10, ctLen: 31, bindAt: 41, nPub: 68, plainLen: 30, nOut: 2, ocAt: 63 },
   { name: "disburse", ecdhAt: 1, ctAt: -1, ctLen: 0, bindAt: 4, nPub: 11, plainLen: 0, nOut: 0, ocAt: -1 },
   { name: "disburse256", ecdhAt: 1, ctAt: -1, ctLen: 0, bindAt: 4, nPub: 11, plainLen: 0, nOut: 0, ocAt: -1 },
 ] as const;
@@ -564,6 +659,7 @@ async function main(): Promise<void> {
   await checkWithdraw();
   await checkTransferSelfSend();
   await checkTransfer10SelfMerge();
+  await checkTransfer10x2Merge();
   await checkFixtureEnvelopes();
   console.log(
     `\n${failures === 0

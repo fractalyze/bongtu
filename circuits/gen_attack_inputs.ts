@@ -1,6 +1,6 @@
 // Extra value-belt fixtures for the U3 soundness tests (SPEC §5.2).
 //
-// Writes four witness inputs that the committed prove_all.sh does NOT produce,
+// Writes five witness inputs that the committed prove_all.sh does NOT produce,
 // all built from the SHARED fixture_lib.ts material (same SENDER / AUTHORITY /
 // salt derivation as gen_inputs.ts by construction):
 //
@@ -20,9 +20,10 @@
 //       note with nullifier[1]=0, enabled[1]=0. (1-0)*0 = 0 satisfies the belt,
 //       so it PROVES and the contract injects enabled[1]=0, matching => ACCEPTED.
 //
-//   transfer10_attack.json -- the same value-carrying disabled slot at arity 10,
-//       where legitimate disabled pads are the norm rather than the exception.
-//       Also UNSATISFIABLE — `generate_witness` MUST THROW.
+//   transfer10_attack.json / transfer10x2_attack.json -- the same value-carrying
+//       disabled slot on the two 10-input circuits, where legitimate disabled
+//       pads are the norm rather than the exception. Also UNSATISFIABLE —
+//       `generate_witness` MUST THROW.
 //
 //   npx tsx gen_attack_inputs.ts
 
@@ -149,15 +150,17 @@ function genPadded(): WithdrawInput {
   };
 }
 
-// --- transfer10 attack: a value-carrying input in a DISABLED slot -----------
-// The arity-10 twin of genAttack. At arity 2 a value-carrying disabled slot is
-// conspicuous; at arity 10 most slots are legitimately disabled pads, so this is
-// where a value belt that only guarded the first slots would let a spend inflate
-// itself. Slot 4 carries 500 at enabled=0, so CheckSum totals 1500 against 1000
-// of real inputs — `(1 - enabled[4]) * inputValues[4] = 500 != 0` must make the
-// witness unsatisfiable. The honest transfer10 fixture (6 zero-value disabled
-// pads) is the positive control that the belt does not reject real padding.
-function genTransfer10Attack(): Transfer10Input {
+// --- 10-input attack: a value-carrying input in a DISABLED slot -------------
+// The 10-input twin of genAttack, built for both output arities. At arity 2 a
+// value-carrying disabled slot is conspicuous; at 10 inputs most slots are
+// legitimately disabled pads, so this is where a value belt that only guarded
+// the first slots would let a spend inflate itself. Slot 4 carries 500 at
+// enabled=0, so CheckSum totals 1500 against 1000 of real inputs —
+// `(1 - enabled[4]) * inputValues[4] = 500 != 0` must make the witness
+// unsatisfiable. The honest transfer10 / transfer10x2 fixtures (zero-value
+// disabled pads) are the positive controls that the belt does not reject real
+// padding.
+function genSpend10Attack(label: string, nOut: number): Transfer10Input {
   const N = 10;
   const real = [400n, 300n, 200n, 100n]; // enabled, 1000 total
   const smuggled = 500n; // slot 4: value-carrying but enabled=0
@@ -171,8 +174,8 @@ function genTransfer10Attack(): Transfer10Input {
   const padSalts = Array.from({ length: nPad }, (_, i) => salt(80 + i));
   const zerosPath = Array.from({ length: H }, () => 0n);
 
-  const outValues = Array.from({ length: N }, (_, i) => (i === 0 ? 1500n : 0n)); // inflated
-  const owners = Array.from({ length: N }, (_, i) =>
+  const outValues = Array.from({ length: nOut }, (_, i) => (i === 0 ? 1500n : 0n)); // inflated
+  const owners = Array.from({ length: nOut }, (_, i) =>
     i === 0 ? receiver(0).publicKey : SENDER.publicKey,
   );
 
@@ -193,12 +196,13 @@ function genTransfer10Attack(): Transfer10Input {
     outputValues: outValues,
     outputSalts: outValues.map((_, i) => salt(50 + i)),
     outputOwnerPublicKeys: owners,
-    ...authEnvelope("transfer10_attack"),
+    ...authEnvelope(label),
   };
 }
 
 write("withdraw_mint", genMint());
 write("withdraw_attack", genAttack());
 write("withdraw_padded", genPadded());
-write("transfer10_attack", genTransfer10Attack());
+write("transfer10_attack", genSpend10Attack("transfer10_attack", 10));
+write("transfer10x2_attack", genSpend10Attack("transfer10x2_attack", 2));
 console.log("mint/attack/padded input generation OK");

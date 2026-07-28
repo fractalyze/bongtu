@@ -1,6 +1,6 @@
 # Circuits
 
-Five circom circuits over four bases, one shared membership gadget, one shared envelope
+Six circom circuits over four bases, one shared membership gadget, one shared envelope
 construction. Sources: `circuits/*.circom` (top-levels) and `circuits/lib/*.circom` (vendored
 bases). Provenance against upstream Zeto is in [zeto-derivation.md](zeto-derivation.md); build
 commands are in [toolchain.md](toolchain.md).
@@ -10,21 +10,31 @@ commands are in [toolchain.md](toolchain.md).
 | `deposit.circom` | `BongtuDepositAuthority(2)` | 0-in / 2-out | 14,127 | 19 | 2^14 |
 | `transfer.circom` | `ZetoTransferSmall(2,2,32)` | 2-in / 2-out | 64,394 | 37 | 2^16 |
 | `transfer10.circom` | `ZetoTransferSmall(10,10,32)` | 10-in / 10-out | 261,683 | 141 | 2^18 |
+| `transfer10x2.circom` | `ZetoTransferSmall(10,2,32)` | 10-in / 2-out | 212,386 | 68 | 2^18 |
 | `withdraw.circom` | `CheckNullifiersInputsOutputsValueIMT(2,1,32)` | 2-in / 1-out | 54,319 | 26 | 2^16 |
 | `disburse.circom` | `Zeto(1,16,32)` | 1-in / 16-out | 208,719 | 11 | 2^18 |
 | `disburse256.circom` | `Zeto(1,256,32)` | 1-in / 256-out | 2,796,719 | 11 | 2^22 |
 
 Constraint counts measured 2026-07-28 (`snarkjs r1cs info` over `circuits/out/*.r1cs`).
 `disburse.circom` is the dev-loop instantiation of the *same* base as `disburse256.circom`;
-`transfer10.circom` is `transfer.circom`'s base at arity 10. The live pool carries the 256
-verifier. Note that the dev-loop disburse is not optional collateral: a public count is a per-base
-property, so an envelope change regenerates **six** verifier/zkey pairs.
+`transfer10.circom` and `transfer10x2.circom` are `transfer.circom`'s base at other arities. The
+live pool carries the 256 verifier. Note that the dev-loop disburse is not optional collateral: a
+public count is a per-base property, so an envelope change regenerates **seven** verifier/zkey pairs.
+
+**transfer10x2 exists because outputs, not inputs, are what a spend pays for on chain.** Each
+output is a depth-32 IMT leaf append (~0.93M gas), and on a real spend eight of transfer10's ten
+outputs are zero-value padding — `transfer10` measured 11,592,399 gas, ~9.3M of it those appends.
+Dropping to two outputs (payment + change, or merged note + zero change) keeps the ten-note
+consolidation and sheds the padding. The input side — ten membership proofs — is unchanged, which
+is also why the constraint saving is only ~19%.
 
 **transfer10 has almost no headroom.** snarkjs picks `domainSize = 2^(floor(log2(nConstraints +
 nPublic)) + 1)`, so transfer10 stays at 2^18 only while `nConstraints <= 262,002` — **319
 constraints of margin**. Anything added to `ZetoTransferSmall` (an extra hash, one more range
 check) spills it to 2^19, which doubles the zkey and the proving time. Measure before and after any
-base change.
+base change. transfer10x2 shares the 2^18 domain with 49,689 constraints of margin — cutting eight
+outputs does not reach 2^17, because 2^17 caps at ~131k and the ten membership proofs alone exceed
+that.
 
 ## The hybrid envelope key
 
@@ -98,6 +108,25 @@ reordering is a breaking change requiring a new verifier and a pool upgrade.
 Same base as transfer, so the *declaration* order is identical and only the run lengths change —
 but every index past 1 moves, so transfer10 needs its own verifier and its own contract indexing.
 
+**transfer10x2 — `uint[68]`**
+
+| idx | signal |
+|---|---|
+| 0..1 | `ecdhPublicKey[2]` |
+| 2..9 | `cipherTexts[2][4]` (receiver-decryptable, one per output) |
+| 10..40 | `cipherTextAuthority[31]` |
+| 41 | `kemBinding` |
+| 42..51 | `nullifiers[10]` |
+| 52 | `root` |
+| 53..62 | `enabled[10]` |
+| 63..64 | `outputCommitments[2]` |
+| 65 | `encryptionNonce` |
+| 66..67 | `authorityPublicKey[2]` |
+
+The authority run is 31 rather than a multiple of 3 plus one by accident: the plaintext is
+`2 + 2*10 + 4*2 = 30`, already a multiple of 3, so the sponge adds no padding and only the final
+squeeze.
+
 **withdraw — `uint[26]`**
 
 | idx | signal |
@@ -146,7 +175,7 @@ They are not all present in all bases:
 
 | base | boolean + value belt | zero-commitment guard |
 |---|---|---|
-| `lib/anon_enc_nullifier_non_repudiation_imt_small_base.circom` (transfer, transfer10) | lines 103–104 | line 117 |
+| `lib/anon_enc_nullifier_non_repudiation_imt_small_base.circom` (transfer, transfer10, transfer10x2) | lines 103–104 | line 117 |
 | `lib/check-nullifiers-value-imt-base.circom` (withdraw) | lines 109–110 | line 123 |
 | `lib/anon_enc_nullifier_non_repudiation_imt_base.circom` (disburse, disburse256) | absent | line 129 |
 
@@ -177,10 +206,10 @@ witness:
 - **Distinct output owner pubkeys (disburse only).** All outputs of a disburse batch share one
   ephemeral key and one `encryptionNonce`, so two outputs to the same owner leak
   `c1 − c2 = m1 − m2`. `assertDistinctOwnerPubkeys` (`packages/core/src/note.ts`) rejects
-  duplicates before proving. transfer and transfer10 are exempt since U-X3 (§11-8 v1.1): their
+  duplicates before proving. The transfer arities are exempt since U-X3 (§11-8 v1.1): their
   base encrypts receiver ciphertext `i` under `encryptionNonce + i` in-circuit
-  (`encrypt-outputs-per-output-nonce.circom`), so duplicate owners — a self-send, or a transfer10
-  self-merge where all ten outputs share one key — are structurally safe, and receivers decrypt
+  (`encrypt-outputs-per-output-nonce.circom`), so duplicate owners — a self-send, or a merge whose
+  outputs all share one key — are structurally safe, and receivers decrypt
   `ct_i` with `nonce + i`. deposit is exempt too: both
   its outputs belong to the depositor and it publishes no per-recipient ciphertext, only a single
   authority envelope over both.
@@ -197,6 +226,7 @@ circuits/                                          include spelling        resol
   disburse.circom     ──> (same base, nOutputs=16)  bare                    lib
   transfer.circom     ──> ..._imt_small_base.circom bare                    lib
   transfer10.circom   ──> (same base, 10-in/10-out)  bare                   lib
+  transfer10x2.circom ──> (same base, 10-in/2-out)   bare                   lib
   withdraw.circom     ──> check-nullifiers-value-imt-base.circom  bare      lib
   deposit.circom      ──> deposit_authority_imt_base.circom       bare      lib
 

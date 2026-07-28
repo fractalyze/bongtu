@@ -18,6 +18,7 @@ import type {
   DisburseInput,
   ProvingRequest,
   Transfer10Input,
+  Transfer10x2Input,
 } from "../src/proving.js";
 import { deriveKeypair, commitment } from "../src/note.js";
 
@@ -116,6 +117,49 @@ test("a transfer10 ProvingRequest keeps all ten [10][H] slots and duplicate owne
   assert.equal(wire.input.enabled[4], "0");
   assert.equal(wire.input.outputOwnerPublicKeys.length, 10);
   assert.deepEqual(wire.input.outputOwnerPublicKeys[9], wire.input.outputOwnerPublicKeys[0]);
+  assert.equal(BigInt(wire.input.inputCommitments[0] as string), input.inputCommitments[0]);
+});
+
+test("a transfer10x2 ProvingRequest keeps ten input slots against only two outputs", () => {
+  const H = 32;
+  const kp = deriveKeypair(515151515151515151n);
+  const ten = <T>(f: (i: number) => T): T[] => Array.from({ length: 10 }, (_, i) => f(i));
+  const values = ten((i) => BigInt(10 * i)); // 450 total
+  const salts = ten((i) => 900n + BigInt(i));
+  const input: Transfer10x2Input = {
+    nullifiers: ten((i) => (i < 4 ? 100n + BigInt(i) : 0n)), // 4 real, 6 padded
+    inputCommitments: ten((i) => commitment(values[i], salts[i], kp.publicKey)),
+    inputValues: values,
+    inputSalts: salts,
+    inputOwnerPrivateKey: 4n,
+    ecdhPrivateKey: 5n,
+    root: 6n,
+    pathElements: ten(() => new Array<bigint>(H).fill(0n)),
+    leafIndices: ten((i) => BigInt(i)),
+    enabled: ten((i) => (i < 4 ? 1n : 0n)),
+    outputCommitments: [700n, 701n],
+    outputValues: [450n, 0n], // merged note + zero change
+    outputSalts: [800n, 801n],
+    // both outputs to ONE owner: the merge shape the per-output nonce allows.
+    outputOwnerPublicKeys: [kp.publicKey, kp.publicKey],
+    kemSs: [15n, 16n],
+    encryptionNonce: 12n,
+    authorityPublicKey: [13n, 14n],
+  };
+  const req: ProvingRequest = { circuit: "transfer10x2", input, backend: "cpu" };
+  const wire = JSON.parse(JSON.stringify(toWire(req))) as ProvingRequest;
+  assert.equal(wire.circuit, "transfer10x2");
+  if (wire.circuit !== "transfer10x2") throw new Error("unreachable"); // narrows the union
+  // the asymmetry IS the circuit: ten membership slots, two output slots.
+  assert.equal(wire.input.pathElements.length, 10);
+  assert.equal(wire.input.pathElements[9].length, H);
+  assert.equal(wire.input.nullifiers.length, 10);
+  assert.equal(wire.input.enabled[3], "1");
+  assert.equal(wire.input.enabled[4], "0");
+  assert.equal(wire.input.outputCommitments.length, 2);
+  assert.equal(wire.input.outputOwnerPublicKeys.length, 2);
+  assert.deepEqual(wire.input.outputOwnerPublicKeys[1], wire.input.outputOwnerPublicKeys[0]);
+  assert.equal(wire.input.outputValues[1], "0");
   assert.equal(BigInt(wire.input.inputCommitments[0] as string), input.inputCommitments[0]);
 });
 

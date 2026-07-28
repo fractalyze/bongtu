@@ -28,8 +28,9 @@
 //   transfer   (2-in/ 2-out): [inOwn.x,inOwn.y, iv0,is0, iv1,is1,
 //                              o0.x,o0.y, o1.x,o1.y, ov0,os0, ov1,os1]            (len 14   -> ct[16])
 //   transfer10 (10-in/10-out): the same shape at arity 10                         (len 62   -> ct[64])
+//   transfer10x2 (10-in/2-out): the same shape, 10 inputs but only 2 outputs      (len 30   -> ct[31])
 //   disburse   (1-in/ B-out): [inOwn.x,inOwn.y, iv,is, (o.x,o.y)*B, (ov,os)*B]    (len 4+4B -> tail)
-// All five are ONE layout — an optional shared-input-owner head, then the input
+// All six are ONE layout — an optional shared-input-owner head, then the input
 // (value, salt) pairs, then the output owner points, then the output
 // (value, salt) pairs — so `spendLayout` below is the single implementation and
 // the table above is its instantiation, not a second source of truth. Every
@@ -54,11 +55,20 @@ import { hybridEnvelopeKey } from "./kem.js";
 import { ecdhSharedSecret, poseidonDecrypt } from "./note.js";
 import { poseidon2 } from "./poseidon.js";
 
-export type OpKind = "deposit" | "withdraw" | "transfer" | "transfer10" | "disburse";
+export type OpKind =
+  | "deposit"
+  | "withdraw"
+  | "transfer"
+  | "transfer10"
+  | "transfer10x2"
+  | "disburse";
 
-/** transfer10 arity: the 10-in / 10-out instantiation of the transfer base
- *  (`circuits/transfer10.circom`). Both sides are 10 — a spend may enable 1..10
- *  inputs (the rest padded) and fund 1..10 outputs (the rest zero-value). */
+/** The INPUT arity shared by both 10-in transfer circuits: a spend may enable
+ *  1..10 inputs and pad the rest. transfer10 (`circuits/transfer10.circom`)
+ *  matches it on the output side too (1..10 funded outputs, the rest
+ *  zero-value); transfer10x2 (`circuits/transfer10x2.circom`) keeps the ten
+ *  inputs but publishes only two outputs — payment and change — because each
+ *  output costs a depth-32 IMT leaf append on chain. */
 export const TRANSFER10_ARITY = 10;
 
 /** The (nIn, nOut) an op's envelope covers. `B` is read only by disburse, whose
@@ -73,6 +83,8 @@ function opArity(kind: OpKind, B: number): { nIn: number; nOut: number } {
       return { nIn: 2, nOut: 2 };
     case "transfer10":
       return { nIn: TRANSFER10_ARITY, nOut: TRANSFER10_ARITY };
+    case "transfer10x2":
+      return { nIn: TRANSFER10_ARITY, nOut: 2 };
     case "disburse":
       return { nIn: 1, nOut: B };
   }
@@ -106,7 +118,8 @@ export interface ParsedEnvelope {
 }
 
 /** Plaintext field count for an op's authority envelope (disburse scales with B).
- *  deposit 8, withdraw 10, transfer 14, transfer10 62, disburse 4 + 4B. */
+ *  deposit 8, withdraw 10, transfer 14, transfer10 62, transfer10x2 30,
+ *  disburse 4 + 4B. */
 export function envelopePlaintextLen(kind: OpKind, B: number): number {
   const { nIn, nOut } = opArity(kind, B);
   return spendLayout(nIn, nOut).len;
@@ -115,7 +128,8 @@ export function envelopePlaintextLen(kind: OpKind, B: number): number {
 /** Poseidon-sponge ciphertext length for an op's authority envelope: the
  *  plaintext padded to a multiple of 3, plus the sponge's final squeeze.
  *  disburse B=256 -> 1030, so 4*B + 1030 == 2054 == disburseCiphertextLen;
- *  transfer10 -> 64, the `cipherTextAuthority[64]` the circuit publishes. */
+ *  transfer10 -> 64 and transfer10x2 -> 31, the `cipherTextAuthority[]` runs
+ *  those circuits publish (30 is already a multiple of 3, so 10x2 pads by 0). */
 export function authorityCiphertextLen(kind: OpKind, B: number): number {
   const plain = envelopePlaintextLen(kind, B);
   return plain + ((3 - (plain % 3)) % 3) + 1;
@@ -129,8 +143,8 @@ export function authorityCiphertextLen(kind: OpKind, B: number): number {
  * change ++ zero-value pads, exactly the circuit's output vector).
  *
  * Throws on a shape that no circuit produces: wrong input/output counts for
- * the kind, or transfer/withdraw inputs with differing owners (the circuits
- * take a single inputOwnerPrivateKey).
+ * the kind, or spend inputs with differing owners (the circuits take a single
+ * inputOwnerPrivateKey).
  */
 export function buildAuthorityPlaintext(kind: OpKind, env: ParsedEnvelope): bigint[] {
   const { inputs, outputs } = env;

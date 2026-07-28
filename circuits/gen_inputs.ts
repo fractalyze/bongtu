@@ -6,7 +6,7 @@
 // membership(), and write() live in fixture_lib.ts (shared by all five
 // generators; PRNG-free, so fixtures are reproducible).
 //
-//   npx tsx gen_inputs.ts        # writes inputs/{deposit,disburse,transfer,withdraw}.json
+//   npx tsx gen_inputs.ts        # writes one inputs/<fixture>.json per write() below
 //
 // Each generator's return value is typed with the @bongtu/core/proving input
 // interface its circuit consumes, so the root tsc gate enforces that the
@@ -19,6 +19,7 @@ import type {
   DepositInput,
   DisburseInput,
   Transfer10Input,
+  Transfer10x2Input,
   TransferInput,
   WithdrawInput,
 } from "@bongtu/core/proving";
@@ -128,7 +129,10 @@ function genTransfer(): TransferInput {
   };
 }
 
-// --- transfer10 (10-in / 10-out), ZetoTransferSmall(10,10,32) ---------------
+// --- the 10-input transfer arities, ZetoTransferSmall(10, nOut, 32) ---------
+//
+// Two circuits share this input side: transfer10 (10 outputs) and transfer10x2
+// (2 outputs). Only `nOut` differs, so one builder produces both.
 
 // Padding convention, mirrored from the wallet's spend assembler: an unused
 // input slot carries nullifier 0, value 0, enabled 0, a zeros path and a
@@ -147,18 +151,22 @@ function padInput(i: number): {
   return { nullifier: 0n, commitment: commitment(0n, s, SENDER.publicKey), value: 0n, salt: s };
 }
 
-/** Build a transfer10 witness input from `inValues` real inputs (padded out to
- *  10) and `outputs` real outputs (padded out to 10 with value-0 self notes).
- *  Value conservation is asserted here, not left to the circuit to discover. */
-function transfer10(
+/** Build a 10-input transfer witness from `inValues` real inputs (padded out to
+ *  10) and `outputs` real outputs (padded out to `nOut` with value-0 self
+ *  notes). Value conservation is asserted here, not left to the circuit to
+ *  discover. The return shape is the same for both output arities — the callers
+ *  name it Transfer10Input or Transfer10x2Input. */
+function spend10(
   label: string,
+  nOut: number,
   inValues: bigint[],
   inSaltBase: number,
   outputs: { value: bigint; owner: Point }[],
   outSaltBase: number,
 ): Transfer10Input {
   const N = 10;
-  if (inValues.length > N || outputs.length > N) throw new Error("transfer10 arity is 10");
+  if (inValues.length > N) throw new Error(`${label}: input arity is 10`);
+  if (outputs.length > nOut) throw new Error(`${label}: output arity is ${nOut}`);
 
   const inSalts = inValues.map((_, i) => salt(inSaltBase + i));
   const inCommits = inValues.map((v, i) => commitment(v, inSalts[i], SENDER.publicKey));
@@ -171,11 +179,11 @@ function transfer10(
   ];
 
   // Unused output slots: value-0 notes back to the sender. Duplicate output
-  // owners are SAFE here (§11-8 v1.1 per-output nonce) and unavoidable at this
-  // arity — hence no assertDistinctOwnerPubkeys, unlike the disburse fixture.
+  // owners are SAFE here (§11-8 v1.1 per-output nonce) and unavoidable at these
+  // arities — hence no assertDistinctOwnerPubkeys, unlike the disburse fixture.
   const outAll = [
     ...outputs,
-    ...Array.from({ length: N - outputs.length }, () => ({ value: 0n, owner: SENDER.publicKey })),
+    ...Array.from({ length: nOut - outputs.length }, () => ({ value: 0n, owner: SENDER.publicKey })),
   ];
   const outSalts = outAll.map((_, i) => salt(outSaltBase + i));
 
@@ -208,8 +216,9 @@ function transfer10(
  *  (payment + change) + 8 zero pads — the shape a wallet produces when it picks
  *  four notes to cover one payment. */
 function genTransfer10(): Transfer10Input {
-  return transfer10(
+  return spend10(
     "transfer10",
+    10,
     [400n, 300n, 200n, 100n], // 1000 spendable
     40,
     [
@@ -226,12 +235,49 @@ function genTransfer10(): Transfer10Input {
  *  ban and the per-output nonce makes safe. */
 function genTransfer10Consolidate(): Transfer10Input {
   const inValues = Array.from({ length: 10 }, (_, i) => BigInt(100 * (i + 1))); // 5500
-  return transfer10(
+  return spend10(
     "transfer10_consolidate",
+    10,
     inValues,
     60,
     [{ value: 5500n, owner: SENDER.publicKey }],
     70,
+  );
+}
+
+// --- transfer10x2 (10-in / 2-out), ZetoTransferSmall(10,2,32) ---------------
+
+/** The canonical partly-filled case at 2 outputs: 4 real inputs + 6 pads paying
+ *  one distinct payee, change back to the sender. The same spend as the
+ *  transfer10 fixture, minus the eight zero-value output slots it had to append
+ *  to the tree anyway. */
+function genTransfer10x2(): Transfer10x2Input {
+  return spend10(
+    "transfer10x2",
+    2,
+    [400n, 300n, 200n, 100n], // 1000 spendable
+    100,
+    [
+      { value: 700n, owner: receiver(0).publicKey }, // payment
+      { value: 300n, owner: SENDER.publicKey }, // change
+    ],
+    110,
+  );
+}
+
+/** The pure merge — the shape the wallet's spend chain uses: all 10 input slots
+ *  real, output 0 the merged total back to self, output 1 a ZERO-value change
+ *  note (also self). Both outputs share ONE owner, the duplicate-owner case the
+ *  shared-nonce circuits ban and the §11-8 v1.1 per-output nonce makes safe. */
+function genTransfer10x2Merge(): Transfer10x2Input {
+  const inValues = Array.from({ length: 10 }, (_, i) => BigInt(100 * (i + 1))); // 5500
+  return spend10(
+    "transfer10x2_merge",
+    2,
+    inValues,
+    120,
+    [{ value: 5500n, owner: SENDER.publicKey }], // output 1 pads to a zero self note
+    130,
   );
 }
 
@@ -275,5 +321,7 @@ write("disburse", genDisburse());
 write("transfer", genTransfer());
 write("transfer10", genTransfer10());
 write("transfer10_consolidate", genTransfer10Consolidate());
+write("transfer10x2", genTransfer10x2());
+write("transfer10x2_merge", genTransfer10x2Merge());
 write("withdraw", genWithdraw());
 console.log("input generation OK");

@@ -1,16 +1,17 @@
 // U3 soundness gate (SPEC §5.2): prove the value-belt closes mint-from-nothing
 // at the CIRCUIT level. Regenerates the attack/padded fixtures, then asserts:
 //
-//   withdraw_mint     (nf=0,  value=X, enabled=0)      -> generate_witness THROWS
-//   withdraw_attack   (nf!=0, value=X, enabled=0)      -> generate_witness THROWS
-//   transfer10_attack (nf!=0, value=X, enabled=0 in a  -> generate_witness THROWS
-//                      padded slot at arity 10)
-//   withdraw_padded   (nf=0,  value=0, enabled=0)      -> generate_witness SUCCEEDS
-//   transfer10        (6 zero-value disabled pads)     -> generate_witness SUCCEEDS
+//   withdraw_mint       (nf=0,  value=X, enabled=0)      -> generate_witness THROWS
+//   withdraw_attack     (nf!=0, value=X, enabled=0)      -> generate_witness THROWS
+//   transfer10_attack   (nf!=0, value=X, enabled=0 in a  -> generate_witness THROWS
+//   transfer10x2_attack  padded slot of a 10-input spend)
+//   withdraw_padded     (nf=0,  value=0, enabled=0)      -> generate_witness SUCCEEDS
+//   transfer10          (6 zero-value disabled pads)     -> generate_witness SUCCEEDS
+//   transfer10x2        (6 zero-value disabled pads)     -> generate_witness SUCCEEDS
 //
 // The throwing fixtures fail on the belt constraint
 // `(1 - enabled[i]) * inputValues[i] === 0` in the spending base.
-// Requires out/{withdraw,transfer10}_js (compile them first, e.g. via prove_all.sh).
+// Requires out/{withdraw,transfer10,transfer10x2}_js (compile them first, e.g. via prove_all.sh).
 //
 // PLUS the PQ-envelope binding gate (pq-envelope-design.md §2/§6): for every
 // proved fixture in out/, TAMPERING the kemBinding public signal makes
@@ -33,7 +34,7 @@ const genwitOf = (c: string): string => join(OUT, `${c}_js`, "generate_witness.j
 const inp = (n: string): string => join(HERE, "inputs", `${n}.json`);
 const wtns = (n: string): string => join(OUT, `${n}.wtns`);
 
-for (const c of ["withdraw", "transfer10"]) {
+for (const c of ["withdraw", "transfer10", "transfer10x2"]) {
   if (!existsSync(wasmOf(c))) {
     console.error(`FATAL: ${wasmOf(c)} missing — compile ${c} first (bash prove_all.sh).`);
     process.exit(1);
@@ -75,6 +76,7 @@ const MUST_THROW: [circuit: string, fixture: string, belt: string][] = [
   ["withdraw", "withdraw_mint", "CheckNullifiersInputsOutputsValueIMT"],
   ["withdraw", "withdraw_attack", "CheckNullifiersInputsOutputsValueIMT"],
   ["transfer10", "transfer10_attack", "ZetoTransferSmall"],
+  ["transfer10x2", "transfer10x2_attack", "ZetoTransferSmall"],
 ];
 
 for (const [circuit, name, belt] of MUST_THROW) {
@@ -90,10 +92,11 @@ for (const [circuit, name, belt] of MUST_THROW) {
   }
 }
 
-// Positive controls: a zero-value disabled slot must still prove, at both arities.
+// Positive controls: a zero-value disabled slot must still prove, at every arity.
 for (const [circuit, name] of [
   ["withdraw", "withdraw_padded"],
   ["transfer10", "transfer10"],
+  ["transfer10x2", "transfer10x2"],
 ]) {
   const r = witness(circuit, name);
   if (!r.ok) {
@@ -106,14 +109,16 @@ for (const [circuit, name] of [
 
 // --- PQ kemBinding tamper gate ---------------------------------------------
 // kemBinding public-signal index per proof fixture (pq-envelope-design.md §3
-// layouts), with the circuit whose vkey verifies it — transfer10 carries two
-// fixtures against one vkey.
+// layouts), with the circuit whose vkey verifies it — transfer10 and
+// transfer10x2 each carry two fixtures against one vkey.
 const KEM_BINDING_AT: [fixture: string, circuit: string, at: number][] = [
   ["deposit", "deposit", 13],
   ["withdraw", "withdraw", 16],
   ["transfer", "transfer", 26],
   ["transfer10", "transfer10", 106],
   ["transfer10_consolidate", "transfer10", 106],
+  ["transfer10x2", "transfer10x2", 41],
+  ["transfer10x2_merge", "transfer10x2", 41],
   ["disburse", "disburse", 4],
   ["disburse256", "disburse256", 4],
 ];
