@@ -56,10 +56,15 @@ Verified against each project's source and deployed artifacts:
 | Own-notes lookup | ✅ indexer `/notes` | ❌ scan all | ❌ scan all | ❌ scan all | n/a |
 | Live | ✅ | ✅ | ✅ | ❌ sunset | ✅ |
 
-- **Mass payout**: Railgun's 5 rises to 13 only when spending a single input; zkBob's 127 shipped,
-  but its pools are shut down.
-- **Recipient count**: bongtu pads every batch to 256 with no per-leaf events, so the count is
-  invisible; the others hide *who* is paid but reveal *how many*.
+- **Mass payout**: the others cap low because their circuits are symmetric N-in/N-out, so every
+  extra recipient is another on-chain tree insert (Zeto pads any multi-output transfer to a full
+  10×10 proof). Railgun's 5 rises to 13 only when spending a single input, and zkBob's 127 shipped
+  but its pools are shut down. bongtu uses a dedicated 1-in/256-out circuit with an O(log 256)
+  batch-attach, so 256 recipients settle in one flat transaction instead of dozens.
+- **Recipient count**: paying people in separate transactions, or in a batch whose size shows,
+  leaks your headcount and pay cadence even when amounts are hidden. bongtu pads every batch to a
+  fixed 256 and attaches the whole subtree with no per-recipient event, so an observer can't tell 3
+  recipients from 250. The others hide *who* is paid but still publish *how many*.
 - **Post-quantum**: all three encrypt on-chain, but Railgun (ECDH) and Token-2022 (ElGamal) use
   classical crypto whose keys stay on-chain forever, so a future quantum computer can decrypt every
   past amount. bongtu mixes in a lattice (ML-KEM-768) secret, so breaking the classical half alone
