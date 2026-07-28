@@ -56,17 +56,10 @@ Verified against each project's source and deployed artifacts:
 | Own-notes lookup | ✅ indexer `/notes` | ❌ scan all | ❌ scan all | ❌ scan all | n/a |
 | Live | ✅ | ✅ | ✅ | ❌ sunset | ✅ |
 
-- **Mass payout**: the others cap low because their circuits are symmetric N-in/N-out, so every
-  extra recipient is another on-chain tree insert (Zeto pads any multi-output transfer to a full
-  10×10 proof). Railgun's 5 rises to 13 only when spending a single input, and zkBob's 127 shipped
-  but its pools are shut down. bongtu uses a dedicated 1-in/256-out circuit with an O(log 256)
-  batch-attach, so 256 recipients settle in one flat transaction instead of dozens.
-- **Recipient count**: paying people in separate transactions, or in a batch whose size shows,
-  leaks your headcount and pay cadence even when amounts are hidden. bongtu pads every batch to a
-  fixed 256 and attaches the whole subtree with no per-recipient event, so an observer can't tell 3
-  recipients from 250. The others hide *who* is paid but still publish *how many*.
+- Railgun's 5 rises to 13 only when spending a single input; zkBob's 127 shipped, but its pools are
+  shut down.
 - **Post-quantum**: all three encrypt on-chain, but Railgun (ECDH) and Token-2022 (ElGamal) use
-  classical crypto whose keys stay on-chain forever, so a future quantum computer can decrypt every
+  classical crypto whose keys stay on-chain forever, so a future quantum computer could decrypt every
   past amount. bongtu mixes in a lattice (ML-KEM-768) secret, so breaking the classical half alone
   reveals nothing.
 
@@ -77,8 +70,18 @@ pool.
 ## The headline: mass private disbursement
 
 One transaction pays up to **256 recipients**, each with an amount only they and the auditor can
-read. One such batch, measured live on GIWA: **3,872,403 L2 gas** (15,126 per recipient) plus
-**~4e-6 ETH** of L1 data fee
+read.
+
+**How the 256 fit in one transaction.** The disburse circuit proves, in a single proof, that the 256
+output notes already form a depth-8 subtree, together with value conservation (the input note equals
+the sum of the outputs). The contract then grafts that whole subtree onto the main Merkle tree at
+level 8 (an **O(log 256)** operation) instead of appending 256 leaves one at a time, which is O(256)
+and would not fit in a block. It pads the batch to a fixed 256 with no per-leaf event (so the
+real recipient count stays hidden) and publishes all 256 ciphertexts on-chain for the auditor,
+bound by one aggregated disclosure hash the proof commits to.
+
+One such batch, measured live on GIWA: **3,872,403 L2 gas** (15,126 per recipient) plus **~4e-6 ETH**
+of L1 data fee
 ([tx](https://sepolia-explorer.giwa.io/tx/0xe254240a5df042a163073c028399a5fc63cf87434a7e7ebbf5ddfea73c803bd6)).
 
 A **100,000-person payroll** is 391 of those batches. From the measured per-batch numbers:
