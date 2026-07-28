@@ -24,6 +24,10 @@ import {
   buildHistoryUrl,
   buildNotesTokenUrl,
   buildHistoryTokenUrl,
+  buildHistoryPageUrl,
+  fetchHistoryPage,
+  HISTORY_PAGE_LIMIT,
+  type HistoryPage,
   signedReadUrl,
   tokenReadUrl,
   assertValidChallenge,
@@ -142,6 +146,59 @@ test("the /notes and /history builders are the SAME builder, differing only in p
 
 test("buildHistoryUrl rejects a malformed compressed owner pubkey (client-side 400 guard)", () => {
   assert.throws(() => buildHistoryUrl("http://localhost:8600", "0x1234", 1n));
+});
+
+// --- /history paging (the client half of the { items, nextBefore } envelope) ------
+
+test("a history page URL always carries limit, and before only when asked", () => {
+  const kp = deriveKeypair(OWNER_SCALAR);
+  const compressed = packPubkey(kp.publicKey);
+  const first = new URL(buildHistoryPageUrl("http://localhost:8600", compressed, "tok.en"));
+  assert.equal(first.pathname, "/history");
+  assert.equal(first.searchParams.get("token"), "tok.en");
+  // `limit` is what SELECTS the envelope over the legacy bare array, so the first
+  // page must send it even though the server would default to the same number.
+  assert.equal(first.searchParams.get("limit"), String(HISTORY_PAGE_LIMIT));
+  assert.equal(first.searchParams.get("before"), null, "the newest page has no cursor");
+
+  const next = new URL(buildHistoryPageUrl("http://localhost:8600", compressed, "tok.en", { before: 41, limit: 7 }));
+  assert.equal(next.searchParams.get("before"), "41");
+  assert.equal(next.searchParams.get("limit"), "7");
+
+  // The deployed wallet reaches its indexer on a RELATIVE base ("/indexer"), which
+  // `new URL` cannot parse — the builder must not have used it internally either.
+  const relative = buildHistoryPageUrl("/indexer", compressed, "tok.en", { before: 3 });
+  assert.ok(relative.startsWith("/indexer/history?owner="), relative);
+  assert.ok(relative.includes("&before=3"), relative);
+});
+
+test("fetchHistoryPage round-trips the page envelope over an injected fetch", async () => {
+  const kp = deriveKeypair(OWNER_SCALAR);
+  const compressed = packPubkey(kp.publicKey);
+  const served: HistoryPage = {
+    items: [
+      { kind: "received", counterparty: null, amount: "5", txHash: "0xaa", blockTimestamp: 1, seq: 9 },
+      { kind: "sent", counterparty: null, amount: "2", txHash: "0xbb", blockTimestamp: 1, seq: 8 },
+    ],
+    nextBefore: 8,
+  };
+  let requested = "";
+  const fakeFetch = (async (url: string) => {
+    requested = url;
+    return { ok: true, text: async () => JSON.stringify(served) };
+  }) as unknown as typeof fetch;
+
+  const page = await fetchHistoryPage("http://localhost:8600", compressed, "tok.en", { before: 20, limit: 2 }, fakeFetch);
+  assert.deepEqual(page, served, "the envelope is returned as-is, not flattened to an array");
+  assert.ok(requested.includes("before=20") && requested.includes("limit=2"), requested);
+
+  // A non-2xx keeps the shared error shape the wallet's classifyReadFailure reads
+  // ("-> 401" is what sends the app back to onboarding).
+  const denied = (async () => ({ ok: false, status: 401, text: async () => "nope" })) as unknown as typeof fetch;
+  await assert.rejects(
+    () => fetchHistoryPage("http://localhost:8600", compressed, "tok.en", {}, denied),
+    /-> 401/,
+  );
 });
 
 // --- view-token binding primitives (the client half of POST /auth) ---------------

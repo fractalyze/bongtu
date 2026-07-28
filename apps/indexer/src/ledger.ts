@@ -408,11 +408,28 @@ export function makeHistoryItem(draft: DerivedHistory, op: OpEnvelope, seq: numb
   };
 }
 
-/** Append a history item to its owner's list. */
+/**
+ * Append a history item to its owner's list, keeping that list sorted by ASCENDING
+ * seq.
+ *
+ * That ordering is an INVARIANT the paged read relies on (PostgresLedger.historyOf
+ * binary-searches `before` and walks backwards for the newest-first page, instead
+ * of copy-sorting the whole feed per request). Both producers already push in
+ * order — apply() stamps a monotonically increasing `historySeq`, and boot()
+ * replays `ORDER BY seq ASC` — so the fast path is a plain append. The ordered
+ * insert is a belt for a future producer that is not: it keeps the invariant true
+ * by construction rather than by comment, and costs nothing until it is needed.
+ */
 export function pushHistory(historyByOwner: Map<string, LedgerHistoryItem[]>, owner: Point, item: LedgerHistoryItem): void {
   const k = ownerKey(owner[0], owner[1]);
   const arr = historyByOwner.get(k) ?? [];
-  arr.push(item);
+  if (arr.length > 0 && item.seq <= arr[arr.length - 1].seq) {
+    let i = arr.length;
+    while (i > 0 && arr[i - 1].seq > item.seq) i--;
+    arr.splice(i, 0, item);
+  } else {
+    arr.push(item);
+  }
   historyByOwner.set(k, arr);
 }
 

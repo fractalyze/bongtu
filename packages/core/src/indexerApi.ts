@@ -105,6 +105,26 @@ export interface HistoryItem {
   seq: number; // newest-first: the feed is sorted by seq desc
 }
 
+/** ONE page of `GET /history` (served whenever the request carries `limit` or
+ *  `before`; a request carrying NEITHER still gets the legacy bare array).
+ *  `nextBefore` is the cursor for the page after this one — pass it back as
+ *  `before` — and null when the feed is exhausted, which is the caller's ONLY
+ *  end-of-feed signal. */
+export interface HistoryPage {
+  items: HistoryItem[];
+  nextBefore: number | null;
+}
+
+/** Where a page starts (`before`, exclusive on seq — omit for the newest) and how
+ *  big it is (`limit`, server-capped at 200). */
+export interface HistoryPageQuery {
+  limit?: number;
+  before?: number;
+}
+
+/** The page size the wallet asks for; the indexer route defaults to the same. */
+export const HISTORY_PAGE_LIMIT = 50;
+
 /** `GET /head` — the ingested mirror state. */
 export interface Head {
   root: string;
@@ -165,8 +185,8 @@ export type Alarm = DisclosureAlarm | EnvelopeAlarm;
 
 // --- thin typed client ----------------------------------------------------------
 
-async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
+async function getJson<T>(url: string, fetchFn: typeof fetch = fetch): Promise<T> {
+  const res = await fetchFn(url);
   const text = await res.text();
   if (!res.ok) throw new Error(`${url} -> ${res.status}: ${text.slice(0, 300)}`);
   return JSON.parse(text) as T;
@@ -242,7 +262,10 @@ export function buildHistoryUrl(indexerUrl: string, ownerCompressed: string, own
   return signedReadUrl(indexerUrl, "history", ownerCompressed, ownerPrivateKey);
 }
 
-/** Fetch a signed /history URL (from `buildHistoryUrl`) into the owner's feed. */
+/** Fetch a signed /history URL (from `buildHistoryUrl`) into the owner's feed.
+ *  Unpaged: a URL with no `limit`/`before` gets the WHOLE feed as a bare array.
+ *  Still the right call for the one-shot key-signed read (a tokenless session has
+ *  nothing to page a second request with); token sessions use fetchHistoryPage. */
 export function fetchHistory(url: string): Promise<HistoryItem[]> {
   return getJson<HistoryItem[]>(url);
 }
@@ -341,4 +364,47 @@ export function buildNotesTokenUrl(indexerUrl: string, ownerCompressed: string, 
 
 export function buildHistoryTokenUrl(indexerUrl: string, ownerCompressed: string, token: string): string {
   return tokenReadUrl(indexerUrl, "history", ownerCompressed, token);
+}
+
+/** Append the paging params to an owner-feed URL. String concatenation, not `new
+ *  URL`: `indexerUrl` is RELATIVE in the deployed wallet ("/indexer"), which `new
+ *  URL` cannot parse without a base. Every builder above already emitted `?owner=`,
+ *  so the separator is always `&`. */
+function withPageParams(url: string, page: HistoryPageQuery): string {
+  const q: string[] = [];
+  if (page.limit !== undefined) q.push(`limit=${page.limit}`);
+  if (page.before !== undefined) q.push(`before=${page.before}`);
+  return q.length === 0 ? url : `${url}&${q.join("&")}`;
+}
+
+/** The token-authed URL for ONE page of an owner's `/history`. */
+export function buildHistoryPageUrl(
+  indexerUrl: string,
+  ownerCompressed: string,
+  token: string,
+  page: HistoryPageQuery = {},
+): string {
+  // `limit` is sent ALWAYS, even for the first page: it is what selects the
+  // { items, nextBefore } envelope over the legacy bare array, so a page request
+  // that omitted it would parse as `items: undefined`.
+  return withPageParams(buildHistoryTokenUrl(indexerUrl, ownerCompressed, token), {
+    limit: page.limit ?? HISTORY_PAGE_LIMIT,
+    before: page.before,
+  });
+}
+
+/**
+ * Fetch one page of an owner's activity feed with a view token — the paging client
+ * the wallet's Activity screen drives. The token is reused per page: paging costs
+ * no new signature, because `before` is a cursor into an already-authorised feed
+ * and the auth is re-checked per request from the token alone.
+ */
+export function fetchHistoryPage(
+  indexerUrl: string,
+  ownerCompressed: string,
+  token: string,
+  page: HistoryPageQuery = {},
+  fetchFn: typeof fetch = fetch,
+): Promise<HistoryPage> {
+  return getJson<HistoryPage>(buildHistoryPageUrl(indexerUrl, ownerCompressed, token, page), fetchFn);
 }

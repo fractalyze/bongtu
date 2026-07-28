@@ -114,10 +114,26 @@ so a cold backfill does not open one socket per block.
 | `GET /alarms` | one discriminated feed: every non-passing disclosure (`type:"disclosure"`) plus, arbiter mode only, envelope cross-check failures (`type:"envelope"`) | none |
 | `GET /health` | `{ ok, lastBlock, nextLeafIndex, batchSize, alarms, lastSuccessAt, lastError, lastErrorAt, consecutiveFailures }`; `ok` is false when the tail poll is persistently failing | none |
 | `GET /notes?owner=&ts=&sig=` | one owner's decrypted notes `[{ owner, value, salt, leafIndex, commitment, txHash, spent }]` | **bjj signature, arbiter mode only** |
-| `GET /history?owner=&ts=&sig=` | one owner's activity feed `[{ kind, counterparty, amount, txHash, blockTimestamp, seq }]`, newest first | **bjj signature, arbiter mode only** |
+| `GET /history?owner=&ts=&sig=[&limit=&before=]` | one owner's activity feed `[{ kind, counterparty, amount, txHash, blockTimestamp, seq }]`, newest first — **one page** as `{ items, nextBefore }` when `limit` or `before` is present, the whole feed as a bare array when neither is (see below) | **bjj signature, arbiter mode only** |
 
 Wire shapes are typed by `@bongtu/core/indexerApi`; the routes type their response bodies against
 them and `buildNotesUrl` / `buildHistoryUrl` are the one client-side URL builder.
+
+**Paging `/history`.** A payroll account's feed grows without bound, so the wallet reads it one page
+at a time: `limit` (default 50, max 200) and `before`, an **exclusive upper bound on `seq`**. The
+cursor is a seq rather than an offset because `seq` is assigned once in chain-apply order and never
+renumbered — a page stays the same page while new activity lands ahead of it. The response is
+`{ items, nextBefore }`, where `nextBefore` is the last item's `seq` when the page came back **full**
+and `null` once the feed is exhausted; a client pages until it is null. Non-digit, empty, negative
+or over-cap values are 400s (`Number("")` is 0, so the parse is digits-only, not `Number()`).
+
+A request carrying **neither** param still gets the legacy bare array of the whole feed — the
+deployed wallet parses an array and would read an envelope as zero activity. That branch exists for
+one release and goes away once no client in the wild predates `fetchHistoryPage`.
+
+The filter is applied in the read model, not in SQL: each owner's history array is kept sorted by
+ascending `seq` at insert (`pushHistory`), so a page is a binary search for `before` plus a backwards
+walk — no per-request copy or sort of a feed that may hold thousands of rows.
 
 **Read auth on `/notes` and `/history`.** `owner` is the compressed bjj pubkey; `sig` is a bjj
 EdDSA-Poseidon signature over `Poseidon(ownerPub.x, ownerPub.y, ts)` verified against **the queried

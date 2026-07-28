@@ -315,6 +315,16 @@ match *is* the "is this mine" test) — but no adapter wires it as a balance sou
 never depends on the indexer; discovery liveness does. See
 [security-model.md](security-model.md#residual-gaps).
 
+**Activity arrives one page at a time.** A read loads `/notes` plus the first 50-item `/history`
+page and its cursor (`loadOwnerSnapshot` in `src/lib/refresh.ts`); the Activity screen's *Load more*
+asks for the next page over the same view token — a cursor into an already-authorised feed, so
+paging costs no extra signature — and the button disappears when the cursor comes back null. Home
+still slices the head of whatever is loaded. Appends de-dup on `seq` (`appendHistoryPage`), because
+a refresh can replace the feed while a next-page request is in flight; and a refresh **resets**
+paging to page one, since the appended pages were read against a feed that has since moved. The
+tokenless fallback session has nothing to page a second request with, so it reads the whole feed
+unpaged in its one shot.
+
 The indexer base URL defaults to the **relative** path `/indexer`, so every `/notes`, `/history`,
 `/head`, `/path` call is same-origin: no CORS wall, and a port-forwarded remote box needs one tunnel
 (the wallet port) rather than two. Who terminates `/indexer/*` depends on the mode

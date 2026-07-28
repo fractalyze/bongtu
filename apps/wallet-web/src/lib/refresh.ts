@@ -10,12 +10,42 @@
 // Pure core + injected sleep/load so the loop is unit-tested in milliseconds
 // (test/refresh.test.ts); App.tsx wires the real token-authed fetches.
 
-import type { OwnerNote, HistoryItem } from "./indexerClient.js";
+import type { OwnerNote, HistoryItem, HistoryPage } from "./indexerClient.js";
 
-/** One consistent read of the owner's indexer state. */
+/** One consistent read of the owner's indexer state. `history` is the FIRST page
+ *  of the activity feed and `historyNextBefore` the cursor for the page after it
+ *  (null = the whole feed fitted in one page). */
 export interface OwnerSnapshot {
   notes: OwnerNote[];
   history: HistoryItem[];
+  historyNextBefore: number | null;
+}
+
+/**
+ * ONE read of the owner's state, from whichever pair of fetches the caller's auth
+ * allows (token-authed page, or the tokenless one-shot's whole feed).
+ *
+ * `loadNotes` failing REJECTS — the balance is the screen, and a wrong balance is
+ * worse than an error banner. The activity read is best-effort on top: an indexer
+ * without /history (or one that failed only that call) still yields a usable
+ * balance, with an empty feed and a null cursor, which is the honest report — the
+ * app has nothing to page from.
+ *
+ * The returned snapshot is what the app applies WHOLESALE, so the feed it holds
+ * afterwards is exactly this read: any pages "Load more" had appended are dropped,
+ * because they were read against a feed that has since moved.
+ */
+export async function loadOwnerSnapshot(
+  loadNotes: () => Promise<OwnerNote[]>,
+  loadHistory: () => Promise<HistoryPage>,
+): Promise<OwnerSnapshot> {
+  const notes = await loadNotes();
+  try {
+    const page = await loadHistory();
+    return { notes, history: page.items, historyNextBefore: page.nextBefore };
+  } catch {
+    return { notes, history: [], historyNextBefore: null };
+  }
 }
 
 // --- refresh policy (what a refresh may do, and what a failed read means) ---------
@@ -75,7 +105,10 @@ export function classifyReadFailure(err: unknown, indexerUrl: string): ReadFailu
  *   - the tx itself appears in the history feed (the precise signal — every op
  *     kind lands a history item for its owner);
  *   - the history feed grew past its pre-action length (covers a feed that
- *     surfaces the op under a different hash, e.g. a multicall wrapper);
+ *     surfaces the op under a different hash, e.g. a multicall wrapper). Both
+ *     sides are ONE page, so this signal goes quiet once an account's feed fills
+ *     a page — the other two carry it from there, and a new op is always on the
+ *     first page anyway, the feed being newest-first;
  *   - the note set changed (a note created, spent, or removed) — the balance
  *     consequence of the action, even if history lags.
  */

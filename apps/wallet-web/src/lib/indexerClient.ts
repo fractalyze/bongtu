@@ -10,7 +10,10 @@
 //     can read its own notes even though the arbiter indexer holds everyone's;
 //   - `GET /events` + `GET /nullifiers` for the key-only trial-decrypt discovery
 //     primitive (`trialDecryptEvents` — tested, not a wallet balance path);
-//   - `GET /head` + `GET /path/{leafIndex}` to build a spend's membership witness.
+//   - `GET /head` + `GET /path/{leafIndex}` to build a spend's membership witness;
+//   - paged `GET /history` (`fetchHistoryPage`) for the activity feed — the app
+//     holds one page at a time and asks for the next by cursor, so a long-lived
+//     account does not download its entire history to render four Home rows.
 
 export {
   getHead,
@@ -20,6 +23,8 @@ export {
   fetchNotes,
   buildHistoryUrl,
   fetchHistory,
+  fetchHistoryPage,
+  HISTORY_PAGE_LIMIT,
   fetchHealth,
   obtainViewToken,
   buildNotesTokenUrl,
@@ -30,6 +35,7 @@ export {
   type PathResult,
   type HistoryItem,
   type HistoryKind,
+  type HistoryPage,
   type Health,
   type ViewToken,
 } from "@bongtu/core/indexerApi";

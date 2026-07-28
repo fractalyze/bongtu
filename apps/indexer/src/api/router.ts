@@ -17,9 +17,12 @@
 //   GET /notes?owner=x,y     -> [{ value, salt, leafIndex, commitment, txHash,
 //                               spent }]  (ARBITER MODE ONLY — registered only when
 //                               the indexer holds the arbiter key; else 404)
-//   GET /history?owner=&ts=&sig= -> [{ kind, counterparty, amount, txHash,
-//                               blockTimestamp, seq }]  (ARBITER MODE ONLY; same
-//                               bjj read-auth as /notes; newest-first)
+//   GET /history?owner=&ts=&sig=[&limit=&before=] -> [{ kind, counterparty,
+//                               amount, txHash, blockTimestamp, seq }] (ARBITER
+//                               MODE ONLY; same bjj read-auth as /notes;
+//                               newest-first). With `limit` or `before` the body
+//                               is ONE page as { items, nextBefore }; with
+//                               neither it stays the legacy whole-feed array.
 //   GET /auth/challenge?owner= -> { challenge, expiresAt, hostBindings }
 //                                                           (ARBITER MODE ONLY)
 //   POST /auth {owner,challenge,sig} -> { token, exp }       (ARBITER MODE ONLY;

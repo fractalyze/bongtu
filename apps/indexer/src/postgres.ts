@@ -186,6 +186,32 @@ export class PostgresStore implements StorePort {
 // Ledger adapter: shared deriveOp + in-memory read model + write-behind + rebuild.
 // ---------------------------------------------------------------------------
 
+/** One page of an owner's activity feed: at most `limit` items, all with a seq
+ *  strictly below `before`. Both absent = the whole feed (the unpaged read). */
+export interface HistoryQuery {
+  limit?: number;
+  before?: number;
+}
+
+/** Index of the LAST element with `seq < before` in a seq-ascending array, or -1
+ *  when every element is at or above it. Binary search, so a deep page costs a
+ *  handful of comparisons instead of a walk from the tail. */
+function lastIndexBelow(arr: readonly LedgerHistoryItem[], before: number): number {
+  let lo = 0;
+  let hi = arr.length - 1;
+  let ans = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (arr[mid].seq < before) {
+      ans = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return ans;
+}
+
 export class PostgresLedger {
   private readonly byOwner = new Map<string, LedgerNote[]>();
   private readonly byCommitment = new Map<string, LedgerNote>();
@@ -245,10 +271,27 @@ export class PostgresLedger {
     return this.byOwner.get(ownerKey(ownerX, ownerY)) ?? [];
   }
 
-  /** One owner's activity history, newest-first (seq desc). */
-  historyOf(ownerX: bigint, ownerY: bigint): LedgerHistoryItem[] {
+  /**
+   * One owner's activity history, newest-first (seq desc), optionally ONE PAGE of
+   * it: `before` is an exclusive upper bound on seq (absent = start at the newest)
+   * and `limit` caps the returned count.
+   *
+   * The filter is pushed into the read model rather than applied by the caller:
+   * a feed that has grown to thousands of items must not be copied and sorted per
+   * request just to serve its first 50. It needs neither a copy nor a sort, because
+   * the per-owner array is kept ASCENDING by seq at insert (see pushHistory) — so
+   * the page is a binary search for `before` followed by a backwards walk, and an
+   * unpaged call is one reversal.
+   */
+  historyOf(ownerX: bigint, ownerY: bigint, opts: HistoryQuery = {}): LedgerHistoryItem[] {
     const arr = this.historyByOwner.get(ownerKey(ownerX, ownerY)) ?? [];
-    return [...arr].sort((a, b) => b.seq - a.seq);
+    // Start index: the newest item strictly below `before` (the whole feed's last
+    // element when unbounded). -1 means nothing qualifies -> empty page.
+    let i = opts.before === undefined ? arr.length - 1 : lastIndexBelow(arr, opts.before);
+    const limit = opts.limit ?? arr.length;
+    const out: LedgerHistoryItem[] = [];
+    for (; i >= 0 && out.length < limit; i--) out.push(arr[i]);
+    return out;
   }
 
   /** Envelope cross-check failures surfaced during ingest (auditor-console feed). */

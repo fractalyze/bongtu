@@ -8,6 +8,10 @@
 //   (3) POLICY — a tokenless session never issues a doomed token read, and a 401
 //       from a token read is classified as a dead login rather than a retryable
 //       indexer error.
+//   (4) SNAPSHOT — loadOwnerSnapshot pairs the balance read with ONE activity
+//       page: a failing feed degrades to empty + no cursor while the balance still
+//       lands, a failing balance rejects outright, and the snapshot is exactly
+//       what a refresh applies (which is what resets paging back to page one).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -15,13 +19,14 @@ import assert from "node:assert/strict";
 import {
   actionReflected,
   classifyReadFailure,
+  loadOwnerSnapshot,
   pollForAction,
   refreshPlan,
   EXPIRED_MESSAGE,
   RECONNECT_NOTICE,
   type OwnerSnapshot,
 } from "../src/lib/refresh.js";
-import type { OwnerNote, HistoryItem } from "../src/lib/indexerClient.js";
+import type { OwnerNote, HistoryItem, HistoryPage } from "../src/lib/indexerClient.js";
 
 const note = (commitment: string, spent: boolean): OwnerNote => ({
   owner: ["1", "2"],
@@ -41,33 +46,41 @@ const hist = (txHash: string, seq: number): HistoryItem => ({
   seq,
 });
 
-const PRE: OwnerSnapshot = { notes: [note("11", false)], history: [hist("0xold", 1)] };
+/** A snapshot literal. `historyNextBefore` is null throughout the predicate/loop
+ *  tests: they turn on the notes and the feed CONTENTS, never on the cursor. */
+const snap = (notes: OwnerNote[], history: HistoryItem[], historyNextBefore: number | null = null): OwnerSnapshot => ({
+  notes,
+  history,
+  historyNextBefore,
+});
+
+const PRE: OwnerSnapshot = snap([note("11", false)], [hist("0xold", 1)]);
 
 // ============================ (1) PREDICATE ==================================
 
 test("actionReflected: unchanged state is NOT reflected", () => {
-  assert.equal(actionReflected(PRE, { notes: [note("11", false)], history: [hist("0xold", 1)] }, "0xNEW"), false);
+  assert.equal(actionReflected(PRE, snap([note("11", false)], [hist("0xold", 1)]), "0xNEW"), false);
 });
 
 test("actionReflected accepts each sufficient signal", () => {
   // the action's tx lands in history (case-insensitive hash match)
   assert.equal(
-    actionReflected(PRE, { notes: PRE.notes, history: [hist("0xNeW", 2), hist("0xold", 1)] }, "0xnew"),
+    actionReflected(PRE, snap(PRE.notes, [hist("0xNeW", 2), hist("0xold", 1)]), "0xnew"),
     true,
   );
   // history grew (even under a different wrapper hash)
   assert.equal(
-    actionReflected(PRE, { notes: PRE.notes, history: [hist("0xother", 2), hist("0xold", 1)] }, "0xnew"),
+    actionReflected(PRE, snap(PRE.notes, [hist("0xother", 2), hist("0xold", 1)]), "0xnew"),
     true,
   );
   // a note was created
   assert.equal(
-    actionReflected(PRE, { notes: [note("11", false), note("22", false)], history: PRE.history }, "0xnew"),
+    actionReflected(PRE, snap([note("11", false), note("22", false)], PRE.history), "0xnew"),
     true,
   );
   // a note flipped to spent
   assert.equal(
-    actionReflected(PRE, { notes: [note("11", true)], history: PRE.history }, "0xnew"),
+    actionReflected(PRE, snap([note("11", true)], PRE.history), "0xnew"),
     true,
   );
 });
@@ -81,7 +94,7 @@ test("pollForAction stops at the first reflecting snapshot", async () => {
   const snapshots: OwnerSnapshot[] = [
     PRE, // still stale
     PRE, // still stale
-    { notes: [note("11", true)], history: [hist("0xnew", 2), hist("0xold", 1)] }, // landed
+    snap([note("11", true)], [hist("0xnew", 2), hist("0xold", 1)]), // landed
   ];
   const load = async (): Promise<OwnerSnapshot> => snapshots[Math.min(calls++, snapshots.length - 1)];
   const res = await pollForAction(load, PRE, "0xnew", { intervalMs: 10, capMs: 1000, sleep: instantSleep });
@@ -104,7 +117,7 @@ test("pollForAction caps out on a never-reflecting indexer, returning the last s
 
 test("pollForAction skips failing loads and can still land afterwards", async () => {
   let calls = 0;
-  const landedSnap: OwnerSnapshot = { notes: PRE.notes, history: [hist("0xnew", 2), hist("0xold", 1)] };
+  const landedSnap: OwnerSnapshot = snap(PRE.notes, [hist("0xnew", 2), hist("0xold", 1)]);
   const load = async (): Promise<OwnerSnapshot> => {
     calls++;
     if (calls < 3) throw new Error("indexer hiccup");
@@ -155,4 +168,46 @@ test("classifyReadFailure: 401 is a dead login, everything else is retryable", (
 
   // Non-Error throws must not crash the classifier.
   assert.equal(classifyReadFailure("boom", url).kind, "error");
+});
+
+// ============================ (4) SNAPSHOT ===================================
+
+const PAGE = (items: HistoryItem[], nextBefore: number | null): HistoryPage => ({ items, nextBefore });
+
+test("loadOwnerSnapshot carries one activity page plus its cursor", async () => {
+  const notes = [note("11", false)];
+  const items = [hist("0xb", 9), hist("0xa", 8)];
+  const s = await loadOwnerSnapshot(
+    async () => notes,
+    async () => PAGE(items, 8),
+  );
+  // The snapshot IS what the app applies wholesale, so a refresh landing this
+  // resets the feed to these rows and the cursor to this value — dropping
+  // whatever "Load more" had appended against the older feed.
+  assert.deepEqual(s, { notes, history: items, historyNextBefore: 8 });
+});
+
+test("a failing activity read still yields a balance, with no cursor to page from", async () => {
+  const notes = [note("11", false)];
+  const s = await loadOwnerSnapshot(
+    async () => notes,
+    async () => {
+      throw new Error("indexer has no /history");
+    },
+  );
+  assert.deepEqual(s, { notes, history: [], historyNextBefore: null });
+});
+
+test("a failing balance read rejects — a wrong balance is worse than an error", async () => {
+  await assert.rejects(
+    () =>
+      loadOwnerSnapshot(
+        async () => {
+          throw new Error("http://x/notes -> 401: dead token");
+        },
+        async () => PAGE([], null),
+      ),
+    /-> 401/,
+    "the 401 must reach classifyReadFailure, not be swallowed into an empty snapshot",
+  );
 });

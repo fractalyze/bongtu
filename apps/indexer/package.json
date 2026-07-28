@@ -21,7 +21,8 @@
     "test:config": "node --import tsx test/config.test.ts",
     "test:viewtoken": "node --import tsx --test test/viewtoken.test.ts",
     "test:derivehistory": "node --import tsx --test test/deriveHistory.test.ts",
-    "test:unit": "npm run test:tree && npm run test:disclosure && npm run test:ingest && npm run test:config && npm run test:viewtoken && npm run test:derivehistory",
+    "test:history": "node --import tsx --test test/history.test.ts",
+    "test:unit": "npm run test:tree && npm run test:disclosure && npm run test:ingest && npm run test:config && npm run test:viewtoken && npm run test:derivehistory && npm run test:history",
     "test:pg": "bash test/pg_integration.sh",
     "typecheck": "tsc --noEmit"
   },

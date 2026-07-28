@@ -34,16 +34,18 @@ import {
   buildNotesUrl,
   buildHistoryUrl,
   buildNotesTokenUrl,
-  buildHistoryTokenUrl,
   fetchNotes,
   fetchHistory,
+  fetchHistoryPage,
   type OwnerNote,
   type HistoryItem,
 } from "../lib/indexerClient.js";
+import { appendHistoryPage } from "../lib/activity.js";
 import { clearKeyBindings, clearSession, loadSession, type StoredSession } from "../lib/session.js";
 import { markLockIntroSeen, shouldShowLockIntro } from "../lib/lockIntro.js";
 import {
   classifyReadFailure,
+  loadOwnerSnapshot,
   pollForAction,
   refreshPlan,
   RECONNECT_NOTICE,
@@ -74,7 +76,14 @@ export interface WalletContextValue {
   // arbiter-indexer-derived state (null until first successful load)
   balance: bigint | null;
   notes: OwnerNote[];
+  /** the activity pages loaded so far, newest-first: one page after a load or a
+   *  refresh, plus whatever `loadMoreHistory` has appended since. */
   history: HistoryItem[];
+  /** cursor for the page after `history`, or null when the feed is exhausted —
+   *  which is also what tells the Activity screen to stop offering "Load more". */
+  historyNextBefore: number | null;
+  /** true while the next page is in flight (the button's own spinner). */
+  historyLoadingMore: boolean;
   loading: boolean;
   /** true while a post-action poll waits for the indexer to reflect the action. */
   syncing: boolean;
@@ -93,6 +102,10 @@ export interface WalletContextValue {
   refresh: () => Promise<void>;
   /** post-action refresh: poll until `txHash` is reflected, then apply the data. */
   refreshAfterAction: (txHash: string) => Promise<void>;
+  /** append the next activity page. REJECTS on a failed read so the screen that
+   *  asked can say so locally, instead of a page-load failure blanking the feed
+   *  that is already on screen. No-op when there is no next page. */
+  loadMoreHistory: () => Promise<void>;
   /** One read of the owner's notes, applied to the app as it lands. A spend chain
    *  calls this between its transactions: it cannot build the leg that spends a
    *  freshly merged note until the indexer says which leaf that note landed on. It
@@ -127,6 +140,8 @@ export function App(): ReactNode {
   const [balance, setBalance] = useState<bigint | null>(null);
   const [notes, setNotes] = useState<OwnerNote[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [historyNextBefore, setHistoryNextBefore] = useState<number | null>(null);
+  const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
@@ -143,26 +158,25 @@ export function App(): ReactNode {
     injectedFrom(connection, (globalThis as { ethereum?: unknown }).ethereum),
   );
 
-  // One loader for every read path: /notes drives the balance; /history is
-  // best-effort on top (an older indexer without it keeps the balance working).
-  const loadOwnerData = useCallback(
-    async (notesUrl: string, historyUrl: string): Promise<OwnerSnapshot> => {
-      const ns = await fetchNotes(notesUrl);
-      let hs: HistoryItem[] = [];
-      try {
-        hs = await fetchHistory(historyUrl);
-      } catch {
-        hs = [];
-      }
-      return { notes: ns, history: hs };
-    },
+  /** Used by every read path except the tokenless one-shot below, which cannot
+   *  page and so cannot share this. */
+  const loadFirstPage = useCallback(
+    (token: string, ownerCompressed: string): Promise<OwnerSnapshot> =>
+      loadOwnerSnapshot(
+        () => fetchNotes(buildNotesTokenUrl(INDEXER_URL, ownerCompressed, token)),
+        () => fetchHistoryPage(INDEXER_URL, ownerCompressed, token),
+      ),
     [],
   );
 
+  // Applying a snapshot RESETS the activity paging: the feed becomes the page that
+  // was just read, and any pages "Load more" had appended are dropped. That is the
+  // honest reset — the older pages were read against a feed that has since moved.
   const applySnapshot = useCallback((snap: OwnerSnapshot): void => {
     setBalance(sumUnspent(snap.notes));
     setNotes(snap.notes);
     setHistory(snap.history);
+    setHistoryNextBefore(snap.historyNextBefore);
   }, []);
 
   // Drop the login and every owner-derived value. Used by the Disconnect button and
@@ -184,6 +198,7 @@ export function App(): ReactNode {
     setBalance(null);
     setNotes([]);
     setHistory([]);
+    setHistoryNextBefore(null);
     setDataError(reason);
     setDataNotice(null);
     navigate("home");
@@ -203,11 +218,7 @@ export function App(): ReactNode {
     setDataNotice(null);
     try {
       // Reads authenticate with the VIEW token only — no key, no signature popup.
-      const snap = await loadOwnerData(
-        buildNotesTokenUrl(INDEXER_URL, session.compressedPubkey, session.token),
-        buildHistoryTokenUrl(INDEXER_URL, session.compressedPubkey, session.token),
-      );
-      applySnapshot(snap);
+      applySnapshot(await loadFirstPage(session.token, session.compressedPubkey));
     } catch (e) {
       const failure = classifyReadFailure(e, INDEXER_URL);
       if (failure.kind === "expired") {
@@ -217,11 +228,12 @@ export function App(): ReactNode {
       setBalance(null);
       setNotes([]);
       setHistory([]);
+      setHistoryNextBefore(null);
       setDataError(failure.message);
     } finally {
       setLoading(false);
     }
-  }, [session, loadOwnerData, applySnapshot, endSession]);
+  }, [session, loadFirstPage, applySnapshot, endSession]);
 
   // Auto-load whenever the session changes (after a connect or a silent restore).
   useEffect(() => {
@@ -295,9 +307,17 @@ export function App(): ReactNode {
           // while the key is still in hand.
           try {
             applySnapshot(
-              await loadOwnerData(
-                buildNotesUrl(INDEXER_URL, id.compressedPubkey, id.keypair.formattedPrivateKey),
-                buildHistoryUrl(INDEXER_URL, id.compressedPubkey, id.keypair.formattedPrivateKey),
+              await loadOwnerSnapshot(
+                () => fetchNotes(buildNotesUrl(INDEXER_URL, id.compressedPubkey, id.keypair.formattedPrivateKey)),
+                // Unpaged on purpose: there is no token to fetch a second page
+                // with, so this one read must carry the whole feed. `nextBefore`
+                // null is therefore the truth, not a shortcut.
+                async () => ({
+                  items: await fetchHistory(
+                    buildHistoryUrl(INDEXER_URL, id.compressedPubkey, id.keypair.formattedPrivateKey),
+                  ),
+                  nextBefore: null,
+                }),
               ),
             );
           } catch {
@@ -321,7 +341,7 @@ export function App(): ReactNode {
         setConnecting(null);
       }
     },
-    [loadOwnerData, applySnapshot],
+    [applySnapshot],
   );
 
   const disconnect = useCallback((): void => endSession(null, true), [endSession]);
@@ -340,12 +360,9 @@ export function App(): ReactNode {
       if (!session) return;
       setSyncing(true);
       try {
-        const load = (): Promise<OwnerSnapshot> =>
-          loadOwnerData(
-            buildNotesTokenUrl(INDEXER_URL, session.compressedPubkey, session.token),
-            buildHistoryTokenUrl(INDEXER_URL, session.compressedPubkey, session.token),
-          );
-        const { last } = await pollForAction(load, { notes, history }, txHash);
+        const load = (): Promise<OwnerSnapshot> => loadFirstPage(session.token, session.compressedPubkey);
+        const pre: OwnerSnapshot = { notes, history, historyNextBefore };
+        const { last } = await pollForAction(load, pre, txHash);
         if (last) {
           applySnapshot(last);
           setDataError(null);
@@ -356,8 +373,26 @@ export function App(): ReactNode {
         setSyncing(false);
       }
     },
-    [session, notes, history, loadOwnerData, applySnapshot, refresh],
+    [session, notes, history, historyNextBefore, loadFirstPage, applySnapshot, refresh],
   );
+
+  // "Load more" on the Activity screen: one page further down the SAME feed, over
+  // the SAME token — a cursor into an already-authorised read, so paging costs no
+  // extra signature. The append de-dups on seq (activity.ts), which is what keeps
+  // a refresh landing mid-page from doubling rows.
+  const loadMoreHistory = useCallback(async (): Promise<void> => {
+    if (!session || historyNextBefore === null || historyLoadingMore) return;
+    setHistoryLoadingMore(true);
+    try {
+      const page = await fetchHistoryPage(INDEXER_URL, session.compressedPubkey, session.token, {
+        before: historyNextBefore,
+      });
+      setHistory((cur) => appendHistoryPage(cur, page.items));
+      setHistoryNextBefore(page.nextBefore);
+    } finally {
+      setHistoryLoadingMore(false);
+    }
+  }, [session, historyNextBefore, historyLoadingMore]);
 
   // The between-legs read a spend chain waits on. It applies what it reads (so the
   // balance on screen keeps up with a chain in flight) but never clears anything on
@@ -366,13 +401,10 @@ export function App(): ReactNode {
     if (!session || refreshPlan(session).kind === "notice") {
       throw new Error(RECONNECT_NOTICE); // tokenless: no way to read, so no way to chain
     }
-    const snap = await loadOwnerData(
-      buildNotesTokenUrl(INDEXER_URL, session.compressedPubkey, session.token),
-      buildHistoryTokenUrl(INDEXER_URL, session.compressedPubkey, session.token),
-    );
+    const snap = await loadFirstPage(session.token, session.compressedPubkey);
     applySnapshot(snap);
     return snap.notes;
-  }, [session, loadOwnerData, applySnapshot]);
+  }, [session, loadFirstPage, applySnapshot]);
 
   const value = useMemo<WalletContextValue>(
     () => ({
@@ -383,6 +415,8 @@ export function App(): ReactNode {
       balance,
       notes,
       history,
+      historyNextBefore,
+      historyLoadingMore,
       loading,
       syncing,
       dataError,
@@ -393,12 +427,13 @@ export function App(): ReactNode {
       disconnect,
       refresh,
       refreshAfterAction,
+      loadMoreHistory,
       reloadNotes,
     }),
     [
-      connection, wallet, session, balance, notes, history, loading, syncing, dataError,
-      dataNotice, connecting, connectError, connectWallet, disconnect, refresh, refreshAfterAction,
-      reloadNotes,
+      connection, wallet, session, balance, notes, history, historyNextBefore, historyLoadingMore,
+      loading, syncing, dataError, dataNotice, connecting, connectError, connectWallet, disconnect,
+      refresh, refreshAfterAction, loadMoreHistory, reloadNotes,
     ],
   );
 
