@@ -178,7 +178,7 @@ export function KvRow({ k, v }: { k: string; v: string }): ReactNode {
 }
 
 /** Human-readable message from wallet/RPC failures — MetaMask's ProviderRpcError
- *  and ethers' wrapped errors are plain objects, so `String(e)` shows
+ *  and viem's layered errors are plain objects, so `String(e)` shows
  *  "[object Object]". */
 export function errText(e: unknown): string {
   const o = e as {
