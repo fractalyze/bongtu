@@ -53,9 +53,11 @@ condition that *holds* and stays until it clears. Consequences:
   classes) and headless boundary classifiers (indexer HTTP — generalizing
   `classifyReadFailure`; chain/provider rejection; proving worker). Testable
   without React.
-- Each app owns its rendering: wallet-web gets the toast host + standardized
-  banner; payroll-web adopts the core taxonomy with its own minimal toast in a
-  follow-up unit. No shared UI package for one component.
+- Rendering lives in `packages/ui` (user decision 2026-07-28): the toast host
+  and banner are shared components there, alongside the other pieces both apps
+  reuse (controls, Modal, ExplorerLink, StagedProgress, money formatting).
+  wallet-web adopts first; payroll-web picks the same components up in its
+  single-page reshape.
 - Message copy stays per-app (U-TEXT: plain words, no note/UTXO jargon).
 
 ## Copy standard
