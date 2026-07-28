@@ -105,7 +105,7 @@ async function main(): Promise<void> {
   const ixRef = new Indexer({ ...baseCfg, databaseUrl: refDatabaseUrl });
   await ixRef.ingest();
   const ref = fingerprint(ixRef);
-  const headNum = Number(await ixRef.provider.getBlockNumber());
+  const headNum = Number(await ixRef.publicClient.getBlockNumber());
   await ixRef.close();
   ok(ref.root === sc.headRoot, `reference mirror root == scenario head root (head block ${headNum}, A=${A})`);
   ok(A > 0 && A < headNum, `intermediate block A=${A} is strictly inside (0, ${headNum}]`);

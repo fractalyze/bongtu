@@ -17,9 +17,9 @@
 //   - PostgresLedger's own (txHash, logIndex) replay dedup;
 //   - pollOnce failure/success state + the /health projection of it.
 //
-// Preconditions shared with src/chain.ts: ethers loadable from
-// BONGTU_NODE_MODULES and contracts/out built (the Indexer constructor reads the
-// pool ABI). The dummy RPC below is never contacted.
+// Preconditions shared with src/chain.ts: contracts/out built (the Indexer
+// constructor reads the pool ABI off the Foundry artifact). The dummy RPC below
+// is never contacted.
 //
 //   node --import tsx test/ingest.test.ts       # (== npm run test:ingest)
 
@@ -39,8 +39,40 @@ import { MirrorTree } from "../src/tree.js";
 import { type OpEnvelope } from "../src/ledger.js";
 import { PostgresLedger } from "../src/postgres.js";
 import { Indexer, type ParsedLog } from "../src/ingest.js";
-import { ethers, abiKnowsKem } from "../src/chain.js";
+import { abiKnowsKem } from "../src/chain.js";
+import {
+  decodeEventLog,
+  encodeAbiParameters,
+  encodeEventTopics,
+  getAbiItem,
+  parseAbi,
+  toBytes,
+  type Abi,
+  type AbiEvent,
+} from "viem";
 import { disclosureChain } from "@bongtu/core/envelope";
+
+// viem 2.55 has no encodeEventLog export, so assemble a raw {topics, data} log
+// the way the chain lays one out — topic0 + indexed topics from
+// encodeEventTopics, the non-indexed tail ABI-encoded into data — then decode it
+// with the combined ABI to round-trip the exact fragment ingest dispatches on.
+function encodeEventLog(
+  item: AbiEvent,
+  argsObj: Record<string, unknown>,
+): { topics: [`0x${string}`, ...`0x${string}`[]]; data: `0x${string}` } {
+  const indexed = item.inputs.filter((i) => i.indexed);
+  const nonIndexed = item.inputs.filter((i) => !i.indexed);
+  const indexedArgs = Object.fromEntries(indexed.map((i) => [i.name as string, argsObj[i.name as string]]));
+  // every event here carries topic0 → a non-empty topics tuple, the shape
+  // decodeEventLog wants.
+  const topics = encodeEventTopics({
+    abi: [item] as Abi,
+    eventName: item.name,
+    args: indexedArgs,
+  } as Parameters<typeof encodeEventTopics>[0]) as [`0x${string}`, ...`0x${string}`[]];
+  const data = encodeAbiParameters(nonIndexed, nonIndexed.map((i) => argsObj[i.name as string]) as never);
+  return { topics, data };
+}
 // THE fixture arbiter's bjj scalar, declared once for the whole repo.
 import { FIXTURE_ARBITER_SCALAR } from "../../../circuits/fixture_lib.js";
 import { health } from "../src/api/routes/health.js";
@@ -702,34 +734,39 @@ async function main(): Promise<void> {
     ok(led.notesOf(own.publicKey[0], own.publicKey[1]).length === 4, "same tx, different logIndex = a distinct op (key is txHash:logIndex)");
   }
 
-  step("DUAL ABI: the pool interface parses BOTH V1 and V2 raw event encodings");
+  step("DUAL ABI: the combined ABI decodes BOTH V1 and V2 raw event encodings");
   {
-    // Encode a raw log under each vintage's own single-ABI interface, then parse
-    // with the indexer's combined interface (what getLogsChunked dispatches on):
-    // topic0 differs between vintages, so a V2-only interface would drop V1
-    // history on the floor — the silent-skip failure the dual ABI closes.
-    const iface = ix.pool.interface;
-    ok(abiKnowsKem(iface), "combined interface models the V2 (kemCiphertext) events");
-    const v1Iface = new ethers.utils.Interface([
+    // Encode a raw log under each vintage's own single-fragment ABI, then decode
+    // with the indexer's combined ABI (what getLogsChunked dispatches on):
+    // topic0 differs between vintages, so a V2-only ABI would drop V1 history on
+    // the floor — the silent-skip failure the dual ABI closes.
+    const abi = ix.abi;
+    ok(abiKnowsKem(abi), "combined ABI models the V2 (kemCiphertext) events");
+    const v1Dep = parseAbi([
       "event Deposited(uint256 indexed epoch, uint256 firstLeafIndex, uint256 oc0, uint256 oc1, uint256 amount, uint256[2] ecdhPublicKey, uint256[10] encryptedValuesForAuthority, uint256 encryptionNonce, uint256 root)",
-    ]);
-    const v1Raw = v1Iface.encodeEventLog(v1Iface.getEvent("Deposited"), [
-      1n, 0n, 11n, 12n, 5n, [1n, 2n], new Array(10).fill(3n), 42n, 99n,
-    ]);
-    const v1Parsed = iface.parseLog({ topics: v1Raw.topics, data: v1Raw.data });
-    ok(v1Parsed.name === "Deposited" && v1Parsed.args.kemBinding === undefined,
-      "a V1-encoded Deposited parses under the combined ABI, WITHOUT kem fields (-> kem: null)");
-    const v2Frag = Object.values(iface.events).find(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (e: any) => e.name === "Deposited" && e.inputs.some((i: any) => i.name === "kemCiphertext"),
+    ])[0] as AbiEvent;
+    const depArgs: Record<string, unknown> = {
+      epoch: 1n, firstLeafIndex: 0n, oc0: 11n, oc1: 12n, amount: 5n,
+      ecdhPublicKey: [1n, 2n], encryptedValuesForAuthority: new Array(10).fill(3n),
+      encryptionNonce: 42n, root: 99n,
+    };
+    const v1Raw = encodeEventLog(v1Dep, depArgs);
+    // decodeEventLog dispatches on topic0 (no eventName passed) — the exact
+    // getLogsChunked path. args come back keyed by input NAME.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const v1Parsed = decodeEventLog({ abi, data: v1Raw.data, topics: v1Raw.topics }) as { eventName: string; args: any };
+    ok(v1Parsed.eventName === "Deposited" && v1Parsed.args.kemBinding === undefined,
+      "a V1-encoded Deposited decodes under the combined ABI, WITHOUT kem fields (-> kem: null)");
+    // the V2 fragment = the built Deposited that carries kemCiphertext
+    const v2Frag = abi.find(
+      (e): e is AbiEvent => e.type === "event" && e.name === "Deposited" && e.inputs.some((i) => i.name === "kemCiphertext"),
     )!;
-    const v2Raw = iface.encodeEventLog(v2Frag, [
-      1n, 0n, 11n, 12n, 5n, [1n, 2n], new Array(10).fill(3n), 42n, 99n, 77n, "0x" + "ab".repeat(1088),
-    ]);
-    const v2Parsed = iface.parseLog({ topics: v2Raw.topics, data: v2Raw.data });
-    ok(v2Parsed.name === "Deposited" && v2Parsed.args.kemBinding !== undefined
-      && ethers.utils.arrayify(v2Parsed.args.kemCiphertext).length === 1088,
-      "a V2-encoded Deposited parses with kemBinding + a 1088-byte kemCiphertext");
+    const v2Raw = encodeEventLog(v2Frag, { ...depArgs, kemBinding: 77n, kemCiphertext: "0x" + "ab".repeat(1088) });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const v2Parsed = decodeEventLog({ abi, data: v2Raw.data, topics: v2Raw.topics }) as { eventName: string; args: any };
+    ok(v2Parsed.eventName === "Deposited" && v2Parsed.args.kemBinding !== undefined
+      && toBytes(v2Parsed.args.kemCiphertext).length === 1088,
+      "a V2-encoded Deposited decodes with kemBinding + a 1088-byte kemCiphertext");
     ok(v1Raw.topics[0] !== v2Raw.topics[0], "V1/V2 topic0 differ (the reason dual-ABI is required)");
   }
 
@@ -740,23 +777,28 @@ async function main(): Promise<void> {
     // not actually carry (or carries at another width). Round-trip a
     // Transferred10 through the real built ABI and check exactly the fields the
     // branch touches. transfer10 has no V1 vintage, so there is only one shape.
-    const iface = ix.pool.interface;
-    const raw = iface.encodeEventLog(iface.getEvent("Transferred10"), [
-      1n,
-      Array.from({ length: 10 }, (_, i) => BigInt(100 + i)),
-      Array.from({ length: 10 }, (_, i) => BigInt(200 + i)),
-      [1n, 2n],
-      new Array(40).fill(3n),
-      new Array(64).fill(4n),
-      42n, 99n, 77n, "0x" + "ab".repeat(1088),
-    ]);
-    const p = iface.parseLog({ topics: raw.topics, data: raw.data });
-    ok(p.name === "Transferred10", "the built ABI models Transferred10");
+    const abi = ix.abi;
+    const item = getAbiItem({ abi, name: "Transferred10" }) as AbiEvent;
+    const raw = encodeEventLog(item, {
+      epoch: 1n,
+      nullifiers: Array.from({ length: 10 }, (_, i) => BigInt(100 + i)),
+      outputCommitments: Array.from({ length: 10 }, (_, i) => BigInt(200 + i)),
+      ecdhPublicKey: [1n, 2n],
+      encryptedValuesForReceivers: new Array(40).fill(3n),
+      encryptedValuesForAuthority: new Array(64).fill(4n),
+      encryptionNonce: 42n,
+      root: 99n,
+      kemBinding: 77n,
+      kemCiphertext: "0x" + "ab".repeat(1088),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const p = decodeEventLog({ abi, data: raw.data, topics: raw.topics }) as { eventName: string; args: any };
+    ok(p.eventName === "Transferred10", "the built ABI models Transferred10");
     ok(p.args.nullifiers.length === 10 && p.args.outputCommitments.length === 10,
       "ten nullifiers and ten output commitments");
     ok(p.args.encryptedValuesForReceivers.length === 40, "receiver ciphertexts arrive as ONE flat 40-element run");
     ok(p.args.encryptedValuesForAuthority.length === 64, "the authority envelope is 64 elements at arity 10");
-    ok(p.args.kemBinding !== undefined && ethers.utils.arrayify(p.args.kemCiphertext).length === 1088,
+    ok(p.args.kemBinding !== undefined && toBytes(p.args.kemCiphertext).length === 1088,
       "kemBinding + a 1088-byte kemCiphertext ride along (kemOf dispatches on their presence)");
     ok(Number(p.args.epoch) === 1 && Number(p.args.encryptionNonce) === 42,
       "epoch and encryptionNonce decode where the feed entry reads them");
@@ -768,23 +810,28 @@ async function main(): Promise<void> {
     // catch the branch reading a field the emitted V5 event does not carry (or
     // at another width), so round-trip through the real built ABI. One shape
     // only — the entry point ships with the V5 upgrade.
-    const iface = ix.pool.interface;
-    const raw = iface.encodeEventLog(iface.getEvent("Transferred10x2"), [
-      1n,
-      Array.from({ length: 10 }, (_, i) => BigInt(100 + i)),
-      [201n, 202n],
-      [1n, 2n],
-      new Array(8).fill(3n),
-      new Array(31).fill(4n),
-      42n, 99n, 77n, "0x" + "ab".repeat(1088),
-    ]);
-    const p = iface.parseLog({ topics: raw.topics, data: raw.data });
-    ok(p.name === "Transferred10x2", "the built ABI models Transferred10x2");
+    const abi = ix.abi;
+    const item = getAbiItem({ abi, name: "Transferred10x2" }) as AbiEvent;
+    const raw = encodeEventLog(item, {
+      epoch: 1n,
+      nullifiers: Array.from({ length: 10 }, (_, i) => BigInt(100 + i)),
+      outputCommitments: [201n, 202n],
+      ecdhPublicKey: [1n, 2n],
+      encryptedValuesForReceivers: new Array(8).fill(3n),
+      encryptedValuesForAuthority: new Array(31).fill(4n),
+      encryptionNonce: 42n,
+      root: 99n,
+      kemBinding: 77n,
+      kemCiphertext: "0x" + "ab".repeat(1088),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const p = decodeEventLog({ abi, data: raw.data, topics: raw.topics }) as { eventName: string; args: any };
+    ok(p.eventName === "Transferred10x2", "the built ABI models Transferred10x2");
     ok(p.args.nullifiers.length === 10 && p.args.outputCommitments.length === 2,
       "ten nullifiers but only TWO output commitments");
     ok(p.args.encryptedValuesForReceivers.length === 8, "receiver ciphertexts arrive as ONE flat 8-element run");
     ok(p.args.encryptedValuesForAuthority.length === 31, "the authority envelope is 31 elements at 10-in/2-out");
-    ok(p.args.kemBinding !== undefined && ethers.utils.arrayify(p.args.kemCiphertext).length === 1088,
+    ok(p.args.kemBinding !== undefined && toBytes(p.args.kemCiphertext).length === 1088,
       "kemBinding + a 1088-byte kemCiphertext ride along (kemOf dispatches on their presence)");
     ok(Number(p.args.epoch) === 1 && Number(p.args.encryptionNonce) === 42,
       "epoch and encryptionNonce decode where the feed entry reads them");

@@ -20,15 +20,51 @@
 // trial-decrypts. Every disburse also runs the disclosureHash check (§6b).
 
 import type { Pool } from "pg";
+import {
+  BaseError,
+  ContractFunctionRevertedError,
+  ContractFunctionZeroDataError,
+  createPublicClient,
+  decodeEventLog,
+  http,
+  keccak256,
+  toBytes,
+  type Abi,
+  type Address,
+  type BlockTag,
+  type PublicClient,
+} from "viem";
 
 import { kemPkFromSecret } from "@bongtu/core/kem";
 import { isPreKemProbeError } from "@bongtu/core/network";
 
 import { MirrorTree } from "./tree.js";
-import { ethers, poolAbi, abiKnowsKem, kemBootGuardError, staleOpAbiError, type ChainConfig } from "./chain.js";
+import { poolAbi, abiKnowsKem, kemBootGuardError, staleOpAbiError, type ChainConfig } from "./chain.js";
 import { InMemoryStore, type StorePort, type Slice } from "./store.js";
 import { verifyDisclosure } from "./disclosure.js";
 import { connect, PostgresStore, PostgresLedger } from "./postgres.js";
+
+// A block pin for readContract: viem takes a bigint blockNumber or a named
+// blockTag, where ethers took a single `{ blockTag }` override.
+type BlockOpts = { blockNumber?: bigint; blockTag?: BlockTag };
+
+/**
+ * A missing getter (a V1 pool where `arbiterKemPkHash` returns `0x`) or an
+ * explicit revert marks a pre-KEM pool — viem surfaces both as CONTRACT-level
+ * errors (ContractFunctionZeroDataError / ...RevertedError), distinct from a
+ * transport failure, which must still propagate. This is the viem-shaped
+ * counterpart to core's `isPreKemProbeError` (which keys on ethers'
+ * CALL_EXCEPTION); the boot guard ORs the two so the semantics survive the
+ * ethers->viem move without touching core.
+ */
+function isViemPreKemProbeError(e: unknown): boolean {
+  return (
+    e instanceof BaseError &&
+    e.walk(
+      (err) => err instanceof ContractFunctionZeroDataError || err instanceof ContractFunctionRevertedError,
+    ) !== null
+  );
+}
 
 const H = 32; // IMT height — a system-wide constant (SPEC §4)
 
@@ -60,14 +96,15 @@ const dec = (x: bigint): string => x.toString();
 const kemOf = (args: any): { binding: bigint; ciphertext: Uint8Array } | null =>
   args.kemBinding === undefined || args.kemCiphertext === undefined
     ? null
-    : { binding: bn(args.kemBinding), ciphertext: ethers.utils.arrayify(args.kemCiphertext) };
+    : { binding: bn(args.kemBinding), ciphertext: toBytes(args.kemCiphertext) };
 
 export class Indexer {
   readonly cfg: ChainConfig;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  readonly provider: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  readonly pool: any;
+  readonly publicClient: PublicClient;
+  // The combined dual-ABI (built V2 artifact ++ frozen V1 op fragments) viem
+  // decodeEventLog / readContract dispatch on. Exposed so the anvil-free unit
+  // test can round-trip raw event encodings through the exact ABI ingest uses.
+  readonly abi: Abi;
   // The runtime store is ALWAYS PostgresStore (Postgres-only, U-I4), swapped in
   // by bootPostgres at first ingest. The InMemoryStore default is the pre-boot
   // placeholder (so /health can answer before the first ingest completes) and the
@@ -101,10 +138,28 @@ export class Indexer {
 
   constructor(cfg: ChainConfig) {
     this.cfg = cfg;
-    this.provider = new ethers.providers.JsonRpcProvider(cfg.rpc);
-    this.pool = new ethers.Contract(cfg.pool, poolAbi(), this.provider);
+    this.abi = poolAbi();
+    this.publicClient = createPublicClient({ transport: http(cfg.rpc) });
     this.arbiterPriv = cfg.authorityKey ?? null;
     this.arbiterMode = this.arbiterPriv !== null;
+  }
+
+  /** A pinned readContract against the pool (the ONE place the address+ABI meet). */
+  private read(functionName: string, args: readonly unknown[] = [], opts: BlockOpts = {}): Promise<unknown> {
+    return this.publicClient.readContract({
+      address: this.cfg.pool as Address,
+      abi: this.abi,
+      functionName,
+      args,
+      ...opts,
+      // viem's readContract is heavily generic over a const ABI; the runtime
+      // args are correct, so widen the call site rather than fight inference.
+    } as Parameters<PublicClient["readContract"]>[0]);
+  }
+
+  /** ethers' single `{ blockTag }` override -> viem's bigint blockNumber / tag. */
+  private blockOpts(blockTag: number | string): BlockOpts {
+    return typeof blockTag === "number" ? { blockNumber: BigInt(blockTag) } : { blockTag: blockTag as BlockTag };
   }
 
   /** Live head state straight from the contract (the mirror is asserted against it). */
@@ -123,33 +178,35 @@ export class Indexer {
   async kemBootGuard(): Promise<string | null> {
     let kemPkHash = "0x" + "0".repeat(64);
     try {
-      const epoch = await this.pool.currentEpoch();
-      kemPkHash = String(await this.pool.arbiterKemPkHash(epoch));
+      const epoch = await this.read("currentEpoch");
+      kemPkHash = String(await this.read("arbiterKemPkHash", [epoch]));
     } catch (e) {
-      // ONLY a CALL_EXCEPTION (missing getter/revert) marks a pre-KEM V1 pool.
+      // ONLY a contract-level revert / missing getter marks a pre-KEM V1 pool.
       // A transient RPC failure must propagate — folding it into "V1 pool"
-      // would disarm the guard exactly when it cannot see the chain.
-      if (!isPreKemProbeError(e)) throw e;
+      // would disarm the guard exactly when it cannot see the chain. (ethers'
+      // CALL_EXCEPTION became viem's ContractFunction*Error — OR both shapes.)
+      if (!isPreKemProbeError(e) && !isViemPreKemProbeError(e)) throw e;
     }
     const kemKey = this.cfg.authorityKemKey ?? null;
     // Stale-op-ABI check first: it is unconditional (the fragments ship
     // in-repo), where the KEM guard only arms on a KEM-epoch pool.
-    const stale = staleOpAbiError(this.pool.interface);
+    const stale = staleOpAbiError(this.abi);
     if (stale !== null) return stale;
     return kemBootGuardError({
       kemPkHash,
       arbiterMode: this.arbiterMode,
       hasKemKey: kemKey !== null,
-      abiKnowsKem: abiKnowsKem(this.pool.interface),
-      kemKeyPkHash: kemKey === null ? null : String(ethers.utils.keccak256(kemPkFromSecret(kemKey))),
+      abiKnowsKem: abiKnowsKem(this.abi),
+      kemKeyPkHash: kemKey === null ? null : keccak256(kemPkFromSecret(kemKey)),
     });
   }
 
-  /** Contract root + nextLeafIndex pinned to `blockTag` (ethers v5 call override). */
+  /** Contract root + nextLeafIndex pinned to `blockTag` (viem readContract block pin). */
   async headAt(blockTag: number | string): Promise<{ root: bigint; nextLeafIndex: number }> {
+    const opts = this.blockOpts(blockTag);
     const [root, nli] = await Promise.all([
-      this.pool.root({ blockTag }),
-      this.pool.nextLeafIndex({ blockTag }),
+      this.read("root", [], opts),
+      this.read("nextLeafIndex", [], opts),
     ]);
     return { root: bn(root), nextLeafIndex: Number(bn(nli)) };
   }
@@ -159,21 +216,29 @@ export class Indexer {
     const out: ParsedLog[] = [];
     const walk = async (lo: number, hi: number): Promise<void> => {
       try {
-        const raw = await this.provider.getLogs({ address: this.cfg.pool, fromBlock: lo, toBlock: hi });
+        const raw = await this.publicClient.getLogs({
+          address: this.cfg.pool as Address,
+          fromBlock: BigInt(lo),
+          toBlock: BigInt(hi),
+        });
         for (const log of raw) {
-          let ev: { name: string; args: unknown } | null = null;
+          let ev: { eventName: string; args: unknown };
           try {
-            ev = this.pool.interface.parseLog(log);
+            // decodeEventLog THROWS on an unknown/ambiguous topic0 — reproducing
+            // ethers' parseLog-misses-unknown-topic0 SKIP: a pre-upgrade V1 log,
+            // a V2 log a V1 build can't model, or a foreign log all fall through
+            // to `continue`, never aborting the batch.
+            ev = decodeEventLog({ abi: this.abi, data: log.data, topics: log.topics });
           } catch {
-            continue; // not a pool event we model
+            continue; // not a pool event we model (unknown topic0)
           }
           out.push({
-            name: ev!.name,
-            blockNumber: log.blockNumber,
+            name: ev.eventName,
+            blockNumber: Number(log.blockNumber),
             logIndex: log.logIndex,
             txHash: log.transactionHash,
             blockTimestamp: 0, // filled below, once per distinct block
-            args: (ev as { args: unknown }).args,
+            args: ev.args,
           });
         }
       } catch (e) {
@@ -206,7 +271,12 @@ export class Indexer {
     const CONC = 16;
     for (let i = 0; i < blockNums.length; i += CONC) {
       const wave = blockNums.slice(i, i + CONC);
-      const blocks = await Promise.all(wave.map((n) => this.provider.getBlock(n)));
+      // viem getBlock THROWS (BlockNotFoundError) on a missing/pending block,
+      // where ethers returned null — catch to null so a phantom block folds to
+      // timestamp 0 rather than failing the whole ingest (block time is bigint).
+      const blocks = await Promise.all(
+        wave.map((n) => this.publicClient.getBlock({ blockNumber: BigInt(n) }).catch(() => null)),
+      );
       wave.forEach((n, j) => tsByBlock.set(n, Number(blocks[j]?.timestamp ?? 0)));
     }
     for (const l of out) l.blockTimestamp = tsByBlock.get(l.blockNumber) ?? 0;
@@ -229,7 +299,7 @@ export class Indexer {
       if (!this.cfg.databaseUrl) {
         throw new Error("Indexer.ingest: cfg.databaseUrl is required — the indexer is Postgres-only (no in-memory backend)");
       }
-      this.batchSize = Number(bn(await this.pool.B()));
+      this.batchSize = Number(bn(await this.read("B")));
       this.tree = new MirrorTree(H, this.batchSize);
       // bootPostgres returns a fromBlock bumped past the persisted cursor so the
       // reconstructed state is not re-ingested (the whole point of resume).
@@ -237,7 +307,7 @@ export class Indexer {
     }
     // `toBlock` bounds the replay (used for phased ingest / conformance); default
     // is the live head. The head invariant below is asserted at exactly this block.
-    const head = toBlock ?? (await this.provider.getBlockNumber());
+    const head = toBlock ?? Number(await this.publicClient.getBlockNumber());
     if (fromBlock > head) return;
     const logs = await this.getLogsChunked(fromBlock, head);
 

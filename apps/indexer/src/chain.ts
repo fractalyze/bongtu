@@ -1,28 +1,23 @@
-// Chain plumbing: load ethers v5 + the BongtuPool ABI without adding a repo dep.
-//
-// ethers v5 loads from the external node_modules via the sdk's shared loader
-// (@bongtu/core/extern — the locked no-repo-local-install decision), so it comes
-// back as `any` — we type OUR code, not ethers.
+// Chain plumbing: the BongtuPool ABI + viem ABI helpers. viem is a first-class
+// repo dependency (no external heavyweight loader needed), and the built ABI is
+// read straight off the Foundry artifact.
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { loadEthers } from "@bongtu/core/extern";
+import { parseAbi, type Abi, type AbiEvent } from "viem";
+
 import { KEM_SECRET_KEY_BYTES } from "@bongtu/core/kem";
 import { CHAIN_ID } from "@bongtu/core/network";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = join(HERE, "..", "..", ".."); // apps/indexer/src -> repo root
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const ethers: any = loadEthers();
-
 /** Load a Foundry artifact ABI from contracts/out/<sol>.sol/<contract>.json. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function loadAbi(sol: string, contract: string): any {
+export function loadAbi(sol: string, contract: string): Abi {
   const p = join(REPO_ROOT, "contracts", "out", `${sol}.sol`, `${contract}.json`);
-  return JSON.parse(readFileSync(p, "utf8")).abi;
+  return JSON.parse(readFileSync(p, "utf8")).abi as Abi;
 }
 
 // The PRE-KEM (V1) op-event shapes, frozen from the pool at b9f9440~1. The V2
@@ -30,8 +25,8 @@ export function loadAbi(sol: string, contract: string): any {
 // interface would silently SKIP every pre-upgrade envelope event while the
 // unchanged Appended/SubtreeAppended kept the mirror advancing (the lagging-
 // indexer failure of pq-envelope-design.md §7). Carrying both fragment sets
-// makes ingest span the upgrade block: ethers parseLog dispatches on topic0, and
-// applyLogs detects the vintage per log by the presence of `kemBinding`.
+// makes ingest span the upgrade block: viem decodeEventLog dispatches on topic0,
+// and applyLogs detects the vintage per log by the presence of `kemBinding`.
 const V1_EVENT_FRAGMENTS = [
   "event Deposited(uint256 indexed epoch, uint256 firstLeafIndex, uint256 oc0, uint256 oc1, uint256 amount, uint256[2] ecdhPublicKey, uint256[10] encryptedValuesForAuthority, uint256 encryptionNonce, uint256 root)",
   "event Transferred(uint256 indexed epoch, uint256[2] nullifiers, uint256[2] outputCommitments, uint256[2] ecdhPublicKey, uint256[4] encryptedValuesForReceiver0, uint256[4] encryptedValuesForReceiver1, uint256[16] encryptedValuesForAuthority, uint256 encryptionNonce, uint256 root)",
@@ -40,37 +35,36 @@ const V1_EVENT_FRAGMENTS = [
 ];
 
 /** The BongtuPool ABI (events + view fns the indexer needs): the built (V2)
- *  artifact PLUS the frozen V1 op-event fragments — dual-ABI ingest. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function poolAbi(): any {
+ *  artifact PLUS the frozen V1 op-event fragments — dual-ABI ingest. A plain
+ *  viem `Abi` array (built JSON items ++ parseAbi'd V1 fragments); viem's
+ *  decodeEventLog dispatches on topic0 across the combined set. */
+export function poolAbi(): Abi {
   const abi = loadAbi("BongtuPool", "BongtuPool");
-  const v1 = V1_EVENT_FRAGMENTS.map((f) => ethers.utils.Fragment.from(f));
+  const v1 = parseAbi(V1_EVENT_FRAGMENTS);
   return [...abi, ...v1];
 }
 
-/** Whether an ethers Interface models the V2 (hybrid) op events — i.e. the
- *  built artifact carries `kemCiphertext` on Deposited. False == a V1-only
- *  build, which MUST NOT serve a KEM-epoch pool (kemBootGuardError). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function abiKnowsKem(iface: any): boolean {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return Object.values(iface.events as Record<string, any>).some(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (ev: any) => ev.name === "Deposited" && ev.inputs.some((i: any) => i.name === "kemCiphertext"),
+/** Whether the combined ABI models the V2 (hybrid) op events — i.e. the built
+ *  artifact carries `kemCiphertext` on Deposited. False == a V1-only build,
+ *  which MUST NOT serve a KEM-epoch pool (kemBootGuardError). Takes the viem
+ *  ABI array (the combined poolAbi()). */
+export function abiKnowsKem(abi: Abi): boolean {
+  return abi.some(
+    (x) => x.type === "event" && x.name === "Deposited" && x.inputs.some((i) => i.name === "kemCiphertext"),
   );
 }
 
 /** Op-event fragments the ingest dispatches on that postdate the V2 artifact
  *  vintage. Unlike the KEM axis (conditioned on chain state), these ship
  *  in-repo, so a build missing one is stale UNCONDITIONALLY — and a stale
- *  build silently under-records: parseLog misses the unknown topic0 while the
- *  unchanged Appended logs keep the mirror and /health green (the same
- *  lagging-indexer failure of pq-envelope-design.md §7, one axis over).
- *  Returns the one-line fatal error, else null. Pure, like kemBootGuardError. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function staleOpAbiError(iface: any): string | null {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const names = new Set(Object.values(iface.events as Record<string, any>).map((ev: any) => ev.name));
+ *  build silently under-records: decodeEventLog throws on (and applyLogs skips)
+ *  the unknown topic0 while the unchanged Appended logs keep the mirror and
+ *  /health green (the same lagging-indexer failure of pq-envelope-design.md §7,
+ *  one axis over). Takes the viem ABI array and checks the event names are
+ *  present. Returns the one-line fatal error, else null. Pure, like
+ *  kemBootGuardError. */
+export function staleOpAbiError(abi: Abi): string | null {
+  const names = new Set(abi.filter((x): x is AbiEvent => x.type === "event").map((ev) => ev.name));
   for (const wanted of ["Transferred10", "Transferred10x2"]) {
     if (!names.has(wanted)) {
       return `FATAL: this build's ABI lacks the ${wanted} event — a stale contracts/out (or apps/indexer/abi/BongtuPool.abi.json) silently skips every ${wanted} op while /health stays green. Rebuild the pool ABI (recipe: apps/indexer/abi/README.md).`;

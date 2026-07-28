@@ -15,7 +15,9 @@ import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { databaseUrlError, kemBootGuardError, parseKemKey, staleOpAbiError, ethers } from "../src/chain.js";
+import { parseAbi } from "viem";
+
+import { databaseUrlError, kemBootGuardError, parseKemKey, staleOpAbiError } from "../src/chain.js";
 
 let failures = 0;
 function ok(cond: unknown, msg: string): void {
@@ -110,20 +112,22 @@ step("SPAWN: src/index.ts without DATABASE_URL exits nonzero with the refusal li
   ok(r.stderr.includes("docker compose"), "stderr points at the docker-compose recipe");
 }
 
-console.log(`\n${failures === 0 ? "CONFIG TEST PASS — Postgres-only boot refusal (unit + spawn)" : `CONFIG TEST FAIL — ${failures} assertion(s)`}`);
-process.exit(failures === 0 ? 0 : 1);
-
 step("UNIT: staleOpAbiError — a build missing a dispatched op event fails closed");
 {
-  const full = new ethers.utils.Interface([
+  // staleOpAbiError now takes the viem ABI ARRAY (parseAbi of human-readable
+  // fragments), not an ethers Interface — it checks the event names are present.
+  const full = parseAbi([
     "event Transferred10(uint256 indexed epoch)",
     "event Transferred10x2(uint256 indexed epoch)",
   ]);
   ok(staleOpAbiError(full) === null, "ABI carrying both 10-input op events passes");
-  const preV5 = new ethers.utils.Interface(["event Transferred10(uint256 indexed epoch)"]);
+  const preV5 = parseAbi(["event Transferred10(uint256 indexed epoch)"]);
   const err = staleOpAbiError(preV5) ?? "";
   ok(err.includes("Transferred10x2"), "a V4-vintage ABI names the missing V5 event");
-  const preV4 = new ethers.utils.Interface(["event Appended(uint256 indexed leafIndex)"]);
+  const preV4 = parseAbi(["event Appended(uint256 indexed leafIndex)"]);
   const err4 = staleOpAbiError(preV4) ?? "";
   ok(err4.includes("Transferred10"), "a pre-V4 ABI is refused on its first missing event");
 }
+
+console.log(`\n${failures === 0 ? "CONFIG TEST PASS — Postgres-only boot refusal (unit + spawn)" : `CONFIG TEST FAIL — ${failures} assertion(s)`}`);
+process.exit(failures === 0 ? 0 : 1);
