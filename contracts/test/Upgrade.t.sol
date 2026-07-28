@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {Base} from "./Base.sol";
+import {stdStorage, StdStorage} from "forge-std/Test.sol";
 import {IPoseidon2} from "../src/interfaces/IPoseidon2.sol";
 import {IDepositVerifier, IWithdrawVerifier, IDisburseVerifier, ITransferVerifier} from "../src/interfaces/IVerifiers.sol";
 import {IERC20} from "../src/utils/IERC20.sol";
@@ -29,6 +30,7 @@ import {
 /// tokens, a transfer spends a nullifier — then the upgrade must leave all of it
 /// intact behind the same address.
 contract UpgradeTest is Base {
+    using stdStorage for StdStorage;
     BongtuPool pool;
     MockERC20 token;
     IPoseidon2 poseidon;
@@ -110,7 +112,9 @@ contract UpgradeTest is Base {
     function testUpgradePreservesKemPkHashAndGapNeighbors() public {
         _buildState();
         pool.rotateArbiter([uint256(303), uint256(404)], KEM_HASH_1); // epoch 1, both keys
-        pool.setDisburseAllowed(address(0xB0B), true); // neighbor slot before the V2 mapping
+        // neighbor slot before the V2 mapping (the retired allowlist mapping —
+        // written via stdstore since its setter is gone with the gate)
+        stdstore.target(address(pool)).sig("disburseAllowed(address)").with_key(address(0xB0B)).checked_write(true);
 
         bytes32 h0Before = pool.arbiterKemPkHash(0); // epoch 0: Base's placeholder hash
         assertTrue(h0Before != bytes32(0), "precondition: epoch 0 carries a nonzero hash");

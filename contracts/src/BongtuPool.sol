@@ -82,7 +82,13 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     ArbiterEpoch[] public arbiterEpochs;
     bool public initialized;
 
-    // --- disburse access control (caller-gated, §5.3) -------------------------
+    // --- retired storage (slot kept for layout continuity) ---------------------
+    // Was the disburse caller-allowlist (§5.3). RETIRED 2026-07-28 (user
+    // decision): disburse is permissionless — the event payload is ciphertext,
+    // so batch contents are already readable only by each recipient and the
+    // arbiter, and value conservation is proven in-circuit. Nothing reads or
+    // writes this mapping anymore; it stays declared so V1-era slots keep
+    // their positions under the UUPS proxy.
     mapping(address => bool) public disburseAllowed;
 
     /// @notice ML-KEM-768 ciphertext wire size (FIPS 203) — the only on-chain
@@ -232,7 +238,6 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     ///         against this hash before encapsulating). Emitted alongside
     ///         ArbiterRotated for the same epoch.
     event ArbiterKemPkHashSet(uint256 indexed epoch, bytes32 kemPkHash);
-    event DisburseAllowlist(address indexed account, bool allowed);
 
     // --- errors ---------------------------------------------------------------
     // (re-init reverts via Initializable.InvalidInitialization, not a local error)
@@ -242,7 +247,6 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     error NullifierAlreadyUsed(uint256 nullifier);
     error ZeroNullifier();
     error InvalidProof();
-    error NotDisburseAuthorized(address caller);
     error Reentrancy();
     error BatchSizeNotPowerOfTwo(uint256 batchSize);
     error MisalignedInsert();
@@ -480,11 +484,6 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         return (ep.keyX, ep.keyY);
     }
 
-    function setDisburseAllowed(address account, bool allowed) external onlyOwner {
-        disburseAllowed[account] = allowed;
-        emit DisburseAllowlist(account, allowed);
-    }
-
     function isKnownRoot(uint256 r) public view returns (bool) {
         return knownRoots[r];
     }
@@ -555,7 +554,9 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     ///         re-hash on-chain). A length-padded junk publish still tx-succeeds but
     ///         yields a provable `mismatch` alarm + undecryptable notes. Pads the
     ///         frontier to a B boundary and attaches the in-circuit subtreeRoot;
-    ///         caller-gated (§5.3); injects enabled=1 and the arbiter key (§5.2/§5.3).
+    ///         permissionless like every spend (allowlist retired 2026-07-28 —
+    ///         contents are ciphertext, so openness costs no privacy); injects
+    ///         enabled=1 and the arbiter key (§5.2/§5.3).
     function disburseWithCiphertexts(
         uint[2] calldata a,
         uint[2][2] calldata b,
@@ -582,7 +583,6 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         uint[11] calldata pub,
         bytes calldata kemCiphertext
     ) private returns (uint256 start) {
-        if (msg.sender != owner() && !disburseAllowed[msg.sender]) revert NotDisburseAuthorized(msg.sender);
         if (!knownRoots[pub[6]]) revert UnknownRoot(pub[6]);
 
         uint256 nf = pub[5];

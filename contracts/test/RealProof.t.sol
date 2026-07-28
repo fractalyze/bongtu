@@ -352,8 +352,10 @@ contract RealProofTest is Base {
 
     // ================= disburse access control (§5.3) ========================
 
-    /// An allowlisted (non-owner) operator may disburse.
-    function testDisburseAllowlistedSucceeds() public {
+    /// ANY caller may disburse (allowlist retired 2026-07-28): the batch's
+    /// contents are ciphertext, so openness costs no privacy, and value
+    /// conservation is the circuit's statement, not an access-control fact.
+    function testDisburseAnyCallerSucceeds() public {
         BongtuPool pool = _freshPool(false);
         _seed(pool, ".disburse");
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".disburse");
@@ -361,32 +363,13 @@ contract RealProofTest is Base {
         uint[11] memory pub;
         for (uint256 i = 0; i < 11; i++) pub[i] = p[i];
 
-        address operator = address(0xB0B);
-        pool.setDisburseAllowed(operator, true);
+        address operator = address(0xB0B); // never granted anything
         uint256[] memory ct = _ctBlob(pool);
         bytes memory kemCt = _kemCt(".disburse");
         vm.prank(operator);
         pool.disburseWithCiphertexts(a, b, c, pub, ct, kemCt);
 
-        assertTrue(pool.nullifierUsed(p[5]), "allowlisted disburse nullifier not marked");
-    }
-
-    /// A caller who is neither owner nor allowlisted is rejected before any proof
-    /// work (the access check precedes the known-root/verify path).
-    function testDisburseUnauthorizedReverts() public {
-        BongtuPool pool = _freshPool(false);
-        _seed(pool, ".disburse");
-        (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".disburse");
-        uint256[] memory p = _pub(".disburse");
-        uint[11] memory pub;
-        for (uint256 i = 0; i < 11; i++) pub[i] = p[i];
-
-        address stranger = address(0xBAD);
-        uint256[] memory ct = _ctBlob(pool);
-        bytes memory kemCt = _kemCt(".disburse");
-        vm.prank(stranger);
-        vm.expectRevert(abi.encodeWithSelector(BongtuPool.NotDisburseAuthorized.selector, stranger));
-        pool.disburseWithCiphertexts(a, b, c, pub, ct, kemCt);
+        assertTrue(pool.nullifierUsed(p[5]), "any-caller disburse nullifier not marked");
     }
 
     // ============ PQ envelope: KEM ciphertext length enforcement =============

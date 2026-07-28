@@ -16,7 +16,7 @@ that material is a **pair**: the bjj private key plus an ML-KEM-768 decapsulatio
 | party | holds | can read |
 |---|---|---|
 | **arbiter (auditor)** | the arbiter bjj **private** key **and** the ML-KEM-768 decapsulation key | every note created and destroyed by every op: input owner, per-note value, salt, output owners — decrypted from on-chain envelopes alone, with no user key and no nullifier linkage |
-| **employer (discloser)** | a disburse-allowlisted sender key; **no** arbiter key | the batch it authored (its own recipients and amounts) and its own notes. Nothing about other users' transfers |
+| **employer (discloser)** | an ordinary sender key (disburse is permissionless since 2026-07-28); **no** arbiter key | the batch it authored (its own recipients and amounts) and its own notes. Nothing about other users' transfers |
 | **public user (wallet)** | own bjj spending key | own notes only — via signature-gated `/notes`, or by trial-decrypting receiver ciphertext with its own key |
 | **prover service (GPU box)** | no key of its own | everything in a `POST /prove` disburse request, in plaintext: the employer's bjj **spending scalar** (`inputOwnerPrivateKey`), the input note, and the full recipient/amount list. Institution-internal by necessity — a compromised prover box impersonates the employer |
 | **chain observer** | nothing | commitments, nullifiers, roots, all ciphertext, transaction senders, and the **public** amounts: deposit `pub[0]` with the depositor address, withdraw `pub[0]` with the recipient address |
@@ -68,9 +68,11 @@ field elements on-chain is not affordable. Content is bound by `disclosureHash`,
 the proof, and checked off-chain by the indexer, which recomputes the same Poseidon fold and raises
 a first-class alarm on `mismatch`, `unverifiable` or `withheld`. So a malicious discloser can publish
 length-correct junk: the transaction succeeds, the recipients' notes are undiscoverable, and the
-tamper is *provable and immediately visible*. Combined with disburse being caller-gated to a known
-allowlisted employer, that is the honest strength of the guarantee — detection and attribution, not
-prevention.
+tamper is *provable and immediately visible*. That is the honest strength of the guarantee —
+detection, not prevention. Attribution is per-EOA: since the caller allowlist was retired
+(2026-07-28, disburse is permissionless like every spend), a junk publish traces to the submitting
+address, not to a pre-vetted employer identity. What openness does NOT cost is privacy — the batch
+payload is ciphertext either way, readable only by each recipient and the arbiter.
 
 ## Post-quantum: the hybrid authority-envelope key
 
@@ -186,7 +188,8 @@ Present-tense, deliberate, and not fixed by anything in the tree today.
   without it — but the wallet has no fallback balance path
   ([wallet.md](wallet.md#indexer-dependency)).
 - **No pause, no blacklist, no fine-grained roles.** The only emergency lever is a UUPS upgrade, and
-  the only role split is `Ownable2Step` plus the disburse allowlist.
+  the only privileged role is the `Ownable2Step` owner (upgrades + arbiter rotation); every
+  spend path, disburse included, is permissionless.
 - **Signature equals spending key.** A wallet user who signs the derivation struct anywhere else has
   handed over their spending key ([wallet.md](wallet.md#key-derivation)).
 - **Prover distribution is undesigned.** disburse proving needs a 1.3 GB zkey and a private GPU
@@ -204,6 +207,6 @@ Present-tense, deliberate, and not fixed by anything in the tree today.
   ([deployment.md](deployment.md#the-arbiter-key-is-fixed-at-deploy-and-the-fixtures-are-bound-to-it)).
 - **Mock token.** The escrowed kKRW is `MockERC20` with a permissionless `mint`. Any production
   token must be non-fee-on-transfer and non-rebasing, or the pool is insolvent by construction.
-- **Single-key ownership.** The proxy owner, the upgrade authority, the arbiter-rotation authority
-  and the disburse allowlist admin are one testnet EOA. Mainnet calls for a multisig or timelock.
+- **Single-key ownership.** The proxy owner, the upgrade authority and the arbiter-rotation
+  authority are one testnet EOA. Mainnet calls for a multisig or timelock.
 - **Testnet only.** GIWA mainnet is not launched; every address and measurement here is Sepolia.

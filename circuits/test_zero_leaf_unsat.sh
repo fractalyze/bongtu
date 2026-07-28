@@ -3,8 +3,8 @@
 #
 # Proves the zero-commitment belt `enabled[i] * IsZero(inputCommitments[i]) === 0`
 # closes the SMT->IMT zero-leaf mint-from-nothing at the CIRCUIT level, for ALL
-# FIVE spending circuits (transfer + transfer10 + transfer10x2 + withdraw
-# permissionless, disburse caller-gated), while leaving honest spends provable.
+# FIVE spending circuits (all permissionless — the disburse caller allowlist
+# retired 2026-07-28), while leaving honest spends provable.
 # The two 10-input circuits put their exploit in a middle slot (7 of 10), where a
 # per-slot belt is easiest to get wrong.
 #

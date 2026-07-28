@@ -567,3 +567,15 @@ prices L2 execution only; GIWA's L1 DA scalars are unpublished, hence DoD-3.
 - ERC-4337 gasless spend; key rotation for leaked bjj keys; per-output nonce; deposit authority envelope;
   full-256 padded batches (count-hiding); role separation (mint/upgrade/arbiter) via AccessControl/timelock;
   mainnet DA-scalar cost model.
+
+## Amendment 2026-07-28 — disburse allowlist retired (§5.3 caller gate)
+
+User decision: `disburseWithCiphertexts` is permissionless, like every other
+spend. Rationale: the gate was product positioning, not soundness — value
+conservation is the circuit's statement, the arbiter envelope is enforced by
+public-signal injection either way, and the event payload is ciphertext, so an
+open caller set costs no privacy (observers learn only that a batch happened
+and which EOA paid gas). Consequence accepted: attribution of a junk publish is
+per-EOA rather than per-vetted-employer (docs/security-model.md). The
+`disburseAllowed` mapping stays declared for storage-layout continuity; its
+setter, event and error are removed. Ships with the V5 (transfer10x2) upgrade.
