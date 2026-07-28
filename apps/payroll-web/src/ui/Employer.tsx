@@ -51,12 +51,8 @@ interface FormState {
   memLeaf: string;
   memPath: string;
   idxUrl: string;
-  ecdh: string;
-  nonce: string;
   arbX: string;
   arbY: string;
-  saltSeed: string;
-  padSeed: string;
   csvPaste: string;
   proverUrl: string;
   poolAddr: string;
@@ -70,12 +66,8 @@ const INITIAL_FORM: FormState = {
   memLeaf: "",
   memPath: "",
   idxUrl: DEFAULTS.indexerUrl,
-  ecdh: "900000000000000000007",
-  nonce: "424242424243",
   arbX: DEFAULTS.arbiterPubKey[0],
   arbY: DEFAULTS.arbiterPubKey[1],
-  saltSeed: "9000000",
-  padSeed: "50000000000",
   csvPaste: "",
   proverUrl: DEFAULTS.proverUrl,
   poolAddr: DEFAULTS.pool,
@@ -187,6 +179,9 @@ export function Employer(): ReactNode {
       // Fresh ML-KEM encapsulation per assembled batch (design doc §6: ct reuse
       // collapses the PQ compartment) — unlike the demo-friendly manual fields
       // above, this is machine-drawn: limbs feed the witness, the ct feeds the tx.
+      // The ephemeral ECDH key, encryption nonce, per-output salts, pad owner keys,
+      // and the slot order are ALL drawn fresh from the CSPRNG inside
+      // buildDisburseRequest (recipient-count privacy) — no longer operator inputs.
       const kem = freshDisburseKem();
       const res = buildDisburseRequest(
         { value: form.inValue.trim(), salt: form.inSalt.trim(), ownerPrivateKey: form.inPriv.trim() },
@@ -197,13 +192,9 @@ export function Employer(): ReactNode {
         },
         rows,
         {
-          ecdhPrivateKey: form.ecdh.trim(),
-          encryptionNonce: form.nonce.trim(),
           authorityPubKey: [form.arbX.trim(), form.arbY.trim()],
           kemSs: kem.kemSs,
           kemCiphertext: kem.kemCiphertext,
-          saltSeed: form.saltSeed.trim(),
-          padSeed: form.padSeed.trim(),
         },
       );
       setAssembled(res);
@@ -386,25 +377,19 @@ export function Employer(): ReactNode {
 
       <Section title="4 · Crypto params (arbiter PUBLIC key — no secret here)">
         <div className="grid grid-cols-2 gap-y-2 gap-x-4">
-          <Field label="ECDH private (ephemeral)">
-            <TextInput value={form.ecdh} onChange={set("ecdh")} />
-          </Field>
-          <Field label="encryption nonce">
-            <TextInput value={form.nonce} onChange={set("nonce")} />
-          </Field>
           <Field label="arbiter pubkey X">
             <TextInput value={form.arbX} onChange={set("arbX")} />
           </Field>
           <Field label="arbiter pubkey Y">
             <TextInput value={form.arbY} onChange={set("arbY")} />
           </Field>
-          <Field label="salt seed">
-            <TextInput value={form.saltSeed} onChange={set("saltSeed")} />
-          </Field>
-          <Field label="padding seed">
-            <TextInput value={form.padSeed} onChange={set("padSeed")} />
-          </Field>
         </div>
+        <Note>
+          The ephemeral ECDH key, encryption nonce, per-output salts, and the dummy pad owner keys are
+          drawn FRESH from the browser CSPRNG per batch, and the 256 output slots are shuffled — so an
+          observer cannot recompute the padding to recover the real recipient count. These are no longer
+          operator inputs.
+        </Note>
       </Section>
 
       <Section title="5 · Build the disbursement">

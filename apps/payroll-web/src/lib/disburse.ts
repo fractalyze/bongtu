@@ -32,7 +32,7 @@ import {
   KEM_CIPHERTEXT_BYTES,
 } from "@bongtu/core/kem";
 import { ARBITER_KEM_PK } from "@bongtu/core/network";
-import type { Point } from "@bongtu/core/babyjub";
+import { SUBGROUP_ORDER, type Point } from "@bongtu/core/babyjub";
 import { toWire } from "@bongtu/core/proving";
 import type { DisburseInput, ProvingRequest } from "@bongtu/core/proving";
 import { H, B } from "../config.js";
@@ -62,9 +62,6 @@ export interface Membership {
 }
 
 export interface CryptoParams {
-  /** ephemeral ECDH private scalar shared across every output envelope of this batch. */
-  ecdhPrivateKey: string;
-  encryptionNonce: string;
   /** the pool's stored arbiter PUBLIC key (safe in employer-mode). */
   authorityPubKey: [string, string];
   /** ML-KEM-768 shared-secret limbs (decimal) — the PQ half of the hybrid
@@ -74,11 +71,46 @@ export interface CryptoParams {
   /** the matching 1088-byte encapsulation ciphertext, 0x-hex — the tx's
    *  `bytes kemCiphertext` arg (never sent to the prover). */
   kemCiphertext: string;
-  /** base for deriving fresh, deterministic output salts. */
-  saltSeed: string;
-  /** base scalar for deriving distinct dummy owner keys for zero-value padding. */
-  padSeed: string;
 }
+
+/**
+ * Per-batch secret entropy — every recipient-count-hiding value is drawn FRESH
+ * from the platform CSPRNG here, never from a hardcoded/deterministic seed.
+ * A prior design let an observer who knew the (default) ecdh/nonce/salt/pad
+ * seeds recompute every pad key, trial-decrypt the on-chain `Disbursed`
+ * ciphertext, and recover the REAL recipient count (the whole point of padding
+ * to B is to hide it). Drawing all of it fresh per batch closes that leak.
+ * Injectable so tests can substitute a deterministic double.
+ */
+export interface DisburseEntropy {
+  /** a fresh field element (decimal string, < field prime) — the ephemeral ECDH
+   *  private scalar, the encryption nonce, each output salt, and the shuffle. */
+  randField: () => string;
+  /** a fresh NONZERO babyjub scalar (< SUBGROUP_ORDER) — a dummy pad owner's
+   *  spending key. Random (not seed+index) so pad keys are not recomputable. */
+  randScalar: () => bigint;
+}
+
+function randBytes(n: number): bigint {
+  const b = new Uint8Array(n);
+  crypto.getRandomValues(b);
+  let x = 0n;
+  for (const byte of b) x = (x << 8n) | BigInt(byte);
+  return x;
+}
+
+/** The platform-CSPRNG entropy used in the browser (wallet spend.ts:randField
+ *  pattern). The default 5th arg of buildDisburseRequest. */
+export const cryptoEntropy: DisburseEntropy = {
+  randField() {
+    const x = randBytes(31); // < 2^248, safely under the field prime
+    return (x === 0n ? 1n : x).toString();
+  },
+  randScalar() {
+    const x = randBytes(48) % SUBGROUP_ORDER; // wide draw -> negligible modulo bias
+    return x === 0n ? 1n : x;
+  },
+};
 
 /**
  * Fresh ML-KEM-768 encapsulation against the institutional arbiter key
@@ -147,6 +179,7 @@ export function buildDisburseRequest(
   membership: Membership,
   recipients: RecipientRow[],
   crypto: CryptoParams,
+  entropy: DisburseEntropy = cryptoEntropy,
 ): AssembleResult {
   if (recipients.length === 0) throw new Error("at least one recipient is required");
   if (recipients.length > B) throw new Error(`too many recipients: ${recipients.length} > ${B}`);
@@ -197,26 +230,49 @@ export function buildDisburseRequest(
     changeCount = 1;
   }
 
-  // Pad to exactly B with zero-value notes to DISTINCT dummy owner keys. Distinct
-  // keys are required by the two-time-pad guard even though the value is 0.
-  const padSeed = BigInt(crypto.padSeed);
+  // Pad to exactly B with zero-value notes to DISTINCT dummy owner keys. Each pad
+  // owner is a FRESH RANDOM babyjub scalar (not `seed + i*step`): an observer who
+  // knew the old pad seed could recompute every dummy key, trial-decrypt the
+  // on-chain ciphertext, and count the reals. Distinct keys are still required by
+  // the two-time-pad guard even though the value is 0 (random collision negligible).
   const realCount = recipients.length;
   let padCount = 0;
   for (let i = outs.length; i < B; i++) {
-    const dummy = deriveKeypair(padSeed + BigInt(i) * 1000003n + 1n).publicKey;
+    const dummy = deriveKeypair(entropy.randScalar()).publicKey;
     outs.push({ owner: dummy, value: 0n, kind: "pad" });
     padCount++;
   }
 
-  // Fresh deterministic salts, then the distinctness guard over ALL B owners.
-  const saltSeed = BigInt(crypto.saltSeed);
-  const outputSalts = outs.map((_, i) => saltSeed + BigInt(i));
-  const outputValues = outs.map((o) => o.value);
-  const outputOwnerPublicKeys: Point[] = outs.map((o) => o.owner);
+  // A FRESH CSPRNG salt per output — sequential `saltSeed + i` would let any one
+  // recipient (who learns their own slot's salt) derive every other slot's salt.
+  const salts = outs.map(() => BigInt(entropy.randField()));
+
+  // Fisher-Yates shuffle the slots over the CSPRNG so POSITION encodes nothing: the
+  // natural real->change->pad layout leaks a lower bound N >= i+1 at each real slot.
+  // Every per-output array (owners, values, salts, and thus commitments, receiver
+  // ciphertexts, and the authority-plaintext outputs) is permuted the SAME way, or
+  // the proof breaks.
+  const order = outs.map((_, i) => i);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Number(BigInt(entropy.randField()) % BigInt(i + 1));
+    const t = order[i];
+    order[i] = order[j];
+    order[j] = t;
+  }
+  const shuffledOuts = order.map((k) => outs[k]);
+  const outputSalts = order.map((k) => salts[k]);
+  const outputValues = shuffledOuts.map((o) => o.value);
+  const outputOwnerPublicKeys: Point[] = shuffledOuts.map((o) => o.owner);
   assertDistinctOwnerPubkeys(outputOwnerPublicKeys);
 
-  const outputCommitments = outs.map((o, i) => commitment(o.value, outputSalts[i], o.owner));
+  const outputCommitments = shuffledOuts.map((o, i) => commitment(o.value, outputSalts[i], o.owner));
   const subtreeRoot = new ImtTree(H, B).computeSubtreeRoot(outputCommitments);
+
+  // The ephemeral ECDH key + encryption nonce are drawn FRESH per batch too: as
+  // constants the whole receiver-envelope keystream was predictable, so an observer
+  // could decrypt [value, salt] for every slot and read off the real count directly.
+  const ecdh = BigInt(entropy.randField());
+  const nonce = BigInt(entropy.randField());
 
   const root = BigInt(membership.root);
   const pathElements = membership.pathElements.map((x) => BigInt(x));
@@ -231,7 +287,7 @@ export function buildDisburseRequest(
     inputValues: [V],
     inputSalts: [inSalt],
     inputOwnerPrivateKey: employer.formattedPrivateKey,
-    ecdhPrivateKey: BigInt(crypto.ecdhPrivateKey),
+    ecdhPrivateKey: ecdh,
     root,
     pathElements: [pathElements],
     leafIndices: [BigInt(membership.leafIndex)],
@@ -241,7 +297,7 @@ export function buildDisburseRequest(
     outputSalts,
     outputOwnerPublicKeys,
     kemSs: [BigInt(crypto.kemSs[0]), BigInt(crypto.kemSs[1])],
-    encryptionNonce: BigInt(crypto.encryptionNonce),
+    encryptionNonce: nonce,
     authorityPublicKey: [BigInt(crypto.authorityPubKey[0]), BigInt(crypto.authorityPubKey[1])],
   };
 
@@ -253,16 +309,16 @@ export function buildDisburseRequest(
 
   // Ciphertext: per-output receiver envelope [value, salt] (256 * 4 = 1024) ++ the
   // single authority envelope (1030), laid out by the owning codec
-  // (@bongtu/core/envelope). Total 2054 = disburseCiphertextLen(B=256).
-  const ecdh = BigInt(crypto.ecdhPrivateKey);
-  const nonce = BigInt(crypto.encryptionNonce);
+  // (@bongtu/core/envelope). Total 2054 = disburseCiphertextLen(B=256). Uses the
+  // SHUFFLED outs + salts + the fresh ecdh/nonce drawn above so the on-chain wire
+  // matches the proven witness.
   const authorityPub: Point = [BigInt(crypto.authorityPubKey[0]), BigInt(crypto.authorityPubKey[1])];
-  const receiverFlat: bigint[] = outs.flatMap((o, i) =>
+  const receiverFlat: bigint[] = shuffledOuts.flatMap((o, i) =>
     poseidonEncrypt([o.value, outputSalts[i]], ecdhSharedSecret(ecdh, o.owner), nonce),
   );
   const authPlain = buildAuthorityPlaintext("disburse", {
     inputs: [{ owner: employer.publicKey, value: V, salt: inSalt }],
-    outputs: outs.map((o, i) => ({ owner: o.owner, value: o.value, salt: outputSalts[i] })),
+    outputs: shuffledOuts.map((o, i) => ({ owner: o.owner, value: o.value, salt: outputSalts[i] })),
   });
   // Hybrid envelope key (design doc §2): the SAME tagged Poseidon fold the
   // circuit derives in-witness — a raw-ECDH key here would emit a ciphertext

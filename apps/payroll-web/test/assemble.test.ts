@@ -18,9 +18,36 @@ import { packPubkey, encodeAddress } from "@bongtu/core/pubkey";
 import { ImtTree } from "@bongtu/core/imt";
 import { ml_kem768, kemSsToLimbs, kemHexToBytes, kemBytesToHex } from "@bongtu/core/kem";
 import { ARBITER_KEM_PK } from "@bongtu/core/network";
-import type { Point } from "@bongtu/core/babyjub";
-import { buildDisburseRequest, freshDisburseKem, type RecipientRow } from "../src/lib/disburse.js";
+import { SUBGROUP_ORDER, type Point } from "@bongtu/core/babyjub";
+import {
+  buildDisburseRequest,
+  freshDisburseKem,
+  type DisburseEntropy,
+  type RecipientRow,
+} from "../src/lib/disburse.js";
 import { DEFAULTS, H, B } from "../src/config.js";
+
+// A DETERMINISTIC entropy double (an LCG) so the byte-pinned / cross-form-equality
+// tests below stay reproducible run-to-run now that production draws ecdh/nonce/
+// salts/pads/shuffle from the CSPRNG. Two `seededEntropy(s)` instances with the
+// same seed emit the identical stream. Production uses `cryptoEntropy` (the CSPRNG).
+function seededEntropy(seed = 1n): DisburseEntropy {
+  let s = seed & ((1n << 128n) - 1n);
+  const next = (): bigint => {
+    s = (s * 6364136223846793005n + 1442695040888963407n) & ((1n << 128n) - 1n);
+    return s;
+  };
+  return {
+    randField: () => {
+      const v = next();
+      return (v === 0n ? 1n : v).toString();
+    },
+    randScalar: () => {
+      const v = next() % SUBGROUP_ORDER;
+      return v === 0n ? 1n : v;
+    },
+  };
+}
 
 // Deterministic ML-KEM material (fixed encapsulation randomness against the real
 // arbiter pk) so the wire-byte pin below stays reproducible run-to-run.
@@ -54,13 +81,9 @@ function fixture(recipientCount: number, value = 100000n) {
   };
   const membership = { root: tree.getRoot().toString(), pathElements: siblings.map(String), leafIndex };
   const crypto = {
-    ecdhPrivateKey: "900000000000000000007",
-    encryptionNonce: "424242424243",
     authorityPubKey: DEFAULTS.arbiterPubKey,
     kemSs: FIXED_KEM.kemSs,
     kemCiphertext: FIXED_KEM.kemCiphertext,
-    saltSeed: "9000000",
-    padSeed: "50000000000",
   };
   return { employer, value, inSalt, inCommit, recipients, inputNote, membership, crypto };
 }
@@ -138,12 +161,20 @@ test("envelope bytes are pinned (hybrid authority tail — the PQ wire, design d
   // breaks — the hybrid derivation itself is pinned against the circuit
   // fixtures in packages/core/test/envelope.test.ts.
   const f = fixture(3);
-  const { ciphertext, meta, kemCiphertext } = buildDisburseRequest(f.inputNote, f.membership, f.recipients, f.crypto);
+  // Fixed entropy double so the pinned wire bytes are reproducible (production
+  // draws these from the CSPRNG; the pin catches an unintended codec change).
+  const { ciphertext, meta, kemCiphertext } = buildDisburseRequest(
+    f.inputNote,
+    f.membership,
+    f.recipients,
+    f.crypto,
+    seededEntropy(20260728n),
+  );
   const sha = createHash("sha256").update(JSON.stringify(ciphertext)).digest("hex");
-  assert.equal(sha, "78b72e25ec349b011edcc02c8ce5e179fe0032070b3f8902aca5facb9240e1e7");
+  assert.equal(sha, "7d4affde8553378992ba8798edb52a9065a0ca9ae2fa86a73bc2cefb64c19867");
   assert.equal(
     meta.disclosureHash,
-    "3095998976422452395981196483552548910517161000528260453346116616632878541452",
+    "17084268192408823093351289529088636825592421255378748703516419180244404484699",
   );
   // the tx's KEM ct is the injected encapsulation, passed through untouched.
   assert.equal(kemCiphertext, FIXED_KEM.kemCiphertext);
@@ -208,9 +239,11 @@ test("rejects a malformed recipient compressed pubkey", () => {
 
 test("base58check recipient rows assemble the identical request as hex rows", () => {
   const f = fixture(2);
-  const viaHex = buildDisburseRequest(f.inputNote, f.membership, f.recipients, f.crypto);
+  // Same seed on both calls -> identical entropy stream -> identical request; the
+  // only variable is the recipient row form (hex vs base58check).
+  const viaHex = buildDisburseRequest(f.inputNote, f.membership, f.recipients, f.crypto, seededEntropy(42n));
   const b58Rows: RecipientRow[] = f.recipients.map((r) => ({ ...r, pubkey: encodeAddress(r.pubkey) }));
-  const viaB58 = buildDisburseRequest(f.inputNote, f.membership, b58Rows, f.crypto);
+  const viaB58 = buildDisburseRequest(f.inputNote, f.membership, b58Rows, f.crypto, seededEntropy(42n));
   assert.deepEqual(viaB58.request, viaHex.request);
   // The operator-facing ledger shows canonical hex regardless of the input form.
   assert.deepEqual(viaB58.ledger, viaHex.ledger);
