@@ -38,11 +38,14 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { encodeFunctionData, keccak256, maxUint256, type Abi } from "viem";
+
 import { deriveKeypair } from "@bongtu/core/note";
 import type { Keypair } from "@bongtu/core/note";
 import type { PointInput } from "@bongtu/core/babyjub";
 import { ml_kem768, kemSsToLimbs } from "@bongtu/core/kem";
-import { loadEthers } from "@bongtu/core/extern";
+
+import { anvilChain, makeRig, type Contract, type Rig } from "./viem_client.js";
 
 // THE fixture arbiter — bjj scalar and ML-KEM-768 keypair both. Deriving a
 // second arbiter here used to make an arbiter-mode indexer's AUTHORITY_KEM_KEY
@@ -59,10 +62,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", ".."); // deploy/lib -> repo root
 const POSEIDON_HEX = join(ROOT, "contracts", "test", "fixtures", "poseidon2.hex");
 
-// ethers v5 comes back `any` from the shared external loader — we type OUR code
-// (notes, keys, tree), not theirs.
-const ethers = loadEthers();
-
 export const RPC = process.env.E2E_RPC || "http://127.0.0.1:8545";
 // anvil default account #0 (deterministic dev key — testnet fake money only).
 const PK = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
@@ -73,44 +72,54 @@ export { H } from "@bongtu/core/network"; // IMT depth — protocol constant, on
 // invites the wrong import.
 export const GATE_B = 16;
 
-/** Provider + driver wallet (anvil account #0) on the harness anvil (E2E_RPC). */
-export function connectAnvil(): { provider: any; wallet: any } {
-  const provider = new ethers.providers.JsonRpcProvider(RPC);
-  const wallet = new ethers.Wallet(PK, provider);
-  return { provider, wallet };
+/** Public client + driver wallet (anvil account #0) on the harness anvil (E2E_RPC),
+ *  wrapped in the shared viem rig. No gasPrice pin: anvil gas is free (the pin is
+ *  a GIWA-only concern). */
+export function connectAnvil(): Rig {
+  return makeRig({ chain: anvilChain(RPC), rpc: RPC, privateKey: PK });
 }
 
 // ---------------------------------------------------------------------------
-// deployment helpers (ethers v5)
+// deployment helpers (viem)
 // ---------------------------------------------------------------------------
-export async function deploy(wallet: any, sol: string, contract: string, args: unknown[] = []): Promise<any> {
+export async function deploy(rig: Rig, sol: string, contract: string, args: unknown[] = []): Promise<Contract> {
   const { abi, bytecode } = artifact(sol, contract);
-  const f = new ethers.ContractFactory(abi, bytecode, wallet);
-  const inst = await f.deploy(...args);
-  await inst.deployed();
-  return inst;
+  const address = await rig.deploy(abi as Abi, bytecode, args);
+  return rig.at(address, abi as Abi);
 }
 
 // Deploy BongtuPool behind a UUPS ERC-1967 proxy (SPEC §5.2), initialized in the
-// proxy constructor with the 8-arg initializer. Returns a contract bound to the
+// proxy constructor with the 9-arg initializer. Returns a contract bound to the
 // BongtuPool ABI at the PROXY address (the canonical, upgrade-stable pool).
-export async function deployPoolProxy(wallet: any, initArgs: unknown[]): Promise<any> {
-  const impl = await deploy(wallet, "BongtuPool", "BongtuPool");
+export async function deployPoolProxy(rig: Rig, initArgs: unknown[]): Promise<Contract> {
+  const impl = await deploy(rig, "BongtuPool", "BongtuPool");
   const { abi: poolAbi } = artifact("BongtuPool", "BongtuPool");
-  const initData = new ethers.utils.Interface(poolAbi).encodeFunctionData("initialize", initArgs);
-  const proxy = await deploy(wallet, "ERC1967Proxy", "ERC1967Proxy", [impl.address, initData]);
-  return new ethers.Contract(proxy.address, poolAbi, wallet);
+  const initData = encodeFunctionData({
+    abi: poolAbi as Abi,
+    functionName: "initialize",
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    args: initArgs as any,
+  });
+  const proxyAddr = await rig.deploy(erc1967Abi() as Abi, erc1967Bytecode(), [impl.address, initData]);
+  return rig.at(proxyAddr, poolAbi as Abi);
+}
+
+function erc1967Abi(): Abi {
+  return artifact("ERC1967Proxy", "ERC1967Proxy").abi as Abi;
+}
+function erc1967Bytecode(): string {
+  return artifact("ERC1967Proxy", "ERC1967Proxy").bytecode;
 }
 
 export interface DeployedStack {
-  poseidon: any; // Poseidon-v1 (raw hex artifact)
-  dv: any; // DepositVerifier
-  wv: any; // WithdrawVerifier
-  dsv: any; // DisburseVerifier
-  tv: any; // TransferVerifier
-  tv10: any; // Transfer10Verifier (installed by the initializeV4 payload)
-  token: any; // mock kKRW
-  pool: any; // BongtuPool bound at the PROXY address
+  poseidon: Contract; // Poseidon-v1 (raw hex artifact)
+  dv: Contract; // DepositVerifier
+  wv: Contract; // WithdrawVerifier
+  dsv: Contract; // DisburseVerifier
+  tv: Contract; // TransferVerifier
+  tv10: Contract; // Transfer10Verifier (installed by the initializeV4 payload)
+  token: Contract; // mock kKRW
+  pool: Contract; // BongtuPool bound at the PROXY address
 }
 
 /** Deploy the full anvil stack both heavy gates start from: Poseidon-v1, the
@@ -130,27 +139,26 @@ export interface DeployedStack {
  *  an older pool's verifiers onto the current ones, and a fresh stack deploys
  *  the current ones outright. */
 export async function deployStack(
-  wallet: any,
+  rig: Rig,
   opts: { batchSize: number; authorityPublicKey: PointInput; mintAmount: bigint; kemPkHash?: string },
 ): Promise<DeployedStack> {
   const posHex = readFileSync(POSEIDON_HEX, "utf8").trim();
-  const posFactory = new ethers.ContractFactory([], posHex, wallet);
-  const poseidon = await posFactory.deploy();
-  await poseidon.deployed();
-  const dv = await deploy(wallet, "DepositVerifier", "DepositVerifier");
-  const wv = await deploy(wallet, "WithdrawVerifier", "WithdrawVerifier");
-  const dsv = await deploy(wallet, "DisburseVerifier", "DisburseVerifier");
-  const tv = await deploy(wallet, "TransferVerifier", "TransferVerifier");
-  const tv10 = await deploy(wallet, "Transfer10Verifier", "Transfer10Verifier");
-  const token = await deploy(wallet, "MockERC20", "MockERC20");
-  const pool = await deployPoolProxy(wallet, [
-    poseidon.address, dv.address, wv.address, dsv.address, tv.address, token.address, opts.batchSize,
-    [dec(opts.authorityPublicKey[0]), dec(opts.authorityPublicKey[1])],
-    opts.kemPkHash ?? ethers.utils.keccak256(AUTHORITY_KEM.publicKey),
+  const posAddr = await rig.deploy([], posHex);
+  const poseidon = rig.at(posAddr, []);
+  const dv = await deploy(rig, "DepositVerifier", "DepositVerifier");
+  const wv = await deploy(rig, "WithdrawVerifier", "WithdrawVerifier");
+  const dsv = await deploy(rig, "DisburseVerifier", "DisburseVerifier");
+  const tv = await deploy(rig, "TransferVerifier", "TransferVerifier");
+  const tv10 = await deploy(rig, "Transfer10Verifier", "Transfer10Verifier");
+  const token = await deploy(rig, "MockERC20", "MockERC20");
+  const pool = await deployPoolProxy(rig, [
+    poseidon.address, dv.address, wv.address, dsv.address, tv.address, token.address, BigInt(opts.batchSize),
+    [BigInt(dec(opts.authorityPublicKey[0])), BigInt(dec(opts.authorityPublicKey[1]))],
+    (opts.kemPkHash ?? keccak256(AUTHORITY_KEM.publicKey)) as `0x${string}`,
   ]);
-  await (await pool.initializeV4(tv10.address)).wait();
-  await (await token.mint(wallet.address, dec(opts.mintAmount))).wait();
-  await (await token.approve(pool.address, ethers.constants.MaxUint256)).wait();
+  await pool.write("initializeV4", [tv10.address]);
+  await token.write("mint", [rig.address, opts.mintAmount]);
+  await token.write("approve", [pool.address, maxUint256]);
   return { poseidon, dv, wv, dsv, tv, tv10, token, pool };
 }
 
@@ -187,7 +195,7 @@ export function kemDraw(label: string): { kemSs: [bigint, bigint]; kemCiphertext
   return { kemSs: kemSsToLimbs(sharedSecret), kemCiphertext: cipherText };
 }
 
-/** The `bytes calldata kemCiphertext` wire form for ethers. */
+/** Encode the KEM ciphertext as the 0x-hex a viem `bytes` arg expects. */
 export const kemCtHex = (ct: Uint8Array): string => "0x" + Buffer.from(ct).toString("hex");
 export const PAYEE = deriveKeypair(222222222222222222222222n);
 const recipient = (i: number): Keypair => deriveKeypair(2000000011n + BigInt(i) * 1000003n);

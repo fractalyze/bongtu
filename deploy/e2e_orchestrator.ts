@@ -45,22 +45,20 @@ import {
   assertDistinctOwnerPubkeys,
 } from "@bongtu/core/note";
 import { hybridEnvelopeKey, kemBindingOf } from "@bongtu/core/kem";
-import { loadEthers } from "@bongtu/core/extern";
+
+import { parseAbi, parseEventLogs } from "viem";
 
 // The deploy-and-drive skeleton (anvil connection, forge-artifact deploys, the
 // UUPS pool proxy, the CPU prove() wrapper, shared actor/salt/amount fixtures)
 // lives in the harness shared with apps/indexer/test/scenario.ts.
 import {
-  H, GATE_B as B, dec, connectAnvil, deployStack, prove as harnessProve,
+  H, GATE_B as B, connectAnvil, deployStack, prove as harnessProve,
   ok, step, failureCount,
   EMPLOYER, AUTHORITY, PAYEE, RCPTS, kemDraw, kemCtHex,
   sD0, sD1, sR, sPay, sChg, sPadT, sPadW, sRes,
   amounts, V,
 } from "./lib/e2e_harness.js";
-
-// ethers v5 comes back `any` from the shared external loader — we type OUR
-// code (notes, keys, tree), not theirs.
-const ethers = loadEthers();
+import { proofArgs } from "./lib/viem_client.js";
 
 // ok() / step() and the failure count are the toolbox's (deploy/lib/proof_toolbox.ts),
 // shared with the GIWA driver.
@@ -73,8 +71,8 @@ const prove = (name: string, input: unknown) => harnessProve(name, input, { verb
 // main
 // ---------------------------------------------------------------------------
 async function main(): Promise<void> {
-  const { wallet } = connectAnvil();
-  const employerAddr = wallet.address;
+  const rig = connectAnvil();
+  const employerAddr = rig.address;
 
   // Actors (EMPLOYER/AUTHORITY/PAYEE/RCPTS), salts, and amounts/V are the
   // harness fixture material shared with the scenario sibling.
@@ -105,27 +103,26 @@ async function main(): Promise<void> {
   step("DEPLOY (anvil): Poseidon-v1, 4 verifiers, BongtuPool(B=16), mock kKRW");
   // deployStack also funds + approves the employer (deposit pulls from
   // msg.sender via SafeERC20).
-  const { poseidon, token, pool } = await deployStack(wallet, {
+  const { poseidon, token, pool } = await deployStack(rig, {
     batchSize: B,
     authorityPublicKey: AUTHORITY.publicKey,
     mintAmount: V * 1000n,
   });
   // sanity: on-chain Poseidon([1,2]) == the SDK / circuit parity constant
-  const posAbi = ["function poseidon(uint256[2]) pure returns (uint256)"];
-  const posC = new ethers.Contract(poseidon.address, posAbi, wallet);
-  const posRef = (await posC.poseidon([1, 2])).toString();
+  const posC = rig.at(poseidon.address, parseAbi(["function poseidon(uint256[2]) pure returns (uint256)"]));
+  const posRef = (await posC.read("poseidon", [[1n, 2n]])).toString();
   ok(posRef === poseidon2(1n, 2n).toString(), "on-chain Poseidon-v1 parity == SDK poseidon2(1,2)");
   console.log(`   pool=${pool.address} token=${token.address} poseidon=${poseidon.address}`);
 
-  ok((await pool.root()).toString() === oracle.getRoot().toString(),
+  ok((await pool.read("root")).toString() === oracle.getRoot().toString(),
     "empty-tree root: contract == ImtTree oracle");
 
-  const poolBal0 = await token.balanceOf(pool.address);
+  const poolBal0: bigint = await token.read("balanceOf", [pool.address]);
 
   const matchRoot = async (label: string): Promise<void> => {
-    const cr = (await pool.root()).toString();
+    const cr = (await pool.read("root")).toString();
     ok(cr === oracle.getRoot().toString(), `${label}: contract.root == ImtTree oracle root`);
-    ok((await pool.nextLeafIndex()).toString() === String(oracle.getNextLeafIndex()),
+    ok((await pool.read("nextLeafIndex")).toString() === String(oracle.getNextLeafIndex()),
       `${label}: contract.nextLeafIndex == oracle (${oracle.getNextLeafIndex()})`);
   };
 
@@ -153,9 +150,9 @@ async function main(): Promise<void> {
       "deposit kemBinding (pub[13]) == Poseidon(3)(TAG_BIND, kemSs) of the tx's encapsulation");
     oracle.appendLeaf(dNote0);
     oracle.appendLeaf(dNote1);
-    await (await pool.deposit(a, b, c, pub, kemCtHex(KEM_DEPOSIT.kemCiphertext))).wait();
+    await pool.write("deposit", [...proofArgs({ a, b, c, pub }), kemCtHex(KEM_DEPOSIT.kemCiphertext)]);
     await matchRoot("after deposit(2 leaves)");
-    const pulled = (await token.balanceOf(pool.address)).sub(poolBal0);
+    const pulled = (await token.read("balanceOf", [pool.address])) - poolBal0;
     ok(pulled.toString() === V.toString(), `deposit pulled V=${V} ERC20 into the pool`);
   }
   const nfDepositV = nullifier(V, sD0, EMPLOYER.formattedPrivateKey);
@@ -222,18 +219,22 @@ async function main(): Promise<void> {
     oracle.attachSubtree(subtreeRoot, outCommits); // pad 2->16 (dead 2..15) + attach 16..31
     // §6b v2: the ONLY disburse path publishes the FULL ciphertext (receiver ++
     // authority) — the contract enforces receiverCiphertexts.length == 4*B + authLen.
-    const rcpt = await (await pool.disburseWithCiphertexts(
-      a, b, c, pub, [...ctFlat, ...authCt].map(dec), kemCtHex(KEM_DISBURSE.kemCiphertext))).wait();
+    const rcpt = await pool.write("disburseWithCiphertexts", [
+      ...proofArgs({ a, b, c, pub }), [...ctFlat, ...authCt], kemCtHex(KEM_DISBURSE.kemCiphertext),
+    ]);
     await matchRoot("after disburse(pad+attach 16)");
-    ok(await pool.nullifierUsed(dec(nfDepositV)), "disburse marked the deposit-note nullifier");
+    ok(await pool.read("nullifierUsed", [nfDepositV]), "disburse marked the deposit-note nullifier");
 
     // pull ecdhPublicKey + nonce + ciphertext straight off the ON-CHAIN events
-    let sawCt = false, sawDisb = false;
-    for (const log of rcpt.logs) {
-      let ev: any;
-      try { ev = pool.interface.parseLog(log); } catch { continue; }
-      if (ev.name === "DisburseCiphertexts") { disbCtFlat = ev.args.receiverCiphertexts.map((x: any) => x.toBigInt()); sawCt = true; }
-      if (ev.name === "Disbursed") { disbEcdhPub = [ev.args.ecdhPublicKey[0].toBigInt(), ev.args.ecdhPublicKey[1].toBigInt()]; disbNonce = ev.args.encryptionNonce.toBigInt(); sawDisb = true; }
+    // (viem's parseEventLogs decodes uint256 to bigint directly — no .toBigInt()).
+    const ctEvs = parseEventLogs({ abi: pool.abi, logs: rcpt.logs, eventName: "DisburseCiphertexts" });
+    const disbEvs = parseEventLogs({ abi: pool.abi, logs: rcpt.logs, eventName: "Disbursed" });
+    const sawCt = ctEvs.length > 0, sawDisb = disbEvs.length > 0;
+    if (sawCt) disbCtFlat = [...((ctEvs[0].args as any).receiverCiphertexts as bigint[])];
+    if (sawDisb) {
+      const da = disbEvs[0].args as any;
+      disbEcdhPub = [da.ecdhPublicKey[0], da.ecdhPublicKey[1]];
+      disbNonce = da.encryptionNonce;
     }
     ok(sawCt && sawDisb, "disburse emitted DisburseCiphertexts + Disbursed events");
     ok(disbCtFlat.length === B * 4 + authCt.length,
@@ -299,14 +300,15 @@ async function main(): Promise<void> {
     const { a, b, c, pub } = await prove("transfer", input);
     oracle.appendLeaf(payCommit); // leaf 32
     oracle.appendLeaf(chgCommit); // leaf 33
-    await (await pool.transfer(a, b, c, pub, kemCtHex(KEM_TRANSFER.kemCiphertext))).wait();
+    await pool.write("transfer", [...proofArgs({ a, b, c, pub }), kemCtHex(KEM_TRANSFER.kemCiphertext)]);
     await matchRoot("after transfer(2 outputs)");
-    ok(await pool.nullifierUsed(dec(nfBatch0)), "transfer marked the batch-note nullifier");
-    ok(!(await pool.nullifierUsed(0)), "zero (padded) nullifier never marked");
+    ok(await pool.read("nullifierUsed", [nfBatch0]), "transfer marked the batch-note nullifier");
+    ok(!(await pool.read("nullifierUsed", [0n])), "zero (padded) nullifier never marked");
 
-    // replay must revert on nullifier reuse
+    // replay must revert on nullifier reuse — viem estimates gas on the (un-pinned
+    // anvil) write, so a reverting call throws before it is ever sent.
     let reverted = false;
-    try { await (await pool.transfer(a, b, c, pub, kemCtHex(KEM_TRANSFER.kemCiphertext))).wait(); } catch { reverted = true; }
+    try { await pool.write("transfer", [...proofArgs({ a, b, c, pub }), kemCtHex(KEM_TRANSFER.kemCiphertext)]); } catch { reverted = true; }
     ok(reverted, "replaying the transfer proof reverts (nullifier already used)");
   }
 
@@ -344,12 +346,12 @@ async function main(): Promise<void> {
     withdrawnAmount = BigInt(pub[0]);
     ok(withdrawnAmount === chgVal, `withdraw out (pub[0]) == change value ${chgVal}`);
     oracle.appendLeaf(resCommit); // leaf 34
-    const balBefore = await token.balanceOf(employerAddr);
-    await (await pool.withdraw(a, b, c, pub, kemCtHex(KEM_WITHDRAW.kemCiphertext))).wait();
+    const balBefore: bigint = await token.read("balanceOf", [employerAddr]);
+    await pool.write("withdraw", [...proofArgs({ a, b, c, pub }), kemCtHex(KEM_WITHDRAW.kemCiphertext)]);
     await matchRoot("after withdraw(1 change output)");
-    const got = (await token.balanceOf(employerAddr)).sub(balBefore);
+    const got = (await token.read("balanceOf", [employerAddr])) - balBefore;
     ok(got.toString() === chgVal.toString(), `withdraw pushed ${chgVal} ERC20 out of the pool`);
-    ok(await pool.nullifierUsed(dec(nfChange)), "withdraw marked the change-note nullifier");
+    ok(await pool.read("nullifierUsed", [nfChange]), "withdraw marked the change-note nullifier");
   }
 
   // ================= TRANSFER TO SELF (U-X3, §11-8 v1.1) ==================
@@ -395,21 +397,20 @@ async function main(): Promise<void> {
     const { a, b, c, pub } = await prove("transfer", input);
     oracle.appendLeaf(selfPayCommit); // leaf 35
     oracle.appendLeaf(selfChgCommit); // leaf 36
-    const rcpt = await (await pool.transfer(a, b, c, pub, kemCtHex(KEM_SELF.kemCiphertext))).wait();
+    const rcpt = await pool.write("transfer", [...proofArgs({ a, b, c, pub }), kemCtHex(KEM_SELF.kemCiphertext)]);
     await matchRoot("after self-send(2 outputs, one owner)");
-    ok(await pool.nullifierUsed(dec(nfPayment)), "self-send marked the payment-note nullifier");
+    ok(await pool.read("nullifierUsed", [nfPayment]), "self-send marked the payment-note nullifier");
 
     // recover BOTH notes from the ON-CHAIN Transferred event only: ct_i + nonce+i
-    let tev: any = null;
-    for (const log of rcpt.logs) {
-      try { const p = pool.interface.parseLog(log); if (p.name === "Transferred") tev = p; } catch { continue; }
-    }
-    ok(tev !== null, "self-send emitted Transferred");
-    const ephPub: [bigint, bigint] = [tev.args.ecdhPublicKey[0].toBigInt(), tev.args.ecdhPublicKey[1].toBigInt()];
-    const evNonce: bigint = tev.args.encryptionNonce.toBigInt();
+    // (viem decodes the uint256[] event args to bigint[] directly).
+    const tevs = parseEventLogs({ abi: pool.abi, logs: rcpt.logs, eventName: "Transferred" });
+    ok(tevs.length > 0, "self-send emitted Transferred");
+    const tev = tevs[0].args as any;
+    const ephPub: [bigint, bigint] = [tev.ecdhPublicKey[0], tev.ecdhPublicKey[1]];
+    const evNonce: bigint = tev.encryptionNonce;
     const evCts: bigint[][] = [
-      tev.args.encryptedValuesForReceiver0.map((x: any) => x.toBigInt()),
-      tev.args.encryptedValuesForReceiver1.map((x: any) => x.toBigInt()),
+      [...(tev.encryptedValuesForReceiver0 as bigint[])],
+      [...(tev.encryptedValuesForReceiver1 as bigint[])],
     ];
     const sharedSelf = ecdhSharedSecret(PAYEE.formattedPrivateKey, ephPub);
     const wantVals = [selfPayVal, selfChgVal];
@@ -446,7 +447,7 @@ async function main(): Promise<void> {
     ];
     let shielded = 0n;
     for (const n of notes) {
-      const spent = await pool.nullifierUsed(dec(n.nf)); // unspent-ness read from the CHAIN
+      const spent = await pool.read("nullifierUsed", [n.nf]); // unspent-ness read from the CHAIN
       if (!spent) shielded += n.v;
     }
     console.log(`   deposited V=${V}  withdrawn=${withdrawnAmount}  shielded(unspent)=${shielded}`);

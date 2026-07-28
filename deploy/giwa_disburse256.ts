@@ -29,19 +29,20 @@ import {
 import type { Keypair } from "@bongtu/core/note";
 import { toWire } from "@bongtu/core/proving";
 import type { Calldata, DisburseInput } from "@bongtu/core/proving";
-import { loadEthers } from "@bongtu/core/extern";
-import { B, GIWA_GAS_FLOOR_GWEI, H, RPC_URL, explorerTxUrl } from "@bongtu/core/network";
+import { B, H, RPC_URL, explorerTxUrl } from "@bongtu/core/network";
 
-// artifact / prove / dec and the ok()/step() ledger are the chain-agnostic
+import { formatEther, keccak256, maxUint256 } from "viem";
+
+// artifact / prove and the ok()/step() ledger are the chain-agnostic
 // toolbox shared with the anvil drivers (deploy/lib/proof_toolbox.ts). This
 // script keeps its own connection + address material: it drives the canonical
 // LIVE pool, not a stack it deployed.
-import { artifact, dec, failureCount, ok, prove, step } from "./lib/proof_toolbox.js";
+import { artifact, failureCount, ok, prove, step } from "./lib/proof_toolbox.js";
+// The viem rig centralizes the GIWA gas-price pin (auto-estimate once overpaid ~1500x).
+import { giwaChain, GIWA_GAS_PRICE, makeRig, proofArgs } from "./lib/viem_client.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
-// ethers v5 comes back `any` from the shared external loader.
-const ethers = loadEthers();
 
 const RPC = process.env.GIWA_RPC || RPC_URL;
 const PK = process.env.DEPLOYER_KEY;
@@ -86,19 +87,17 @@ async function proveDisburse256(input: DisburseInput): Promise<Calldata> {
   return cd;
 }
 async function main(): Promise<void> {
-  const provider = new ethers.providers.JsonRpcProvider(RPC);
-  const wallet = new ethers.Wallet(PK, provider);
-  const pool = new ethers.Contract(addr.pool, artifact("BongtuPool", "BongtuPool").abi, wallet);
-  const token = new ethers.Contract(addr.token, artifact("MockERC20", "MockERC20").abi, wallet);
+  // The viem rig pins gasPrice to the GIWA floor on every write (auto-estimate
+  // once overpaid ~1500x and drained the faucet grant).
+  const rig = makeRig({ chain: giwaChain, rpc: RPC, privateKey: PK!, gasPrice: GIWA_GAS_PRICE });
+  const pool = rig.at(addr.pool, artifact("BongtuPool", "BongtuPool").abi);
+  const token = rig.at(addr.token, artifact("MockERC20", "MockERC20").abi);
   const ARBITER: [bigint, bigint] = [BigInt(addr.arbiterKeyX), BigInt(addr.arbiterKeyY)]; // pool's stored authority key
-  // Explicit gas price: the GIWA gas floor lives in @bongtu/core/network
-  // (ethers' auto-estimate overpays ~1500x and drains the faucet grant).
-  const TX = { gasPrice: ethers.utils.parseUnits(GIWA_GAS_FLOOR_GWEI, "gwei") };
 
   // The pool refuses clients holding the wrong (or a pre-upgrade zero) KEM pk:
   // encapsulating to an unverified key would silently strand the envelope.
-  const onchainKemPkHash = await pool.arbiterKemPkHash(await pool.currentEpoch());
-  ok(onchainKemPkHash === ethers.utils.keccak256(KEM_PK),
+  const onchainKemPkHash = await pool.read("arbiterKemPkHash", [await pool.read("currentEpoch")]);
+  ok(String(onchainKemPkHash) === keccak256(KEM_PK),
     "keccak256(ARBITER_KEM_PK) == on-chain arbiterKemPkHash(currentEpoch) (pool is PQ-upgraded)");
 
   const EMPLOYER = deriveKeypair(313131313131313131313131n);
@@ -127,13 +126,13 @@ async function main(): Promise<void> {
   // deposit publics (18): oc0=pub[13], oc1=pub[14] (the smoke deposit's two leaves).
   oracle.appendLeaf(BigInt(rp.deposit.pub[13]));
   oracle.appendLeaf(BigInt(rp.deposit.pub[14]));
-  const liveRoot0 = (await pool.root()).toString();
-  ok(oracle.getRoot().toString() === liveRoot0, `mirror root == live pool.root() (nextLeafIndex ${await pool.nextLeafIndex()})`);
+  const liveRoot0 = (await pool.read("root")).toString();
+  ok(oracle.getRoot().toString() === liveRoot0, `mirror root == live pool.root() (nextLeafIndex ${await pool.read("nextLeafIndex")})`);
 
   // ---- deposit an employer note(V) + note(0) ----
   step("DEPOSIT (0-in/2-out): employer deposits V -> note(V) + note(0)");
-  await (await token.mint(wallet.address, dec(V * 2n), TX)).wait();
-  await (await token.approve(addr.pool, ethers.constants.MaxUint256, TX)).wait();
+  await token.write("mint", [rig.address, V * 2n]);
+  await token.write("approve", [addr.pool, maxUint256]);
   const dNoteV = commitment(V, sD0, EMPLOYER.publicKey);
   const dNote0 = commitment(0n, sD1, EMPLOYER.publicKey);
   {
@@ -145,9 +144,9 @@ async function main(): Promise<void> {
     });
     ok(BigInt(pub[0]) === V, `deposit out == V (${V})`);
     oracle.appendLeaf(dNoteV); oracle.appendLeaf(dNote0);
-    await (await pool.deposit(a, b, c, pub, kemHex(KEM_DEP.kemCiphertext), TX)).wait();
-    ok((await pool.root()).toString() === oracle.getRoot().toString(), "after deposit: pool.root == mirror");
-    ok((await pool.nextLeafIndex()).toString() === "4", "after deposit: nextLeafIndex == 4");
+    await pool.write("deposit", [...proofArgs({ a, b, c, pub }), kemHex(KEM_DEP.kemCiphertext)]);
+    ok((await pool.read("root")).toString() === oracle.getRoot().toString(), "after deposit: pool.root == mirror");
+    ok((await pool.read("nextLeafIndex")).toString() === "4", "after deposit: nextLeafIndex == 4");
   }
   const leafV = 2; // dNoteV landed at leaf index 2
   const nfV = nullifier(V, sD0, EMPLOYER.formattedPrivateKey);
@@ -173,6 +172,7 @@ async function main(): Promise<void> {
   ok(BigInt(pub[5]) === nfV, "disburse nullifier (pub[5]) == nullifier(deposit note)");
   ok(BigInt(pub[6]) === oracle.getRoot(), "disburse membership root (pub[6]) == live tree root");
   ok(BigInt(pub[9]) === ARBITER[0] && BigInt(pub[10]) === ARBITER[1], "disburse authority key == pool's stored arbiter key");
+  const disbCd = { a, b, c, pub };
 
   // rebuild + prove the on-chain ciphertext via disclosureHash
   const rcptCts = amounts.map((v, i) => poseidonEncrypt([v, sR(i)], ecdhSharedSecret(ECDH, RCPTS[i].publicKey), NONCE));
@@ -190,26 +190,30 @@ async function main(): Promise<void> {
   // §6b v2: the enforced-length disburse publishes the FULL ciphertext
   // (256*4 receiver ++ authority = 2054 elements) — the contract reverts otherwise.
   step("SUBMIT disburseWithCiphertexts to GIWA (full ciphertext: receiver ++ authority)");
-  const tx = await pool.disburseWithCiphertexts(
-    a, b, c, pub, [...ctFlat, ...authCt].map(dec), kemHex(KEM_DISB.kemCiphertext), TX);
-  const rcpt = await tx.wait();
-  ok((await pool.root()).toString() === oracle.getRoot().toString(), "after disburse: pool.root == mirror (256-subtree attached)");
-  ok((await pool.nextLeafIndex()).toString() === "512", "after disburse: nextLeafIndex == 512 (pad 4->256 + 256 batch)");
-  ok(await pool.nullifierUsed(dec(nfV)), "disburse marked the deposit-note nullifier");
+  const rcpt = await pool.write("disburseWithCiphertexts", [
+    ...proofArgs(disbCd), [...ctFlat, ...authCt], kemHex(KEM_DISB.kemCiphertext),
+  ]);
+  const txHash = rcpt.transactionHash;
+  ok((await pool.read("root")).toString() === oracle.getRoot().toString(), "after disburse: pool.root == mirror (256-subtree attached)");
+  ok((await pool.read("nextLeafIndex")).toString() === "512", "after disburse: nextLeafIndex == 512 (pad 4->256 + 256 batch)");
+  ok(await pool.read("nullifierUsed", [nfV]), "disburse marked the deposit-note nullifier");
 
   // ---- measured cost ----
-  const full = await provider.send("eth_getTransactionReceipt", [tx.hash]);
+  // Raw eth_getTransactionReceipt for the OP-stack l1Fee field (the viem chain
+  // has no OP formatter, so read it off the JSON-RPC result directly).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const full = (await rig.publicClient.request({ method: "eth_getTransactionReceipt" as any, params: [txHash] as any })) as any;
   const gasUsed = BigInt(full.gasUsed), l1Fee = BigInt(full.l1Fee || "0x0"), gp = BigInt(full.effectiveGasPrice);
   const l2 = gasUsed * gp, total = l2 + l1Fee;
   step("RESULT");
-  console.log(`   tx           : ${tx.hash}`);
+  console.log(`   tx           : ${txHash}`);
   console.log(`   recipients   : ${B}   V(total) = ${V}`);
   console.log(`   L2 gasUsed   : ${gasUsed}  (< Karst cap 16,777,216: ${gasUsed < 16777216n})`);
   console.log(`   L2 fee       : ${l2} wei`);
   console.log(`   L1 data fee  : ${l1Fee} wei`);
-  console.log(`   TOTAL cost   : ${total} wei = ${ethers.utils.formatEther(total.toString())} ETH`);
+  console.log(`   TOTAL cost   : ${total} wei = ${formatEther(total)} ETH`);
   console.log(`   per recipient: ${gasUsed / BigInt(B)} gas`);
-  console.log(`   explorer     : ${explorerTxUrl(tx.hash)}`);
+  console.log(`   explorer     : ${explorerTxUrl(txHash)}`);
   const failures = failureCount();
   console.log(`\n${failures === 0 ? "GIWA 256-DISBURSE PASS" : `FAIL ${failures}`}`);
   process.exit(failures === 0 ? 0 : 1);

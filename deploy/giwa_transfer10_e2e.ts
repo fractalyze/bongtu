@@ -18,9 +18,11 @@
 /// <reference path="../apps/wallet-web/src/vite-env.d.ts" />
 import { deriveKeypair, commitment } from "@bongtu/core/note";
 import { packPubkey } from "@bongtu/core/pubkey";
-import { loadEthers } from "@bongtu/core/extern";
-import { GIWA_GAS_FLOOR_GWEI, RPC_URL, explorerTxUrl } from "@bongtu/core/network";
-import { artifact, dec, prove, ok, step, failureCount } from "./lib/proof_toolbox.js";
+import { RPC_URL, explorerTxUrl } from "@bongtu/core/network";
+import { maxUint256, parseAbi, zeroAddress } from "viem";
+import { artifact, prove, ok, step, failureCount } from "./lib/proof_toolbox.js";
+// The viem rig centralizes the GIWA gas-price pin (auto-estimate once overpaid ~1500x).
+import { giwaChain, GIWA_GAS_PRICE, makeRig, proofArgs } from "./lib/viem_client.js";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,33 +54,30 @@ const V3 = 300n * 10n ** 18n;
 const PAY = 550n * 10n ** 18n; // > any single pair — forces the 3-note transfer10 path
 
 async function main(): Promise<void> {
-  const ethers = loadEthers();
   const rpc = process.env.GIWA_RPC || RPC_URL;
   const key = process.env.DEPLOYER_KEY;
   if (!key) throw new Error("DEPLOYER_KEY required");
-  const provider = new ethers.providers.JsonRpcProvider(rpc);
-  const wallet = new ethers.Wallet(key, provider);
-  const TX = { gasPrice: ethers.utils.parseUnits(GIWA_GAS_FLOOR_GWEI, "gwei") };
+  // The viem rig pins gasPrice to the GIWA floor on every write.
+  const rig = makeRig({ chain: giwaChain, rpc, privateKey: key, gasPrice: GIWA_GAS_PRICE });
 
   const A = deriveIdentityFromSignature(SIG_A);
   const B = deriveIdentityFromSignature(SIG_B);
   step(`owners: A=${A.compressedPubkey.slice(0, 14)}… pays B=${B.compressedPubkey.slice(0, 14)}… ${PAY / 10n ** 18n} kKRW from 3 notes`);
 
-  const pool = new ethers.Contract(
+  const pool = rig.at(
     ADDR.pool,
-    [
+    parseAbi([
       "function deposit(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[19] pub, bytes kemCiphertext)",
       "function transfer10(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[141] pub, bytes kemCiphertext)",
       "function root() view returns (uint256)",
       "function nextLeafIndex() view returns (uint256)",
       "function nullifierUsed(uint256) view returns (bool)",
       "function transfer10Verifier() view returns (address)",
-    ],
-    wallet,
+    ]),
   );
-  const token = new ethers.Contract(ADDR.token, artifact("MockERC20", "MockERC20").abi, wallet);
+  const token = rig.at(ADDR.token, artifact("MockERC20", "MockERC20").abi);
 
-  ok((await pool.transfer10Verifier()) !== ethers.constants.AddressZero, "pool is V4 (transfer10Verifier set)");
+  ok((await pool.read("transfer10Verifier")) !== zeroAddress, "pool is V4 (transfer10Verifier set)");
 
   // ---- three deposits -> three spendable notes for A ---------------------------
   // Repeat runs reuse A's existing unspent notes (the ledger remembers them), so
@@ -96,14 +95,14 @@ async function main(): Promise<void> {
   step(`DEPOSIT x${missing.length} for A (has ${notes.length} unspent notes already)`);
   if (missing.length > 0) {
     const total = missing.reduce((a2, b2) => a2 + b2, 0n);
-    await (await token.mint(wallet.address, dec(total), TX)).wait();
-    await (await token.approve(ADDR.pool, ethers.constants.MaxUint256, TX)).wait();
+    await token.write("mint", [rig.address, total]);
+    await token.write("approve", [ADDR.pool, maxUint256]);
   }
   for (const v of missing) {
     const crypto = freshSpendCrypto(randField);
     const salt0 = randField();
     const salt1 = randField();
-    const leafBase = Number(await pool.nextLeafIndex());
+    const leafBase = Number(await pool.read("nextLeafIndex"));
     const cV = commitment(v, BigInt(salt0), A.keypair.publicKey);
     const c0 = commitment(0n, BigInt(salt1), A.keypair.publicKey);
     const { a, b, c, pub } = await prove("deposit", {
@@ -116,8 +115,8 @@ async function main(): Promise<void> {
       encryptionNonce: BigInt(crypto.encryptionNonce),
       authorityPublicKey: crypto.authorityPubKey.map(BigInt),
     });
-    const rc = await (await pool.deposit(a, b, c, pub, crypto.kemCiphertext, TX)).wait();
-    ok(rc.status === 1, `deposit(${v / 10n ** 18n}) mined: ${rc.transactionHash}`);
+    const rc = await pool.write("deposit", [...proofArgs({ a, b, c, pub }), crypto.kemCiphertext]);
+    ok(rc.status === "success", `deposit(${v / 10n ** 18n}) mined: ${rc.transactionHash}`);
     notes.push({ value: v.toString(), salt: salt0, leafIndex: leafBase, spent: false });
   }
 
@@ -133,7 +132,7 @@ async function main(): Promise<void> {
     await new Promise((r) => setTimeout(r, 3000));
   }
   ok(head !== null && head.nextLeafIndex >= wantLeaf, `indexer caught up (nextLeafIndex ${head?.nextLeafIndex} >= ${wantLeaf})`);
-  ok(head!.root === (await pool.root()).toString(), "indexer /head root == pool.root");
+  ok(head!.root === (await pool.read("root")).toString(), "indexer /head root == pool.root");
 
   // ---- the wallet's own selection + assembly ----------------------------------
   step("WALLET PATH: selectInputNotes(arity 10) -> buildTransfer10Request");
@@ -152,17 +151,16 @@ async function main(): Promise<void> {
 
   step("PROVE transfer10 (CPU snarkjs) + SUBMIT to GIWA");
   const { a, b, c, pub } = await prove("transfer10", toWire(built.request.input));
-  const before = Number(await pool.nextLeafIndex());
-  const tx = await pool.transfer10(a, b, c, pub, crypto.kemCiphertext, TX);
-  const rcpt = await tx.wait();
-  ok(rcpt.status === 1, `transfer10 mined: ${rcpt.transactionHash}`);
+  const before = Number(await pool.read("nextLeafIndex"));
+  const rcpt = await pool.write("transfer10", [...proofArgs({ a, b, c, pub }), crypto.kemCiphertext]);
+  ok(rcpt.status === "success", `transfer10 mined: ${rcpt.transactionHash}`);
   console.log(`   gasUsed ${rcpt.gasUsed.toString()}  ${explorerTxUrl(rcpt.transactionHash)}`);
 
   // ---- on-chain + indexer verification ----------------------------------------
   step("VERIFY: 10 leaves appended, 3 nullifiers spent, B received via the live ledger");
-  ok(Number(await pool.nextLeafIndex()) === before + 10, `nextLeafIndex ${before} -> ${before + 10}`);
+  ok(Number(await pool.read("nextLeafIndex")) === before + 10, `nextLeafIndex ${before} -> ${before + 10}`);
   for (const [i, m] of built.meta.nullifiers.entries()) {
-    if (m !== "0") ok(await pool.nullifierUsed(m), `input nullifier ${i} marked used`);
+    if (m !== "0") ok(await pool.read("nullifierUsed", [BigInt(m)]), `input nullifier ${i} marked used`);
   }
   // arbiter ledger: B holds the payment note (signed read via the wallet's URL
   // builder; /notes returns a bare array of owner notes)

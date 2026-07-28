@@ -13,17 +13,18 @@ import { webcrypto } from "node:crypto";
 
 import { deriveKeypair, commitment, nullifier } from "@bongtu/core/note";
 import { ml_kem768, kemSsToLimbs, kemHexToBytes } from "@bongtu/core/kem";
-import { loadEthers } from "@bongtu/core/extern";
 import {
   ARBITER_KEM_PK,
   ARBITER_PUBKEY_X,
   ARBITER_PUBKEY_Y,
-  GIWA_GAS_FLOOR_GWEI,
   H,
   RPC_URL,
   explorerTxUrl,
 } from "@bongtu/core/network";
-import { artifact, dec, prove, ok, step, failureCount } from "./lib/proof_toolbox.js";
+import { maxUint256, parseAbi } from "viem";
+import { artifact, prove, ok, step, failureCount } from "./lib/proof_toolbox.js";
+// The viem rig centralizes the GIWA gas-price pin (auto-estimate once overpaid ~1500x).
+import { giwaChain, GIWA_GAS_PRICE, makeRig, proofArgs } from "./lib/viem_client.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ADDR = JSON.parse(readFileSync(join(HERE, "addresses.91342.json"), "utf8"));
@@ -69,30 +70,32 @@ async function liveHeadCaughtUp(wantLeaf: number): Promise<bigint> {
 }
 
 async function main(): Promise<void> {
-  const ethers = loadEthers();
-  const provider = new ethers.providers.JsonRpcProvider(process.env.GIWA_RPC || RPC_URL);
-  const wallet = new ethers.Wallet(process.env.DEPLOYER_KEY!, provider);
-  const TX = { gasPrice: ethers.utils.parseUnits(GIWA_GAS_FLOOR_GWEI, "gwei") };
-  const pool = new ethers.Contract(
+  // The viem rig pins gasPrice to the GIWA floor on every write.
+  const rig = makeRig({
+    chain: giwaChain,
+    rpc: process.env.GIWA_RPC || RPC_URL,
+    privateKey: process.env.DEPLOYER_KEY!,
+    gasPrice: GIWA_GAS_PRICE,
+  });
+  const pool = rig.at(
     ADDR.pool,
-    [
+    parseAbi([
       "function deposit(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[19] pub, bytes kemCiphertext)",
       "function transfer(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[37] pub, bytes kemCiphertext)",
       "function withdraw(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[26] pub, bytes kemCiphertext)",
       "function nextLeafIndex() view returns (uint256)",
-    ],
-    wallet,
+    ]),
   );
-  const token = new ethers.Contract(ADDR.token, artifact("MockERC20", "MockERC20").abi, wallet);
+  const token = rig.at(ADDR.token, artifact("MockERC20", "MockERC20").abi);
   const gas: Record<string, { used: string; tx: string }> = {};
   const zeros: bigint[] = new Array(H).fill(0n);
 
   step("DEPOSIT 200 for C (measured)");
-  await (await token.mint(wallet.address, dec(DEP), TX)).wait();
-  await (await token.approve(ADDR.pool, ethers.constants.MaxUint256, TX)).wait();
+  await token.write("mint", [rig.address, DEP]);
+  await token.write("approve", [ADDR.pool, maxUint256]);
   const sDep = randField();
   const sDep0 = randField();
-  const leafDep = Number(await pool.nextLeafIndex());
+  const leafDep = Number(await pool.read("nextLeafIndex"));
   const cDep = commitment(DEP, sDep, C.publicKey);
   const kemD = drawKem();
   {
@@ -106,7 +109,7 @@ async function main(): Promise<void> {
       encryptionNonce: randNonce(),
       authorityPublicKey: AUTHORITY_PUB,
     });
-    const r = await (await pool.deposit(a, b, c, pub, kemD.ctHex, TX)).wait();
+    const r = await pool.write("deposit", [...proofArgs({ a, b, c, pub }), kemD.ctHex]);
     gas.deposit = { used: r.gasUsed.toString(), tx: r.transactionHash };
   }
 
@@ -138,8 +141,8 @@ async function main(): Promise<void> {
       encryptionNonce: randNonce(),
       authorityPublicKey: AUTHORITY_PUB,
     });
-    const leafPay = Number(await pool.nextLeafIndex());
-    const r = await (await pool.transfer(a, b, c, pub, kemT.ctHex, TX)).wait();
+    const leafPay = Number(await pool.read("nextLeafIndex"));
+    const r = await pool.write("transfer", [...proofArgs({ a, b, c, pub }), kemT.ctHex]);
     gas.transfer = { used: r.gasUsed.toString(), tx: r.transactionHash };
     gas.transfer.tx += ` (pay leaf ${leafPay})`;
   }
@@ -171,7 +174,7 @@ async function main(): Promise<void> {
       authorityPublicKey: AUTHORITY_PUB,
     });
     ok(BigInt(pub[0]) === PAY, `withdraw pub[0] == ${PAY}`);
-    const r = await (await pool.withdraw(a, b, c, pub, kemW.ctHex, TX)).wait();
+    const r = await pool.write("withdraw", [...proofArgs({ a, b, c, pub }), kemW.ctHex]);
     gas.withdraw = { used: r.gasUsed.toString(), tx: r.transactionHash };
   }
 
