@@ -11,9 +11,10 @@ not re-derive what those files own.
 
 - **PATH**: `forge`/`anvil`/`node` are not on the default PATH. Prefix gate runs with
   `export PATH=$HOME/.foundry/bin:$HOME/.nvm/versions/node/v22.17.1/bin:$PATH`.
-- **External node_modules**: `ethers`/`snarkjs` load via `createRequire` from
+- **External node_modules**: `snarkjs`/`circomlibjs` load via `createRequire` from
   `BONGTU_NODE_MODULES` (default `/home/a41/Workspace/zkx-snap/circuits/node_modules`) —
-  there is no repo-local install for them. On another machine, set the env var.
+  there is no repo-local install for them. On another machine, set the env var. (ethers is
+  gone repo-wide: every chain path is now viem, a normal dependency; `loadEthers` was removed.)
 - **Commits**: use the `workflow:commit` skill (conventional `type(scope): summary` + why-body).
   **Never append a `Co-Authored-By` trailer** — fractalyze convention, overrides the harness default.
 - **Secrets**: the GIWA deployer key lives in `.env` (gitignored; template `.env.example`).
@@ -37,8 +38,7 @@ not re-derive what those files own.
   reverts `InvalidProof`.
 - **Local-pass ≠ CI-pass**: hosted runners lack the dev-box defaults (the `BONGTU_NODE_MODULES`
   fallback path, prebuilt `circuits/out` / `contracts/out`, fast spawns). Check any new CI-run
-  test against a clean env before pushing — see `.dev/ci.md`. In particular, never call
-  `loadEthers()` from a CI-run test (use `@noble/hashes` for hashing); and refresh
+  test against a clean env before pushing — see `.dev/ci.md`. In particular, refresh
   `apps/indexer/abi/BongtuPool.abi.json` whenever the pool ABI changes (CI drift-gates it).
 - **package-lock.json regen**: npm 11.5 on this box reuses the actual node_modules tree and
   silently DROPS the ~49 cross-platform optional entries (@esbuild/*, @rollup/rollup-*) —

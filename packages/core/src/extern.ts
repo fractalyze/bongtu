@@ -1,5 +1,6 @@
-// External heavyweight deps (ethers v5, snarkjs, circomlibjs) — the ONE owner of
-// the createRequire loader the node-side scripts used to copy-paste per file.
+// External heavyweight deps (snarkjs, circomlibjs) — the ONE owner of the
+// createRequire loader the node-side scripts used to copy-paste per file. (ethers
+// is gone: every consumer moved to viem, which ships as a normal repo dependency.)
 //
 // The repo deliberately ships NO local install of these packages (locked decision,
 // docs/toolchain.md / CLAUDE.md): they are large, ship no usable types for this
@@ -25,12 +26,6 @@ export const EXTERN_NODE_MODULES =
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function requireExtern(spec: string): any {
   return require(join(EXTERN_NODE_MODULES, spec));
-}
-
-/** ethers v5 (untyped). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function loadEthers(): any {
-  return requireExtern("ethers");
 }
 
 /** snarkjs via its CJS build entry — the package's default entry does not resolve

@@ -10,10 +10,9 @@
 // or arbiter epoch rotation, edit THIS file (the test convicts stale fields);
 // app config.ts files import from here and keep only app-specific knobs.
 //
-// DATA-ONLY by design: no ethers (or any other) import — wallet-web bundles
-// the sdk and must stay ethers-free at the sdk boundary. Consumers that need
-// a BigNumber gas price call ethers.utils.parseUnits(GIWA_GAS_FLOOR_GWEI,
-// "gwei") themselves.
+// DATA-ONLY by design: no chain-library import — this stays a plain-data
+// boundary. Consumers turn GIWA_GAS_FLOOR_GWEI into a wei gas price with their
+// own client (viem `parseGwei(GIWA_GAS_FLOOR_GWEI)`).
 
 /** GIWA Sepolia chain id (also the EIP-712 KDF domain chainId, SPEC §6). */
 export const CHAIN_ID = 91342;
