@@ -18,11 +18,12 @@ any transaction while the public chain and other users cannot.
 ## The problem
 
 Stablecoins settle **tens of trillions of dollars a year**, more raw volume than PayPal and on the
-order of Visa ([a16z](https://a16zcrypto.com/posts/article/state-of-crypto-report-2025/)). Yet
-**fewer than 1% of businesses use them for payroll**
-([Toku](https://www.toku.com/resources/aleo-toku-and-paxos-labs-launch-first-private-stablecoin-payroll-solution-removing-the-final-barrier-to-enterprise-stablecoin-adoption)),
-against a **$55 trillion** global payroll market. The reason is not speed or cost. A public chain
-exposes *"individual salaries, bonus structures, and corporate treasury balances to public view."*
+order of Visa ([a16z](https://a16zcrypto.com/posts/article/state-of-crypto-report-2025/)). For them
+to carry everyday money like salaries, vendor payments, and payouts, a few things have to hold at
+once: no one wants their income or spending public, and paying many people has to stay fast and
+cheap. A public chain gives neither. It exposes *"individual salaries, bonus structures, and
+corporate treasury balances to public view,"* and existing private systems can't do a large payout
+without splitting it into hundreds of transactions.
 
 When you use a bank, you take four things for granted:
 
@@ -38,59 +39,56 @@ built-in auditability, which is why [Tornado Cash was
 sanctioned](https://home.treasury.gov/news/press-releases/jy0916). These four are the basic
 requirements; bongtu meets them **at scale**, across a payroll-sized payout in a single transaction.
 
-> Requirement #3 is why *"protect the payroll file"* has become *"protect the payroll graph"*
-> ([Toku](https://www.toku.com/resources/payroll-data-privacy)): hiding amounts alone still leaks
-> headcount, churn, and payday timing. Requirement #4 is what a16z calls *"the nuclear option:
-> involuntary selective de-anonymization"*
-> ([a16z](https://a16zcrypto.com/achieving-crypto-privacy-and-regulatory-compliance/)); every other
-> private-payments system offers only *voluntary* viewing keys the user must choose to share.
+## Comparison with others
 
-## How the field compares
+Verified against each project's source and deployed artifacts:
 
-Verified against each project's source/artifacts, for the exact configuration each ships:
-
-| | **bongtu** | Zeto (non-rep) | Railgun v2 | zkBob | Token-2022 CT |
+| | **bongtu** | Zeto | Railgun | zkBob | Token-2022 |
 |---|---|---|---|---|---|
-| Private peer-to-peer transfer | ✅ | ✅ | ✅ | ✅ | ⚠️ amounts only |
-| **Practical 1-to-N mass payout** | ✅ **256 / tx** | ❌ 10 | ❌ 5¹ | ⚠️ 127 (sunset) | ❌ |
-| Hides amounts | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Hides sender↔recipient graph | ✅ | ✅ | ✅ | ✅ | ❌ addresses public |
-| Hides org headcount / cadence | ✅² | ⚠️ | ⚠️ | ⚠️ count leaks³ | ❌ |
-| **Auditor sees without user consent** | ✅ circuit-enforced | ✅ circuit-enforced | ❌ voluntary | ❌ voluntary | ✅ circuit-enforced |
-| Per-period (epoch) disclosure | ✅ on-chain rotation | ❌ key fixed at deploy | ❌ | ❌ | ❌ single key |
-| Post-quantum (HNDL) protection | ✅ hybrid ML-KEM-768 | ⚠️ PQ-only variant⁴ | ❌ | ❌ | ❌ |
-| Per-user note-fetch service | ✅ indexer `/notes` | ❌ scan all | ❌ scan all⁵ | ❌ scan all | n/a |
-| Live today | ✅ GIWA testnet | ✅ | ✅ | ❌ **sunset** | ✅ |
+| P2P transfer | ✅ | ✅ | ✅ | ✅ | ⚠️ |
+| **Mass payout / tx** | ✅ **256** | 10 | 5 | 127 | ❌ |
+| Hides amount | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Hides graph (from↔to) | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Hides recipient count | ✅ | ⚠️ | ⚠️ | ⚠️ | ❌ |
+| **Involuntary audit** | ✅ | ✅ | ❌ | ❌ | ✅ |
+| Per-period disclosure | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Post-quantum (HNDL) | ✅ | ⚠️ | ❌ | ❌ | ❌ |
+| Own-notes lookup | ✅ | ❌ | ❌ | ❌ | n/a |
+| Live | ✅ | ✅ | ✅ | ❌ sunset | ✅ |
 
-¹ Railgun reaches 13 outputs only when spending a single input; from a normal multi-UTXO balance the
-ceiling is 5 ([artifacts.json](https://github.com/Railgun-Community/shared-models/blob/main/src/json/artifacts.json)).
-² A disburse pads to a fixed 256 with no per-leaf events, so the real recipient count is not
-on-chain.
-³ zkBob and Railgun hide *who* the recipients are but publish the *count* (zkBob's variable-length
-memo carries an item count; Railgun emits one commitment event per output).
-⁴ Zeto's PQ variant (Qurrency) is ML-KEM-512 **PQ-only, not hybrid**, drops the auditor role, and
-bakes the auditor key into the circuit with no rotation path.
-⁵ Railgun's QuickSync is a bulk event feed; the client still trial-decrypts every commitment.
-
-**Three gaps no live system closes, and bongtu closes all three:** (1) audit that is both
-protocol-enforced *and* selectively scoped (everyone else's is voluntary and whole-wallet);
-(2) any HNDL mitigation on the ciphertext written permanently on-chain (four of four competitors
-publish an ephemeral pubkey next to every note); (3) a per-recipient note-discovery service instead
+Railgun's 5 rises to 13 only with a single input; zkBob's 127 shipped but the pools are shut down.
+"Hides recipient count": bongtu pads every batch to 256 with no per-leaf events, while the others
+hide *who* is paid but leak *how many*. "Post-quantum (HNDL)": all of these publish encrypted data
+on-chain, but Railgun (ECDH over curve25519) and Token-2022 (ElGamal) key it with classical,
+discrete-log crypto whose public keys sit on-chain forever, so a future quantum computer decrypts
+every past amount; bongtu mixes a lattice (ML-KEM-768) secret into the envelope key, so breaking the
+classical half alone reveals nothing. The bottom three rows are the empty column no live system
+fills: enforced-and-scoped audit, post-quantum on-chain ciphertext, and an own-notes lookup instead
 of scanning the whole pool.
 
 ## The headline: mass private disbursement
 
 One transaction pays up to **256 recipients**, each with an amount only they and the auditor can
-read. Measured on the live GIWA pool: **3,872,403 gas ≈ 15,126 per recipient**
+read. One such batch, measured live on GIWA: **3,872,403 L2 gas** (15,126 per recipient) plus
+**~4e-6 ETH** of L1 data fee
 ([tx](https://sepolia-explorer.giwa.io/tx/0xe254240a5df042a163073c028399a5fc63cf87434a7e7ebbf5ddfea73c803bd6)).
 
-At that rate **100,000 recipients ≈ 391 transactions ≈ ~1.5 billion gas**, on GIWA (OP-stack L2,
-0.005 gwei) roughly **a few minutes and tens of dollars** end to end; GPU proving is ~0.47 s/batch
-warm and never the bottleneck. Against Zeto's own published 2,763,071 gas for a **2-recipient**
-transfer (~1.38M/recipient), bongtu is **~90× cheaper per recipient**: the gap is the value-keyed
-SMT we replaced with an IMT batch-attach and the ciphertext bloat we replaced with an aggregated
-disclosure hash. *(The 15,126/recipient figure predates the hybrid ML-KEM envelope, which adds the
-KEM ciphertext cost; that batch has not been re-measured live.)*
+A **100,000-person payroll** is 391 of those batches. From the measured per-batch numbers:
+
+| | per 256-batch | ×391 (100,000 people) |
+|---|---|---|
+| L2 gas | 3,872,403 | ~1.51 billion |
+| L2 cost @ 0.005 gwei | ~3.9e-5 ETH | **~0.0076 ETH** |
+| L1 data fee | ~4e-6 ETH | **~0.0016 ETH** |
+| **total** | | **~0.009 ETH (tens of dollars)** |
+| GPU proving @ 0.47 s | 0.47 s | **~3 minutes** |
+
+So a full private payroll of 100,000 clears in **a few minutes for well under $50**, proving on a
+single GPU. For contrast, Zeto's own published number is 2,763,071 gas for **2 recipients**
+(~1.38M each), making bongtu **~90× cheaper per recipient**: we replaced Zeto's value-keyed SMT with
+an IMT batch-attach and its per-note ciphertext with one aggregated disclosure hash. *(These are
+391× one measured batch, not a single live 100k run; the batch figure also predates the hybrid
+ML-KEM envelope, which adds the KEM-ciphertext cost.)*
 
 ## Status
 
@@ -111,28 +109,28 @@ headline 256-disburse has run end-to-end on this pool (tx `0xe254240a…`, `next
 ## System map
 
 ```
-┌────────────────────────────┐     ┌────────────────────────────┐
-│ wallet-web (browser)       │     │ payroll-web (employer)     │
-│ MetaMask → bjj key,        │     │ recipient list (≤256),     │
-│ snarkjs proves tx          │     │ builds a /prove request    │
-└─────────────┬──────────────┘     └──────────────┬─────────────┘
-              │                                    │ POST /prove
-              │                                    ▼
-              │                     ┌────────────────────────────┐
-              │                     │ prover/ (employer GPU box) │
-              │                     │ disburse256 zkey resident  │
-              │                     └──────────────┬─────────────┘
-              │ tx (a,b,c,pub)       Groth16 calldata, employer submits
-              ▼                                    ▼
-┌──────────────────────────────────────────────────────────────┐
-│ BongtuPool (GIWA L2):  4 verifiers + IMT + kKRW escrow        │
-└───────────────────────────────┬──────────────────────────────┘
-                                 │ events: ciphertext, roots, disclosureHash
-                                 ▼
-┌──────────────────────────────────────────────────────────────┐
-│ indexer (arbiter key):  mirrors the tree (root == on-chain),  │
-│ decrypts envelopes → per-owner /notes + /history, alarms      │
-└──────────────────────────────────────────────────────────────┘
+┌─────────────────────────────┐        ┌─────────────────────────────┐
+│ wallet-web (browser)        │        │ payroll-web (employer)      │
+│ MetaMask → bjj key          │        │ recipient list (≤256),      │
+│ snarkjs proves a tx         │        │ builds a /prove request     │
+└──────────────┬──────────────┘        └──────────────┬──────────────┘
+               │                                      │ POST /prove
+               │                                      ▼
+               │                       ┌─────────────────────────────┐
+               │                       │ prover/ (employer GPU box)  │
+               │                       │ disburse256 zkey resident   │
+               │                       └──────────────┬──────────────┘
+               │ tx (a,b,c,pub)                       │ Groth16 calldata
+               ▼                                      ▼
+┌───────────────────────────────────────────────────────────────────┐
+│ BongtuPool (GIWA L2):  4 verifiers + IMT + kKRW escrow            │
+└─────────────────────────────────┬─────────────────────────────────┘
+                                  │ events: ciphertext, roots, disclosureHash
+                                  ▼
+┌───────────────────────────────────────────────────────────────────┐
+│ indexer (arbiter key):  mirrors the tree, decrypts envelopes to   │
+│ per-owner /notes + /history, raises disclosure alarms             │
+└───────────────────────────────────────────────────────────────────┘
 ```
 
 ## Layout
