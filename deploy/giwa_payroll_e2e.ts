@@ -101,7 +101,9 @@ const kkrw = (v: bigint | string): string => `${(BigInt(v) / KKRW).toString()} k
 // --- the Origin shim: prover-service requests only ------------------------------
 
 const realFetch = globalThis.fetch;
-globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+// Parameters<typeof fetch> instead of RequestInfo: the root cross-tree tsconfig
+// type-checks this driver without the DOM lib, where RequestInfo does not exist.
+globalThis.fetch = ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   if (!url.startsWith(PROVER)) return realFetch(input, init);
   const headers = new Headers(init?.headers);

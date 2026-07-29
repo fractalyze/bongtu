@@ -48,18 +48,24 @@ export const DEFAULTS = {
   // the disburse builder's authority-envelope target. The contract injects the
   // SAME key from storage before verifying, so a mismatch fails the proof.
   arbiterPubKey: [ARBITER_PUBKEY_X, ARBITER_PUBKEY_Y] as [string, string],
-  // Build-time env is read as `import.meta.env?.VITE_X || default` throughout —
-  // the repo-wide convention (the optional chain survives Vite's static
-  // replacement and keeps the plain node test runtime from throwing).
-  //
   // The arbiter-mode indexer for signed /notes (balance) + /head + signed /path
   // (membership). Relative `/indexer` reaches it same-origin: the Vite proxy in
   // dev, the Vercel rewrite (vercel.json) in prod.
-  indexerUrl: import.meta.env?.VITE_INDEXER_URL || "/indexer",
+  indexerUrl: viteEnv().VITE_INDEXER_URL || "/indexer",
   // The bongtu prover service (top-level prover/, FastAPI over rabbitsnark on
   // the employer's GPU box). ALL payroll proofs go there — this app never
   // proves in the browser.
-  proverUrl: proverUrlFromEnv(import.meta.env?.VITE_PROVER_URL, Boolean(import.meta.env?.DEV)),
+  proverUrl: proverUrlFromEnv(viteEnv().VITE_PROVER_URL, Boolean(viteEnv().DEV)),
 } as const;
+
+// Build-time env, typed by assertion instead of the vite/client ImportMeta
+// augmentation: this module is ALSO type-checked by the ROOT cross-tree
+// tsconfig (deploy/giwa_payroll_e2e.ts imports the console's own modules),
+// which has no Vite types — `import.meta.env?.` would not compile there. The
+// optional access still survives Vite's static replacement and the plain node
+// test runtime.
+function viteEnv(): { VITE_INDEXER_URL?: string; VITE_PROVER_URL?: string; DEV?: boolean } {
+  return (import.meta as { env?: { VITE_INDEXER_URL?: string; VITE_PROVER_URL?: string; DEV?: boolean } }).env ?? {};
+}
 
 export { H, B } from "@bongtu/core/network";
