@@ -2,12 +2,12 @@
 // TESTNET TOOL for trying batch transfers (USER-APPROVED mock, U-P7):
 //
 //   header      brand "Bongtu Payroll Tool" + TESTNET badge | [Sign out]
-//   status bar  full-width under the header: connect prompt, or the connected
+//   session card ONE in-content region: connect prompt, or the connected
 //               wallet's eth account · bongtu address · kKRW balance · [Deposit]
 //   payees      only once the wallet is connected: ONE centered
 //               [Generate random recipients] button, or the generated worksheet
 //               (255 editable/deletable rows) with a [Regenerate] affordance
-//   bottom bar  fixed: "Total outgoing: X kKRW (N recipients)" + [Send]
+//   total row   attached under the payees table: total + [Send]
 //
 // One click on [Send] (after a confirmation that names the random-recipient
 // framing) runs the WHOLE chain — transfer10x2 merges until one note covers the
@@ -15,7 +15,7 @@
 // app's builder, seed randomization intact) — with a wallet-style progress rail
 // and a done screen. Every proof goes to the prover service.
 //
-// The WALLET session lives here (not on the login page): the status bar offers
+// The WALLET session lives here (not on the login page): the session card offers
 // [Connect wallet] while none exists. The connect chain is unchanged: injected
 // provider → ensureChain → EIP-712 sign (the shared KDF) → keyCache seed →
 // indexer view token. The idle wipe and an account switch drop the wallet
@@ -383,12 +383,24 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
         </div>
       </header>
 
-      {/* status bar — full-width under the header, but only once a wallet
-          session exists; the disconnected state is a CARD in the content area
-          (the wallet-web connect idiom), not a nav-wide strip */}
-      {bar.kind === "connected" && (
-        <div className="bg-surface-2 border-b border-border">
-          <div className="max-w-[1100px] mx-auto px-5 py-2.5 flex items-center gap-4 flex-wrap min-h-[46px]">
+      <main className="max-w-[1100px] mx-auto w-full px-5 py-5 flex flex-col gap-4 flex-1">
+        {/* session card — ONE region for both states: the connect prompt swaps
+            to the wallet's account/address/balance/[Deposit] in place */}
+        <div className="bg-surface border border-border rounded-xl px-5 py-3.5 flex items-center gap-4 flex-wrap min-h-[58px]">
+          {bar.kind === "disconnected" ? (
+            <>
+              <span className="text-[13.5px] font-medium">Please connect your wallet</span>
+              <span className="text-[12.5px] text-muted hidden sm:inline">
+                Approve the connection and one signature in MetaMask.
+              </span>
+              <div className="ml-auto">
+                <Button disabled={connecting} onClick={() => void connectWallet()}>
+                  {connecting && <Spinner />}
+                  {connecting ? "Connecting…" : "Connect wallet"}
+                </Button>
+              </div>
+            </>
+          ) : (
             <>
               <span className="font-mono text-[12px]" title={bar.ethAccount}>
                 {shortHex(bar.ethAccount)}
@@ -410,25 +422,8 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
                 </Button>
               </div>
             </>
-          </div>
+          )}
         </div>
-      )}
-
-      <main className="max-w-[1100px] mx-auto w-full px-5 py-5 flex flex-col gap-4 flex-1 pb-[88px]">
-        {wallet === null && (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="w-full max-w-[420px] bg-surface border border-border rounded-2xl p-8 flex flex-col items-center gap-4 text-center shadow-[0_8px_28px_-18px_rgba(17,24,39,0.18)]">
-              <div className="text-[15px] font-semibold">Connect your wallet</div>
-              <p className="text-[13px] text-muted">
-                Approve the connection and one signature in MetaMask.
-              </p>
-              <Button disabled={connecting} onClick={() => void connectWallet()}>
-                {connecting && <Spinner />}
-                {connecting ? "Connecting…" : "Connect wallet"}
-              </Button>
-            </div>
-          </div>
-        )}
         {dataError && <Banner message={dataError} onRetry={() => void refresh()} retryLabel="Retry" />}
 
         {/* deposit: a highlighted CTA when the sheet cannot be covered, a quiet
@@ -548,53 +543,34 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
                   </tbody>
                 </table>
               </div>
+              {/* total + send — attached under the table, not a fixed footer
+                  (sendReadiness keeps the messaging truthful) */}
+              <div className="border-t border-border px-4 py-3.5 flex items-center gap-4 flex-wrap bg-surface">
+                <div className="text-[14px] font-semibold tabular-nums">
+                  Total outgoing: {formatKkrw(check.totalWei)} kKRW ({check.filledCount} recipient
+                  {check.filledCount === 1 ? "" : "s"})
+                </div>
+                <div className="text-[12.5px] text-muted flex-1 min-w-[200px]">
+                  {readiness.kind === "loading" &&
+                    (dataError !== null ? "The balance could not be read. See the notice above." : "Loading the balance…")}
+                  {readiness.kind === "blocked" && "Fix the highlighted cells to send."}
+                  {readiness.kind === "ready" && "Balance covers the sheet. One payout transaction will be sent."}
+                  {readiness.kind === "ready-fragmented" &&
+                    `Your balance is split across notes: ${readiness.mergeCount} merge${readiness.mergeCount === 1 ? "" : "s"}, then the payout — ${readiness.mergeCount + 1} signatures in total.`}
+                  {readiness.kind === "insufficient" && shortfall !== null && (
+                    <span className="text-err font-medium">
+                      Balance is short by {formatKkrw(shortfall)} kKRW. Deposit above, then send.
+                    </span>
+                  )}
+                </div>
+                <Button disabled={!sendable} onClick={() => setConfirmOpen(true)}>
+                  Send
+                </Button>
+              </div>
             </div>
           ))}
       </main>
 
-      {/* the fixed bottom bar: total + send (sendReadiness keeps it truthful) */}
-      {wallet !== null && (
-        <div className="fixed bottom-0 inset-x-0 z-10 bg-surface border-t border-border">
-          <div className="max-w-[1100px] mx-auto px-5 py-3.5 flex items-center gap-4 flex-wrap">
-            <div className="text-[14px] font-semibold tabular-nums">
-              Total outgoing: {formatKkrw(check.totalWei)} kKRW ({check.filledCount} recipient
-              {check.filledCount === 1 ? "" : "s"})
-            </div>
-            <div className="text-[12.5px] text-muted flex-1 min-w-[200px]">
-              {/* Neutral, muted, no CTA until the balance is known — a failed read
-                  is already named by the banner above. */}
-              {readiness.kind === "loading" &&
-                (dataError !== null ? "The balance could not be read. See the notice above." : "Loading the balance…")}
-              {readiness.kind === "blocked" &&
-                (check.issues.length > 0 ? "Fix the highlighted cells to send." : "Generate recipients to send.")}
-              {readiness.kind === "ready" && "Balance covers the sheet. One payout transaction will be sent."}
-              {readiness.kind === "ready-fragmented" &&
-                `Your balance is split across notes: ${readiness.mergeCount} merge${readiness.mergeCount === 1 ? "" : "s"}, then the payout — ${readiness.mergeCount + 1} signatures in total.`}
-              {readiness.kind === "insufficient" && shortfall !== null && (
-                <span className="text-err font-medium">
-                  Balance is short by {formatKkrw(shortfall)} kKRW. Deposit above, then send.
-                </span>
-              )}
-            </div>
-            <Button disabled={!sendable} onClick={() => setConfirmOpen(true)}>
-              Send
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {confirmOpen && (
-        <ConfirmSend
-          totalWei={check.totalWei}
-          recipientCount={check.filledCount}
-          mergeCount={readiness.kind === "ready-fragmented" ? readiness.mergeCount : 0}
-          onCancel={() => setConfirmOpen(false)}
-          onConfirm={() => {
-            setConfirmOpen(false);
-            void startPay();
-          }}
-        />
-      )}
       {pay.phase === "running" && <ProgressRail stage={pay.stage} leg={pay.leg} />}
       {pay.phase === "done" && <DoneScreen result={pay.result} paid={pay.paid} onClose={closeDone} />}
     </div>
