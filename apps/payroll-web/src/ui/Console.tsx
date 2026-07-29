@@ -369,6 +369,12 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
 
   const shortfall = readiness.kind === "insufficient" ? readiness.shortfallWei : null;
   const sendable = readiness.kind === "ready" || readiness.kind === "ready-fragmented";
+  // A background refresh can flip the sheet DEFINITIVELY unsendable while the
+  // confirm is up (insufficient/blocked) — close it then. A transient "loading"
+  // tick must not eat the dialog mid-click.
+  useEffect(() => {
+    if (readiness.kind === "insufficient" || readiness.kind === "blocked") setConfirmOpen(false);
+  }, [readiness.kind]);
   // A background refresh can flip the sheet unsendable while the confirm is up;
   // close it then, so it cannot silently reappear when sendability returns.
   useEffect(() => {
@@ -577,6 +583,18 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
           ))}
       </main>
 
+      {confirmOpen && (
+        <ConfirmSend
+          totalWei={check.totalWei}
+          recipientCount={check.filledCount}
+          mergeCount={readiness.kind === "ready-fragmented" ? readiness.mergeCount : 0}
+          onCancel={() => setConfirmOpen(false)}
+          onConfirm={() => {
+            setConfirmOpen(false);
+            void startPay();
+          }}
+        />
+      )}
       {pay.phase === "running" && <ProgressRail stage={pay.stage} leg={pay.leg} />}
       {pay.phase === "done" && <DoneScreen result={pay.result} paid={pay.paid} onClose={closeDone} />}
     </div>
