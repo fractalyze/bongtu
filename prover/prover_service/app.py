@@ -14,8 +14,9 @@
 #                     403 Origin gate (PROVER_ALLOWED_ORIGINS set and the
 #                         request's Origin is absent or not allowed)
 #                     422 schema violation (incl. the §11-8 two-time-pad guard)
-#                     500 witness infra failure (bad wasm/node/timeout — the
-#                         service's environment, never the client's batch)
+#                     500 witness infra failure (bad .so/w2s, crashed or wedged
+#                         witness worker — the service's environment, never the
+#                         client's batch)
 #                     503 engines not ready yet
 #
 # Circuits: one resident engine per BONGTU_CIRCUITS registry name
@@ -35,20 +36,18 @@
 
 from __future__ import annotations
 
-import shutil
-import tempfile
 import threading
 import time
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from . import config
-from .engine import CircuitProver, WitnessGenerationError, WitnessInfraError
+from .engine import CircuitProver
 from .schema import Calldata, ProvingRequest
+from .witness import WitnessGenerationError, WitnessInfraError
 
 engines: dict[str, CircuitProver] = {
     name: CircuitProver(config.CIRCUITS[name]) for name in config.ENABLED_CIRCUITS
@@ -57,18 +56,9 @@ state = {"status": "initializing", "error": None, "boot_started": None}
 _prove_lock = threading.Lock()
 
 
-def _sweep_stale_scratch() -> None:
-    # engine.prove spools witness JSON (spending keys) into bongtu-prove-* temp
-    # dirs; the context manager cleans them on every normal path, but a SIGKILL
-    # or power loss mid-prove orphans one — sweep before serving.
-    for d in Path(tempfile.gettempdir()).glob("bongtu-prove-*"):
-        shutil.rmtree(d, ignore_errors=True)
-
-
 def _initialize() -> None:
     state["boot_started"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     try:
-        _sweep_stale_scratch()
         for engine in engines.values():  # serial: one GPU, dict preserves BONGTU_CIRCUITS order
             engine.initialize()
         state["status"] = "ready"
@@ -175,6 +165,6 @@ def prove(request: ProvingRequest) -> Calldata:
         # The request was well-formed but unsatisfiable (bad membership/sums/keys).
         raise HTTPException(status_code=400, detail=str(e)) from e
     except WitnessInfraError as e:
-        # The service's own environment failed (wasm/node/timeout) — a 400 here
+        # The service's own environment failed (.so/w2s/worker) — a 400 here
         # would tell the employer app their batch is unprovable when it isn't.
         raise HTTPException(status_code=500, detail=str(e)) from e

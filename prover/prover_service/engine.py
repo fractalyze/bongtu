@@ -4,16 +4,21 @@
 # every BONGTU_CIRCUITS name. Lifecycle (the measured-cost contract this design
 # follows, numbers for disburse256, the big one):
 #   initialize(), ONCE at boot (~2.5min total, then ~25GB GPU resident):
+#     witness host spawn+load        ~2s   (the resident CPU witness worker)
 #     parse_zkey(1.24GB)            ~23s
 #     zkey_to_terms -> coefficients  ~3s   (CACHED — compile_circom discards them)
 #     compile_circom -> CompiledProver ~2min (reusable across proofs)
 #     one warm-up prove              ~4s   (JAX JIT; after it, proves are ~0.5s)
-#   prove(input), per request (~seconds warm):
-#     node generate_witness.js (circom wasm, subprocess) -> .wtns
-#     parse_wtns -> witness (np bn254_sf; NEVER the int-converting .witnesses
-#       property — slice _witnesses for the publics instead)
+#   prove(input), per request (~1.5s warm for disburse256):
+#     WitnessHost.compute (in-process compiled .so, resident CPU worker) ~1s
+#       — U-P5: replaced the ~7.5s node/WASM subprocess; witness bytes travel
+#       over pipes, no input JSON spooled to disk
 #     compute_abc(witness as mont view) -> Az, Bz
 #     compiled.prove -> Groth16Proof -> snarkjs-compatible calldata
+#
+# The witness seam lives in witness.py (WitnessHost + the 400-vs-500 fault
+# split); it is a resident worker PROCESS, not a plain in-process call, because
+# a constraint failure aborts the calling process (rationale there).
 #
 # The compiled disburse256 state pins ~25GB of the 32GB GPU (the PJRT plugin
 # ignores XLA_PYTHON_CLIENT_PREALLOCATE), so there is exactly ONE service
@@ -24,34 +29,39 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import tempfile
 import time
-from pathlib import Path
 
 from . import config
 from .calldata import to_solidity_calldata
 from .config import CircuitConfig
 from .schema import Calldata
+from .witness import WitnessHost
 
 
-class WitnessGenerationError(Exception):
-    """The circom witness calculator rejected the input (unsatisfiable request).
+def check_witness_size(circuit: CircuitConfig, witness_size: int, num_vars: int) -> None:
+    """Boot gate: the .so's witness length must EQUAL the zkey's (pure).
 
-    Client fault: the request was well-formed but violates a circuit constraint
-    (bad membership witness, sums, keys). app.py maps this to HTTP 400.
+    The two halves of a circuit's artifact set are built by different pipelines
+    from the same .circom — `circuits/build_witness_so.sh` emits the .so + w2s,
+    the snarkjs setup emits the zkey — so a stale half is the expected drift,
+    and it is silent: the worker happily computes a witness of its own length.
+
+    The comparison is exact, not a bound. `num_vars` is Groth16's m, the length
+    of the zkey's points_a1/pb1/pb2 arrays that `CompiledProver.prove` MSMs the
+    witness against, so a SHORT witness reads past the end of a point array and
+    a LONG one silently drops its tail variables — either way a proof that is
+    wrong rather than absent, which is the failure mode this service must never
+    ship. Fail the boot instead, naming the two artifacts to rebuild together.
     """
-
-
-class WitnessInfraError(Exception):
-    """Witness generation failed for a reason that is NOT the client's input.
-
-    Server fault: missing/stale wasm or generate_witness.js, a broken node
-    binary, a wedged subprocess (timeout) — the circom calculator only reaches
-    its 'Assert Failed' message when the INPUT is unsatisfiable, so anything
-    else is the service's environment. app.py maps this to HTTP 500 so the
-    employer app doesn't tell the user their batch is unprovable.
-    """
+    if witness_size != num_vars:
+        raise RuntimeError(
+            f"{circuit.name}: the witness calculator at {circuit.so} produces "
+            f"{witness_size} witness elements but the zkey at {circuit.zkey} "
+            f"expects {num_vars} (Groth16 m) — the .so/w2s pair and the zkey "
+            f"were built from different circuit revisions; rebuild both "
+            f"(circuits/build_witness_so.sh + the zkey setup) or fix "
+            f"{circuit.env_prefix}_SO / {circuit.env_prefix}_ZKEY"
+        )
 
 
 class CircuitProver:
@@ -59,6 +69,7 @@ class CircuitProver:
 
     def __init__(self, circuit: CircuitConfig) -> None:
         self.circuit = circuit
+        self.witness = WitnessHost(circuit)
         self.compiled = None  # rabbitsnark CompiledProver
         self.coefficients = None  # np coefficient table (compile_circom discards it)
         self.num_public: int = 0
@@ -67,14 +78,24 @@ class CircuitProver:
     # -- boot ---------------------------------------------------------------
 
     def initialize(self) -> None:
-        """Parse + compile the zkey and run one warm-up prove. Blocking."""
+        """Spawn the witness worker, parse + compile the zkey, warm-up prove. Blocking."""
         from rabbitsnark.circom.zkey import parse_zkey
         from rabbitsnark.circom.zkey_to_terms import zkey_to_terms
         from rabbitsnark.groth16 import compile_circom
 
         t0 = time.monotonic()
+        self.witness.start()  # first: fails fast on missing .so/w2s, no GPU cost yet
+        self.boot_seconds["witness_host"] = round(time.monotonic() - t0, 2)
+
+        t0 = time.monotonic()
         zkey = parse_zkey(str(self.circuit.zkey))
         self.boot_seconds["parse_zkey"] = round(time.monotonic() - t0, 2)
+
+        # Gate the .so/zkey pair here, before the ~2min compile: both artifacts
+        # are now parsed and this is the last cheap moment to catch a stale one.
+        check_witness_size(
+            self.circuit, self.witness.witness_size, zkey.header_groth.num_vars
+        )
 
         t0 = time.monotonic()
         _terms, self.coefficients = zkey_to_terms(zkey)
@@ -104,75 +125,25 @@ class CircuitProver:
         """Witness-gen the circuit input, then GPU-prove it to solidity calldata."""
         if self.compiled is None:
             raise RuntimeError(f"CircuitProver({self.circuit.name}).initialize() has not completed")
-
-        with tempfile.TemporaryDirectory(prefix="bongtu-prove-") as scratch:
-            wtns_path = Path(scratch) / f"{self.circuit.name}.wtns"
-            self._generate_witness(input_json, Path(scratch) / "input.json", wtns_path)
-            proof_json, publics = self._prove_wtns(wtns_path)
+        witness_bytes = self.witness.compute(input_json)
+        proof_json, publics = self._prove_witness(witness_bytes)
         return to_solidity_calldata(proof_json, publics, expected_pub_len=self.circuit.num_public)
 
-    def _generate_witness(self, input_json: dict, input_path: Path, wtns_path: Path) -> None:
-        """Run the circom witness calculator (node subprocess, CPU).
-
-        Classifies failures at this seam, where the evidence is: circom's
-        calculator prints 'Assert Failed' on stderr iff a circuit constraint is
-        unsatisfied by the input => WitnessGenerationError (client, 400).
-        Everything else — unlaunchable node, timeout, a crash that never
-        produced the .wtns — is WitnessInfraError (service, 500).
-        """
-        input_path.write_text(json.dumps(input_json))
-        infra_hint = (
-            f"check {self.circuit.env_prefix}_WASM / {self.circuit.env_prefix}_GEN_WITNESS / "
-            "BONGTU_NODE_BIN (prover_service/config.py) and the circuits/out artifacts"
-        )
-        try:
-            res = subprocess.run(
-                [
-                    config.NODE_BIN,
-                    str(self.circuit.gen_witness),
-                    str(self.circuit.wasm),
-                    str(input_path),
-                    str(wtns_path),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=config.WITNESS_TIMEOUT,
-            )
-        except subprocess.TimeoutExpired as e:
-            raise WitnessInfraError(
-                f"witness generation timed out after {config.WITNESS_TIMEOUT}s "
-                f"(healthy {self.circuit.name} witness-gen is seconds); {infra_hint}"
-            ) from e
-        except OSError as e:
-            raise WitnessInfraError(
-                f"could not launch the witness calculator ({e}); {infra_hint}"
-            ) from e
-        if res.returncode != 0 or not wtns_path.exists():
-            detail = (res.stderr or res.stdout or "").strip()[-2000:]
-            if "Assert Failed" in (res.stderr or ""):
-                raise WitnessGenerationError(
-                    f"witness generation failed (rc={res.returncode}): {detail}"
-                )
-            raise WitnessInfraError(
-                f"witness calculator failed without a circuit assert "
-                f"(rc={res.returncode}, wtns_exists={wtns_path.exists()}): "
-                f"{detail or '<no output>'}; {infra_hint}"
-            )
-
-    def _prove_wtns(self, wtns_path: Path) -> tuple[dict, list[str]]:
-        """rabbitsnark in-process prove of a .wtns file (the rabbitsnark cli flow)."""
+    def _prove_witness(self, witness_bytes: bytes) -> tuple[dict, list[str]]:
+        """rabbitsnark in-process prove of a full witness vector (standard-form
+        32-byte LE elements, the exact .wtns data section layout)."""
         import numpy as np
-        from zk_dtypes import bn254_sf_mont
+        from zk_dtypes import bn254_sf, bn254_sf_mont
 
-        from rabbitsnark.circom.wtns import parse_wtns
         from rabbitsnark.r1cs_solver import compute_abc
 
-        wtns = parse_wtns(str(wtns_path))
-        # Standard-form np array; the mont view feeds compute_abc. The publics are
-        # sliced from the raw array — the .witnesses property would int-convert all
-        # ~5.5M elements.
-        z_std = wtns.data._witnesses
+        # bytearray copy: frombuffer over bytes would be read-only, and the
+        # prover mutates views of z_std.
+        z_std = np.frombuffer(bytearray(witness_bytes), dtype=np.dtype(bn254_sf))
         witness_mont = z_std.view(np.dtype(bn254_sf_mont))
+        # The publics are sliced from the raw array — an int-conversion of all
+        # ~2.8M elements (e.g. a .witnesses-style property) would dominate the
+        # request.
         publics = [str(int(x)) for x in z_std[1 : self.num_public + 1]]
 
         az_mont, bz_mont = compute_abc(

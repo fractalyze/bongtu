@@ -12,8 +12,8 @@
 # each worker compiling its own ~25GB prover (instant OOM at 2) and the worker
 # surviving a kill of the recorded PID. Never raise it.
 # Env knobs are documented in prover_service/config.py (BONGTU_CIRCUITS,
-# PROVER_ALLOWED_ORIGINS, BONGTU_CIRCUITS_OUT, per-circuit BONGTU_*_ZKEY/...,
-# BONGTU_NODE_BIN, ...); the bind address/port are owned HERE
+# PROVER_ALLOWED_ORIGINS, BONGTU_CIRCUITS_OUT, per-circuit BONGTU_*_ZKEY/_SO/
+# _W2S, ...); the bind address/port are owned HERE
 # (PROVER_HOST/PROVER_PORT).
 set -euo pipefail
 

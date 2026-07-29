@@ -57,6 +57,16 @@ recommitting its verifier fails the build).
   change is the "GPU regen recipe" bullet in the repo [`CLAUDE.md`](../CLAUDE.md);
   the prover service that holds the zkey resident is
   [`prover/`](../prover/README.md).
+- `build_witness_so.sh` builds the **compiled witness calculators** the prover
+  service loads (`out/lib<name>.so` + `out/<name>_w2s.json`, gitignored) for
+  the three GPU-served circuits via the circom MLIR backend — ~7x faster
+  witness-gen than the WASM pair. `witness_rt/` is the vendored (patched)
+  r1cs-solver runtime MLIR it links; toolchain caveats are in the script
+  header. Rebuild after any circuit change, alongside the zkey.
+- `wtns_compare.py` element-wise compares a snarkjs `.wtns` against a raw
+  witness dump — the byte-identity gate for that swap (a wrong witness still
+  proves, just a different statement). Stdlib only, no venv; the three-command
+  recipe is [`prover/README.md`](../prover/README.md) "Byte-identity gate".
 
 ## Witness-input generators
 

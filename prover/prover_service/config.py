@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,14 +36,23 @@ class CircuitConfig:
     `num_public` is the public-signal count the zkey MUST expose — boot fails
     fast on a mismatch (wrong zkey wired), and calldata.py rejects a proof whose
     pub length disagrees with it.
+
+    `so` + `w2s` are the compiled in-process witness calculator pair
+    (circuits/build_witness_so.sh); `input_order` is the circuit's signal
+    DECLARATION order (public signals first) — the compiled calculator takes
+    inputs positionally, so the request JSON's keys are reordered to this
+    before flattening (witness.flatten_ordered). The order is a property of
+    the .circom source; a new/changed circuit re-derives it by matching the
+    input region of a known-good .wtns.
     """
 
     name: str
     wire_tag: str
     env_prefix: str  # the BONGTU_* env-override family, e.g. BONGTU_DISBURSE
     zkey: Path
-    wasm: Path
-    gen_witness: Path
+    so: Path
+    w2s: Path
+    input_order: tuple[str, ...]
     warmup_input: Path
     num_public: int
 
@@ -64,9 +72,10 @@ def _path(env_key: str, default: Path) -> Path:
 # artifacts exist locally.
 #
 # disburse256 keeps its pre-registry env names (BONGTU_DISBURSE_ZKEY /
-# BONGTU_DISBURSE_WASM / BONGTU_DISBURSE_GEN_WITNESS / BONGTU_WARMUP_INPUT)
-# byte-compatible; transfer10x2 follows the same scheme under
-# BONGTU_TRANSFER10X2_* (warm-up override: BONGTU_TRANSFER10X2_WARMUP_INPUT).
+# BONGTU_WARMUP_INPUT) byte-compatible; transfer10x2/deposit follow the same
+# scheme under BONGTU_TRANSFER10X2_* / BONGTU_DEPOSIT_*. The witness
+# calculator pair is BONGTU_<X>_SO / BONGTU_<X>_W2S (U-P5 replaced the
+# node/WASM subprocess — the _WASM/_GEN_WITNESS knobs are gone with it).
 CIRCUITS: dict[str, CircuitConfig] = {
     "disburse256": CircuitConfig(
         name="disburse256",
@@ -74,12 +83,29 @@ CIRCUITS: dict[str, CircuitConfig] = {
         env_prefix="BONGTU_DISBURSE",
         # The 1.24GB disburse256 Groth16 proving key (gitignored artifact; the
         # GPU regen recipe lives in CLAUDE.md "GPU regen recipe" +
-        # .dev/milestone-m1.md — the CPU pipeline in docs/toolchain.md builds
-        # the wasm/witness pair).
+        # .dev/milestone-m1.md — circuits/build_witness_so.sh builds the
+        # .so/w2s witness pair).
         zkey=_path("BONGTU_DISBURSE_ZKEY", CIRCUITS_OUT / "disburse256.zkey"),
-        wasm=_path("BONGTU_DISBURSE_WASM", CIRCUITS_OUT / "disburse256_js" / "disburse256.wasm"),
-        gen_witness=_path(
-            "BONGTU_DISBURSE_GEN_WITNESS", CIRCUITS_OUT / "disburse256_js" / "generate_witness.js"
+        so=_path("BONGTU_DISBURSE_SO", CIRCUITS_OUT / "libdisburse256.so"),
+        w2s=_path("BONGTU_DISBURSE_W2S", CIRCUITS_OUT / "disburse256_w2s.json"),
+        input_order=(
+            "nullifiers",
+            "root",
+            "enabled",
+            "encryptionNonce",
+            "authorityPublicKey",
+            "inputCommitments",
+            "inputValues",
+            "inputSalts",
+            "inputOwnerPrivateKey",
+            "ecdhPrivateKey",
+            "kemSs",
+            "pathElements",
+            "leafIndices",
+            "outputCommitments",
+            "outputValues",
+            "outputSalts",
+            "outputOwnerPublicKeys",
         ),
         # The committed satisfying input used for the boot warm-up proof
         # (circuits/gen_disburse256_input.ts writes it).
@@ -94,12 +120,26 @@ CIRCUITS: dict[str, CircuitConfig] = {
         # here (212,386 constraints; CPU-provable in a wallet, GPU-warm for the
         # payroll console's merge chains).
         zkey=_path("BONGTU_TRANSFER10X2_ZKEY", CIRCUITS_OUT / "transfer10x2.zkey"),
-        wasm=_path(
-            "BONGTU_TRANSFER10X2_WASM", CIRCUITS_OUT / "transfer10x2_js" / "transfer10x2.wasm"
-        ),
-        gen_witness=_path(
-            "BONGTU_TRANSFER10X2_GEN_WITNESS",
-            CIRCUITS_OUT / "transfer10x2_js" / "generate_witness.js",
+        so=_path("BONGTU_TRANSFER10X2_SO", CIRCUITS_OUT / "libtransfer10x2.so"),
+        w2s=_path("BONGTU_TRANSFER10X2_W2S", CIRCUITS_OUT / "transfer10x2_w2s.json"),
+        input_order=(
+            "nullifiers",
+            "root",
+            "enabled",
+            "outputCommitments",
+            "encryptionNonce",
+            "authorityPublicKey",
+            "inputCommitments",
+            "inputValues",
+            "inputSalts",
+            "inputOwnerPrivateKey",
+            "ecdhPrivateKey",
+            "kemSs",
+            "pathElements",
+            "leafIndices",
+            "outputValues",
+            "outputSalts",
+            "outputOwnerPublicKeys",
         ),
         warmup_input=_path("BONGTU_TRANSFER10X2_WARMUP_INPUT", INPUTS_DIR / "transfer10x2.json"),
         num_public=68,
@@ -113,9 +153,17 @@ CIRCUITS: dict[str, CircuitConfig] = {
         # self-custody wallet) does NO in-browser proving: the employer console
         # funds the pool through the same service that proves its disburse.
         zkey=_path("BONGTU_DEPOSIT_ZKEY", CIRCUITS_OUT / "deposit.zkey"),
-        wasm=_path("BONGTU_DEPOSIT_WASM", CIRCUITS_OUT / "deposit_js" / "deposit.wasm"),
-        gen_witness=_path(
-            "BONGTU_DEPOSIT_GEN_WITNESS", CIRCUITS_OUT / "deposit_js" / "generate_witness.js"
+        so=_path("BONGTU_DEPOSIT_SO", CIRCUITS_OUT / "libdeposit.so"),
+        w2s=_path("BONGTU_DEPOSIT_W2S", CIRCUITS_OUT / "deposit_w2s.json"),
+        input_order=(
+            "outputCommitments",
+            "encryptionNonce",
+            "authorityPublicKey",
+            "outputValues",
+            "outputSalts",
+            "outputOwnerPublicKeys",
+            "ecdhPrivateKey",
+            "kemSs",
         ),
         warmup_input=_path("BONGTU_DEPOSIT_WARMUP_INPUT", INPUTS_DIR / "deposit.json"),
         num_public=19,
@@ -179,16 +227,10 @@ def origin_rejection(origin: str | None) -> str | None:
     return None
 
 
-# node runs the circom witness calculator; node is not on the default PATH on the
-# dev box (CLAUDE.md), so fall back to the known nvm install.
-NODE_BIN = os.environ.get(
-    "BONGTU_NODE_BIN",
-    shutil.which("node") or str(Path.home() / ".nvm/versions/node/v22.17.1/bin/node"),
-)
-
-# Wall-clock cap on one witness-calculator subprocess (a healthy disburse256
-# witness-gen is ~5s; 300s means "wedged", an infra fault). Overridable so the
-# CPU-only seam tests can exercise the timeout leg in seconds.
+# Wall-clock cap on one witness-worker compute answer (a healthy disburse256
+# in-process compute is ~1s; 300s means "wedged", an infra fault — the worker
+# is killed and respawned). Overridable so the CPU-only seam tests can
+# exercise the timeout leg in seconds.
 WITNESS_TIMEOUT = float(os.environ.get("BONGTU_WITNESS_TIMEOUT", "300"))
 
 # The bind address/port (PROVER_HOST/PROVER_PORT, loopback:8700 default) are

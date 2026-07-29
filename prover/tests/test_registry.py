@@ -103,7 +103,7 @@ def test_per_circuit_env_overrides_land_on_their_circuit(reload_config, tmp_path
     assert cfg.CIRCUITS["transfer10x2"].warmup_input == tmp_path / "t_warm.json"
     # the override families are disjoint: the transfer10x2 zkey stayed put above
     # and vice versa
-    assert cfg.CIRCUITS["transfer10x2"].wasm.name == "transfer10x2.wasm"
+    assert cfg.CIRCUITS["transfer10x2"].so.name == "libtransfer10x2.so"
 
 
 @pytest.mark.parametrize("name", ["transfer10x2", "deposit"])

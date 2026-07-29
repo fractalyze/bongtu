@@ -40,23 +40,76 @@ of truth); `prover_service/schema.py` mirrors them 1:1 and must be kept in sync.
 | `POST /prove` | body = a `ProvingRequest` (`{circuit:"disburse"\|"transfer10x2", input:{...}, backend?:"gpu"}`, field elements as decimal strings) → 200 `Calldata` `{a,b,c,pub}` — snarkjs `exportSolidityCallData` form (G2 inner-swap applied), every value a 0x 32-byte hex word, splat straight into the matching `BongtuPool` entrypoint |
 
 Witness handling: the service accepts the **circuit input JSON** (exactly what
-`apps/payroll-web` assembles and POSTs) and runs circom witness generation
-**server-side** (`node circuits/out/<circuit>_js/generate_witness.js`, ~5s CPU
-for the 2.79M-constraint disburse256) before the GPU proof. No `.wtns` upload
-path exists — no consumer produces one, and the input JSON is what the
-employer flow already has in hand.
+`apps/payroll-web` assembles and POSTs) and computes the witness server-side
+with the **compiled rabbitsnark witness calculator**
+(`circuits/out/lib<circuit>.so` + `<circuit>_w2s.json`, built by
+`circuits/build_witness_so.sh`): ~1s CPU for the 2.79M-constraint disburse256,
+~5x faster than the retired `node generate_witness.js` (WASM) subprocess it
+replaced (U-P5), with an elementwise-identical witness vector (gate below). No
+`.wtns` upload path exists — no consumer produces one, and the input JSON is
+what the employer flow already has in hand.
+
+### Byte-identity gate
+
+Swapping witness calculators is only safe if the new one computes the SAME
+vector: a wrong witness does not fail, it proves a different statement, and
+Groth16 has no way to tell you so. `circuits/wtns_compare.py` (stdlib-only, no
+venv needed) is the check — run it after any change to the .so pipeline or the
+circuits, against the WASM calculator as the reference:
+
+```sh
+# 1. reference: the WASM calculator's own .wtns (~6s for disburse256)
+node circuits/out/disburse256_js/generate_witness.js \
+  circuits/out/disburse256_js/disburse256.wasm \
+  circuits/inputs/disburse256.json /tmp/ref.wtns
+
+# 2. candidate: the bytes the service's witness seam actually returns (~1s)
+(cd prover && .venv/bin/python -c '
+import json
+from prover_service import config
+from prover_service.witness import WitnessHost
+c = config.CIRCUITS["disburse256"]
+h = WitnessHost(c); h.start()
+open("/tmp/new.bin", "wb").write(h.compute(json.loads(c.warmup_input.read_text())))
+h.close()')
+
+# 3. compare element by element (exit 1 names the first differing index)
+python3 circuits/wtns_compare.py /tmp/ref.wtns /tmp/new.bin
+# BYTE-IDENTICAL: 2796497 witness elements (89487904 bytes)
+```
+
+Substitute `transfer10x2` / `deposit` (and their `circuits/inputs/*.json`) for
+the other two registry circuits. Boot enforces the weaker half of this
+automatically: `engine.py` refuses to serve a circuit whose .so witness length
+disagrees with its zkey's `num_vars`, the drift a stale half of the artifact
+pair produces (measured: 2796497 / 212695 / 14132 for the three circuits).
+
+**Why the calculator runs in a resident WORKER process, not the service
+process** (the U-P5 decision record): a circom constraint failure inside the
+compiled .so is a `cf.assert`, which lowers to
+`puts("assertion failed at line N"); abort()` — literally in-process, one
+unsatisfiable client request would SIGABRT the whole ~25GB resident GPU prover
+(a 2.5min reboot = a DoS by bad batch). So each engine holds a small resident
+CPU worker (`witness_worker.py`, loads the .so + w2s once, ~1s warm compute
+over pipes, no input JSON spooled to disk); on a constraint failure the WORKER
+aborts, the parent (`witness.py WitnessHost`) reads the assert line off its
+stderr for the 400 detail and respawns it. The node/WASM subprocess path is
+**deleted**, not kept as a fallback: the worker's stderr carries the same
+class of diagnostic (`assertion failed at line N` vs WASM's
+`Assert Failed ... line: N`), so nothing needed the old path.
 
 Errors: 422 = schema violation, **including the §11-8 two-time-pad guard**
 (duplicate DISBURSE output owner pubkeys are rejected before any proving work;
 transfer10x2 allows duplicates — a self-merge is its headline use); 400 = a
 CPU-side circuit (transfer/withdraw) / a registry circuit missing from
 this instance's `BONGTU_CIRCUITS` (the detail names the knob) / cpu backend /
-unsatisfiable witness input (circom's `Assert Failed` — the client's batch is
-at fault); 403 = Origin gate (below); 500 = witness **infra** failure
-(missing/stale wasm, broken node, timeout — the service's environment; the
-detail names the config knobs to check); 503 = still compiling. The 400-vs-500
-classification happens at the witness subprocess seam (`engine.py`), pinned
-CPU-only by `tests/test_witness_seam.py`.
+unsatisfiable witness input (the calculator's `assertion failed` — the
+client's batch is at fault) / input JSON whose keys or element counts don't
+fit the circuit; 403 = Origin gate (below); 500 = witness **infra** failure
+(missing/stale .so or w2s, a crashed or wedged worker — the service's
+environment; the detail names the config knobs to check); 503 = still
+compiling. The 400-vs-500 classification happens at the witness worker seam
+(`witness.py`), pinned CPU-only by `tests/test_witness_seam.py`.
 
 ## Origin allowlist
 
@@ -75,10 +128,15 @@ a private network or request signing
 
 Prerequisite: the **gitignored** circuit artifacts must exist under
 `circuits/out/` for every circuit in `BONGTU_CIRCUITS` — the `.zkey`
-(disburse256 1.24GB, transfer10x2 95MB) plus the `<circuit>_js/`
-witness-calculator pair. The CPU build pipeline is in `docs/toolchain.md`; the
-GPU regen recipe (after any circuit change) is the "GPU regen recipe" bullet in
-the repo `CLAUDE.md` (evidence in `.dev/milestone-m1.md`).
+(disburse256 1.24GB, transfer10x2 95MB) plus the `lib<circuit>.so` +
+`<circuit>_w2s.json` witness-calculator pair
+(`cd circuits && bash build_witness_so.sh` — toolchain paths and the
+patched-fork caveat are documented in that script; ~2min per circuit). The
+zkey CPU build pipeline is in `docs/toolchain.md`; the GPU regen recipe (after
+any circuit change) is the "GPU regen recipe" bullet in the repo `CLAUDE.md`
+(evidence in `.dev/milestone-m1.md`). **After a circuit change, rebuild BOTH
+the zkey and the .so pair, and re-derive the registry's `input_order` if the
+circuit's input signals changed** (`prover_service/config.py` documents how).
 
 ```sh
 bash prover/setup.sh    # once: create .venv (python 3.11 + rabbitsnark bridge)
@@ -137,13 +195,14 @@ public indexer /health.
   2) and orphans its worker on kill. Never raise it. Proves are serialized by
   an in-process lock.
 - **Eager init, never lazy.** Boot compiles each `BONGTU_CIRCUITS` engine in
-  order: per circuit `parse_zkey` → `zkey_to_terms` (coefficient table cached —
-  `compile_circom` discards it) → `compile_circom` → one warm-up proof against
-  its `circuits/inputs/<circuit>.json` fixture (JAX JIT). For disburse256 that
-  is ~23s + ~3s + ~2min + ~9s; transfer10x2 adds a small fraction of that
-  (95MB zkey). `/ready` flips only after the LAST warm-up lands (measured
-  boot-to-ready, disburse256 alone: 144s). A warm disburse `POST /prove` is
-  then ~6s wall: ~5s CPU witness-gen + ~0.5s GPU proof.
+  order: per circuit witness-worker spawn (loads the .so + w2s resident) →
+  `parse_zkey` → `zkey_to_terms` (coefficient table cached — `compile_circom`
+  discards it) → `compile_circom` → one warm-up proof against its
+  `circuits/inputs/<circuit>.json` fixture (JAX JIT). For disburse256 that
+  is ~2s + ~23s + ~3s + ~2min + ~9s; transfer10x2 adds a small fraction of
+  that (95MB zkey). `/ready` flips only after the LAST warm-up lands. A warm
+  disburse `POST /prove` is then ~2s wall: ~1s in-process CPU witness compute
+  + ~0.5s GPU proof (was ~6s on the retired node/WASM witness path).
 - **GPU 0 only** (`CUDA_VISIBLE_DEVICES=0`, set in `config.py` before any jax
   import), never profiled with nsys (CLAUDE.md GPU contract).
 
@@ -158,10 +217,8 @@ public indexer /health.
   the service still reports ready; restart the process on repeated 5xx.
 - **`/prove` is unauthenticated** — same posture as the retired prover-helper,
   and the default bind is loopback. Set `PROVER_ALLOWED_ORIGINS` (above) so a
-  browser tab ON the employer box cannot fire ~6s prove jobs at it; that gate
-  is not authentication (Origin is forgeable outside a browser).
-- Orphaned `bongtu-prove-*` scratch dirs (SIGKILL mid-prove) are swept at the
-  next boot (`app.py`); they are mode-0700 and same-user only in the interim.
+  browser tab ON the employer box cannot fire multi-second prove jobs at it;
+  that gate is not authentication (Origin is forgeable outside a browser).
 
 ## Env & files
 
@@ -170,10 +227,11 @@ consumed by `run.sh`); the rest default in `prover_service/config.py` —
 `BONGTU_CIRCUITS` (comma list of registry names, default
 `disburse256,transfer10x2,deposit`), `PROVER_ALLOWED_ORIGINS` (unset = allow all),
 `BONGTU_CIRCUITS_OUT`, per-circuit path overrides
-(`BONGTU_DISBURSE_ZKEY`/`_WASM`/`_GEN_WITNESS` + the legacy-named
-`BONGTU_WARMUP_INPUT`; `BONGTU_TRANSFER10X2_ZKEY`/`_WASM`/`_GEN_WITNESS`/
-`_WARMUP_INPUT`; same family under `BONGTU_DEPOSIT_*`), `BONGTU_NODE_BIN`, `BONGTU_WITNESS_TIMEOUT` (seconds,
-default 300), `PROVER_DETERMINISTIC` (=1 for byte-stable test proofs).
+(`BONGTU_DISBURSE_ZKEY`/`_SO`/`_W2S` + the legacy-named
+`BONGTU_WARMUP_INPUT`; `BONGTU_TRANSFER10X2_ZKEY`/`_SO`/`_W2S`/
+`_WARMUP_INPUT`; same family under `BONGTU_DEPOSIT_*`),
+`BONGTU_WITNESS_TIMEOUT` (seconds, default 300), `PROVER_DETERMINISTIC` (=1
+for byte-stable test proofs).
 
 ```
 setup.sh                 one-time .venv + rabbitsnark/jax bridge (.pth)
@@ -183,11 +241,16 @@ prover_service/
                          per-circuit engine routing, init thread, prove lock
   engine.py              CircuitProver: boot compile + per-request prove,
                          one per registered circuit
+  witness.py             WitnessHost: the resident witness-worker seam +
+                         the 400-vs-500 fault classification
+  witness_worker.py      the CPU worker process: compiled .so calculator,
+                         one resident per engine (takes the constraint-abort
+                         so the GPU process never does)
   schema.py              pydantic mirror of @bongtu/core/proving (keep in sync!)
   calldata.py            snarkjs exportSolidityCallData-compatible formatting
                          (+ per-circuit pub-length check from the registry)
-  config.py              circuit registry + env-resolved paths/origins
-                         (pins CUDA_VISIBLE_DEVICES=0)
+  config.py              circuit registry (incl. per-circuit input_order) +
+                         env-resolved paths/origins (pins CUDA_VISIBLE_DEVICES=0)
 tests/                   CPU-only unit gates: .venv/bin/python -m pytest  (no GPU)
 ```
 

@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from prover_service import app as app_module  # noqa: E402
 from prover_service import config  # noqa: E402
-from prover_service.engine import WitnessGenerationError  # noqa: E402
+from prover_service.witness import WitnessGenerationError  # noqa: E402
 from prover_service.schema import Calldata  # noqa: E402
 from test_schema import minimal_disburse_input  # noqa: E402
 
