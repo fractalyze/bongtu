@@ -24,6 +24,10 @@
 //     never let an expired key be used.
 //   - a page reload, for free: nothing here is persisted.
 //
+// "Last use" means a USER action. A background poll reads the key through peek(),
+// which deliberately does not push the deadline out — otherwise a console left open
+// on a refreshing screen would never re-lock.
+//
 // The account the key was derived under is held alongside it. MetaMask's selected
 // account can change under a live page (`connection.address` is frozen at connect
 // time), and the derivation follows the CURRENT account — so a cached key whose
@@ -88,6 +92,25 @@ export class KeyCache {
    *  and the flows agree. */
   isUnlocked(): boolean {
     return this.held !== null && !this.expired(this.held);
+  }
+
+  /**
+   * The held identity for `sessionPubkey`, or null — read WITHOUT touching the idle
+   * deadline and without asking the wallet which account is selected.
+   *
+   * For BACKGROUND reads only: a poll that signs an indexer request with a key the
+   * lock already has. It must not go through unlock(), for two reasons. The wipe
+   * deadline has to measure what the USER did — a 3-second refresh that re-armed it
+   * would keep an unattended console unlocked forever, which is exactly what the
+   * 10-minute wipe exists to prevent. And the account round-trip would only re-prove
+   * what the accountsChanged watcher already enforces by emptying the lock on a
+   * switch. A background read never derives either, so there is no popup to decide
+   * about: an empty or expired lock simply means "no read right now".
+   */
+  peek(sessionPubkey: string): WalletIdentity | null {
+    const held = this.held;
+    if (!held || held.sessionPubkey !== sessionPubkey || this.expired(held)) return null;
+    return held.identity;
   }
 
   /** Subscribe to lock/unlock changes (the lock indicator's data path). */

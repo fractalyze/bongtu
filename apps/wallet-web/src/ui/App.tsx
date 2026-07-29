@@ -21,7 +21,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { DEFAULTS, KEY_DERIVATION } from "../config.js";
+import { DEFAULTS } from "../config.js";
 import { walletErrorMessage, type Connection } from "@bongtu/client/connection";
 import {
   endWalletConnection,
@@ -31,7 +31,7 @@ import {
   watchWallet,
 } from "../lib/wagmi.js";
 import { runLogin } from "@bongtu/client/loginFlow";
-import { deriveLoginIdentity } from "@bongtu/client/identity";
+import { KEY_DERIVATION, deriveLoginIdentity } from "@bongtu/client/identity";
 import { keyCache } from "../lib/keyCache.js";
 import type { WalletDescription } from "../lib/walletBrand.js";
 import { sumUnspent } from "@bongtu/client/balance";

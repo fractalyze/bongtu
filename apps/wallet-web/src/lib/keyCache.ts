@@ -10,10 +10,9 @@
 // persisted (see the class's own contract in @bongtu/client/keyCache).
 
 import { KeyCache } from "@bongtu/client/keyCache";
-import { deriveTransientIdentity } from "@bongtu/client/identity";
+import { KEY_DERIVATION, deriveTransientIdentity } from "@bongtu/client/identity";
 import type { Connection } from "@bongtu/client/connection";
 import type { WalletIdentity } from "@bongtu/client/derive";
-import { KEY_DERIVATION } from "../config.js";
 import { currentAccount } from "./wagmi.js";
 
 /** The wallet's one cache. Flows take it through their deps seam so tests can run

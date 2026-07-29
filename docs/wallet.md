@@ -68,6 +68,12 @@ a throttled background tab cannot skip. The first login on a device gets a one-s
 exactly this (`src/lib/lockIntro.ts` stores one boolean — not key material — under
 `bongtu.lockIntro.v1`).
 
+"Idle" counts **user actions only**. A background poll that signs a read with the held key takes it
+through `keyCache.peek()`, which returns the identity without re-arming the wipe or asking the wallet
+which account is selected — otherwise a console left open on a refreshing screen would never re-lock.
+The payroll console (whose tokenless reads are signed) is the caller that needs it; the wallet reads
+with a view token and so peeks nowhere.
+
 A held key belongs to exactly one wallet account. If the selected account changes, the wallet
 refuses the action outright (`ACCOUNT_MISMATCH_MESSAGE`) rather than derive and spend under a
 stranger's key — and when a held key already proves the mismatch, it refuses without a popup.

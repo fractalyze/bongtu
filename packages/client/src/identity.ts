@@ -8,6 +8,7 @@
 // lock, and the login hands what it derives straight to the lock (keyCache.seed);
 // nothing else may keep the value this function returns.
 
+import { CHAIN_ID, POOL_ADDRESS } from "@bongtu/core/network";
 import {
   keyDerivationTypedData,
   deriveIdentityFromSignature,
@@ -22,15 +23,32 @@ export interface LoginSignaturePlan {
   doubleSign: boolean;
 }
 
-/** The EIP-712 domain facts the KDF signs over (SPEC §6) — deployment config the
- *  APP supplies (wallet-web config.ts KEY_DERIVATION): this package reads none of
- *  its own. Same values => same struct => same derived key, so a deployment must
- *  pass identical values everywhere it derives. */
+/** The EIP-712 domain facts the KDF signs over (SPEC §6). Same values => same
+ *  struct => same derived key, so a deployment must pass identical values
+ *  everywhere it derives — which is why the deployment's own values live below
+ *  (KEY_DERIVATION), not per app. */
 export interface KeyDerivationConfig {
   chainId: number;
   pool: string;
   keyVersion: string;
 }
+
+/** KDF domain version (SPEC §6): part of the EIP-712 domain, so bumping it
+ *  rotates every derived key. Pinned per deployment; never silently changed. */
+const KEY_VERSION = "1";
+
+/**
+ * THIS deployment's KDF domain facts — the ONE home both apps derive under.
+ * Built from the sdk deployment facts (@bongtu/core/network, equality-tested
+ * against deploy/addresses.91342.json), so wallet-web and payroll-web deriving
+ * the same key for the same account holds by construction: neither app carries
+ * its own copy of these values.
+ */
+export const KEY_DERIVATION: KeyDerivationConfig = {
+  chainId: CHAIN_ID,
+  pool: POOL_ADDRESS,
+  keyVersion: KEY_VERSION,
+};
 
 /**
  * One eth_signTypedData_v4 popup in the connected wallet -> the full wallet identity

@@ -194,6 +194,52 @@ test("a use pushes the idle deadline out (the timer is re-armed on every unlock)
   assert.equal(h.state.derives, 1, "the deadline follows the last use, not the first unlock");
 });
 
+// ============================ (1b) BACKGROUND PEEK ===========================
+
+test("a background peek reads the held key without postponing the idle wipe", async () => {
+  const h = harness({ suppressTimer: true });
+  await h.unlock();
+
+  // Nine minutes of a 3-second auto-refresh, in one jump: a poll may ride the key…
+  h.state.now += IDLE_WIPE_MS - 1_000;
+  assert.equal(h.cache.peek(SESSION.compressedPubkey)?.compressedPubkey, SESSION.compressedPubkey);
+
+  // …but it may not push the deadline out, so the console still locks on schedule.
+  h.state.now += 1_000;
+  assert.equal(h.cache.peek(SESSION.compressedPubkey), null, "past the deadline there is nothing to peek");
+  assert.equal(h.cache.isUnlocked(), false, "polling did not keep an unattended console unlocked");
+  assert.equal(h.state.derives, 1, "and peeking never spent a signature");
+});
+
+test("an unlock DOES extend the deadline a peek left alone", async () => {
+  const h = harness({ suppressTimer: true });
+  await h.unlock();
+  h.state.now += IDLE_WIPE_MS - 1_000;
+  h.cache.peek(SESSION.compressedPubkey);
+  await h.unlock(); // a user action, at the same instant the poll ran
+  h.state.now += IDLE_WIPE_MS - 1_000;
+  assert.notEqual(h.cache.peek(SESSION.compressedPubkey), null, "the deadline follows the ACTION");
+  assert.equal(h.state.derives, 1);
+});
+
+test("peek returns nothing for an empty lock or another session's key", async () => {
+  const h = harness();
+  assert.equal(h.cache.peek(SESSION.compressedPubkey), null, "a fresh page holds nothing");
+  await h.unlock();
+  assert.equal(h.cache.peek(OTHER.compressedPubkey), null, "the hold is bound to ONE session");
+  h.cache.lock();
+  assert.equal(h.cache.peek(SESSION.compressedPubkey), null);
+});
+
+test("a peeked key rearms nothing — the armed wipe timer is left exactly as it was", async () => {
+  const h = harness();
+  await h.unlock();
+  h.cache.peek(SESSION.compressedPubkey);
+  h.fireIdle(); // the timer armed by the unlock, never replaced by the peek
+  assert.equal(h.cache.isUnlocked(), false);
+  assert.equal(h.cache.peek(SESSION.compressedPubkey), null);
+});
+
 // ============================ (2) ACCOUNT BINDING ============================
 
 test("switching MetaMask accounts refuses the action and drops the key — with no popup", async () => {

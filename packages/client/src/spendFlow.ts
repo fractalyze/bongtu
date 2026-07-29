@@ -37,6 +37,7 @@ import {
   buildTransferRequest,
   buildTransfer10x2Request,
   buildWithdrawRequest,
+  planDisburseChain,
   planSpendChain,
   pendingLegOf,
   freshSpendCrypto,
@@ -344,4 +345,65 @@ export async function runSpendChain(
   // The terminal leg is the transaction the user asked for: it is what the success
   // screen links and what the post-action refresh polls for.
   return last as SpendOutcome;
+}
+
+/** What runMergeChain hands back: the single note that now covers the amount —
+ *  ready to be the terminal transaction's one input — and the merge transactions
+ *  that made it (empty when the balance already held such a note). */
+export interface MergeChainResult {
+  funding: WalletInputNote;
+  mergeTxs: SpendOutcome[];
+}
+
+/**
+ * Run the merges that put a 1-input terminal transaction within reach: plan with
+ * planDisburseChain (spend.ts), run each merge leg exactly like runSpendChain runs
+ * its own — session guards per leg, fresh membership, transfer10x2 self-send, then
+ * the "waiting" pause until the indexer has the merged note — and hand back the
+ * funding note. The terminal leg (payroll's 1-in/256-out disburse) is the CALLER's
+ * transaction: this package owns "merge until one note covers the total", the app
+ * owns what that note then pays for.
+ *
+ * `onStage` legs are numbered over merges + 1 — the +1 being the terminal
+ * transaction the caller runs next — so one progress rail can show the whole run
+ * ("combining 1 of 3 … paying 3 of 3") without the caller re-deriving the count.
+ *
+ * Throws `insufficient` (planning, before anything is signed) and, once any merge
+ * has landed, wraps a later failure with CHAIN_FAILURE_REASSURANCE — the merges
+ * that went through are real notes, and a retry plans a shorter chain over them.
+ */
+export async function runMergeChain(
+  ctx: SpendContext,
+  amount: string,
+  onStage: OnSpendStage,
+  deps: SpendIo,
+): Promise<MergeChainResult> {
+  const io: RunSpendDeps = { ...DEFAULT_DEPS, ...deps };
+  const plan = planDisburseChain(ctx.notes, amount);
+  const count = plan.merges.length + 1; // + the caller's terminal transaction
+  const merged: (WalletInputNote | undefined)[] = [];
+  const mergeTxs: SpendOutcome[] = [];
+
+  for (let index = 0; index < plan.merges.length; index++) {
+    const leg: LegProgress = { index, count };
+    const step = plan.merges[index];
+    try {
+      const identity = await openSpendSession(io, ctx, onStage, leg);
+      const action = legAction(step, ctx, { amount }, merged);
+      const run = await runLeg(io, ctx, identity, action, onStage, leg);
+      mergeTxs.push(run.outcome);
+      onStage("waiting", leg);
+      merged[index] = await awaitMergedNote(io, ctx, identity, step.mergedValue, run.payeeSalt);
+    } catch (e) {
+      // Same money-state rule as runSpendChain: nothing terminal was sent, and
+      // the merges that DID land stay merged.
+      throw new Error(`${walletErrorMessage(e)} ${CHAIN_FAILURE_REASSURANCE}`);
+    }
+  }
+
+  const from = pendingLegOf(plan.funding.leafIndex);
+  if (from === null) return { funding: plan.funding, mergeTxs };
+  const real = merged[from];
+  if (!real) throw new Error(`merge leg ${from + 1} has not produced its note yet`);
+  return { funding: real, mergeTxs };
 }

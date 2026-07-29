@@ -370,6 +370,65 @@ export function planSpendChain(
   }
 }
 
+/** A merge leg on its own — what planDisburseChain emits, since a disburse chain's
+ *  terminal transaction (the 1-in/256-out disburse) is the APP's leg, not this
+ *  package's. */
+export type MergeLeg = Extract<SpendLeg, { leg: "merge" }>;
+
+/** The way from the balance a payroll wallet holds to the ONE note a disburse can
+ *  spend: the merge legs to run first (possibly none), then which note funds the
+ *  terminal 1-input transaction — a real note, or (leafIndex < 0, see pendingLeaf)
+ *  the note the LAST merge leg will create. */
+export interface DisburseChainPlan {
+  merges: MergeLeg[];
+  funding: WalletInputNote;
+}
+
+/**
+ * Plan the merges that put a payroll disburse within reach. The terminal disburse
+ * circuit spends exactly ONE input note (SPEC §4, 1-in / B-out), so the plan folds
+ * — ten largest notes at a time, each fold a transfer10x2 self-send exactly like a
+ * wallet merge — until a single note covers `amount`. PURE and deterministic, same
+ * ground as planSpendChain; the difference is the terminal leg: a disburse is the
+ * app's own transaction (payroll's builder + submit), so the plan hands back the
+ * funding note instead of a terminal SpendLeg.
+ *
+ * "Merge only as far as you must" holds here too: a wallet whose largest note
+ * already covers the amount plans ZERO merges, and planning stops the moment a
+ * fold's total does. Throws the `insufficient` SpendSelectionError — before any
+ * leg is planned — when the whole balance is below the amount; never `needs-merge`
+ * (that verdict is exactly what the merges answer).
+ */
+export function planDisburseChain(
+  notes: readonly SelectableNote[],
+  amount: string,
+): DisburseChainPlan {
+  const merges: MergeLeg[] = [];
+  let working = unspentLargestFirst(notes);
+
+  // Bounded by construction: every pass either returns or replaces ≥2 notes with
+  // 1, so the working set strictly shrinks until one note holds the whole balance.
+  for (;;) {
+    try {
+      // selectInputNotes at arity 1 owns the amount validation and the
+      // `insufficient` verdict — a wallet that cannot afford the payroll is told
+      // so before any merge is planned.
+      const [funding] = selectInputNotes(working, amount, 1);
+      return { merges, funding };
+    } catch (e) {
+      if (!(e instanceof SpendSelectionError) || e.blocker !== "needs-merge") throw e;
+    }
+
+    const fold = working.slice(0, TRANSFER10_ARITY);
+    const mergedValue = totalValue(fold);
+    merges.push({ leg: "merge", inputs: fold.map(pickNote), mergedValue });
+    working = unspentLargestFirst([
+      { value: mergedValue, salt: "", leafIndex: pendingLeaf(merges.length - 1), spent: false },
+      ...working.slice(TRANSFER10_ARITY),
+    ]);
+  }
+}
+
 /** What the Send/Withdraw form shows while the user types. */
 export interface SpendPreview {
   /** Which circuit's one-time key the screen should be fetching: the FIRST leg's,

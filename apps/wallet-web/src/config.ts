@@ -47,9 +47,6 @@ export const DEFAULTS = {
   // transfer/withdraw circuits encrypt an authority envelope to this key; the
   // contract injects the SAME key from storage before verifying, so a mismatch fails.
   arbiterPubKey: [ARBITER_PUBKEY_X, ARBITER_PUBKEY_Y] as [string, string],
-  // KDF domain version (SPEC §6): part of the EIP-712 domain, so bumping it rotates
-  // every derived key. Pinned per deployment; never silently changed.
-  keyVersion: "1",
   // The arbiter-mode indexer for the signed `GET /notes` balance path (required —
   // the wallet has no fallback balance path; decision 2026-07-25, review #17b).
   // Default is the RELATIVE base `/indexer`, which the Vite proxy (vite.config
@@ -69,15 +66,12 @@ export const DEFAULTS = {
   circuitBaseUrl: "/circuits",
 } as const;
 
-/** The EIP-712 KDF domain facts (@bongtu/client/identity KeyDerivationConfig) this
- *  deployment derives every spending key under — threaded into the engine at the
- *  two derivation call sites (login deps in App.tsx, the lock's lazy re-derive in
- *  lib/keyCache.ts). Same values everywhere or the two would derive different keys. */
-export const KEY_DERIVATION = {
-  chainId: DEFAULTS.chainId,
-  pool: DEFAULTS.pool,
-  keyVersion: DEFAULTS.keyVersion,
-} as const;
+// The EIP-712 KDF domain facts this deployment derives every spending key under
+// are NOT app config anymore: they live in @bongtu/client/identity KEY_DERIVATION
+// (built from the sdk deployment facts), so wallet-web and payroll-web deriving
+// the same key for the same account holds by construction. The two derivation
+// call sites (login deps in App.tsx, the lock's lazy re-derive in lib/keyCache.ts)
+// import it from there.
 
 // first 8 of sha256 over the FOUR keys the wallet proves against, concatenated in
 // this documented order (the version bucket stores them all, so regenerating any one

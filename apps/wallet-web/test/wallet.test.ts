@@ -40,6 +40,7 @@ import {
   type WalletIdentity,
 } from "@bongtu/client/derive";
 import { sumUnspent, trialDecryptEvents } from "@bongtu/client/balance";
+import { KEY_DERIVATION } from "@bongtu/client/identity";
 import { walletErrorMessage } from "@bongtu/client/connection";
 import type { FeedEvent } from "@bongtu/client/indexerClient";
 import {
@@ -131,10 +132,16 @@ test("the Vite indexer proxy is on in development and auto-disabled in productio
 });
 
 test("the key-derivation struct is domain-separated (chainId, pool, version)", () => {
-  const t = keyDerivationTypedData(DEFAULTS.chainId, DEFAULTS.pool, DEFAULTS.keyVersion);
+  // KEY_DERIVATION lives in @bongtu/client (one home for both apps); the lift must
+  // not change what this deployment signs — same chainId/pool as the app's own
+  // deployment facts, same "1" version the wallet always derived under.
+  assert.equal(KEY_DERIVATION.chainId, DEFAULTS.chainId);
+  assert.equal(KEY_DERIVATION.pool, DEFAULTS.pool);
+  assert.equal(KEY_DERIVATION.keyVersion, "1");
+  const t = keyDerivationTypedData(KEY_DERIVATION.chainId, KEY_DERIVATION.pool, KEY_DERIVATION.keyVersion);
   assert.equal(t.domain.chainId, 91342);
   assert.equal(t.domain.verifyingContract, DEFAULTS.pool);
-  assert.equal(t.domain.version, DEFAULTS.keyVersion);
+  assert.equal(t.domain.version, "1");
   assert.equal(t.primaryType, "BongtuSpendingKey");
   assert.ok(t.types.BongtuSpendingKey.length >= 1);
 });
