@@ -5,10 +5,13 @@
 //
 // The rules this module owns (headlessly gated in test/randomRecipients.test.ts):
 //
-//   - addresses are REAL BabyJubJub keys: a random 31-byte scalar from the
-//     CSPRNG (crypto.getRandomValues) -> deriveKeypair -> packPubkey ->
-//     base58check (what every bongtu surface displays), the same
-//     @bongtu/core path a wallet uses — every generated address decodes, and a
+//   - addresses are REAL BabyJubJub subgroup points: a run derives TWO random
+//     keypairs (CSPRNG scalar -> deriveKeypair, the same @bongtu/core path a
+//     wallet uses) and walks P += step from there — one point ADDITION per row
+//     instead of a full scalar mult (which costs ~50ms each, 13 s for a
+//     255-row sheet, measured; the payees are throwaway test identities whose
+//     private keys are discarded, so the rows being an arithmetic walk is
+//     immaterial). Every address packs/decodes exactly like a wallet's, and a
 //     duplicate draw is redrawn, so rows never trip the worksheet's dup check;
 //   - amounts are whole kKRW, minimum 1 per row, and their SUM is exactly the
 //     target: floor(80% of the whole-kKRW balance). target <= 0.8 * balance, so
@@ -21,6 +24,7 @@
 //     means generation is disabled; a known-too-small balance shows the
 //     "Deposit first" hint (an UNKNOWN balance shows Loading instead).
 
+import { addPoint, type Point } from "@bongtu/core/babyjub";
 import { deriveKeypair } from "@bongtu/core/note";
 import { encodeAddress, packPubkey } from "@bongtu/core/pubkey";
 import { MAX_ROWS, type WorksheetRow } from "./worksheet.js";
@@ -98,26 +102,34 @@ export function generateRecipients(balanceWei: bigint): WorksheetRow[] {
     throw new Error("The balance is too small to generate a test payroll. Deposit first.");
   }
   const amounts = splitAmounts(targetKkrw(balanceWei), count);
-  const seen = new Set<string>();
-  return amounts.map((a) => ({ address: freshAddress(seen), amount: a.toString() }));
+  const next = addressStream();
+  return amounts.map((a) => ({ address: next(), amount: a.toString() }));
 }
 
-/** One fresh distinct base58 address; the derivation (a BabyJubJub scalar mult)
- *  is the expensive step every generator shares. */
-function freshAddress(seen: Set<string>): string {
-  let address: string;
-  do {
-    address = encodeAddress(packPubkey(deriveKeypair(randomScalar()).publicKey));
-  } while (seen.has(address));
-  seen.add(address);
-  return address;
+/** Fresh distinct base58 addresses, one point ADDITION each: both generators
+ *  share this because the alternative — a full scalar mult per row — is the
+ *  13-seconds-per-sheet cost the module doc rules out. */
+function addressStream(): () => string {
+  let p: Point = deriveKeypair(randomScalar()).publicKey;
+  const step: Point = deriveKeypair(randomScalar()).publicKey;
+  const seen = new Set<string>();
+  return () => {
+    for (;;) {
+      const address = encodeAddress(packPubkey(p));
+      p = addPoint(p, step);
+      if (!seen.has(address)) {
+        seen.add(address);
+        return address;
+      }
+    }
+  };
 }
 
 /**
  * The same sheet as generateRecipients, delivered in chunks with an event-loop
- * yield between them. 255 scalar mults block the main thread for seconds when
- * run in one go — the view must keep painting its spinner and can append rows
- * as they arrive. `yieldFn` is injectable so tests run without timers.
+ * yield between them, so the view keeps painting and can append rows as they
+ * arrive even on a machine where the point walk is not instant. `yieldFn` is
+ * injectable so tests run without timers.
  */
 export async function generateRecipientsChunked(
   balanceWei: bigint,
@@ -130,12 +142,12 @@ export async function generateRecipientsChunked(
     throw new Error("The balance is too small to generate a test payroll. Deposit first.");
   }
   const amounts = splitAmounts(targetKkrw(balanceWei), count);
-  const seen = new Set<string>();
+  const next = addressStream();
   for (let start = 0; start < count; start += chunkSize) {
     const end = Math.min(start + chunkSize, count);
     const chunk: WorksheetRow[] = [];
     for (let i = start; i < end; i++) {
-      chunk.push({ address: freshAddress(seen), amount: amounts[i].toString() });
+      chunk.push({ address: next(), amount: amounts[i].toString() });
     }
     onChunk(chunk);
     if (end < count) await yieldFn();
