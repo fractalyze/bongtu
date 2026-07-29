@@ -1,13 +1,31 @@
 // CSV -> recipient rows. One convenience input for the employer recipients editor
-// (the form is the other); NOT required. Format: two columns `pubkey,amount` per
-// line, where pubkey is a bongtu address — base58check OR legacy 32-byte hex, both
-// normalized here to canonical hex via the core decodeAddress (the ONE address
-// normalization point). A header row naming a "pubkey"/"amount"-ish column is
-// skipped; blank lines and `#` comments ignored.
+// (the form is the other); NOT required. Format: EXACTLY two comma-separated
+// columns `pubkey,amount` per line, where pubkey is a bongtu address —
+// base58check OR legacy 32-byte hex, both normalized here to canonical hex via the
+// core decodeAddress (the ONE address normalization point). A header row naming a
+// "pubkey"/"amount"-ish column is skipped; blank lines and `#` comments ignored.
+//
+// Every rejection names its line number and is worded for the operator, because a
+// payroll is the worst place to learn about a parse rule from a stack trace.
 
 import { decodeAddress } from "@bongtu/core/pubkey";
 
 import type { RecipientRow } from "./disburse.js";
+
+/** Amounts are whole kKRW here (a pasted export, not a typed cell). */
+const isWholeAmount = (cell: string | undefined): boolean => cell !== undefined && /^\d+$/.test(cell);
+
+/** Whether a cell reads as a bongtu address at all — the header heuristic's real
+ *  question, and the reason it cannot be asked of the amount cell alone. */
+function isAddressCell(cell: string | undefined): boolean {
+  if (cell === undefined) return false;
+  try {
+    decodeAddress(cell);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function parseRecipientsCsv(text: string): RecipientRow[] {
   const rows: RecipientRow[] = [];
@@ -16,18 +34,33 @@ export function parseRecipientsCsv(text: string): RecipientRow[] {
     const line = raw.trim();
     if (line === "" || line.startsWith("#")) return;
     const parts = line.split(",").map((p) => p.trim());
-    if (parts.length < 2) throw new Error(`CSV line ${i + 1}: expected "pubkey,amount", got ${JSON.stringify(raw)}`);
+
+    // A header row is skipped only when NEITHER cell is data. The amount cell alone
+    // cannot decide it: `<주소>,1.5` is a real payee whose amount breaks the
+    // whole-kKRW rule, and dropping it as a "header" would silently drop a person.
+    if (i === 0 && parts.length === 2 && !isAddressCell(parts[0]) && !isWholeAmount(parts[1])) return;
+
+    // Cell COUNT is checked before the cells: `<주소>,1,000` splits into three, and
+    // reading just the first two would pay 1 kKRW instead of 1,000 — a 1000x
+    // underpay that nothing downstream can notice.
+    if (parts.length !== 2) {
+      throw new Error(
+        `CSV ${i + 1}행: "주소,금액" 두 칸이어야 하는데 ${parts.length}칸입니다.` +
+          (parts.length > 2 ? " 금액의 천단위 쉼표를 지우거나 따옴표로 감싸세요." : ""),
+      );
+    }
+
     const [pubkey, amount] = parts;
-    // Skip an obvious header row (first line whose amount is not a number).
-    if (i === 0 && !/^\d+$/.test(amount)) return;
-    if (!/^\d+$/.test(amount)) throw new Error(`CSV line ${i + 1}: amount must be a non-negative integer, got ${JSON.stringify(amount)}`);
+    if (!isWholeAmount(amount)) {
+      throw new Error(`CSV ${i + 1}행: 금액은 0 이상의 정수여야 합니다. 입력값: ${JSON.stringify(amount)}`);
+    }
     // Normalize base58check/hex here so downstream (assembly, the editor table)
     // only ever sees canonical hex — and a typo'd address fails with its line number.
     let canonical: string;
     try {
       canonical = decodeAddress(pubkey);
     } catch (e) {
-      throw new Error(`CSV line ${i + 1}: bad address: ${(e as Error).message}`);
+      throw new Error(`CSV ${i + 1}행: 주소를 읽을 수 없습니다. (${(e as Error).message})`);
     }
     rows.push({ pubkey: canonical, amount });
   });

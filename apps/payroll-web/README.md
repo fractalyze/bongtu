@@ -1,63 +1,52 @@
-# bongtu payroll (PoC)
+# bongtu payroll (봉투 페이롤)
 
-A minimal, functional role-moded admin web app (SPEC §7 / Q10). One app, two modes,
-switched by a tab. It imports the bongtu `sdk` and `indexer` **source
-directly**, so every commitment / nullifier / Poseidon-sponge ciphertext it builds is
-byte-identical to what the prover service proves and the contract verifies.
+A login-gated **single-page pay console** for the employer (SPEC §7 employer-mode),
+built on the shared **`@bongtu/client`** protocol engine. Same bjj identity as the
+public wallet — MetaMask login runs the same EIP-712 → bjj derivation under the ONE
+`@bongtu/client/identity KEY_DERIVATION` config, so the console and the wallet derive
+the **same key for the same account** by construction. It imports the `@bongtu/*`
+workspace **source directly**, so every commitment / nullifier / ciphertext it builds
+is byte-identical to what the prover service proves and the contract verifies.
 
-Vite + TypeScript, minimal deps (`ethers` v5 for MetaMask, `poseidon-lite` for the sdk).
+There is no auditor mode here anymore (the arbiter seat is the arbiter indexer's
+`/notes`); this app is **login + worksheet only**.
 
-## Two modes
+## The one page
 
-### Employer mode — holds NO arbiter key
-Assembles and submits a 256-recipient private disbursement:
+- **Login** — product hero + one button: connect the injected wallet → EIP-712 sign →
+  console. The session is the in-memory `KeyCache` hold only (`src/lib/keyCache.ts`):
+  nothing persists, a refresh (or the 10-min idle wipe, or an account switch) means
+  logging in again. At login the key is traded for an indexer **view token** so
+  background balance reads never need it.
+- **Worksheet** — full-width rows of `{받는 주소, 금액(kKRW)}`; `[+]` adds a row
+  (capped at **255** = B−1, one slot is the employer's change note), CSV paste fills
+  the sheet (`lib/csv.ts` — exactly two cells `pubkey,amount` per line, base58check/hex
+  both fine; a third cell is rejected by line number rather than truncated, so a
+  thousands-comma cannot become a 1000x underpay), per-row inline errors (bad address,
+  duplicate, self-pay, bad amount), rows draft-persisted to localStorage
+  (`lib/worksheet.ts`, injectable-storage seam).
+- **Footer** — one note covers the total → `[전송]`; covered but fragmented → `[전송]`
+  and the run auto-inserts merge legs; insufficient → the **입금** (deposit) CTA takes
+  over with the exact shortfall (deposit is de-emphasized otherwise). Until the first
+  balance read lands there is a fourth, neutral state: 확인 중, send disabled, no
+  deposit CTA — an unread balance is never reported as 부족.
 
-1. **Recipients** — a form (add rows `{compressed pubkey, amount}`) and/or an optional
-   CSV upload/paste (`pubkey,amount` per line). A recipient is identified by a
-   **compressed bjj pubkey** (`@bongtu/core/pubkey` — a 32-byte hex string). Full ETH→bjj
-   onboarding is out of scope for this PoC; recipients paste their compressed key.
-2. **Input note** — the employer's note to spend (value, salt, bjj spending scalar).
-3. **Membership witness** — the input note's `root` + 32-sibling path + leaf index,
-   pasted, fetched from an indexer (`/head` + `/path/{leafIndex}`), or built locally
-   for the demo.
-4. **Build disbursement** (pure, `src/lib/disburse.ts`): derives fresh salts, lays out
-   `N` recipients + one employer **change** note (remainder) + zero-value **padding** to
-   exactly 256 outputs (so `sum(outputs) == inputValue`), computes the output
-   commitments (`sdk`), enforces **distinct owner pubkeys** (§11-8 two-time-pad guard),
-   builds the `subtreeRoot`, verifies the membership path folds to `root`, and emits a
-   complete **disburse `ProvingRequest`** (`@bongtu/core/proving`) plus the **2054-element** ciphertext
-   (1024 receiver ++ 1030 authority = `disburseCiphertextLen` for B=256).
-5. **Prove** — POST the request to the bongtu prover service (top-level `prover/`;
-   browser GPU proving is infeasible: 1.24 GB zkey + rabbitsnark) → get calldata.
-6. **Submit** — `disburseWithCiphertexts(a,b,c,pub, ciphertext)` via MetaMask.
+## What [전송] runs
 
-The employer's **ledger** is its own authored recipients + change (no arbiter key
-needed — it authored the batch), downloadable as a receipt CSV.
+One click, one progress rail, the whole chain:
 
-> PoC boundary (honest): if no prover service is reachable, employer-mode still fully
-> assembles a valid `ProvingRequest` + the ciphertext and wires the MetaMask submit —
-> the proving handoff is the only step that needs the employer's GPU box.
+1. **Merge legs** — `@bongtu/client runMergeChain`: transfer10x2 self-sends (≤10 notes
+   each) until ONE note covers the total. The package owns "merge until covered".
+2. **The terminal disburse** — this app's leg (`lib/payRun.ts`): signed `/path` for the
+   funding note, `lib/disburse.ts` assembles the 1-in/256-out request — with its
+   **CSPRNG-randomized** salts / pad owners / shuffle intact (recipient-count
+   privacy) — and `lib/chain.ts` submits `disburseWithCiphertexts`.
+3. **Done screen** — per-row check + explorer links. No receipts download.
 
-### Auditor mode — the ONLY mode with the arbiter key
-The independent regulator seat. Configure an arbiter-mode indexer URL + the **arbiter
-private key** (never leaves the browser), then **Load ledger**:
-
-- Fetches the public `GET /events` feed + `GET /alarms`.
-- Decrypts each **transfer / disburse** authority envelope **locally** with the arbiter
-  key (`src/lib/ledger.ts`, via the `@bongtu/core/envelope` codec) into "who received what /
-  spent status" — grouped by owner, with unspent balances, plus a per-op feed and the
-  disclosure alarms.
-- **Coverage boundary:** the public `/events` feed carries an authority tail only for
-  `transfer` and `disburse` (deposit/withdraw emit theirs in the raw `Deposited`/
-  `Withdrawn` log, which the public feed strips — `ingest.ts` sets `ciphertext: []`). So
-  the local decrypt reconstructs the transfer + disburse ledger (exactly the compliance
-  beat: the auditor reads employees' p2p transfers AND the 256-batch). Deposit/withdraw
-  notes come from an arbiter indexer's own `/notes` directory.
-
-A secondary **`GET /notes` lookup** exercises the signed read-auth flow (`@bongtu/core/eddsa`).
-Its auth binds to the **owner** key (the signature must verify against the queried
-pubkey), so it needs the owner's private scalar — it is a recipient's own-notes lookup
-via the arbiter indexer, not a general auditor browse.
+**All proofs go to the prover service** (`lib/proverClient.ts` → `POST {base}/prove`,
+per-circuit pub-length pins `disburse=11 / transfer10x2=68 / deposit=19` — the service
+registry's vkey truth). The console never proves in the browser; funding deposits run
+the shared `@bongtu/client` depositFlow with the same service adapter injected.
 
 ## Run
 
@@ -71,8 +60,8 @@ npm run dev        # Vite dev server → open the printed URL
 Gates:
 
 ```sh
-npm test           # pure-logic assembly test (no GPU/chain): shapes, distinct owners,
-                   #   commitments == sdk commitment(), the 2054 ciphertext rule
+npm test           # worksheet rules, prover adapter pins, KDF equality, and the
+                   #   disburse assembly/randomness gates (no GPU/chain)
 npm run typecheck  # tsc --noEmit
 npm run build      # vite production build
 ```
@@ -80,51 +69,55 @@ npm run build      # vite production build
 ### Prover service (employer's GPU box)
 
 ```sh
-# top-level prover/ — a Python FastAPI service over rabbitsnark; see prover/README.md
-bash ../../prover/setup.sh   # once
-bash ../../prover/run.sh     # eager boot ~2.5min, then GET :8700/ready -> 200
+bash ../../prover/setup.sh   # once — see prover/README.md
+bash ../../prover/run.sh     # eager boot, then GET :8700/ready -> 200
 ```
 
-The employer-mode "Prove via service" button POSTs the assembled request to
-`POST /prove` (`ProvingRequest` -> `{a,b,c,pub}`). The URL default lives in
-`src/config.ts` (`proverUrl`) and is overridable at build time with
-`VITE_PROVER_URL`. The zkey is compiled once at service boot; a warm prove
-request is ~6 s wall (~5 s CPU witness-gen + ~0.5 s GPU proof).
+The base URL is `VITE_PROVER_URL`, else `http://127.0.0.1:8700` in dev and the
+same-origin `/prover` path in prod builds (`src/config.ts proverUrlFromEnv`; the prod
+rewrite behind `/prover` ships with the prover funnel work, U-P4).
 
 ## Deployment
 
 Production: https://payroll.fractalyze.io — the `bongtu-payroll` Vercel project
-(`fractalyze` team), git-connected with root directory `apps/payroll-web`; only pushes
-touching `apps/payroll-web/**` or `packages/**` trigger a build. `vercel.json` carries
-the `/indexer/:path*` rewrite that keeps the indexer same-origin (prod counterpart of
-the dev proxy in `vite.config.ts`).
-
-## Defaults (live GIWA Sepolia — `deploy/addresses.91342.json`)
-
-`src/config.ts` ships the live pool `0x93365980784ef504613EF5822ce1289CF858Fc10`, chain
-91342, and the pool's **public** arbiter key (safe in employer-mode). The arbiter
-**private** key is entered only in auditor-mode and lives in no file.
+(`fractalyze` team), git-connected with root directory `apps/payroll-web`. `vercel.json`
+carries the `/indexer/:path*` rewrite that keeps the indexer same-origin (prod
+counterpart of the dev proxy in `vite.config.ts`).
 
 ## Layout
 
 ```
 src/
-  config.ts            live GIWA defaults (public data only)
-  main.ts              mode tabs (employer | auditor)
+  config.ts            app knobs (indexer/prover URLs); chain facts come from
+                       @bongtu/core/network, the KDF from @bongtu/client/identity
+  main.tsx             React entry
   lib/
-    disburse.ts        PURE: recipients + input note + membership -> ProvingRequest + ciphertext
-    ledger.ts          PURE: /events + arbiter key -> decrypted auditor ledger
-    csv.ts             recipient CSV parser
-    chain.ts           MetaMask disburseWithCiphertexts + KEM-epoch guard (ethers v5)
-    proverClient.ts    POST a request to the prover/ service
-    indexerClient.ts   the ONE indexer barrel: /head /path /events /alarms fetch
-                       wrappers + the signed GET /notes URL builder
-    dom.ts             tiny framework-free DOM helpers
-  views/
-    employer.ts        employer-mode UI
-    auditor.ts         auditor-mode UI
+    worksheet.ts       PURE: rows, validation, draft, the footer readiness verdict
+    disburse.ts        PURE: recipients + funding note + membership -> ProvingRequest
+                       + the 2054-element ciphertext (CSPRNG pads/salts/shuffle)
+    payRun.ts          the whole run: client merge chain, then the disburse leg
+    csv.ts             recipient CSV parser (the paste-fill path)
+    errors.ts          the Korean boundary: shared-classifier verdicts + amount
+                       errors in the console's voice (client/ui stay English)
+    proverClient.ts    the ONE service adapter: POST /prove + per-circuit pub pins
+    chain.ts           disburseWithCiphertexts submit over the shared Connection
+    connect.ts         injected EIP-1193 -> the engine's Connection (no wagmi here)
+    keyCache.ts        the one lock instance (shared KDF, live-account read)
+    toasts.ts          the one toast queue (@bongtu/ui)
+  ui/
+    App.tsx            login gate (session == the KeyCache hold)
+    Login.tsx          hero + [MetaMask로 로그인]
+    Console.tsx        header / worksheet / stat bar / footer / progress rail / done
+    controls.tsx       shared control looks on the wallet token palette
 test/
-  assemble.test.ts     the pure-logic assembly gate
+  worksheet.test.ts    rows, validation (self-pay), csv fill, draft seam, readiness
+  proverClient.test.ts adapter + pub-length pins + base-URL defaults
+  kdf.test.ts          identity coincidence with wallet-web (shared KEY_DERIVATION)
+  assemble.test.ts     the disburse assembly gate (kept from the previous console)
+  randomness.test.ts   recipient-count privacy: per-batch CSPRNG draws + shuffle
+  csv.test.ts          CSV normalization, cell-count and header-heuristic gate
+  payRun.test.ts       batch bounds + terminal-leg failure wording (injected I/O)
+  errors.test.ts       the Korean boundary's wording gate
 ```
 
 ## License

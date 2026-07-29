@@ -1,7 +1,7 @@
 {
   "name": "@bongtu/payroll-web",
   "version": "0.0.0",
-  "description": "bongtu admin PoC — role-moded web app: employer-mode (assemble a disburse ProvingRequest, prove on the prover/ service, submit disburseWithCiphertexts) and auditor-mode (arbiter-key decrypt of the /events feed into a ledger). SPEC §7. Imports unbuilt @bongtu/* workspace source directly so the crypto is byte-identical.",
+  "description": "bongtu payroll console — a login-gated single-page pay console on the shared @bongtu/client engine (SPEC §7 employer-mode): MetaMask login derives the wallet-identical bjj key, a worksheet of {address, amount} rows, one click runs merge legs (transfer10x2) until one note covers the total then the 1-in/256-out disburse — every proof on the prover/ GPU service, never in the browser. Imports unbuilt @bongtu/* workspace source directly so the crypto is byte-identical.",
   "type": "module",
   "private": true,
   "license": "Apache-2.0",
@@ -13,7 +13,9 @@
     "test": "node --import tsx --test --test-force-exit test/*.test.ts"
   },
   "dependencies": {
+    "@bongtu/client": "*",
     "@bongtu/core": "*",
+    "@bongtu/ui": "*",
     "poseidon-lite": "^0.3.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

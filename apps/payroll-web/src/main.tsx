@@ -1,6 +1,6 @@
-// React entry for the bongtu payroll console. All chain/proving logic stays in the
-// PURE lib modules (disburse / csv / ledger / chain / clients); this tree is the
-// view wiring around them. See src/ui/App.tsx for the mode shell.
+// React entry for the bongtu payroll console. All chain/proving logic stays in
+// the PURE lib modules (worksheet / disburse / csv / payRun / clients) and the
+// shared @bongtu/client engine; this tree is the view wiring around them.
 
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";

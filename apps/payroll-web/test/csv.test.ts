@@ -41,5 +41,40 @@ test("a tampered base58 address fails loudly with its line number", () => {
   const addr = encodeAddress(HEX_A);
   const last = addr[addr.length - 1];
   const tampered = addr.slice(0, -1) + (last === "2" ? "5" : "2");
-  assert.throws(() => parseRecipientsCsv(`${addr},100\n${tampered},250`), /line 2.*bad address/s);
+  assert.throws(() => parseRecipientsCsv(`${addr},100\n${tampered},250`), /2행.*주소를 읽을 수 없습니다/s);
+});
+
+// ---------------------------- cell COUNT ------------------------------------------
+
+test("a third comma is rejected, not silently truncated to the first two cells", () => {
+  // The 1000x underpay: '<주소>,1,000' used to parse as amount "1". The employer
+  // would have paid one kKRW and had no way to see it before the chain.
+  assert.throws(
+    () => parseRecipientsCsv(`${HEX_A},100\n${HEX_B},1,000`),
+    (e: Error) =>
+      /2행/.test(e.message) && /3칸/.test(e.message) && /천단위 쉼표/.test(e.message),
+    "the line, the cell count, and the likely cause",
+  );
+  // …and it never reaches the row list, even though line 1 was fine.
+  assert.throws(() => parseRecipientsCsv(`${HEX_A},1,000`), /1행/);
+});
+
+test("a line missing its amount cell names the line too", () => {
+  assert.throws(() => parseRecipientsCsv(`${HEX_A},100\n${HEX_B}`), /2행.*1칸/s);
+});
+
+// ---------------------------- the header heuristic --------------------------------
+
+test("line 1 is skipped as a header only when its ADDRESS is not an address either", () => {
+  // A real first payee with a rejected amount is an ERROR, not a header: dropping
+  // it would drop a person from the payroll with no message at all.
+  assert.throws(() => parseRecipientsCsv(`${HEX_A},1.5\n${HEX_B},250`), /1행.*정수/s);
+  assert.throws(() => parseRecipientsCsv(`${encodeAddress(HEX_A)},1.5`), /1행.*정수/s);
+
+  // Whereas neither cell being data is exactly what a header looks like.
+  assert.deepEqual(parseRecipientsCsv(`받는 주소,금액\n${HEX_B},250`), [
+    { pubkey: HEX_B.toLowerCase(), amount: "250" },
+  ]);
+  // A first row that IS data survives the heuristic untouched.
+  assert.deepEqual(parseRecipientsCsv(`${HEX_A},100`), [{ pubkey: HEX_A.toLowerCase(), amount: "100" }]);
 });
