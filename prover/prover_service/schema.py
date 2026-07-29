@@ -6,10 +6,11 @@
 # the two files in sync; a field added there must be added here.
 #
 # One deliberate omission: the TS `Circuit` union also has "transfer10" (10-in /
-# 10-out). This service holds only the GPU disburse zkey, and transfer10 proves
-# in-browser on CPU like transfer/withdraw/deposit, so there is no variant for it
-# here — an unknown tag is rejected at validation, which is the right answer for
-# a circuit this service cannot prove. Add one only if it ever gets a zkey.
+# 10-out). This service registers only the circuits in config.CIRCUITS
+# (disburse256 + transfer10x2), and transfer10 proves in-browser on CPU like
+# transfer/withdraw/deposit, so there is no variant for it here — an unknown tag
+# is rejected at validation, which is the right answer for a circuit this
+# service cannot prove. Add one only if it ever joins the registry.
 #
 # Field elements arrive as decimal strings (JSON has no bigint; the TS side
 # stringifies) or small ints; points are [x, y] pairs. The §11-8 two-time-pad
@@ -120,6 +121,18 @@ class TransferInput(_SpendInput):
     """
 
 
+class Transfer10x2Input(_SpendInput):
+    """transfer10x2 (10-in / 2-out): the transfer base at 10 inputs, 2 outputs.
+
+    The merge/pay leg the employer console proves on the GPU service (and
+    wallets prove on CPU). Same per-output-nonce base as transfer, so duplicate
+    output owners are LEGAL — a pure self-merge (both outputs to the sender) is
+    the headline use (proving.ts Transfer10x2Input, docs/circuits.md). Like
+    transfer/withdraw, arity is not re-checked here: the committed fixture pins
+    the 10/2 shape, and a wrong-arity input fails witness generation (400).
+    """
+
+
 class WithdrawInput(_SpendInput):
     """withdraw (2-in / 1-out): single change output, no distinctness needed."""
 
@@ -153,6 +166,12 @@ class TransferRequest(_StrictModel):
     backend: Literal["cpu", "gpu"] | None = None
 
 
+class Transfer10x2Request(_StrictModel):
+    circuit: Literal["transfer10x2"]
+    input: Transfer10x2Input
+    backend: Literal["cpu", "gpu"] | None = None
+
+
 class WithdrawRequest(_StrictModel):
     circuit: Literal["withdraw"]
     input: WithdrawInput
@@ -166,7 +185,9 @@ class DisburseRequest(_StrictModel):
 
 
 ProvingRequest = Annotated[
-    Union[DepositRequest, TransferRequest, WithdrawRequest, DisburseRequest],
+    Union[
+        DepositRequest, TransferRequest, Transfer10x2Request, WithdrawRequest, DisburseRequest
+    ],
     Field(discriminator="circuit"),
 ]
 

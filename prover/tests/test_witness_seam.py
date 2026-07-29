@@ -7,8 +7,12 @@
 # signature) => WitnessGenerationError (app.py: 400, "your batch is
 # unprovable"); every other failure — non-assert crash, missing .wtns, timeout,
 # unlaunchable node — => WitnessInfraError (app.py: 500, "the service is
-# broken"), with a detail pointing at the config knobs to check.
+# broken"), with a detail pointing at the config knobs to check. The engine is
+# per-circuit since the registry (CircuitProver over a CircuitConfig), so
+# the stub is wired via dataclasses.replace of the disburse256 entry — the same
+# seam a differently-pathed registry entry uses.
 
+import dataclasses
 import importlib
 from pathlib import Path
 
@@ -16,7 +20,7 @@ import pytest
 
 from prover_service import config
 from prover_service.engine import (
-    Disburse256Prover,
+    CircuitProver,
     WitnessGenerationError,
     WitnessInfraError,
 )
@@ -24,18 +28,23 @@ from prover_service.engine import (
 STUB = Path(__file__).resolve().parent / "stub_generate_witness.js"
 
 
+def stub_circuit(tmp_path, base: str = "disburse256") -> config.CircuitConfig:
+    """The registry entry for `base`, re-pathed at the stub calculator."""
+    return dataclasses.replace(
+        config.CIRCUITS[base], gen_witness=STUB, wasm=tmp_path / "stub.wasm"
+    )
+
+
 @pytest.fixture
 def run_stub(monkeypatch, tmp_path):
-    """Point the engine's env-overridable config paths at the stub calculator
-    and return a runner: run_stub(mode) -> the .wtns path (monkeypatch restores
-    the real config attributes at teardown)."""
-    monkeypatch.setattr(config, "DISBURSE_GEN_WITNESS", STUB)
-    monkeypatch.setattr(config, "DISBURSE_WASM", tmp_path / "stub.wasm")
+    """Build a CircuitProver over the stub-pathed disburse256 registry entry and
+    return a runner: run_stub(mode) -> the .wtns path (monkeypatch restores the
+    timeout at teardown)."""
     # Generous: a COLD node spawn on a 2-core CI runner can exceed 2s, which
     # failed the success leg there. The timeout leg overrides this locally.
     monkeypatch.setattr(config, "WITNESS_TIMEOUT", 30.0)
 
-    prover = Disburse256Prover()
+    prover = CircuitProver(stub_circuit(tmp_path))
 
     def run(mode: str) -> Path:
         wtns = tmp_path / "out.wtns"
@@ -59,6 +68,14 @@ def test_nonassert_crash_is_an_infra_fault(run_stub):
         run_stub("infra")
 
 
+def test_infra_hint_names_the_circuits_own_env_knobs(monkeypatch, tmp_path):
+    # The hint must point at the FAILING circuit's env family, not disburse's.
+    monkeypatch.setattr(config, "WITNESS_TIMEOUT", 30.0)
+    prover = CircuitProver(stub_circuit(tmp_path, base="transfer10x2"))
+    with pytest.raises(WitnessInfraError, match="BONGTU_TRANSFER10X2_WASM"):
+        prover._generate_witness({"mode": "infra"}, tmp_path / "input.json", tmp_path / "out.wtns")
+
+
 def test_zero_exit_without_wtns_is_an_infra_fault(run_stub):
     with pytest.raises(WitnessInfraError, match="wtns_exists=False"):
         run_stub("no-wtns")
@@ -78,13 +95,16 @@ def test_infra_is_not_a_subclass_of_client_fault():
 
 
 def test_witness_paths_are_env_overridable(monkeypatch):
-    # The stub seam above patches config attributes; this pins the layer the
-    # ops contract actually promises — the env knobs — end to end via reload.
+    # The stub seam above swaps CircuitConfig fields; this pins the layer the
+    # ops contract actually promises — the env knobs — end to end via reload,
+    # for both the legacy disburse256 names and the transfer10x2 family.
     monkeypatch.setenv("BONGTU_DISBURSE_GEN_WITNESS", str(STUB))
+    monkeypatch.setenv("BONGTU_TRANSFER10X2_GEN_WITNESS", str(STUB))
     monkeypatch.setenv("BONGTU_WITNESS_TIMEOUT", "2")
     try:
         importlib.reload(config)
-        assert config.DISBURSE_GEN_WITNESS == STUB
+        assert config.CIRCUITS["disburse256"].gen_witness == STUB
+        assert config.CIRCUITS["transfer10x2"].gen_witness == STUB
         assert config.WITNESS_TIMEOUT == 2.0
     finally:
         monkeypatch.undo()

@@ -3,16 +3,18 @@
 #
 #   bash prover/run.sh
 #
-# Boot is EAGER: the disburse256 zkey is parsed + GPU-compiled and one warm-up
-# proof runs (~2.5min total) before GET /ready flips to 200. The compiled state
-# pins ~25GB of GPU memory for the life of the process — run exactly ONE
-# instance per GPU. --workers 1 is pinned EXPLICITLY: with the flag absent,
-# uvicorn falls back to the WEB_CONCURRENCY env var and would silently start a
-# multi-worker supervisor — each worker compiling its own ~25GB prover (instant
-# OOM at 2) and the worker surviving a kill of the recorded PID. Never raise it.
-# Env knobs are documented in prover_service/config.py (BONGTU_CIRCUITS_OUT,
-# BONGTU_DISBURSE_ZKEY, BONGTU_WARMUP_INPUT, BONGTU_NODE_BIN, ...); the bind
-# address/port are owned HERE (PROVER_HOST/PROVER_PORT).
+# Boot is EAGER: every BONGTU_CIRCUITS zkey (default disburse256,transfer10x2)
+# is parsed + GPU-compiled and one warm-up proof runs per circuit (~3min total)
+# before GET /ready flips to 200. The compiled state pins ~25GB of GPU memory
+# for the life of the process — run exactly ONE instance per GPU. --workers 1
+# is pinned EXPLICITLY: with the flag absent, uvicorn falls back to the
+# WEB_CONCURRENCY env var and would silently start a multi-worker supervisor —
+# each worker compiling its own ~25GB prover (instant OOM at 2) and the worker
+# surviving a kill of the recorded PID. Never raise it.
+# Env knobs are documented in prover_service/config.py (BONGTU_CIRCUITS,
+# PROVER_ALLOWED_ORIGINS, BONGTU_CIRCUITS_OUT, per-circuit BONGTU_*_ZKEY/...,
+# BONGTU_NODE_BIN, ...); the bind address/port are owned HERE
+# (PROVER_HOST/PROVER_PORT).
 set -euo pipefail
 
 cd "$(dirname "$0")"

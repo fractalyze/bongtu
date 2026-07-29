@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from prover_service import config
 from prover_service.calldata import to_solidity_calldata
 
 FIXTURES = Path(__file__).resolve().parents[2] / "contracts" / "test" / "fixtures"
@@ -56,9 +57,26 @@ def test_words_are_0x_padded_64_nibbles():
 
 
 def test_pub_preserves_order_and_length():
-    pubs = [str(i * 1000 + 7) for i in range(10)]  # disburse256 exposes 10 publics
+    pubs = [str(i * 1000 + 7) for i in range(11)]  # disburse256 exposes 11 publics
     cd = to_solidity_calldata(snarkjs_proof(), pubs)
     assert [int(x, 16) for x in cd.pub] == [int(p) for p in pubs]
+
+
+@pytest.mark.parametrize("name", ["disburse256", "transfer10x2"])
+def test_per_circuit_pub_length_comes_from_the_registry(name):
+    # engine.prove passes the registry's num_public (11 / 68); the exact count
+    # passes and off-by-one fails naming both numbers.
+    n = config.CIRCUITS[name].num_public
+    ok = to_solidity_calldata(snarkjs_proof(), ["1"] * n, expected_pub_len=n)
+    assert len(ok.pub) == n
+    with pytest.raises(ValueError, match=f"expected {n} public signals, got {n - 1}"):
+        to_solidity_calldata(snarkjs_proof(), ["1"] * (n - 1), expected_pub_len=n)
+
+
+def test_pub_length_unchecked_when_no_expectation_is_given():
+    # backward-compatible default: callers outside the engine (tests, tools)
+    # may format any pub list.
+    assert len(to_solidity_calldata(snarkjs_proof(), ["7"]).pub) == 1
 
 
 def test_out_of_range_value_is_rejected():

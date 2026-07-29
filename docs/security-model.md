@@ -24,6 +24,11 @@ that material is a **pair**: the bjj private key plus an ML-KEM-768 decapsulatio
 Hidden from the chain observer: transfer amounts, transfer parties, disburse total, disburse
 recipients and their amounts, and the mapping from any nullifier to the leaf it spent.
 
+The prover service's `/prove` additionally sits behind an Origin allowlist
+(`PROVER_ALLOWED_ORIGINS`, [prover/README.md](../prover/README.md)): it stops drive-by browser/bot
+use but is spoofable by any non-browser client — production hardening is a private network or
+request signing, not this header check.
+
 An arbiter-mode **indexer** is a fourth thing: it holds the arbiter private key and therefore every
 owner's decrypted notes. Signature-gated `/notes` governs who may query it; it does not reduce what
 that instance can see. Treat it as institution-internal infrastructure

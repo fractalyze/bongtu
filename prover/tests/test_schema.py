@@ -75,6 +75,8 @@ def test_repo_disburse256_fixture_parses_unchanged():
     [
         ("deposit", "deposit.json"),
         ("transfer", "transfer.json"),
+        ("transfer10x2", "transfer10x2.json"),
+        ("transfer10x2", "transfer10x2_merge.json"),  # the pure self-merge shape
         ("withdraw", "withdraw.json"),
         ("disburse", "disburse.json"),  # the M0 1x16 dev build (shape guards are B-agnostic)
     ],
@@ -113,6 +115,9 @@ def test_all_four_circuit_tags_parse():
     for circuit, inp in [
         ("deposit", deposit_input),
         ("transfer", spend_input),
+        # transfer10x2 reuses the 2-in shape here: schema.py deliberately does
+        # not pin arity (wrong arity fails witness generation with a 400)
+        ("transfer10x2", spend_input),
         ("withdraw", {**spend_input, "outputCommitments": ["7"], "outputValues": ["100"],
                       "outputSalts": ["9"], "outputOwnerPublicKeys": [["1", "2"]]}),
         ("disburse", minimal_disburse_input()),
@@ -141,6 +146,16 @@ def test_self_send_transfer_with_duplicate_owners_is_accepted():
     assert req.circuit == "transfer"
     assert req.input.outputOwnerPublicKeys[0] == req.input.outputOwnerPublicKeys[1]
     assert req.input.model_dump() == self_send
+
+
+def test_transfer10x2_merge_fixture_has_duplicate_owners_and_is_accepted():
+    # The committed merge fixture IS a self-merge: both outputs belong to the
+    # sender. Its round-trip above plus this assertion pins that the mirror
+    # accepts duplicate transfer10x2 owners (per-output nonce, like transfer) —
+    # a §11-8 guard here would 422 every merge leg the payroll console proves.
+    raw = json.loads((INPUTS / "transfer10x2_merge.json").read_text())
+    req = request_adapter.validate_python({"circuit": "transfer10x2", "input": raw})
+    assert req.input.outputOwnerPublicKeys[0] == req.input.outputOwnerPublicKeys[1]
 
 
 @pytest.mark.parametrize(

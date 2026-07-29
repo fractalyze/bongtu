@@ -25,8 +25,20 @@ def _word(v: str | int) -> str:
     return "0x" + format(n, "064x")
 
 
-def to_solidity_calldata(proof: dict, public_signals: list[str]) -> Calldata:
-    """Convert a snarkjs-shape proof dict + decimal public signals to Calldata."""
+def to_solidity_calldata(
+    proof: dict, public_signals: list[str], expected_pub_len: int | None = None
+) -> Calldata:
+    """Convert a snarkjs-shape proof dict + decimal public signals to Calldata.
+
+    `expected_pub_len` is the registry's per-circuit public-signal count
+    (config.CIRCUITS[...].num_public — 11 for disburse256, 68 for transfer10x2):
+    a proof carrying any other number of publics would revert on-chain as a
+    malformed verifier call, so reject it here with the counts named.
+    """
+    if expected_pub_len is not None and len(public_signals) != expected_pub_len:
+        raise ValueError(
+            f"expected {expected_pub_len} public signals, got {len(public_signals)}"
+        )
     pi_a, pi_b, pi_c = proof["pi_a"], proof["pi_b"], proof["pi_c"]
     return Calldata(
         a=[_word(pi_a[0]), _word(pi_a[1])],

@@ -33,8 +33,9 @@ echo "== writing the rabbitsnark/jax bridge .pth into $SITE =="
 # entries (the rabbitsnark source tree, then the read-only jax site-packages).
 printf '%s\n%s\n' "$RABBITSNARK_DIR" "$JAX_SITE" > "$SITE/zz_rabbitsnark_bridge.pth"
 
-echo "== installing the service deps (fastapi/uvicorn/pytest only) =="
-.venv/bin/pip install --quiet 'fastapi==0.140.0' 'uvicorn==0.51.0' pytest
+echo "== installing the service deps (fastapi/uvicorn + test deps only) =="
+# httpx: fastapi.testclient's transport, used only by tests/test_app.py.
+.venv/bin/pip install --quiet 'fastapi==0.140.0' 'uvicorn==0.51.0' pytest httpx
 
 echo "== smoke: the bridge resolves rabbitsnark + jax =="
 .venv/bin/python - <<'EOF'
