@@ -4,6 +4,8 @@
 //   header      brand "Bongtu Payroll Tool" + TESTNET badge | [Sign out]
 //   session card ONE in-content region: connect prompt, or the connected
 //               wallet's eth account · bongtu address · kKRW balance · [Deposit]
+//               ([Deposit] opens the deposit DIALOG — with the sheet short, the
+//               button wears the warn palette and the total row says by how much)
 //   payees      only once the wallet is connected: ONE centered
 //               [Generate random recipients] button, or the generated worksheet
 //               (255 editable/deletable rows) with a [Regenerate] affordance
@@ -33,7 +35,7 @@ import type { ReactNode } from "react";
 import { Banner } from "@bongtu/ui/Banner";
 import { KEY_DERIVATION, deriveLoginIdentity } from "@bongtu/client/identity";
 import { ensureChain, type Connection } from "@bongtu/client/connection";
-import { runDeposit, type DepositStage } from "@bongtu/client/depositFlow";
+import { runDeposit } from "@bongtu/client/depositFlow";
 import type { LegProgress, SpendStage } from "@bongtu/client/spendFlow";
 import { sumUnspent } from "@bongtu/client/balance";
 import { formatKkrw, groupAmountInput } from "@bongtu/client/money";
@@ -46,8 +48,17 @@ import {
   type OwnerNote,
 } from "@bongtu/client/indexerClient";
 import { DEFAULTS } from "../config.js";
-import { errorDetails, parseDepositAmount, payrollErrorMessage } from "../lib/errors.js";
+import { errorDetails, payrollErrorMessage } from "../lib/errors.js";
 import { openInjectedConnection, watchInjectedAccount } from "../lib/connect.js";
+import {
+  DEPOSIT_MODAL_DEPS,
+  depositModalView,
+  mintTestKkrw,
+  openDepositModal,
+  readDepositAccount,
+  readGas,
+  type DepositModalState,
+} from "../lib/depositModal.js";
 import { keyCache } from "../lib/keyCache.js";
 import { proveViaService } from "../lib/proverClient.js";
 import { runPayRun, type PayRunResult } from "../lib/payRun.js";
@@ -62,7 +73,8 @@ import {
   type RowIssue,
   type WorksheetRow,
 } from "../lib/worksheet.js";
-import { Button, CellInput, TestnetBadge, shortHex } from "./controls.js";
+import { Button, CellInput, Spinner, TestnetBadge, shortHex } from "./controls.js";
+import { DepositModal } from "./DepositModal.js";
 
 const INDEXER_URL = DEFAULTS.indexerUrl;
 const AUTO_REFRESH_MS = 3000;
@@ -78,29 +90,12 @@ function shortB58(b58: string): string {
   return b58.length <= 16 ? b58 : `${b58.slice(0, 8)}…${b58.slice(-6)}`;
 }
 
-/** The busy indicator the connect button shows while the chain runs. */
-function Spinner(): ReactNode {
-  return (
-    <span
-      aria-hidden
-      className="inline-block w-3.5 h-3.5 mr-1.5 rounded-full border-2 border-primary-ink/40 border-t-primary-ink animate-spin align-[-2px]"
-    />
-  );
-}
-
 const STAGE_LABEL: Record<SpendStage, string> = {
   unlock: "Waiting for wallet signature",
   assemble: "Assembling the transaction",
   prove: "Generating the zero-knowledge proof (GPU server)",
   submit: "Waiting for the wallet to send",
   waiting: "Waiting for network confirmation",
-};
-
-const DEPOSIT_STAGE_LABEL: Record<DepositStage, string> = {
-  unlock: "Waiting for wallet signature",
-  approve: "Approving kKRW",
-  prove: "Generating the zero-knowledge proof (GPU server)",
-  submit: "Waiting for the wallet to send",
 };
 
 interface WalletSession {
@@ -127,10 +122,9 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
 
   const [pay, setPay] = useState<PayPhase>({ phase: "idle" });
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [depositOpen, setDepositOpen] = useState(false);
-  const [depositAmount, setDepositAmount] = useState("");
-  const [depositStage, setDepositStage] = useState<DepositStage | null>(null);
-  const [depositError, setDepositError] = useState<string | null>(null);
+  // The deposit dialog: ONE piece of state, null when closed — a typed amount or a
+  // read balance cannot outlive the dialog that collected it.
+  const [deposit, setDeposit] = useState<DepositModalState | null>(null);
 
   const disconnectWallet = useCallback((): void => {
     keyCache.lock();
@@ -139,11 +133,9 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
     setNotes(null);
     setDataError(null);
     setRows([]);
-    // The deposit panel is wallet-session state too: a switched account must not
-    // inherit the previous session's open panel and typed amount.
-    setDepositOpen(false);
-    setDepositAmount("");
-    setDepositError(null);
+    // The dialogs are wallet-session state too: a switched account must not inherit
+    // the previous session's open deposit (its balance readout is that account's).
+    setDeposit(null);
     setConfirmOpen(false);
   }, []);
 
@@ -237,7 +229,7 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
 
   // Money disbursed TO or BY this account must appear unprompted; a tick never
   // overlaps itself or a run, and a tokenless session reads only while unlocked.
-  const busy = pay.phase === "running" || depositStage !== null;
+  const busy = pay.phase === "running" || deposit?.stage != null || deposit?.minting === true;
   useEffect(() => {
     if (!wallet) return;
     let inflight = false;
@@ -278,11 +270,13 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
     if (balance === null || plannedRows === 0 || generating) return;
     setGenerating(true);
     setRows([]);
-    // Chunked: rows stream in ~32 per event-loop turn, so the spinner paints
-    // instead of the tab freezing through 255 scalar mults.
-    void generateRecipientsChunked(balance, (chunk) => setRows((rs) => [...rs, ...chunk])).finally(() =>
-      setGenerating(false),
-    );
+    // Chunked so the event loop keeps painting through 255 scalar mults, but
+    // revealed ONCE at the end — streaming rows into the table re-rendered a
+    // growing 255-row list eight times and read as UI jank (user feedback).
+    const acc: WorksheetRow[] = [];
+    void generateRecipientsChunked(balance, (chunk) => acc.push(...chunk))
+      .then(() => setRows(acc))
+      .finally(() => setGenerating(false));
   };
 
   const startPay = async (): Promise<void> => {
@@ -330,43 +324,6 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
     void refresh();
   };
 
-  const startDeposit = async (): Promise<void> => {
-    // A deposit signs with the wallet, so the action prompts for the connect
-    // when none exists (the status bar's [Connect wallet] is the same chain).
-    if (!wallet) {
-      void connectWallet();
-      return;
-    }
-    const parsed = parseDepositAmount(depositAmount);
-    if (!parsed.ok) {
-      setDepositError(parsed.error);
-      return;
-    }
-    setDepositError(null);
-    setDepositStage("approve");
-    try {
-      await runDeposit(
-        {
-          connection: wallet.connection,
-          pool: DEFAULTS.pool,
-          token: DEFAULTS.token,
-          explorer: DEFAULTS.explorer,
-          sessionPubkey: wallet.pubkey,
-        },
-        { amount: parsed.wei.toString() },
-        (stage) => setDepositStage(stage),
-        { keyCache, prove },
-      );
-      setDepositAmount("");
-      setDepositOpen(false);
-      void refresh();
-    } catch (e) {
-      setDepositError(payrollErrorMessage(e));
-    } finally {
-      setDepositStage(null);
-    }
-  };
-
   const shortfall = readiness.kind === "insufficient" ? readiness.shortfallWei : null;
   const sendable = readiness.kind === "ready" || readiness.kind === "ready-fragmented";
   // A background refresh can flip the sheet DEFINITIVELY unsendable while the
@@ -380,6 +337,87 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
   useEffect(() => {
     if (!sendable) setConfirmOpen(false);
   }, [sendable]);
+
+  // --- the deposit dialog ----------------------------------------------------------
+
+  /** Patch the OPEN dialog. A no-op once it is closed, so a late read or a
+   *  finally-block cannot resurrect a dialog the operator dismissed. */
+  const patchDeposit = (patch: Partial<DepositModalState>): void =>
+    setDeposit((d) => (d === null ? null : { ...d, ...patch }));
+
+  /** Read the account's public kKRW + gas into the open dialog. Both edges are
+   *  best-effort inside readDepositAccount, so this never throws at the caller. */
+  const readDepositBalances = async (connection: Connection): Promise<void> => {
+    patchDeposit(await readDepositAccount(connection, DEFAULTS.token, DEFAULTS.pool, DEPOSIT_MODAL_DEPS));
+  };
+
+  const openDeposit = (): void => {
+    // A deposit signs with the wallet, so the action prompts for the connect when
+    // none exists (the session card's [Connect wallet] is the same chain).
+    if (!wallet) {
+      void connectWallet();
+      return;
+    }
+    // Opened against the CURRENT shortfall: the operator who came here from a short
+    // sheet starts with the gap already typed in.
+    setDeposit(openDepositModal(shortfall));
+    void readDepositBalances(wallet.connection);
+  };
+
+  /** The gas belt both actions run first. A ZERO-gas account fails inside the wallet
+   *  with an opaque provider object, so it is caught here and said plainly (the
+   *  dialog's notice + faucet link) with nothing signed. Returns false = stop. */
+  const gasOk = async (connection: Connection): Promise<boolean> => {
+    const gas = await readGas(connection, DEPOSIT_MODAL_DEPS);
+    patchDeposit({ gas });
+    return gas !== "none";
+  };
+
+  const startDeposit = async (): Promise<void> => {
+    if (!wallet || deposit === null) return;
+    const amountWei = depositModalView(deposit).amountWei;
+    if (amountWei === null) return;
+    patchDeposit({ error: null });
+    if (!(await gasOk(wallet.connection))) return;
+    patchDeposit({ stage: "approve" });
+    try {
+      await runDeposit(
+        {
+          connection: wallet.connection,
+          pool: DEFAULTS.pool,
+          token: DEFAULTS.token,
+          explorer: DEFAULTS.explorer,
+          sessionPubkey: wallet.pubkey,
+        },
+        { amount: amountWei.toString() },
+        (stage) => patchDeposit({ stage }),
+        { keyCache, prove },
+      );
+      // The note lands in the pool, not in this dialog: close it and let the 3s
+      // refresh show the new private balance where the balance lives.
+      setDeposit(null);
+      void refresh();
+    } catch (e) {
+      patchDeposit({ error: payrollErrorMessage(e), stage: null });
+    }
+  };
+
+  const startMint = async (): Promise<void> => {
+    if (!wallet || deposit === null) return;
+    patchDeposit({ error: null });
+    if (!(await gasOk(wallet.connection))) return;
+    patchDeposit({ minting: true });
+    try {
+      await mintTestKkrw(wallet.connection, DEFAULTS.token, DEPOSIT_MODAL_DEPS);
+      // The minted kKRW is public and sits in the wallet — the dialog's own readout
+      // is what changed, so re-read it here (the private balance did not move).
+      await readDepositBalances(wallet.connection);
+    } catch (e) {
+      patchDeposit({ error: payrollErrorMessage(e) });
+    } finally {
+      patchDeposit({ minting: false });
+    }
+  };
 
   return (
     <div className="min-h-full flex flex-col">
@@ -427,7 +465,9 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
                 {bar.balanceWei === null ? BALANCE_LOADING : `${formatKkrw(bar.balanceWei)} kKRW`}
               </span>
               <div className="ml-auto">
-                <Button variant="secondary" onClick={() => setDepositOpen((v) => !v)}>
+                {/* while the sheet is short, the ONE affordance that fixes it wears
+                    the warn palette — the total row says by how much */}
+                <Button variant={shortfall !== null ? "warn" : "secondary"} onClick={openDeposit}>
                   Deposit
                 </Button>
               </div>
@@ -436,54 +476,22 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
         </div>
         {dataError && <Banner message={dataError} onRetry={() => void refresh()} retryLabel="Retry" />}
 
-        {/* deposit: a highlighted CTA when the sheet cannot be covered, a quiet
-            panel behind the status bar's Deposit button otherwise */}
-        {wallet !== null && (readiness.kind === "insufficient" || depositOpen) && (
-          <div
-            className={`rounded-xl px-5 py-4 border flex flex-col gap-3 ${
-              readiness.kind === "insufficient" ? "bg-warn-bg border-warn-border" : "bg-surface border-border"
-            }`}
-          >
-            <div className="text-[13px] font-semibold">
-              {readiness.kind === "insufficient" ? "Deposit needed" : "Deposit"}
-            </div>
-            <div className="flex items-end gap-2 flex-wrap">
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] text-muted">Amount (kKRW)</span>
-                <input
-                  type="text"
-                  className="bg-surface border border-border rounded-lg px-2.5 py-1.5 text-[13px] text-right tabular-nums w-[200px] focus:outline-none focus:border-border-strong"
-                  value={depositAmount}
-                  placeholder={shortfall !== null ? formatKkrw(shortfall) : "0"}
-                  onChange={(e) => setDepositAmount(groupAmountInput(e.target.value))}
-                />
-              </label>
-              {shortfall !== null && (
-                <Button variant="secondary" onClick={() => setDepositAmount(groupAmountInput(formatKkrw(shortfall)))}>
-                  Cover the shortfall
-                </Button>
-              )}
-              <Button disabled={depositStage !== null} onClick={() => void startDeposit()}>
-                {depositStage !== null ? DEPOSIT_STAGE_LABEL[depositStage] : "Deposit"}
-              </Button>
-            </div>
-            {depositError && <div className="text-[12.5px] text-err">{depositError}</div>}
-            <div className="text-[12px] text-muted">
-              Converts public kKRW into private pool balance. Up to two wallet confirmations:
-              the approval (when needed) and the deposit.
-            </div>
-          </div>
-        )}
-
         {/* payees — only once the wallet is connected */}
         {wallet !== null &&
           (rows.length === 0 ? (
-            /* empty state: ONE centered generate button */
+            /* empty state: ONE centered generate button — or, mid-generation,
+               the whole area as a loading panel until the sheet reveals at once */
             <div className="bg-surface border border-border rounded-xl flex-1 flex flex-col items-center justify-center gap-3 py-16">
-              <Button disabled={plannedRows === 0 || generating} onClick={generate}>
-                {generating && <Spinner />}
-                {generating ? "Generating…" : "Generate random recipients"}
-              </Button>
+              {generating ? (
+                <div className="flex flex-col items-center gap-2 text-muted">
+                  <span className="w-6 h-6 rounded-full border-[3px] border-border border-t-primary animate-spin" />
+                  <span className="text-[13px]">Generating {plannedRows} recipients…</span>
+                </div>
+              ) : (
+                <Button disabled={plannedRows === 0} onClick={generate}>
+                  Generate random recipients
+                </Button>
+              )}
               {plannedRows === 0 && (
                 <div className="text-[12px] text-muted">
                   {balance === null ? BALANCE_LOADING : "Deposit first"}
@@ -571,7 +579,8 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
                     `Your balance is split across notes: ${readiness.mergeCount} merge${readiness.mergeCount === 1 ? "" : "s"}, then the payout — ${readiness.mergeCount + 1} signatures in total.`}
                   {readiness.kind === "insufficient" && shortfall !== null && (
                     <span className="text-err font-medium">
-                      Balance is short by {formatKkrw(shortfall)} kKRW. Deposit above, then send.
+                      Balance is short by {formatKkrw(shortfall)} kKRW. Use Deposit at the top,
+                      then send.
                     </span>
                   )}
                 </div>
@@ -593,6 +602,15 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
             setConfirmOpen(false);
             void startPay();
           }}
+        />
+      )}
+      {deposit !== null && (
+        <DepositModal
+          state={deposit}
+          onAmountChange={(amount) => patchDeposit({ amount })}
+          onClose={() => setDeposit(null)}
+          onDeposit={() => void startDeposit()}
+          onMint={() => void startMint()}
         />
       )}
       {pay.phase === "running" && <ProgressRail stage={pay.stage} leg={pay.leg} />}

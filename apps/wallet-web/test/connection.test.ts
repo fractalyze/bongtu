@@ -36,7 +36,7 @@ import {
   type PublicClient,
 } from "viem";
 import { ARBITER_KEM_PK_HASH, POOL_ABI_FRAGMENTS } from "@bongtu/core/network";
-import { giwaSepolia, GAS_PRICE } from "@bongtu/client/chain";
+import { giwaSepolia } from "@bongtu/client/chain";
 import { buildConnectors } from "../src/lib/wagmi.js";
 import {
   assertPoolKemEpoch,
@@ -93,6 +93,10 @@ function fakeRpc(overrides: Record<string, (params?: unknown[]) => unknown> = {}
           return TX_HASH;
         case "eth_blockNumber":
           return "0x1";
+        case "eth_getTransactionCount":
+          return "0x2a"; // pending nonce 42 — asserted on the sent tx below
+        case "eth_gasPrice":
+          return "0xf4610"; // 1,001,000 wei ≈ the chain's real ~0.001 gwei quote
         case "eth_getTransactionReceipt":
           return receipt;
         default:
@@ -150,8 +154,13 @@ test("submitTransfer sends the pinned gas price and byte-exact calldata, then wa
   assert.ok(sent, "an eth_sendTransaction went out");
   const tx = (sent.params as [Record<string, string>])[0];
   assert.equal(tx.to?.toLowerCase(), POOL.toLowerCase());
-  assert.equal(BigInt(tx.gasPrice), GAS_PRICE, "the GIWA gas floor is pinned, never estimated");
-  assert.equal(GAS_PRICE, parseGwei("0.005"), "and the floor is the documented 0.005 gwei");
+  // The price is the CHAIN's word (eth_gasPrice), never wallet-stack estimation
+  // (which once overpaid ~1500x) and no longer a fixed pin that goes stale when
+  // the sequencer moves its floor.
+  assert.equal(BigInt(tx.gasPrice), 0xf4610n, "gas price == the node's eth_gasPrice quote");
+  // The nonce comes from the chain's pending count, not the wallet's tracker —
+  // MetaMask's cache desyncs after speed-up/cancel surgery ("nonce too low").
+  assert.equal(BigInt(tx.nonce), 42n, "nonce == the chain's pending transaction count");
 
   // Byte-exact calldata: the decimal-string proof encoded exactly as the pool ABI
   // fragment demands (a drift here is a silent on-chain revert).
@@ -196,7 +205,7 @@ test("mintTestToken (dev faucet) submits at the same pinned gas price", async ()
   assert.ok(sent);
   const tx = (sent.params as [Record<string, string>])[0];
   assert.equal(tx.to?.toLowerCase(), token);
-  assert.equal(BigInt(tx.gasPrice), GAS_PRICE);
+  assert.equal(BigInt(tx.gasPrice), 0xf4610n, "mint pays the same chain-quoted price");
 });
 
 // ======================== (2) KEM EPOCH GUARD ===============================

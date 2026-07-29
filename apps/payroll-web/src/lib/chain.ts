@@ -9,7 +9,7 @@
 import { parseAbi, type Address } from "viem";
 import type { Calldata } from "@bongtu/core/proving";
 import { POOL_ABI_FRAGMENTS, explorerTxUrl } from "@bongtu/core/network";
-import { GAS_PRICE, giwaSepolia } from "@bongtu/client/chain";
+import { giwaSepolia } from "@bongtu/client/chain";
 import type { Connection } from "@bongtu/client/connection";
 
 const POOL_ABI = parseAbi([POOL_ABI_FRAGMENTS.disburseWithCiphertexts]);
@@ -53,7 +53,13 @@ export async function submitDisburse(
     account: connection.address as Address,
     chain: giwaSepolia,
     // Pinned, never estimated: wallet-stack auto-estimation once overpaid ~1500x.
-    gasPrice: GAS_PRICE,
+    gasPrice: await connection.publicClient.getGasPrice(),
+    // Chain-derived nonce, same rationale as the client submits: the wallet's
+    // tracker desyncs after speed-up/cancel surgery.
+    nonce: await connection.publicClient.getTransactionCount({
+      address: connection.address as Address,
+      blockTag: "pending",
+    }),
   });
   await connection.publicClient.waitForTransactionReceipt({ hash });
   return { txHash: hash, explorerUrl: explorerTxUrl(hash, explorerBase) };

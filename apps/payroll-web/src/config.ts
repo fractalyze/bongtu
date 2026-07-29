@@ -41,6 +41,10 @@ export const DEFAULTS = {
   chainId: CHAIN_ID,
   rpc: RPC_URL,
   explorer: EXPLORER_BASE,
+  // The official GIWA testnet-ETH faucet (docs.giwa.io/en/get-started/faucets) —
+  // linked from the deposit dialog's zero-gas notice, same as the wallet, so an
+  // operator whose account cannot pay for its own mint has a next step.
+  gasFaucet: "https://faucet.giwa.io",
   pool: POOL_ADDRESS,
   token: TOKEN_ADDRESS,
   batchSize: B,

@@ -30,7 +30,7 @@ import {
   explorerTxUrl,
   isPreKemProbeError,
 } from "@bongtu/core/network";
-import { GAS_PRICE, giwaSepolia } from "./chain.js";
+import { giwaSepolia } from "./chain.js";
 
 // The shared per-function ABI fragments (@bongtu/core/network) — only the pool
 // functions the wallet touches, parsed once for viem. deposit is the 0-in/2-out
@@ -328,6 +328,26 @@ function asProofArgs(calldata: Calldata) {
   };
 }
 
+/** The next nonce from the CHAIN's pending view, not the wallet's tracker.
+ *  MetaMask's account cache desyncs after speed-up/cancel surgery and then
+ *  assigns stale nonces ("nonce too low" on submit). Every flow here awaits
+ *  each tx to its receipt before the next, so the pending count is always the
+ *  correct next nonce. */
+/** The chain's own price word (eth_gasPrice) per tx — GIWA quotes ~0.001 gwei.
+ *  The old fixed pin guarded against wallet-stack fee ESTIMATION (which once
+ *  overpaid ~1500x); asking the node directly is not estimation, and a fixed
+ *  pin goes stale the day the sequencer moves its floor. */
+async function chainGasPrice(connection: Connection): Promise<bigint> {
+  return connection.publicClient.getGasPrice();
+}
+
+async function nextNonce(connection: Connection): Promise<number> {
+  return connection.publicClient.getTransactionCount({
+    address: connection.address as Address,
+    blockTag: "pending",
+  });
+}
+
 async function submit(
   connection: Connection,
   poolAddr: string,
@@ -348,8 +368,8 @@ async function submit(
     args: [a, b, c, pub, kemCiphertext as `0x${string}`] as never,
     account: connection.address as Address,
     chain: giwaSepolia,
-    // Pinned, never estimated: wallet-stack auto-estimation once overpaid ~1500x.
-    gasPrice: GAS_PRICE,
+    nonce: await nextNonce(connection),
+    gasPrice: await chainGasPrice(connection),
   });
   await connection.publicClient.waitForTransactionReceipt({ hash });
   return { txHash: hash, explorerUrl: explorerTxUrl(hash, explorerBase) };
@@ -422,7 +442,8 @@ export async function approveToken(
     args: [spender as Address, amount],
     account: connection.address as Address,
     chain: giwaSepolia,
-    gasPrice: GAS_PRICE,
+    gasPrice: await chainGasPrice(connection),
+    nonce: await nextNonce(connection),
   });
   await connection.publicClient.waitForTransactionReceipt({ hash });
   return hash;
@@ -433,7 +454,7 @@ export async function approveToken(
  * from the connected wallet. The deployed token is MockERC20 whose `mint` is
  * permissionless (no onlyOwner/cap), so the user self-funds test kKRW and pays their
  * OWN GIWA gas — there is no backend faucet service or operator key. Same submit shape
- * as approveToken/submit (GAS_PRICE floor, wait for the receipt); returns the tx hash +
+ * as approveToken/submit (chain-quoted gas, explicit nonce, receipt wait); returns the tx hash +
  * explorer link so the Deposit screen can surface it. A production token has no mint.
  */
 export async function mintTestToken(
@@ -449,7 +470,8 @@ export async function mintTestToken(
     args: [to as Address, amount],
     account: connection.address as Address,
     chain: giwaSepolia,
-    gasPrice: GAS_PRICE,
+    gasPrice: await chainGasPrice(connection),
+    nonce: await nextNonce(connection),
   });
   await connection.publicClient.waitForTransactionReceipt({ hash });
   return { txHash: hash, explorerUrl: explorerTxUrl(hash) };

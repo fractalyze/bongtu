@@ -14,6 +14,12 @@ const BUTTON_CLS = {
   ghost:
     "bg-transparent text-muted border-0 px-2 py-1 rounded-lg cursor-pointer text-[13px] " +
     "hover:text-ink disabled:opacity-40 transition-colors",
+  // Secondary's shape in the warn palette: the session card's [Deposit] wears it
+  // while the sheet is short, so the fix is visible where the money is, without a
+  // second primary competing with [Send].
+  warn:
+    "bg-warn-bg text-warn border border-warn-border px-3 py-1.5 rounded-xl cursor-pointer text-[13px] " +
+    "font-semibold hover:border-warn disabled:opacity-40 disabled:cursor-not-allowed transition-colors",
 } as const;
 
 export function Button({
@@ -22,6 +28,18 @@ export function Button({
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: keyof typeof BUTTON_CLS }): ReactNode {
   return <button type="button" className={`${BUTTON_CLS[variant]} ${className}`.trim()} {...rest} />;
+}
+
+/** The busy indicator a button shows while its action runs (connect, generate,
+ *  mint, the deposit's staged run). Drawn in `currentColor` so it stays visible on
+ *  every variant — a white-inked spinner is invisible on the white secondary. */
+export function Spinner(): ReactNode {
+  return (
+    <span
+      aria-hidden
+      className="inline-block w-3.5 h-3.5 mr-1.5 rounded-full border-2 border-current/40 border-t-current animate-spin align-[-2px]"
+    />
+  );
 }
 
 /** One worksheet/deposit text cell. `invalid` paints the error border the
