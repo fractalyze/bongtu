@@ -93,9 +93,11 @@ export type HistoryKind = "received" | "sent" | "withdraw" | "deposit";
 /** One `GET /history` activity item as the arbiter mode serves it: the owner's
  *  view of an op the ledger decrypted. `counterparty` is a COMPRESSED bjj pubkey
  *  hex (the other party — sender for "received", payee for "sent") or null for
- *  a "deposit"/"withdraw". A pure self-send (every nonzero output back to
- *  the owner) is a "sent" + "received" pair whose counterparty is the owner's own
- *  key. `amount` is what moved for the owner (decimal). */
+ *  a "deposit"/"withdraw" and for a disburse's aggregated payer-side "sent"
+ *  (a 255-payee batch has no single other party). A pure self-send (every
+ *  nonzero output back to the owner) is a "sent" + "received" pair whose
+ *  counterparty is the owner's own key. `amount` is what moved for the owner
+ *  (decimal). */
 export interface HistoryItem {
   kind: HistoryKind;
   counterparty: string | null; // compressed bjj pubkey hex, or null

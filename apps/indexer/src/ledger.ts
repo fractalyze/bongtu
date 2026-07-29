@@ -79,7 +79,8 @@ export type HistoryKind = "received" | "sent" | "withdraw" | "deposit";
  *     a transfer);
  *   - "sent":     a transfer whose spent input was the owner's (counterparty =
  *     the payee, amount = what left them). A pure self-send is a "sent" +
- *     "received" pair, both owned by and addressed to the sender;
+ *     "received" pair, both owned by and addressed to the sender. A disburse
+ *     is ONE aggregated "sent" for the payer (counterparty null);
  *   - "withdraw": the owner unshielded (counterparty null, amount = unshielded);
  *   - "deposit":  the owner's own deposit output (counterparty null).
  * `counterparty` is a COMPRESSED bjj pubkey hex (never a raw x,y pair). Wire shape
@@ -300,7 +301,9 @@ export function deriveOp(
  *     like every other row, where the older single "self" item needed its own
  *     verb and its own neutral amount styling in every client.
  *   - disburse: each non-self output → "received" (counterparty = the employer
- *     input owner). Only a cross-checked batch contributes.
+ *     input owner), plus ONE aggregated "sent" for the employer (counterparty
+ *     null, amount = the batch's non-self total — per-payee rows would bury the
+ *     payer's feed under 255 items). Only a cross-checked batch contributes.
  *   - withdraw: the input owner unshielded inputs − change → "withdraw".
  */
 export function deriveHistory(op: OpEnvelope, env: ParsedEnvelope, disburseCrossChecks: boolean): DerivedHistory[] {
@@ -314,11 +317,18 @@ export function deriveHistory(op: OpEnvelope, env: ParsedEnvelope, disburseCross
     case "disburse": {
       if (!disburseCrossChecks) return out;
       const sender = env.inputs[0].owner;
+      let paid = 0n;
       for (const o of env.outputs) {
         if (o.value !== 0n && !sameOwner(o.owner, sender)) {
           out.push({ owner: o.owner, kind: "received", counterparty: sender, amount: o.value });
+          paid += o.value;
         }
       }
+      // The payer's side of the batch: ONE aggregated "sent" (counterparty null —
+      // a 255-payee payroll has no single other party, and 255 per-payee rows
+      // would bury every other item in the payer's feed). Without this the payer's
+      // wallet showed NOTHING for a disburse they funded.
+      if (paid > 0n) out.push({ owner: sender, kind: "sent", counterparty: null, amount: paid });
       return out;
     }
     case "transfer":

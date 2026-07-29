@@ -126,11 +126,27 @@ test("transfer whose outputs are all zero yields nothing at all", () => {
 test("disburse: an uncross-checked batch contributes NOTHING", () => {
   const batch = env([note(A, 9n), note(A, 0n)], [note(B, 3n), note(C, 6n)]);
   assert.deepEqual(deriveHistory(op("disburse"), batch, false), []);
-  // Control: the same batch, cross-checked, is a "received" per non-self output.
+  // Control: the same batch, cross-checked, is a "received" per non-self output
+  // plus the payer's ONE aggregated "sent".
   assert.deepEqual(deriveHistory(op("disburse"), batch, true).map(shape), [
     ["B", "received", "A", "3"],
     ["C", "received", "A", "6"],
+    ["A", "sent", null, "9"],
   ]);
+});
+
+test("disburse: the payer's aggregated 'sent' excludes change and pads", () => {
+  // 20 in: 3 to B, 5 to C, 12 change back to A, one zero pad — the payer's feed
+  // must say 8 left (never 20, never a per-payee flood), and a batch that pays
+  // ONLY the payer (all change) says nothing.
+  const withChange = env([note(A, 20n)], [note(B, 3n), note(C, 5n), note(A, 12n), note(B, 0n)]);
+  assert.deepEqual(deriveHistory(op("disburse"), withChange, true).map(shape), [
+    ["B", "received", "A", "3"],
+    ["C", "received", "A", "5"],
+    ["A", "sent", null, "8"],
+  ]);
+  const allSelf = env([note(A, 20n)], [note(A, 20n), note(B, 0n)]);
+  assert.deepEqual(deriveHistory(op("disburse"), allSelf, true), []);
 });
 
 test("withdraw: net unshielded only, and nothing when the change equals the inputs", () => {
