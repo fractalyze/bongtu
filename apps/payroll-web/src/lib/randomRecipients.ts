@@ -6,7 +6,8 @@
 // The rules this module owns (headlessly gated in test/randomRecipients.test.ts):
 //
 //   - addresses are REAL BabyJubJub keys: a random 31-byte scalar from the
-//     CSPRNG (crypto.getRandomValues) -> deriveKeypair -> packPubkey, the same
+//     CSPRNG (crypto.getRandomValues) -> deriveKeypair -> packPubkey ->
+//     base58check (what every bongtu surface displays), the same
 //     @bongtu/core path a wallet uses — every generated address decodes, and a
 //     duplicate draw is redrawn, so rows never trip the worksheet's dup check;
 //   - amounts are whole kKRW, minimum 1 per row, and their SUM is exactly the
@@ -21,7 +22,7 @@
 //     "Deposit first" hint (an UNKNOWN balance shows Loading instead).
 
 import { deriveKeypair } from "@bongtu/core/note";
-import { packPubkey } from "@bongtu/core/pubkey";
+import { encodeAddress, packPubkey } from "@bongtu/core/pubkey";
 import { MAX_ROWS, type WorksheetRow } from "./worksheet.js";
 
 const KKRW = 10n ** 18n;
@@ -102,7 +103,7 @@ export function generateRecipients(balanceWei: bigint): WorksheetRow[] {
   for (let i = 0; i < count; i++) {
     let address: string;
     do {
-      address = packPubkey(deriveKeypair(randomScalar()).publicKey);
+      address = encodeAddress(packPubkey(deriveKeypair(randomScalar()).publicKey));
     } while (seen.has(address));
     seen.add(address);
     rows.push({ address, amount: amounts[i].toString() });

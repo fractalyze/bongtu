@@ -37,6 +37,7 @@ import { runDeposit, type DepositStage } from "@bongtu/client/depositFlow";
 import type { LegProgress, SpendStage } from "@bongtu/client/spendFlow";
 import { sumUnspent } from "@bongtu/client/balance";
 import { formatKkrw, groupAmountInput } from "@bongtu/client/money";
+import { encodeAddress } from "@bongtu/core/pubkey";
 import {
   buildNotesTokenUrl,
   buildNotesUrl,
@@ -71,6 +72,21 @@ const BALANCE_LOADING = "Loading";
 
 const prove = (request: Parameters<typeof proveViaService>[1]) =>
   proveViaService(DEFAULTS.proverUrl, request);
+
+/** base58 display form: enough head to eyeball-compare, tail to disambiguate. */
+function shortB58(b58: string): string {
+  return b58.length <= 16 ? b58 : `${b58.slice(0, 8)}…${b58.slice(-6)}`;
+}
+
+/** The busy indicator the connect button shows while the chain runs. */
+function Spinner(): ReactNode {
+  return (
+    <span
+      aria-hidden
+      className="inline-block w-3.5 h-3.5 mr-1.5 rounded-full border-2 border-primary-ink/40 border-t-primary-ink animate-spin align-[-2px]"
+    />
+  );
+}
 
 const STAGE_LABEL: Record<SpendStage, string> = {
   unlock: "Waiting for wallet signature",
@@ -367,24 +383,21 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
         </div>
       </header>
 
-      {/* status bar — full-width, under the header (lib/statusBar.ts decides) */}
-      <div className="bg-surface-2 border-b border-border">
-        <div className="max-w-[1100px] mx-auto px-5 py-2.5 flex items-center gap-4 flex-wrap min-h-[46px]">
-          {bar.kind === "disconnected" ? (
-            <>
-              <span className="text-[13px] text-muted">Please connect your wallet</span>
-              <Button disabled={connecting} onClick={() => void connectWallet()}>
-                {connecting ? "Connecting…" : "Connect wallet"}
-              </Button>
-            </>
-          ) : (
+      {/* status bar — full-width under the header, but only once a wallet
+          session exists; the disconnected state is a CARD in the content area
+          (the wallet-web connect idiom), not a nav-wide strip */}
+      {bar.kind === "connected" && (
+        <div className="bg-surface-2 border-b border-border">
+          <div className="max-w-[1100px] mx-auto px-5 py-2.5 flex items-center gap-4 flex-wrap min-h-[46px]">
             <>
               <span className="font-mono text-[12px]" title={bar.ethAccount}>
                 {shortHex(bar.ethAccount)}
               </span>
               <span className="text-muted">·</span>
-              <span className="font-mono text-[12px]" title={bar.bongtuAddress}>
-                {shortHex(bar.bongtuAddress)}
+              {/* the bongtu address is DISPLAYED base58 like every other surface;
+                  the state keeps canonical hex */}
+              <span className="font-mono text-[12px]" title={encodeAddress(bar.bongtuAddress)}>
+                {shortB58(encodeAddress(bar.bongtuAddress))}
               </span>
               <span className="text-muted">·</span>
               <span className="text-[13px] font-semibold tabular-nums">
@@ -397,11 +410,25 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
                 </Button>
               </div>
             </>
-          )}
+          </div>
         </div>
-      </div>
+      )}
 
       <main className="max-w-[1100px] mx-auto w-full px-5 py-5 flex flex-col gap-4 flex-1 pb-[88px]">
+        {wallet === null && (
+          <div className="flex-1 flex items-center justify-center">
+            <div className="w-full max-w-[420px] bg-surface border border-border rounded-2xl p-8 flex flex-col items-center gap-4 text-center shadow-[0_8px_28px_-18px_rgba(17,24,39,0.18)]">
+              <div className="text-[15px] font-semibold">Connect your wallet</div>
+              <p className="text-[13px] text-muted">
+                Approve the connection and one signature in MetaMask.
+              </p>
+              <Button disabled={connecting} onClick={() => void connectWallet()}>
+                {connecting && <Spinner />}
+                {connecting ? "Connecting…" : "Connect wallet"}
+              </Button>
+            </div>
+          </div>
+        )}
         {dataError && <Banner message={dataError} onRetry={() => void refresh()} retryLabel="Retry" />}
 
         {/* deposit: a highlighted CTA when the sheet cannot be covered, a quiet
@@ -637,9 +664,9 @@ function ProgressRail({ stage, leg }: { stage: SpendStage; leg: LegProgress }): 
                 >
                   {state === "done" ? "✓" : i + 1}
                 </span>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className={`text-[13.5px] ${state === "todo" ? "text-muted" : "font-medium"}`}>{label}</div>
-                  {state === "active" && <div className="text-[12px] text-muted">{STAGE_LABEL[stage]}</div>}
+                  {state === "active" && <StageChecklist stage={stage} />}
                 </div>
               </li>
             );
@@ -652,6 +679,46 @@ function ProgressRail({ stage, leg }: { stage: SpendStage; leg: LegProgress }): 
     </div>
   );
 }
+
+/** The active leg's inner stages as their own checklist — a single-leg payout
+ *  would otherwise read as one opaque step while proving/waiting runs. `unlock`
+ *  renders as a transient first row only while it is happening. */
+const STAGE_ORDER: SpendStage[] = ["assemble", "prove", "submit", "waiting"];
+function StageChecklist({ stage }: { stage: SpendStage }): ReactNode {
+  const activeAt = stage === "unlock" ? -1 : STAGE_ORDER.indexOf(stage);
+  return (
+    <ol className="mt-1.5 flex flex-col gap-1">
+      {stage === "unlock" && (
+        <li className="flex items-center gap-2 text-[12px] font-medium">
+          <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse-soft shrink-0" />
+          {STAGE_LABEL.unlock}
+        </li>
+      )}
+      {STAGE_ORDER.map((st, i) => {
+        const state = i < activeAt ? "done" : i === activeAt ? "active" : "todo";
+        return (
+          <li
+            key={st}
+            className={`flex items-center gap-2 text-[12px] ${
+              state === "done" ? "text-pos" : state === "active" ? "font-medium" : "text-muted"
+            }`}
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                state === "done" ? "bg-pos" : state === "active" ? "bg-primary animate-pulse-soft" : "bg-border-strong"
+              }`}
+            />
+            {STAGE_LABEL[st]}
+            {st === "prove" && state === "active" && (
+              <span className="text-muted font-normal">— up to ~20s for a full batch</span>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 
 /** The done screen: one check per paid row + the explorer link of the terminal
  *  disburse (merge legs listed under it). No receipts download, by design. */
