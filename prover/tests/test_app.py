@@ -6,6 +6,8 @@
 # only pydantic+pytest, so this whole file skips there — the origin DECISION
 # matrix itself is CI-covered as a pure function in tests/test_registry.py).
 
+import base64
+import hashlib
 import json
 from pathlib import Path
 
@@ -55,6 +57,9 @@ def client(monkeypatch):
         {name: StubEngine(name) for name in ("disburse256", "transfer10x2", "deposit")},
     )
     monkeypatch.setitem(app_module.state, "status", "ready")
+    # The anti-guessing pause is real-time sleep — zeroed so the 401 matrix
+    # doesn't cost 0.3s per case (its presence is an app.py code fact).
+    monkeypatch.setattr(config, "AUTH_FAILURE_DELAY", 0.0)
     # TestClient outside a `with` never runs the lifespan -> no init thread.
     return TestClient(app_module.app)
 
@@ -116,6 +121,87 @@ def test_403_fires_before_the_body_is_parsed(client, monkeypatch):
     monkeypatch.setattr(config, "ALLOWED_ORIGINS", [ALLOWED])
     r = client.post("/prove", json={"circuit": "nonsense"})
     assert r.status_code == 403
+
+
+# -- auth gate (PROVER_AUTH_SHA256, U-P6) -----------------------------------
+#
+# Throwaway pair minted here — no real credential (or its hash) in the repo.
+
+AUTH_ID, AUTH_PW = "http-matrix-id", "http-matrix-pw"
+AUTH_DIGEST = hashlib.sha256(f"{AUTH_ID}:{AUTH_PW}".encode()).hexdigest()
+
+
+def basic(id_: str, pw: str) -> dict:
+    return {"Authorization": "Basic " + base64.b64encode(f"{id_}:{pw}".encode()).decode()}
+
+
+@pytest.fixture
+def authed(monkeypatch):
+    monkeypatch.setattr(config, "AUTH_SHA256", AUTH_DIGEST)
+
+
+def test_auth_set_prove_without_credentials_is_401(client, authed):
+    r = client.post("/prove", json=disburse_body())
+    assert r.status_code == 401
+    assert "missing Authorization" in r.json()["detail"]
+    assert "www-authenticate" not in r.headers  # never the browser's native dialog
+
+
+def test_auth_set_prove_with_wrong_credentials_is_401(client, authed):
+    r = client.post("/prove", json=disburse_body(), headers=basic(AUTH_ID, "wrong"))
+    assert r.status_code == 401
+    assert "wrong ID or password" in r.json()["detail"]
+
+
+def test_auth_set_prove_with_right_credentials_proves(client, authed):
+    r = client.post("/prove", json=disburse_body(), headers=basic(AUTH_ID, AUTH_PW))
+    assert r.status_code == 200
+    assert len(r.json()["pub"]) == 11
+
+
+def test_auth_check_answers_the_sign_in_probe(client, authed):
+    assert client.get("/auth/check", headers=basic(AUTH_ID, AUTH_PW)).json() == {"ok": True}
+    assert client.get("/auth/check", headers=basic(AUTH_ID, "wrong")).status_code == 401
+    assert client.get("/auth/check").status_code == 401
+
+
+def test_auth_unset_keeps_everything_open(client, monkeypatch):
+    monkeypatch.setattr(config, "AUTH_SHA256", None)
+    assert client.get("/auth/check").status_code == 200  # dev login accepts anything
+    assert client.post("/prove", json=disburse_body()).status_code == 200
+
+
+def test_auth_set_health_and_ready_stay_open(client, authed):
+    assert client.get("/healthz").status_code == 200
+    assert client.get("/ready").status_code == 200  # state stubbed ready
+
+
+def test_auth_composes_with_the_origin_gate(client, authed, monkeypatch):
+    # BOTH gates must pass on /prove: right credentials + wrong Origin -> 403,
+    # right Origin + wrong credentials -> 401 (auth first — a drive-by with no
+    # credential learns nothing about the origin list), both right -> 200.
+    monkeypatch.setattr(config, "ALLOWED_ORIGINS", [ALLOWED])
+    creds = basic(AUTH_ID, AUTH_PW)
+    r = client.post("/prove", json=disburse_body(), headers={**creds, "Origin": "https://evil.example"})
+    assert r.status_code == 403
+    r = client.post("/prove", json=disburse_body(), headers={**basic(AUTH_ID, "wrong"), "Origin": ALLOWED})
+    assert r.status_code == 401
+    r = client.post("/prove", json=disburse_body(), headers={**creds, "Origin": ALLOWED})
+    assert r.status_code == 200
+
+
+def test_auth_401_fires_before_the_body_is_parsed(client, authed):
+    r = client.post("/prove", json={"circuit": "nonsense"})
+    assert r.status_code == 401
+
+
+def test_auth_401_carries_cors_headers_for_a_browser_origin(client, authed):
+    # CORS wraps the gates (middleware order): without ACAO on the 401, a
+    # cross-origin login page could not READ the status and would report
+    # "unreachable" instead of "wrong ID or password".
+    r = client.get("/auth/check", headers={"Origin": ALLOWED})
+    assert r.status_code == 401
+    assert "access-control-allow-origin" in r.headers
 
 
 # -- circuit routing --------------------------------------------------------

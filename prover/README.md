@@ -37,6 +37,7 @@ of truth); `prover_service/schema.py` mirrors them 1:1 and must be kept in sync.
 |---|---|
 | `GET /healthz` | 200 — process liveness |
 | `GET /ready` | 200 `{status:"ready", circuits:["disburse","transfer10x2","deposit"], num_public:{...}, boot_seconds:{...}}` once **every** registered engine is compiled + warm (`circuits` lists wire tags in boot order); 503 `{status:"initializing"\|"failed"}` before/on failure |
+| `GET /auth/check` | the payroll console's sign-in probe: 200 `{ok:true}` when the request's Basic credentials pass the auth gate (or `PROVER_AUTH_SHA256` is unset); 401 otherwise. Costs nothing — proves a credential without proving a circuit |
 | `POST /prove` | body = a `ProvingRequest` (`{circuit:"disburse"\|"transfer10x2", input:{...}, backend?:"gpu"}`, field elements as decimal strings) → 200 `Calldata` `{a,b,c,pub}` — snarkjs `exportSolidityCallData` form (G2 inner-swap applied), every value a 0x 32-byte hex word, splat straight into the matching `BongtuPool` entrypoint |
 
 Witness handling: the service accepts the **circuit input JSON** (exactly what
@@ -111,17 +112,38 @@ environment; the detail names the config knobs to check); 503 = still
 compiling. The 400-vs-500 classification happens at the witness worker seam
 (`witness.py`), pinned CPU-only by `tests/test_witness_seam.py`.
 
-## Origin allowlist
+## Auth (`PROVER_AUTH_SHA256`) and the Origin allowlist
 
-`PROVER_ALLOWED_ORIGINS` (comma-separated origins, e.g.
+Two request gates, composable — a `POST /prove` must pass BOTH; each is a no-op
+while its env knob is unset (unchanged local-dev behavior behind the loopback
+bind).
+
+**`PROVER_AUTH_SHA256`** — hex `sha256("id:password")` of the ONE shared
+operator credential (single-employer PoC). When set, `POST /prove` and
+`GET /auth/check` require a valid HTTP Basic `Authorization` header: the
+decoded `id:password` is sha256'd and compared against the env value in
+constant time (`hmac.compare_digest`), and a failure is answered **401** after
+a ~0.3s pause (a cheap brake on guessing over the funnel). `/healthz` and
+`/ready` stay unauthenticated. This is the gate that actually authenticates —
+it holds against any client, browser or not. The payroll console's login page
+is a client of exactly this: it validates the typed id/password against
+`/auth/check` and rides the same Basic value on every `/prove`. Mint the value
+without echoing the credential into shell history, e.g.:
+
+```sh
+python3 -c 'import getpass,hashlib;print(hashlib.sha256(getpass.getpass("id:password? ").encode()).hexdigest())'
+```
+
+The credential itself never appears in the repo or its tests — tests mint
+throwaway pairs. The production systemd unit (below) carries the env value.
+
+**`PROVER_ALLOWED_ORIGINS`** (comma-separated origins, e.g.
 `https://payroll.fractalyze.io`): when set, a `POST /prove` whose `Origin`
 header is absent or not in the list is refused **403** with a one-line reason,
 and CORS is scoped to the same list; `/healthz` and `/ready` stay open (probes
-don't send Origin). When unset, everything is allowed — unchanged local-dev
-behavior behind the default loopback bind. Origins compare exactly
-(scheme+host+port, trailing-slash tolerant). This stops drive-by browser/bot
-use only: any non-browser client can forge Origin, so production hardening is
-a private network or request signing
+don't send Origin). Origins compare exactly (scheme+host+port, trailing-slash
+tolerant). This stops drive-by browser/bot use only: any non-browser client
+can forge Origin — the Basic auth above is the real gate
 ([docs/security-model.md](../docs/security-model.md)).
 
 ## Run
@@ -165,7 +187,9 @@ silently kill proving (`loginctl` linger is on for this box):
 ```sh
 # unit: ~/.config/systemd/user/bongtu-prover.service
 #   run.sh, CUDA_VISIBLE_DEVICES=0, Restart=on-failure (30s backoff),
-#   MemoryMax=16G host-side, PROVER_ALLOWED_ORIGINS = the payroll origins
+#   MemoryMax=16G host-side, PROVER_ALLOWED_ORIGINS = the payroll origins,
+#   PROVER_AUTH_SHA256 = sha256 of the operator "id:password" (the value is
+#   set on the box only — never committed anywhere)
 systemctl --user status bongtu-prover    # logs: journalctl --user -u bongtu-prover
 ```
 
@@ -215,10 +239,11 @@ public indexer /health.
   before any multi-tenant use.
 - **A GPU fault mid-prove does not downgrade `/ready`.** The request fails but
   the service still reports ready; restart the process on repeated 5xx.
-- **`/prove` is unauthenticated** — same posture as the retired prover-helper,
-  and the default bind is loopback. Set `PROVER_ALLOWED_ORIGINS` (above) so a
-  browser tab ON the employer box cannot fire multi-second prove jobs at it;
-  that gate is not authentication (Origin is forgeable outside a browser).
+- **Auth is one shared credential** — `PROVER_AUTH_SHA256` gates `/prove`
+  behind a single operator id/password (fine for a single-employer PoC; leave
+  it unset for loopback-only local dev). Production would use per-user
+  SSO/OIDC. Keep `PROVER_ALLOWED_ORIGINS` set alongside it so browser drive-bys
+  are refused before they even reach a credential prompt.
 
 ## Env & files
 
@@ -226,6 +251,7 @@ Env knobs (all optional): `PROVER_HOST`/`PROVER_PORT` (127.0.0.1:8700,
 consumed by `run.sh`); the rest default in `prover_service/config.py` —
 `BONGTU_CIRCUITS` (comma list of registry names, default
 `disburse256,transfer10x2,deposit`), `PROVER_ALLOWED_ORIGINS` (unset = allow all),
+`PROVER_AUTH_SHA256` (hex sha256 of "id:password"; unset = no auth),
 `BONGTU_CIRCUITS_OUT`, per-circuit path overrides
 (`BONGTU_DISBURSE_ZKEY`/`_SO`/`_W2S` + the legacy-named
 `BONGTU_WARMUP_INPUT`; `BONGTU_TRANSFER10X2_ZKEY`/`_SO`/`_W2S`/

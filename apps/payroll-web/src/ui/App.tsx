@@ -1,108 +1,67 @@
-// bongtu payroll — the login-gated shell (LOCKED design, 2026-07-29): a Login
-// page and the one Console page, nothing else. The session IS the in-memory
-// KeyCache hold (lib/keyCache.ts): logging in chains connect -> EIP-712 sign
-// (the SHARED @bongtu/client KDF, so this console derives exactly the wallet's
-// key for the same account) -> seed the lock -> Console. Nothing is persisted,
-// so a page refresh — and the lock's own 10-minute idle wipe, and an account
-// switch in the wallet — all land back on Login.
+// bongtu payroll — the two-stage shell (LOCKED design): a service Login page
+// and the one Console page, nothing else.
+//
+// The SERVICE session (this file's gate): id/password validated against the
+// prover's GET /auth/check and held as an HTTP Basic value in sessionStorage
+// (lib/serviceAuth.ts) — a refresh keeps it, closing the browser ends it, and
+// a 401 from any later prover call drops it (the adapter calls
+// serviceAuth.drop(), the subscription here lands the page back on Login).
+//
+// The WALLET session lives INSIDE the Console: MetaMask connect → EIP-712
+// sign → the in-memory KeyCache hold. Nothing about it is persisted, so a
+// refresh, the lock's 10-minute idle wipe, or an account switch all drop the
+// wallet session — while the service session stands.
 
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { ToastHost } from "@bongtu/ui/Toast";
-import { KEY_DERIVATION, deriveLoginIdentity } from "@bongtu/client/identity";
-import { ensureChain, type Connection } from "@bongtu/client/connection";
-import { obtainViewToken } from "@bongtu/client/indexerClient";
 import { DEFAULTS } from "../config.js";
-import { payrollErrorMessage } from "../lib/errors.js";
-import { openInjectedConnection, watchInjectedAccount } from "../lib/connect.js";
 import { keyCache } from "../lib/keyCache.js";
+import { serviceAuth, signInToProver } from "../lib/serviceAuth.js";
 import { toasts } from "../lib/toasts.js";
 import { Console } from "./Console.js";
 import { Login } from "./Login.js";
 
-interface AdminSession {
-  connection: Connection;
-  /** the employer's compressed bjj pubkey — what every note read/spend is keyed on. */
-  pubkey: string;
-  /** the indexer's view token, or null when the indexer has no /auth — then the
-   *  Console signs its reads with the held key instead. In-memory only, like
-   *  everything else about this login. */
-  viewToken: string | null;
-}
-
 export function App(): ReactNode {
-  const [session, setSession] = useState<AdminSession | null>(null);
-  const [connecting, setConnecting] = useState(false);
+  const [authed, setAuthed] = useState(() => serviceAuth.header() !== null);
+  const [signingIn, setSigningIn] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
-  const signOut = useCallback((): void => {
-    keyCache.lock();
-    toasts.clear();
-    setSession(null);
-  }, []);
-
-  // The session lives exactly as long as the lock holds the key: the idle wipe
-  // (or an explicit lock) drops the page back to Login — an admin console must
-  // not keep rendering balances for a key it no longer holds.
+  // The service session's one source of truth is the holder itself: signing in,
+  // the Sign out button, and the adapter's 401 path all land here. Ending it
+  // also empties the lock — a console that lost its service session must not
+  // keep a spending key warm behind the login page.
   useEffect(() => {
-    return keyCache.subscribe(() => {
-      if (!keyCache.isUnlocked()) setSession(null);
+    return serviceAuth.subscribe(() => {
+      const held = serviceAuth.header() !== null;
+      if (!held) {
+        keyCache.lock();
+        toasts.clear();
+      }
+      setAuthed(held);
     });
   }, []);
 
-  // A held spending key belongs to ONE wallet account; a switch ends the session.
-  useEffect(() => watchInjectedAccount(signOut), [signOut]);
-
-  const login = useCallback(async (): Promise<void> => {
-    setConnecting(true);
+  const signIn = useCallback(async (id: string, password: string): Promise<void> => {
+    setSigningIn(true);
     setLoginError(null);
     try {
-      const connection = await openInjectedConnection();
-      // The derivation's typed data pins domain.chainId to GIWA, and wallets
-      // reject a v4 request whose domain chain differs from the active one — so
-      // the add/switch prompt must come BEFORE the signature.
-      await ensureChain(connection);
-      // Injected wallets are MetaMask-class deterministic signers — no
-      // double-sign check needed (loginGuard's rule for the injected transport).
-      const identity = await deriveLoginIdentity(connection, { doubleSign: false }, KEY_DERIVATION);
-      // The login popup already paid for the key: hand it to the lock so the
-      // whole session runs on it (idle-wiped, memory-only).
-      keyCache.seed(identity, connection.address, identity.compressedPubkey);
-      // Trade the key for a view token while it is in hand, so background
-      // balance reads never need it again. An indexer without /auth just means
-      // key-signed reads (Console handles both).
-      let viewToken: string | null = null;
-      try {
-        const view = await obtainViewToken(
-          DEFAULTS.indexerUrl,
-          identity.compressedPubkey,
-          identity.keypair.formattedPrivateKey,
-        );
-        viewToken = view.token;
-      } catch {
-        viewToken = null;
-      }
-      setSession({ connection, pubkey: identity.compressedPubkey, viewToken });
-    } catch (e) {
-      // The login's own inline slot, in the console's Korean — a declined signature
-      // is the most common outcome here and must not read as an English error.
-      setLoginError(payrollErrorMessage(e));
+      const result = await signInToProver(DEFAULTS.proverUrl, id, password);
+      if (!result.ok) setLoginError(result.error);
+      // ok -> serviceAuth.set already notified; the subscription flips authed.
+    } catch {
+      setLoginError("Could not reach the prover service. Check the connection and try again.");
     } finally {
-      setConnecting(false);
+      setSigningIn(false);
     }
   }, []);
 
   return (
     <div className="relative min-h-full">
-      {session ? (
-        <Console
-          connection={session.connection}
-          pubkey={session.pubkey}
-          viewToken={session.viewToken}
-          onLogout={signOut}
-        />
+      {authed ? (
+        <Console onSignOut={() => serviceAuth.drop()} />
       ) : (
-        <Login onLogin={() => void login()} busy={connecting} error={loginError} />
+        <Login onSignIn={(id, pw) => void signIn(id, pw)} busy={signingIn} error={loginError} />
       )}
       <ToastHost queue={toasts} />
     </div>

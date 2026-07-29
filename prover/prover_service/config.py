@@ -13,6 +13,10 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
+import hmac
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -224,6 +228,60 @@ def origin_rejection(origin: str | None) -> str | None:
         return "missing Origin header and PROVER_ALLOWED_ORIGINS is set on this service"
     if origin.rstrip("/") not in allowed:
         return f"Origin {origin!r} is not in PROVER_ALLOWED_ORIGINS"
+    return None
+
+
+def _parse_auth_sha256(raw: str | None) -> str | None:
+    """PROVER_AUTH_SHA256 -> normalized lowercase hex digest, or None = auth off.
+
+    The value is sha256("id:password") in hex — the CREDENTIAL never lives in
+    the environment, only its digest. A set-but-malformed value is a fatal boot
+    error: a typo'd digest would silently lock every operator out (or, worse,
+    read as "auth on" while matching nothing anyone can type).
+    """
+    if raw is None or not raw.strip():
+        return None
+    digest = raw.strip().lower()
+    if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+        raise ValueError(
+            "PROVER_AUTH_SHA256 must be the 64-char hex sha256 of 'id:password' "
+            f"(got {len(digest)} chars)"
+        )
+    return digest
+
+
+AUTH_SHA256: str | None = _parse_auth_sha256(os.environ.get("PROVER_AUTH_SHA256"))
+
+# The pause served before every 401 (seconds) — a cheap brake on credential
+# guessing over the funnel. Not env-tunable; tests monkeypatch it to 0.
+AUTH_FAILURE_DELAY = 0.3
+
+
+def auth_rejection(authorization: str | None) -> str | None:
+    """The one-line 401 reason for an Authorization header, or None = allowed.
+
+    Pure and fastapi-free (mirrors origin_rejection): reads AUTH_SHA256 at call
+    time so both the matrix tests (tests/test_registry.py, CI's pydantic-only
+    install) and the HTTP tests (tests/test_app.py) drive the same decision.
+    Expects HTTP Basic — base64("id:password") — and compares
+    sha256(decoded) against AUTH_SHA256 in constant time (hmac.compare_digest),
+    so the comparison leaks nothing about how much of the digest matched.
+    """
+    expected = AUTH_SHA256
+    if expected is None:
+        return None
+    if authorization is None:
+        return "missing Authorization header and PROVER_AUTH_SHA256 is set on this service"
+    scheme, _, payload = authorization.strip().partition(" ")
+    if scheme.lower() != "basic" or not payload.strip():
+        return "Authorization must be HTTP Basic"
+    try:
+        decoded = base64.b64decode(payload.strip(), validate=True)
+    except (binascii.Error, ValueError):
+        return "malformed Basic credentials (not base64)"
+    digest = hashlib.sha256(decoded).hexdigest()
+    if not hmac.compare_digest(digest, expected):
+        return "wrong ID or password"
     return None
 
 

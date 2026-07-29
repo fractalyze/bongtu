@@ -9,6 +9,7 @@ import { existsSync, readFileSync } from "node:fs";
 
 import type { ProvingRequest } from "@bongtu/core/proving";
 import { SERVICE_PUB_LEN, proveViaService } from "../src/lib/proverClient.js";
+import { serviceAuth } from "../src/lib/serviceAuth.js";
 import { proverUrlFromEnv } from "../src/config.js";
 
 const WORD = "0x" + "0".repeat(64);
@@ -109,6 +110,39 @@ test("a circuit the service does not serve is refused before any fetch", async (
     /does not serve/,
   );
   assert.equal(calls.length, 0);
+});
+
+// ---------------------------- the service session ---------------------------------
+
+test("a held service session rides on the request; none means a bare request", async () => {
+  // Throwaway value — the real credential lives only in the prover's env.
+  const held = "Basic dGhyb3ctaWQ6YXdheS1wdw==";
+  serviceAuth.set(held);
+  try {
+    const { calls, fn } = fakeFetch(200, calldataWith(11));
+    await withFetch(fn, () => proveViaService("/prover", request("disburse")));
+    assert.equal((calls[0].init.headers as Record<string, string>).authorization, held);
+  } finally {
+    serviceAuth.drop();
+  }
+  const { calls, fn } = fakeFetch(200, calldataWith(11));
+  await withFetch(fn, () => proveViaService("/prover", request("disburse")));
+  assert.equal((calls[0].init.headers as Record<string, string>).authorization, undefined);
+});
+
+test("a 401 drops the service session — the console must fall back to Login", async () => {
+  serviceAuth.set("Basic dGhyb3ctaWQ6YXdheS1wdw==");
+  try {
+    await assert.rejects(
+      withFetch(fakeFetch(401, { detail: "wrong ID or password" }).fn, () =>
+        proveViaService("/prover", request("disburse")),
+      ),
+      /Sign in again/,
+    );
+    assert.equal(serviceAuth.header(), null, "the rejected credential is not kept");
+  } finally {
+    serviceAuth.drop();
+  }
 });
 
 test("service errors surface with their status and body", async () => {

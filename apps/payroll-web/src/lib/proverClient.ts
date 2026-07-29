@@ -8,6 +8,8 @@
 
 import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
 
+import { serviceAuth } from "./serviceAuth.js";
+
 /**
  * The public-signal count each served circuit's calldata must carry — the
  * service registry's per-circuit vkey truth (prover_service/config.py CIRCUITS
@@ -33,12 +35,25 @@ export async function proveViaService(baseUrl: string, request: ProvingRequest):
   if (expected === undefined) {
     throw new Error(`the prover service does not serve '${request.circuit}'`);
   }
+  // The service session rides on every prover request (the prover's
+  // PROVER_AUTH_SHA256 gate); absent — local dev against an open service, or
+  // the node e2e driver — the request goes out bare, unchanged behavior.
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  const auth = serviceAuth.header();
+  if (auth !== null) headers.authorization = auth;
   const res = await fetch(`${baseUrl.replace(/\/$/, "")}/prove`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify({ ...request, backend: "gpu" }),
   });
   const text = await res.text();
+  if (res.status === 401) {
+    // The prover no longer honors this credential (rotated, or never valid):
+    // the service session is over — dropping it sends App back to the login
+    // page, which beats every later request failing the same way.
+    serviceAuth.drop();
+    throw new Error("The prover service rejected this sign-in. Sign in again.");
+  }
   if (!res.ok) throw new Error(`prover service ${res.status}: ${text.slice(0, 400)}`);
   let cd: Calldata;
   try {

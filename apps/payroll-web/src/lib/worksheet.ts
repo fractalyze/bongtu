@@ -60,7 +60,7 @@ export interface WorksheetCheck {
 
 /** Paying yourself is refused by the disburse assembly's distinct-owner guard —
  *  but only at the very end, after every merge leg has been signed. */
-export const SELF_PAY_MESSAGE = "본인 주소로는 지급할 수 없습니다.";
+export const SELF_PAY_MESSAGE = "You can't pay your own address.";
 
 /**
  * Validate every filled row: address must decode (base58check/hex -> canonical
@@ -100,12 +100,12 @@ export function checkWorksheet(rows: WorksheetRow[], selfAddress?: string): Work
 
     let canonical: string | null = null;
     if (address === "") {
-      issues.push({ index, field: "address", message: "받는 주소를 입력하세요." });
+      issues.push({ index, field: "address", message: "Enter a recipient address." });
     } else {
       try {
         canonical = decodeAddress(address);
       } catch {
-        issues.push({ index, field: "address", message: "올바른 bongtu 주소가 아닙니다." });
+        issues.push({ index, field: "address", message: "Not a valid bongtu address." });
       }
     }
     if (canonical !== null && canonical === self) {
@@ -114,7 +114,7 @@ export function checkWorksheet(rows: WorksheetRow[], selfAddress?: string): Work
     if (canonical !== null) {
       const first = seen.get(canonical);
       if (first !== undefined) {
-        issues.push({ index, field: "address", message: `${first + 1}행과 같은 주소입니다.` });
+        issues.push({ index, field: "address", message: `Same address as row ${first + 1}.` });
       } else {
         seen.set(canonical, index);
       }
@@ -122,13 +122,13 @@ export function checkWorksheet(rows: WorksheetRow[], selfAddress?: string): Work
 
     let wei: bigint | null = null;
     if (amount === "") {
-      issues.push({ index, field: "amount", message: "금액을 입력하세요." });
+      issues.push({ index, field: "amount", message: "Enter an amount." });
     } else {
       const parsed = parseKkrw(amount);
       if (!parsed.ok) {
-        issues.push({ index, field: "amount", message: "올바른 금액이 아닙니다. 예: 1000 또는 1.5" });
+        issues.push({ index, field: "amount", message: "Enter a valid amount, like 1000 or 1.5." });
       } else if (parsed.wei <= 0n) {
-        issues.push({ index, field: "amount", message: "0보다 큰 금액을 입력하세요." });
+        issues.push({ index, field: "amount", message: "Enter an amount above zero." });
       } else {
         wei = parsed.wei;
       }
@@ -144,7 +144,7 @@ export function checkWorksheet(rows: WorksheetRow[], selfAddress?: string): Work
     issues.push({
       index: MAX_ROWS,
       field: "address",
-      message: `한 번에 최대 ${MAX_ROWS}명까지 지급할 수 있습니다.`,
+      message: `At most ${MAX_ROWS} payees per run.`,
     });
   }
   return { issues, filledCount, recipients, totalWei };
@@ -155,9 +155,9 @@ export function checkWorksheet(rows: WorksheetRow[], selfAddress?: string): Work
  *  as whole kKRW exactly like a typed cell). Throws with the offending line. */
 export function rowsFromCsv(text: string): WorksheetRow[] {
   const parsed = parseRecipientsCsv(text);
-  if (parsed.length === 0) throw new Error("붙여넣은 CSV에서 읽을 행이 없습니다.");
+  if (parsed.length === 0) throw new Error("No payee rows found in the pasted CSV.");
   if (parsed.length > MAX_ROWS) {
-    throw new Error(`CSV 행이 ${parsed.length}개입니다. 한 번에 최대 ${MAX_ROWS}명까지 지급할 수 있습니다.`);
+    throw new Error(`The CSV has ${parsed.length} rows — at most ${MAX_ROWS} payees per run.`);
   }
   return parsed.map((r) => ({ address: r.pubkey, amount: r.amount }));
 }
@@ -235,9 +235,9 @@ export type SendReadiness =
 /**
  * Decide the footer state from the validated sheet and the live balance. The
  * single-vs-fragmented split comes from the SAME planner the run will execute
- * (@bongtu/client planDisburseChain), so the footer can promise "N번의 통합
- * 트랜잭션" and the run delivers exactly that — the verdict and the plan cannot
- * drift.
+ * (@bongtu/client planDisburseChain), so the footer can promise "N merges, then
+ * the payout" and the run delivers exactly that — the verdict and the plan
+ * cannot drift.
  *
  * `notes === null` means the balance has NOT been read yet — the first paint, or an
  * indexer the console cannot reach. That is its own verdict, never an empty wallet:

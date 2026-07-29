@@ -4,6 +4,8 @@
 # HTTP-level 403/routing behavior over the same function is tests/test_app.py,
 # which importorskips fastapi).
 
+import base64
+import hashlib
 import importlib
 import json
 from pathlib import Path
@@ -148,3 +150,54 @@ def test_origin_rejection_matrix_when_unset(monkeypatch):
     monkeypatch.setattr(config, "ALLOWED_ORIGINS", None)
     assert config.origin_rejection(None) is None
     assert config.origin_rejection("https://evil.example") is None
+
+
+# -- PROVER_AUTH_SHA256 -----------------------------------------------------
+#
+# Throwaway credentials minted HERE — no real credential (or its hash) may
+# ever appear in the repo; the live pair lives only in the service's env.
+
+
+def _basic(creds: str) -> str:
+    return "Basic " + base64.b64encode(creds.encode()).decode()
+
+
+TEST_CREDS = "matrix-id:matrix-only-pw"
+TEST_DIGEST = hashlib.sha256(TEST_CREDS.encode()).hexdigest()
+
+
+def test_unset_or_empty_auth_means_open(reload_config):
+    assert config.AUTH_SHA256 is None  # unset in the test env
+    assert reload_config(PROVER_AUTH_SHA256="  ").AUTH_SHA256 is None
+
+
+def test_auth_env_normalizes_to_lowercase_hex(reload_config):
+    assert reload_config(PROVER_AUTH_SHA256=TEST_DIGEST.upper()).AUTH_SHA256 == TEST_DIGEST
+
+
+def test_auth_env_rejects_a_malformed_digest(reload_config):
+    # A typo'd knob must kill the boot, not silently lock everyone out.
+    for bad in ("deadbeef", TEST_DIGEST + "00", TEST_DIGEST[:-1] + "g"):
+        with pytest.raises(ValueError, match="PROVER_AUTH_SHA256"):
+            reload_config(PROVER_AUTH_SHA256=bad)
+
+
+def test_auth_rejection_matrix_when_set(monkeypatch):
+    monkeypatch.setattr(config, "AUTH_SHA256", TEST_DIGEST)
+    assert config.auth_rejection(_basic(TEST_CREDS)) is None
+    assert config.auth_rejection("basic " + _basic(TEST_CREDS)[6:]) is None  # scheme is case-insensitive
+    assert "missing Authorization" in config.auth_rejection(None)
+    assert "wrong ID or password" in config.auth_rejection(_basic("matrix-id:nope"))
+    assert "wrong ID or password" in config.auth_rejection(_basic("other:matrix-only-pw"))
+    # id:password is ONE hashed string — a colon shuffle is just a wrong credential
+    assert "wrong ID or password" in config.auth_rejection(_basic("matrix-id:matrix:only-pw"))
+    assert "HTTP Basic" in config.auth_rejection("Bearer sometoken")
+    assert "HTTP Basic" in config.auth_rejection("Basic ")
+    assert "not base64" in config.auth_rejection("Basic %%%not-base64%%%")
+
+
+def test_auth_rejection_matrix_when_unset(monkeypatch):
+    monkeypatch.setattr(config, "AUTH_SHA256", None)
+    assert config.auth_rejection(None) is None
+    assert config.auth_rejection("Bearer junk") is None
+    assert config.auth_rejection(_basic("anything:at-all")) is None

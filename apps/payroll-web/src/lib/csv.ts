@@ -36,23 +36,25 @@ export function parseRecipientsCsv(text: string): RecipientRow[] {
     const parts = line.split(",").map((p) => p.trim());
 
     // A header row is skipped only when NEITHER cell is data. The amount cell alone
-    // cannot decide it: `<주소>,1.5` is a real payee whose amount breaks the
+    // cannot decide it: `<address>,1.5` is a real payee whose amount breaks the
     // whole-kKRW rule, and dropping it as a "header" would silently drop a person.
     if (i === 0 && parts.length === 2 && !isAddressCell(parts[0]) && !isWholeAmount(parts[1])) return;
 
-    // Cell COUNT is checked before the cells: `<주소>,1,000` splits into three, and
-    // reading just the first two would pay 1 kKRW instead of 1,000 — a 1000x
+    // Cell COUNT is checked before the cells: `<address>,1,000` splits into three,
+    // and reading just the first two would pay 1 kKRW instead of 1,000 — a 1000x
     // underpay that nothing downstream can notice.
     if (parts.length !== 2) {
       throw new Error(
-        `CSV ${i + 1}행: "주소,금액" 두 칸이어야 하는데 ${parts.length}칸입니다.` +
-          (parts.length > 2 ? " 금액의 천단위 쉼표를 지우거나 따옴표로 감싸세요." : ""),
+        `CSV line ${i + 1}: expected the two cells "address,amount", got ${parts.length} cells.` +
+          (parts.length > 2 ? " Remove thousands commas from the amount, or quote it." : ""),
       );
     }
 
     const [pubkey, amount] = parts;
     if (!isWholeAmount(amount)) {
-      throw new Error(`CSV ${i + 1}행: 금액은 0 이상의 정수여야 합니다. 입력값: ${JSON.stringify(amount)}`);
+      throw new Error(
+        `CSV line ${i + 1}: the amount must be a whole number of kKRW (0 or more). Got: ${JSON.stringify(amount)}`,
+      );
     }
     // Normalize base58check/hex here so downstream (assembly, the editor table)
     // only ever sees canonical hex — and a typo'd address fails with its line number.
@@ -60,7 +62,7 @@ export function parseRecipientsCsv(text: string): RecipientRow[] {
     try {
       canonical = decodeAddress(pubkey);
     } catch (e) {
-      throw new Error(`CSV ${i + 1}행: 주소를 읽을 수 없습니다. (${(e as Error).message})`);
+      throw new Error(`CSV line ${i + 1}: could not read the address. (${(e as Error).message})`);
     }
     rows.push({ pubkey: canonical, amount });
   });

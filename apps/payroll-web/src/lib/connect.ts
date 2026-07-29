@@ -37,10 +37,10 @@ const publicClient: PublicClient = createPublicClient({ chain: giwaSepolia, tran
  */
 export async function openInjectedConnection(): Promise<Connection> {
   const injected = injectedProvider();
-  if (!injected) throw new Error("설치된 지갑이 없습니다. MetaMask를 설치한 뒤 다시 시도하세요.");
+  if (!injected) throw new Error("No wallet found in this browser. Install MetaMask and try again.");
   const walletClient = createWalletClient({ chain: giwaSepolia, transport: custom(injected) });
   const [address] = await walletClient.requestAddresses();
-  if (!address) throw new Error("지갑이 계정을 열어주지 않았습니다. MetaMask에서 계정을 선택하세요.");
+  if (!address) throw new Error("The wallet did not share an account. Select one in MetaMask and try again.");
   return {
     address,
     walletClient: createWalletClient({ account: address, chain: giwaSepolia, transport: custom(injected) }),

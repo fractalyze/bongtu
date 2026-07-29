@@ -1,37 +1,48 @@
-# bongtu payroll (봉투 페이롤)
+# bongtu payroll (Bongtu Payroll)
 
 A login-gated **single-page pay console** for the employer (SPEC §7 employer-mode),
 built on the shared **`@bongtu/client`** protocol engine. Same bjj identity as the
-public wallet — MetaMask login runs the same EIP-712 → bjj derivation under the ONE
+public wallet — the wallet connect runs the same EIP-712 → bjj derivation under the ONE
 `@bongtu/client/identity KEY_DERIVATION` config, so the console and the wallet derive
 the **same key for the same account** by construction. It imports the `@bongtu/*`
 workspace **source directly**, so every commitment / nullifier / ciphertext it builds
 is byte-identical to what the prover service proves and the contract verifies.
 
 There is no auditor mode here anymore (the arbiter seat is the arbiter indexer's
-`/notes`); this app is **login + worksheet only**.
+`/notes`); this app is **login + worksheet only**. All copy is English.
 
-## The one page
+## The one page — behind a two-stage login
 
-- **Login** — product hero + one button: connect the injected wallet → EIP-712 sign →
-  console. The session is the in-memory `KeyCache` hold only (`src/lib/keyCache.ts`):
-  nothing persists, a refresh (or the 10-min idle wipe, or an account switch) means
-  logging in again. At login the key is traded for an indexer **view token** so
-  background balance reads never need it.
-- **Worksheet** — full-width rows of `{받는 주소, 금액(kKRW)}`; `[+]` adds a row
-  (capped at **255** = B−1, one slot is the employer's change note), CSV paste fills
-  the sheet (`lib/csv.ts` — exactly two cells `pubkey,amount` per line, base58check/hex
-  both fine; a third cell is rejected by line number rather than truncated, so a
-  thousands-comma cannot become a 1000x underpay), per-row inline errors (bad address,
-  duplicate, self-pay, bad amount), rows draft-persisted to localStorage
-  (`lib/worksheet.ts`, injectable-storage seam).
-- **Footer** — one note covers the total → `[전송]`; covered but fragmented → `[전송]`
-  and the run auto-inserts merge legs; insufficient → the **입금** (deposit) CTA takes
-  over with the exact shortfall (deposit is de-emphasized otherwise). Until the first
-  balance read lands there is a fourth, neutral state: 확인 중, send disabled, no
-  deposit CTA — an unread balance is never reported as 부족.
+- **Service login (the login page)** — an ID/password form. The credentials are
+  REAL prover-service credentials, not UI theater: submit builds HTTP Basic
+  (`base64(id + ":" + password)`), validates it against `GET {proverBase}/auth/check`
+  (`src/lib/serviceAuth.ts`; 401 → "Wrong ID or password." inline), and holds the
+  Basic value in **sessionStorage** — a refresh keeps the service session, closing
+  the browser ends it. The same value rides as the `Authorization` header on
+  **every** prover request (`lib/proverClient.ts`); a 401 from any later prover
+  call drops the service session back to the login page. Against a dev prover with
+  `PROVER_AUTH_SHA256` unset, `/auth/check` answers 200 for anything — sign-in is
+  free locally.
+- **Wallet session (inside the console)** — `[Connect wallet]` in the header while
+  none exists: connect the injected wallet → `ensureChain` → EIP-712 sign → the
+  in-memory `KeyCache` hold (`src/lib/keyCache.ts`) → indexer **view token** so
+  background balance reads never need the key. Nothing persists: a refresh, the
+  10-min idle wipe, or an account switch drops the wallet session (the service
+  session stands). Send/deposit without a wallet session prompt for the connect.
+- **Worksheet** — full-width rows of `{recipient address, amount (kKRW)}`; `[+]` adds
+  a row (capped at **255** = B−1, one slot is the employer's change note), CSV paste
+  fills the sheet (`lib/csv.ts` — exactly two cells `pubkey,amount` per line,
+  base58check/hex both fine; a third cell is rejected by line number rather than
+  truncated, so a thousands-comma cannot become a 1000x underpay), per-row inline
+  errors (bad address, duplicate, self-pay, bad amount), rows draft-persisted to
+  localStorage (`lib/worksheet.ts`, injectable-storage seam).
+- **Footer** — one note covers the total → `[Send]`; covered but fragmented →
+  `[Send]` and the run auto-inserts merge legs; insufficient → the **Deposit** CTA
+  takes over with the exact shortfall (deposit is de-emphasized otherwise). Until the
+  first balance read lands there is a fourth, neutral state: Loading, send disabled,
+  no deposit CTA — an unread balance is never reported as Short.
 
-## What [전송] runs
+## What [Send] runs
 
 One click, one progress rail, the whole chain:
 
@@ -97,27 +108,32 @@ src/
                        + the 2054-element ciphertext (CSPRNG pads/salts/shuffle)
     payRun.ts          the whole run: client merge chain, then the disburse leg
     csv.ts             recipient CSV parser (the paste-fill path)
-    errors.ts          the Korean boundary: shared-classifier verdicts + amount
-                       errors in the console's voice (client/ui stay English)
-    proverClient.ts    the ONE service adapter: POST /prove + per-circuit pub pins
+    errors.ts          the wording boundary: shared-classifier verdicts in the
+                       console's voice + the deposit field's amount errors
+    serviceAuth.ts     the service session: Basic value builder, /auth/check
+                       sign-in probe, sessionStorage holder (drop on 401)
+    proverClient.ts    the ONE service adapter: POST /prove + Authorization
+                       header + per-circuit pub pins
     chain.ts           disburseWithCiphertexts submit over the shared Connection
     connect.ts         injected EIP-1193 -> the engine's Connection (no wagmi here)
     keyCache.ts        the one lock instance (shared KDF, live-account read)
     toasts.ts          the one toast queue (@bongtu/ui)
   ui/
-    App.tsx            login gate (session == the KeyCache hold)
-    Login.tsx          hero + [MetaMask로 로그인]
-    Console.tsx        header / worksheet / stat bar / footer / progress rail / done
+    App.tsx            service-login gate (session == the held Basic value)
+    Login.tsx          hero + the ID/password [Sign in] form
+    Console.tsx        header (wallet connect) / worksheet / stat bar / footer /
+                       progress rail / done
     controls.tsx       shared control looks on the wallet token palette
 test/
   worksheet.test.ts    rows, validation (self-pay), csv fill, draft seam, readiness
-  proverClient.test.ts adapter + pub-length pins + base-URL defaults
+  proverClient.test.ts adapter + pub-length pins + auth header + base-URL defaults
+  serviceAuth.test.ts  the service session: Basic value, sign-in probe, holder
   kdf.test.ts          identity coincidence with wallet-web (shared KEY_DERIVATION)
   assemble.test.ts     the disburse assembly gate (kept from the previous console)
   randomness.test.ts   recipient-count privacy: per-batch CSPRNG draws + shuffle
   csv.test.ts          CSV normalization, cell-count and header-heuristic gate
   payRun.test.ts       batch bounds + terminal-leg failure wording (injected I/O)
-  errors.test.ts       the Korean boundary's wording gate
+  errors.test.ts       the wording boundary's gate
 ```
 
 ## License

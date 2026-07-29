@@ -82,7 +82,7 @@ test("a duplicate address is flagged on the LATER row, naming the first", () => 
   assert.equal(check.issues.length, 1);
   assert.equal(check.issues[0].index, 1);
   assert.equal(check.issues[0].field, "address");
-  assert.match(check.issues[0].message, /1행/);
+  assert.match(check.issues[0].message, /row 1/);
 });
 
 test("a row paying the logged-in employer is flagged in the cell, in either address form", () => {
@@ -151,8 +151,8 @@ test("CSV paste fills rows through the one csv parser (base58/hex normalized)", 
 });
 
 test("CSV paste rejects an empty paste, a bad line, and an over-cap sheet", () => {
-  assert.throws(() => rowsFromCsv("# comments only\n"), /행이 없습니다/);
-  assert.throws(() => rowsFromCsv(`${ADDR_A}`), /1행/);
+  assert.throws(() => rowsFromCsv("# comments only\n"), /No payee rows/);
+  assert.throws(() => rowsFromCsv(`${ADDR_A}`), /line 1/);
   const over = Array.from(
     { length: MAX_ROWS + 1 },
     (_, i) => `${packPubkey(deriveKeypair(6000000000n + BigInt(i) * 1013n).publicKey)},1`,
@@ -217,13 +217,13 @@ test("footer: insufficient -> the deposit CTA state, carrying the exact shortfal
   assert.deepEqual(verdict, { kind: "insufficient", shortfallWei: wei(150n) });
 });
 
-test("footer: a balance that has not loaded yet is its OWN state, never 부족", () => {
+test("footer: a balance that has not loaded yet is its OWN state, never Short", () => {
   // The bug this pins: null (first paint, or an unreachable indexer) read as an
   // empty balance told a funded employer they were short by the whole payroll and
   // pushed a deposit for it.
   const check = checkWorksheet([row(ADDR_A, "300")]);
   assert.deepEqual(sendReadiness(check, null), { kind: "loading" });
-  assert.deepEqual(sendReadiness(check, []), { kind: "insufficient", shortfallWei: wei(300n) }, "an actually EMPTY balance is still 부족");
+  assert.deepEqual(sendReadiness(check, []), { kind: "insufficient", shortfallWei: wei(300n) }, "an actually EMPTY balance is still Short");
   // …and the verdict never claims sendability while the balance is unknown.
   for (const rows of [[blankRow()], [row(ADDR_A, "300")], [row("bad", "10")]]) {
     assert.equal(sendReadiness(checkWorksheet(rows), null).kind, "loading");

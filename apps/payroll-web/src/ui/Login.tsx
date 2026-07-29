@@ -1,11 +1,15 @@
-// The login page — the console's only other screen. One button does the whole
-// entry: connect the injected wallet -> EIP-712 sign (the shared KDF, so the
-// employer's bjj key is exactly what wallet-web would derive) -> main page.
+// The service login — the console's only other screen. An id/password form
+// whose credentials are REAL prover-service credentials (lib/serviceAuth.ts →
+// GET /auth/check), not UI theater. The wallet is NOT connected here: MetaMask
+// lives inside the Console, where the actions that need it are.
+//
+// Copy is deliberately minimal (LOCKED): product title + tagline + the form.
 // The hero is an inline SVG on the shared CSS tokens (no external assets):
 // a shield-marked envelope fanning out to many small notes — the product in one
 // picture, one funding note privately paying a whole payroll.
 
-import type { ReactNode } from "react";
+import { useState } from "react";
+import type { FormEvent, ReactNode } from "react";
 
 /** The payroll hero: envelope+shield on the left, a fan of pay-flow lines to a
  *  column of recipient notes on the right. Token-driven colors only. */
@@ -16,7 +20,7 @@ function PayrollHero(): ReactNode {
     <svg
       viewBox="0 0 360 156"
       role="img"
-      aria-label="하나의 봉투에서 여러 직원에게 이어지는 지급 흐름"
+      aria-label="One envelope paying out to many recipients"
       className="w-full max-w-[360px] h-auto"
     >
       {/* envelope */}
@@ -52,7 +56,7 @@ function PayrollHero(): ReactNode {
           <rect x="22" y="7" width={i % 2 ? 34 : 44} height="6" rx="3" fill="var(--color-surface-2)" />
         </g>
       ))}
-      {/* the "…까지 255명" ellipsis dots under the column */}
+      {/* the "…and 250 more" ellipsis dots under the column */}
       {[0, 1, 2].map((i) => (
         <circle key={i} cx={285 + i * 10} cy={146} r="1.8" fill="var(--color-muted)" />
       ))}
@@ -60,44 +64,72 @@ function PayrollHero(): ReactNode {
   );
 }
 
+const FIELD_CLS =
+  "w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-[14px] " +
+  "focus:outline-none focus:border-border-strong";
+
 export function Login({
-  onLogin,
+  onSignIn,
   busy,
   error,
 }: {
-  onLogin: () => void;
+  onSignIn: (id: string, password: string) => void;
   busy: boolean;
   error: string | null;
 }): ReactNode {
+  const [id, setId] = useState("");
+  const [password, setPassword] = useState("");
+  const submit = (e: FormEvent): void => {
+    e.preventDefault();
+    if (!busy) onSignIn(id, password);
+  };
   return (
     <div className="min-h-full flex items-center justify-center p-6">
-      <div className="w-full max-w-[420px] bg-surface border border-border rounded-2xl p-8 flex flex-col items-center gap-5 text-center shadow-[0_8px_28px_-18px_rgba(17,24,39,0.18)]">
+      <form
+        onSubmit={submit}
+        className="w-full max-w-[420px] bg-surface border border-border rounded-2xl p-8 flex flex-col items-center gap-5 text-center shadow-[0_8px_28px_-18px_rgba(17,24,39,0.18)]"
+      >
         <div className="flex items-baseline gap-2">
-          <span className="text-2xl font-bold text-primary">봉투</span>
-          <span className="text-lg font-semibold">페이롤</span>
+          <span className="text-2xl font-bold text-primary">Bongtu</span>
+          <span className="text-2xl font-bold">Payroll</span>
         </div>
-        <p className="text-[13.5px] text-muted -mt-2">
-          한 번의 전송으로 최대 255명에게, 금액도 인원수도 드러내지 않고 급여를 지급합니다.
-        </p>
+        <p className="text-[13.5px] text-muted -mt-2">Payroll administration, at scale.</p>
         <PayrollHero />
+        <label className="w-full flex flex-col gap-1 text-left">
+          <span className="text-[11px] text-muted">ID</span>
+          <input
+            type="text"
+            className={FIELD_CLS}
+            autoComplete="username"
+            autoFocus
+            spellCheck={false}
+            value={id}
+            onChange={(e) => setId(e.target.value)}
+          />
+        </label>
+        <label className="w-full flex flex-col gap-1 text-left">
+          <span className="text-[11px] text-muted">Password</span>
+          <input
+            type="password"
+            className={FIELD_CLS}
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </label>
         <button
-          type="button"
+          type="submit"
           disabled={busy}
-          onClick={onLogin}
           className="w-full bg-primary text-primary-ink rounded-xl px-4 py-3 font-semibold cursor-pointer hover:bg-primary-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          {busy ? "지갑 서명 대기 중…" : "MetaMask로 로그인"}
+          {busy ? "Signing in…" : "Sign in"}
         </button>
         {error && (
           <p role="alert" className="text-[13px] text-err bg-err-bg border border-err-border rounded-xl px-3 py-2 w-full">
             {error}
           </p>
         )}
-        <p className="text-[12px] text-muted">
-          로그인 서명으로 지급 키를 만듭니다. 키는 이 탭의 메모리에만 있으며, 새로고침하면 다시
-          로그인합니다.
-        </p>
-      </div>
+      </form>
     </div>
   );
 }

@@ -4,7 +4,7 @@
 //   (1) the batch bounds, checked before any leg runs, so an impossible sheet
 //       fails in the instant after the click rather than after minutes of merges;
 //   (2) the terminal-leg failure wording — once merge transactions have LANDED,
-//       "실패했습니다" alone reads like lost payroll, so the money state is named.
+//       a bare "failed" reads like lost payroll, so the money state is named.
 //
 // The run's I/O edges are injected (PayRunDeps), so the whole terminal leg runs
 // here with no wallet, no indexer and no prover.
@@ -102,18 +102,20 @@ test("a terminal failure AFTER landed merges says the money is safe and the retr
     (e: Error) =>
       e.message.includes(PAY_RUN_FAILURE_REASSURANCE) &&
       e.message.includes("indexer is down") &&
-      /지급되지 않았/.test(e.message),
+      /nobody was paid/.test(e.message),
     "two signed transactions landed and nobody was paid — that must be said",
   );
 });
 
-test("the wrapped headline is Korean, not the engine's English", async () => {
-  // A declined wallet popup on the terminal leg: @bongtu/client would word this
-  // "Transaction rejected in your wallet." — payroll speaks to its operator.
+test("the wrapped headline is the console's wording, not the raw thrown value", async () => {
+  // A declined wallet popup on the terminal leg goes through payrollErrorMessage,
+  // so the operator reads the verdict, not the provider's error string.
   const rejected = Object.assign(new Error("User rejected the request"), { code: 4001 });
   await assert.rejects(
     runPayRun(CTX, recipients(3), noop, deps({ merges: 1, headError: rejected })),
-    (e: Error) => e.message.startsWith("지갑에서 서명을 거부했습니다.") && e.message.includes(PAY_RUN_FAILURE_REASSURANCE),
+    (e: Error) =>
+      e.message.startsWith("Transaction rejected in your wallet.") &&
+      e.message.includes(PAY_RUN_FAILURE_REASSURANCE),
   );
 });
 

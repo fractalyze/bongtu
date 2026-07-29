@@ -38,15 +38,13 @@ export const MAX_RECIPIENTS = DEFAULTS.batchSize - 1;
 
 /**
  * What the console says when the TERMINAL disburse fails after merge legs have
- * already landed. @bongtu/client owns the English original (CHAIN_FAILURE_REASSURANCE,
- * which the wallet renders) — payroll speaks Korean to its operator, so the wrapper is
- * translated at this boundary rather than changed in the shared package.
- *
- * The money is the whole point: several transactions were signed and none of them
- * paid anybody, so "실패했습니다" alone reads like lost payroll.
+ * already landed. @bongtu/client's CHAIN_FAILURE_REASSURANCE covers a wallet's
+ * merge chain; a payroll's version must speak to the payroll fear — the money is
+ * the whole point: several transactions were signed and none of them paid
+ * anybody, so a bare "failed" reads like lost payroll.
  */
 export const PAY_RUN_FAILURE_REASSURANCE =
-  "자금은 안전합니다. 아무에게도 지급되지 않았고, 이미 합쳐진 노트는 그대로 남아 있어 다시 시도하면 더 짧은 과정으로 끝납니다.";
+  "Your funds are safe: nobody was paid, and the already-merged notes stay merged — a retry finishes in fewer steps.";
 
 export interface PayRunResult {
   /** the terminal disburse transaction — what the done screen links. */
@@ -91,9 +89,11 @@ export async function runPayRun(
   // The batch bounds, checked before ANY leg runs: an empty sheet has nothing to
   // sign for, and a sheet past B-1 recipients cannot fit the circuit's output
   // slots — either would otherwise surface after minutes of merges and proving.
-  if (recipients.length === 0) throw new Error("지급할 행이 없습니다.");
+  if (recipients.length === 0) throw new Error("No payee rows to pay.");
   if (recipients.length > MAX_RECIPIENTS) {
-    throw new Error(`한 번에 최대 ${MAX_RECIPIENTS}명까지 지급할 수 있습니다. (지금 ${recipients.length}명)`);
+    throw new Error(
+      `At most ${MAX_RECIPIENTS} payees per run — the sheet has ${recipients.length}.`,
+    );
   }
   const total = recipients.reduce((s, r) => s + BigInt(r.amount), 0n);
   const io = {
@@ -153,7 +153,7 @@ export async function runPayRun(
     // The builder folds the funding note's path itself — refuse to spend a proof
     // (and the user's wait) on a root the balance has already moved past.
     if (!built.meta.membershipOk) {
-      throw new Error("잔고가 방금 바뀌었습니다. 잠시 후 다시 시도하세요.");
+      throw new Error("Your balance just changed. Try again in a moment.");
     }
 
     onStage("prove", leg);
