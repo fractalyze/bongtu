@@ -1,5 +1,5 @@
 // Headless gate for the spending key's SESSION BINDING as the two action flows see it
-// (lib/identity.ts + lib/keyCache.ts, enforced in spendFlow.runSpendChain and
+// (identity.ts + keyCache.ts, enforced in spendFlow.runSpendChain and
 // depositFlow.runDeposit). The lock's own state machine — reuse, both idle-wipe
 // layers, the indicator — is gated in keyCache.test.ts; this file is about what the
 // FLOWS do with it.
@@ -27,12 +27,12 @@ import assert from "node:assert/strict";
 import type { Calldata } from "@bongtu/core/proving";
 import { commitment } from "@bongtu/core/note";
 import { ImtTree, foldToRoot } from "@bongtu/core/imt";
-import { deriveIdentityFromSignature } from "../src/lib/derive.js";
-import { ACCOUNT_MISMATCH_MESSAGE, assertSessionIdentity } from "../src/lib/identity.js";
-import { KeyCache } from "../src/lib/keyCache.js";
-import { runSpendChain, type RunSpendDeps, type SpendContext } from "../src/lib/spendFlow.js";
-import { runDeposit, type DepositContext, type RunDepositDeps } from "../src/lib/depositFlow.js";
-import type { OwnerNote } from "../src/lib/indexerClient.js";
+import { deriveIdentityFromSignature } from "../src/derive.js";
+import { ACCOUNT_MISMATCH_MESSAGE, assertSessionIdentity } from "../src/identity.js";
+import { KeyCache } from "../src/keyCache.js";
+import { runSpendChain, type SpendIo, type SpendContext } from "../src/spendFlow.js";
+import { runDeposit, type DepositContext, type DepositIo } from "../src/depositFlow.js";
+import type { OwnerNote } from "../src/indexerClient.js";
 
 const SESSION_SIG = "0x" + "a1".repeat(32) + "b2".repeat(32) + "1c";
 const OTHER_SIG = "0x" + "c3".repeat(32) + "d4".repeat(32) + "1b";
@@ -98,7 +98,7 @@ function testCache(trace: Trace, wallet: FakeWallet): KeyCache {
   });
 }
 
-function spendDeps(trace: Trace, keyCache: KeyCache): Partial<RunSpendDeps> {
+function spendDeps(trace: Trace, keyCache: KeyCache): SpendIo {
   return {
     ensureChain: async () => {},
     assertPoolKemEpoch: async () => {},
@@ -116,7 +116,7 @@ function spendDeps(trace: Trace, keyCache: KeyCache): Partial<RunSpendDeps> {
         root: MEMBERSHIP_ROOT,
       };
     },
-    proveInBrowser: async () => {
+    prove: async () => {
       trace.prove++;
       return DUMMY_CALLDATA;
     },
@@ -134,6 +134,8 @@ function spendDeps(trace: Trace, keyCache: KeyCache): Partial<RunSpendDeps> {
 const spendCtx = (): SpendContext => ({
   connection: FAKE_CONNECTION,
   indexerUrl: "http://localhost:8600",
+  pool: "0x0000000000000000000000000000000000000b0b",
+  explorer: "https://x",
   notes: NOTES,
   sessionPubkey: SESSION.compressedPubkey,
   // The single note below funds every amount here in ONE transaction, so no chain
@@ -143,7 +145,7 @@ const spendCtx = (): SpendContext => ({
   },
 });
 
-function depositDeps(trace: Trace, keyCache: KeyCache): Partial<RunDepositDeps> {
+function depositDeps(trace: Trace, keyCache: KeyCache): DepositIo {
   return {
     ensureChain: async () => {},
     assertPoolKemEpoch: async () => {},
@@ -153,7 +155,7 @@ function depositDeps(trace: Trace, keyCache: KeyCache): Partial<RunDepositDeps> 
       trace.approve++;
       return "0xapprove";
     },
-    proveInBrowser: async () => {
+    prove: async () => {
       trace.prove++;
       return DUMMY_CALLDATA;
     },
@@ -166,6 +168,9 @@ function depositDeps(trace: Trace, keyCache: KeyCache): Partial<RunDepositDeps> 
 
 const depositCtx = (): DepositContext => ({
   connection: FAKE_CONNECTION,
+  pool: "0x0000000000000000000000000000000000000b0b",
+  token: "0x0000000000000000000000000000000000000c0c",
+  explorer: "https://x",
   sessionPubkey: SESSION.compressedPubkey,
 });
 

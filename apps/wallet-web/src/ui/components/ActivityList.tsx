@@ -11,11 +11,11 @@
 
 import type { ReactNode } from "react";
 import { encodeAddress } from "@bongtu/core/pubkey";
-import type { HistoryItem, HistoryKind } from "../../lib/indexerClient.js";
-// verb + direction live in lib/activity.ts (pure, headlessly tested) — this file
+import type { HistoryItem, HistoryKind } from "@bongtu/client/indexerClient";
+// verb + direction live in @bongtu/client/activity (pure, headlessly tested) — this file
 // only keeps what needs JSX: the icon mapping and the row layout.
-import { ACTIVITY_VERB, activityDirection } from "../../lib/activity.js";
-import { formatKkrw } from "../../lib/money.js";
+import { ACTIVITY_VERB, activityDirection } from "@bongtu/client/activity";
+import { formatKkrw } from "@bongtu/client/money";
 import { relativeTime, shortenPubkey } from "../format.js";
 import { LinkButton } from "./controls.js";
 import { IconReceived, IconSend, IconDeposit, IconWithdraw, IconExternalLink } from "./icons.js";

@@ -10,7 +10,7 @@
 // when the current allowance already covers V (one approve tx only when needed, then the
 // permissionless deposit tx).
 
-import { DEFAULTS } from "../config.js";
+import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
 import type { Connection } from "./connection.js";
 import {
   approveToken,
@@ -20,9 +20,8 @@ import {
   submitDeposit,
   walletErrorMessage,
 } from "./connection.js";
-import { keyCache, type KeyCache } from "./keyCache.js";
+import type { KeyCache } from "./keyCache.js";
 import { assertDepositAffordable, buildDepositRequest, freshDepositCrypto } from "./deposit.js";
-import { proveInBrowser } from "./prove.js";
 import { randField } from "./spend.js";
 
 /** The coarse stages a deposit passes through. "unlock" is the signature that hands
@@ -33,6 +32,12 @@ export type DepositStage = "unlock" | "approve" | "prove" | "submit";
 
 export interface DepositContext {
   connection: Connection;
+  /** the pool address the deposit approves and submits to (app config). */
+  pool: string;
+  /** the wrapped kKRW ERC-20 the pool escrows (app config). */
+  token: string;
+  /** the explorer base URL the success link is built on (app config). */
+  explorer: string;
   /** the logged-in session's compressed bjj pubkey — what the just-in-time
    *  derivation must reproduce before any kKRW is shielded. */
   sessionPubkey: string;
@@ -57,16 +62,22 @@ export interface RunDepositDeps {
   ensureChain: typeof ensureChain;
   /** the wallet's lock — holds the spending key between actions (keyCache.ts). */
   keyCache: KeyCache;
-  proveInBrowser: typeof proveInBrowser;
+  /** Turn a ProvingRequest into Groth16 calldata. The APP supplies this: wallet-web
+   *  injects in-browser snarkjs (prove.ts proveInBrowser with its circuit asset
+   *  base URL applied); payroll-web will inject its prover-service adapter. */
+  prove: (request: ProvingRequest) => Promise<Calldata>;
   submitDeposit: typeof submitDeposit;
 }
-const DEFAULT_DEPS: RunDepositDeps = {
+
+/** What every deposit must be handed: the app's lock instance and its prover. The
+ *  engine-side edges (token reads, guards, submits) default to the real ones. */
+export type DepositIo = Pick<RunDepositDeps, "keyCache" | "prove"> & Partial<RunDepositDeps>;
+
+const DEFAULT_DEPS: Omit<RunDepositDeps, "keyCache" | "prove"> = {
   readTokenState,
   approveToken,
   assertPoolKemEpoch,
   ensureChain,
-  keyCache,
-  proveInBrowser,
   submitDeposit,
 };
 
@@ -91,9 +102,9 @@ export async function runDeposit(
   ctx: DepositContext,
   args: { amount: string },
   onStage: (stage: DepositStage) => void,
-  deps: Partial<RunDepositDeps> = {},
+  deps: DepositIo,
 ): Promise<DepositOutcome> {
-  const io = { ...DEFAULT_DEPS, ...deps };
+  const io: RunDepositDeps = { ...DEFAULT_DEPS, ...deps };
   const amount = args.amount.trim();
   const V = BigInt(amount);
   if (V <= 0n) throw new Error(`deposit amount must be positive, got ${V}`);
@@ -108,12 +119,12 @@ export async function runDeposit(
   // Verify the pool's arbiter KEM key hash FIRST: a pre-KEM or foreign-keyed pool
   // can never accept this build's proof, so nothing below — not the approve tx, not
   // the signature popup, not the multi-second proof — is worth spending on it.
-  await io.assertPoolKemEpoch(ctx.connection, DEFAULTS.pool);
+  await io.assertPoolKemEpoch(ctx.connection, ctx.pool);
   const { balance, allowance } = await io.readTokenState(
     ctx.connection,
-    DEFAULTS.token,
+    ctx.token,
     ctx.connection.address,
-    DEFAULTS.pool,
+    ctx.pool,
   );
   // Fail BEFORE the approve tx + proof if the public balance can't cover V (the pool's
   // safeTransferFrom would revert on-chain anyway).
@@ -126,7 +137,7 @@ export async function runDeposit(
   if (locked) onStage("approve");
   let approved = false;
   if (allowance < V) {
-    await io.approveToken(ctx.connection, DEFAULTS.token, DEFAULTS.pool, V);
+    await io.approveToken(ctx.connection, ctx.token, ctx.pool, V);
     approved = true;
   }
 
@@ -134,13 +145,13 @@ export async function runDeposit(
     onStage("prove");
     const crypto = freshDepositCrypto(randField);
     const built = buildDepositRequest(identity, amount, crypto);
-    const calldata = await io.proveInBrowser(built.request, DEFAULTS.circuitBaseUrl);
+    const calldata = await io.prove(built.request);
 
     onStage("submit");
     // The tx carries the SAME encapsulation the proof's kemBinding committed to
     // (crypto.kemCiphertext) — a different ct would decapsulate to mismatching
     // limbs at the arbiter and burn the envelope into an alarm.
-    const res = await io.submitDeposit(ctx.connection, DEFAULTS.pool, calldata, crypto.kemCiphertext, DEFAULTS.explorer);
+    const res = await io.submitDeposit(ctx.connection, ctx.pool, calldata, crypto.kemCiphertext, ctx.explorer);
     return { txHash: res.txHash, explorerUrl: res.explorerUrl, amount, approved };
   } catch (e) {
     // The CHAIN_FAILURE_REASSURANCE pattern generalized (error-surface standard):

@@ -1,4 +1,4 @@
-// Headless gates for the refresh policy + post-action poller (src/lib/refresh.ts).
+// Headless gates for the refresh policy + post-action poller (src/refresh.ts).
 //
 //   (1) PREDICATE — actionReflected accepts on: the tx in history, a longer
 //       history, a changed note set (created/spent); rejects an unchanged state.
@@ -27,8 +27,8 @@ import {
   EXPIRED_MESSAGE,
   RECONNECT_NOTICE,
   type OwnerSnapshot,
-} from "../src/lib/refresh.js";
-import type { OwnerNote, HistoryItem, HistoryPage } from "../src/lib/indexerClient.js";
+} from "../src/refresh.js";
+import type { OwnerNote, HistoryItem, HistoryPage } from "../src/indexerClient.js";
 
 const note = (commitment: string, spent: boolean): OwnerNote => ({
   owner: ["1", "2"],

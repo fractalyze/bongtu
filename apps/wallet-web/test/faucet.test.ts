@@ -18,16 +18,17 @@ import assert from "node:assert/strict";
 
 import type { Calldata } from "@bongtu/core/proving";
 import { DEFAULTS, testnetFromEnv } from "../src/config.js";
-import { deriveIdentityFromSignature } from "../src/lib/derive.js";
+import { deriveIdentityFromSignature } from "@bongtu/client/derive";
 import { FAUCET_AMOUNT } from "../src/lib/faucet.js";
-import { assertDepositAffordable } from "../src/lib/deposit.js";
-import { KeyCache } from "../src/lib/keyCache.js";
+import { assertDepositAffordable } from "@bongtu/client/deposit";
+import { KeyCache } from "@bongtu/client/keyCache";
 import {
   runDeposit,
   DEPOSIT_FAILURE_REASSURANCE,
   type DepositContext,
+  type DepositIo,
   type RunDepositDeps,
-} from "../src/lib/depositFlow.js";
+} from "@bongtu/client/depositFlow";
 
 const SIG = "0x" + "a1".repeat(32) + "b2".repeat(32) + "1c";
 
@@ -43,6 +44,9 @@ function fakeContext(sessionPubkey: string = SESSION_PUBKEY): DepositContext {
   return {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     connection: { address: ACCOUNT, provider: {}, signer: {} } as any,
+    pool: "0x0000000000000000000000000000000000000b0b",
+    token: "0x0000000000000000000000000000000000000c0c",
+    explorer: "https://x",
     sessionPubkey,
   };
 }
@@ -62,7 +66,7 @@ function fakeKeyCache(onDerive: () => void = () => {}): KeyCache {
 
 // The MetaMask edges every flow test injects: chain alignment is a no-op and the
 // spending key comes from a fake lock (keyCache.ts).
-function fakeWalletDeps(): Partial<RunDepositDeps> {
+function fakeWalletDeps(): Pick<RunDepositDeps, "ensureChain" | "assertPoolKemEpoch" | "keyCache"> {
   return {
     ensureChain: async () => {},
     assertPoolKemEpoch: async () => {},
@@ -98,7 +102,7 @@ test("runDeposit rejects V > balance BEFORE approving, key-deriving, or proving"
   let approveCalls = 0;
   let proveCalls = 0;
   let deriveCalls = 0;
-  const deps: Partial<RunDepositDeps> = {
+  const deps: DepositIo = {
     ...fakeWalletDeps(),
     keyCache: fakeKeyCache(() => deriveCalls++),
     readTokenState: async () => ({ balance: 100n, allowance: 0n }),
@@ -106,7 +110,7 @@ test("runDeposit rejects V > balance BEFORE approving, key-deriving, or proving"
       approveCalls++;
       return "0xapprove";
     },
-    proveInBrowser: async () => {
+    prove: async () => {
       proveCalls++;
       return DUMMY_CALLDATA;
     },
@@ -130,7 +134,7 @@ test("runDeposit happy path threads kem-guard → unlock → approve → prove �
   let kemGuardCalls = 0;
   let deriveCalls = 0;
   const stages: string[] = [];
-  const deps: Partial<RunDepositDeps> = {
+  const deps: DepositIo = {
     ...fakeWalletDeps(),
     keyCache: fakeKeyCache(() => {
       // The unlock signature appears only after the kem guard, and before any tx —
@@ -150,7 +154,7 @@ test("runDeposit happy path threads kem-guard → unlock → approve → prove �
       assert.equal(proveCalls, 0, "kem guard runs BEFORE the proof");
       kemGuardCalls++;
     },
-    proveInBrowser: async () => {
+    prove: async () => {
       proveCalls++;
       return DUMMY_CALLDATA;
     },
@@ -170,7 +174,7 @@ test("runDeposit happy path threads kem-guard → unlock → approve → prove �
 
 test("runDeposit refuses when the pool's KEM epoch rejects this build's key", async () => {
   let proveCalls = 0;
-  const deps: Partial<RunDepositDeps> = {
+  const deps: DepositIo = {
     ...fakeWalletDeps(),
     keyCache: fakeKeyCache(() => {
       throw new Error("no key derivation may happen against an unverified key");
@@ -179,7 +183,7 @@ test("runDeposit refuses when the pool's KEM epoch rejects this build's key", as
     assertPoolKemEpoch: async () => {
       throw new Error("on-chain arbiter KEM key hash 0x11 does not match this build's ARBITER_KEM_PK");
     },
-    proveInBrowser: async () => {
+    prove: async () => {
       proveCalls++;
       return DUMMY_CALLDATA;
     },
@@ -220,11 +224,11 @@ test("DEFAULTS.testnet is true where import.meta.env is absent (node runner)", (
 // must NOT appear (nothing partial can exist — it would only confuse).
 
 test("a deposit failing AFTER its approve landed carries the money-state line", async () => {
-  const deps: Partial<RunDepositDeps> = {
+  const deps: DepositIo = {
     ...fakeWalletDeps(),
     readTokenState: async () => ({ balance: 1_000n, allowance: 0n }), // approve needed
     approveToken: async () => "0xapprove",
-    proveInBrowser: async () => {
+    prove: async () => {
       throw new Error("proof worker crashed");
     },
     submitDeposit: async () => {
@@ -239,13 +243,13 @@ test("a deposit failing AFTER its approve landed carries the money-state line", 
 });
 
 test("a deposit failing with NO approve landed stays a plain failure (no reassurance)", async () => {
-  const deps: Partial<RunDepositDeps> = {
+  const deps: DepositIo = {
     ...fakeWalletDeps(),
     readTokenState: async () => ({ balance: 1_000n, allowance: 10_000n }), // approve skipped
     approveToken: async () => {
       throw new Error("approve must not run when the allowance covers V");
     },
-    proveInBrowser: async () => {
+    prove: async () => {
       throw new Error("proof worker crashed");
     },
     submitDeposit: async () => {

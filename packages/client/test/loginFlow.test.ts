@@ -8,9 +8,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { runLogin, type RunLoginDeps } from "../src/lib/loginFlow.js";
-import type { Connection } from "../src/lib/connection.js";
-import type { WalletIdentity } from "../src/lib/derive.js";
+import { runLogin, type RunLoginDeps } from "../src/loginFlow.js";
+import type { Connection } from "../src/connection.js";
+import type { WalletIdentity } from "../src/derive.js";
 
 const CONNECTION = { address: "0xabc", transport: "injected" } as unknown as Connection;
 const IDENTITY = {
@@ -18,7 +18,7 @@ const IDENTITY = {
   keypair: { formattedPrivateKey: "priv" },
 } as unknown as WalletIdentity;
 
-function fakes(calls: string[], overrides: Partial<RunLoginDeps> = {}): Partial<RunLoginDeps> {
+function fakes(calls: string[], overrides: Partial<RunLoginDeps> = {}): RunLoginDeps {
   return {
     openConnection: async () => {
       calls.push("open");

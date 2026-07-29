@@ -1,4 +1,4 @@
-// Headless gates for the PURE deposit/shield witness builder (src/lib/deposit.ts) —
+// Headless gates for the PURE deposit/shield witness builder (src/deposit.ts) —
 // the 0-in / 2-out mint this unit adds. MetaMask, the ERC-20 approve, and live snarkjs
 // are out of scope (network edge, covered elsewhere); what IS covered is the whole
 // security-critical witness assembly:
@@ -21,14 +21,17 @@ import { ml_kem768, kemSsToLimbs, kemHexToBytes, kemBytesToHex } from "@bongtu/c
 import { ARBITER_KEM_PK } from "@bongtu/core/network";
 import type { Point } from "@bongtu/core/babyjub";
 
-import { deriveIdentityFromSignature } from "../src/lib/derive.js";
+import { deriveIdentityFromSignature } from "../src/derive.js";
 import {
   buildDepositRequest,
   freshDepositCrypto,
   type DepositCrypto,
-} from "../src/lib/deposit.js";
-import type { KemMaterial } from "../src/lib/spend.js";
-import { DEFAULTS } from "../src/config.js";
+} from "../src/deposit.js";
+import type { KemMaterial } from "../src/spend.js";
+import { ARBITER_PUBKEY_X, ARBITER_PUBKEY_Y } from "@bongtu/core/network";
+
+/** the pool's stored arbiter PUBLIC key, from the ONE network module. */
+const ARBITER_PUBKEY: [string, string] = [ARBITER_PUBKEY_X, ARBITER_PUBKEY_Y];
 
 // A fixed stand-in for eth_signTypedData_v4 (65-byte ECDSA sig) — a fixed account.
 const SIG = "0x" + "a1".repeat(32) + "b2".repeat(32) + "1c";
@@ -47,7 +50,7 @@ const CRYPTO: DepositCrypto = {
   encryptionNonce: "222222222222",
   salt0: "7000001",
   salt1: "7000002",
-  authorityPubKey: DEFAULTS.arbiterPubKey,
+  authorityPubKey: ARBITER_PUBKEY,
   kemSs: FIXED_KEM.kemSs,
   kemCiphertext: FIXED_KEM.kemCiphertext,
 };
@@ -105,8 +108,8 @@ test("deposit: mints note(V)+note(0), both self-owned, commitments == sdk commit
 
   // the authority envelope targets the pool's stored arbiter key (contract injects it).
   assert.deepEqual(inp.authorityPublicKey, [
-    DEFAULTS.arbiterPubKey[0],
-    DEFAULTS.arbiterPubKey[1],
+    ARBITER_PUBKEY[0],
+    ARBITER_PUBKEY[1],
   ]);
 
   // the hybrid-envelope KEM limbs join the witness exactly as injected (the ct
@@ -145,7 +148,7 @@ test("freshDepositCrypto draws exactly four fields from the injected randomness"
   const drawn = [c.ecdhPrivateKey, c.encryptionNonce, c.salt0, c.salt1];
   assert.equal(new Set(drawn).size, 4, "no two fields share a draw (two-time-pad guard)");
   // the arbiter key is the pool's fixed stored key, not drawn from randomness.
-  assert.deepEqual([...c.authorityPubKey], [...DEFAULTS.arbiterPubKey]);
+  assert.deepEqual([...c.authorityPubKey], [...ARBITER_PUBKEY]);
 
   // and the drawn material is accepted by the builder.
   const wallet = deriveIdentityFromSignature(SIG);

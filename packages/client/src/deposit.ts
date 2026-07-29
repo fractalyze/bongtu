@@ -17,12 +17,12 @@
 // ProvingRequest", ready to prove and submit.
 
 import { commitment } from "@bongtu/core/note";
+import { ARBITER_PUBKEY_X, ARBITER_PUBKEY_Y } from "@bongtu/core/network";
 import type { Point } from "@bongtu/core/babyjub";
 import { toWire } from "@bongtu/core/proving";
 import type { DepositInput, ProvingRequest } from "@bongtu/core/proving";
 import type { WalletIdentity } from "./derive.js";
 import { toEncryptionNonce, freshKemMaterial, type KemDrawFn } from "./spend.js";
-import { DEFAULTS } from "../config.js";
 
 /** Fresh per-tx crypto material for one deposit. `ecdhPrivateKey`/`encryptionNonce`
  *  must never be reused across txs (a shared ephemeral key + nonce is a two-time pad);
@@ -80,7 +80,7 @@ export function freshDepositCrypto(rand: RandField, drawKem: KemDrawFn = freshKe
     encryptionNonce: toEncryptionNonce(rand()),
     salt0: rand(),
     salt1: rand(),
-    authorityPubKey: DEFAULTS.arbiterPubKey,
+    authorityPubKey: [ARBITER_PUBKEY_X, ARBITER_PUBKEY_Y],
     kemSs: kem.kemSs,
     kemCiphertext: kem.kemCiphertext,
   };

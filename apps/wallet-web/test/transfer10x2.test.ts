@@ -37,10 +37,10 @@ import { deriveKeypair } from "@bongtu/core/note";
 import { TRANSFER10_ARITY } from "@bongtu/core/envelope";
 import type { Calldata } from "@bongtu/core/proving";
 
-import { deriveIdentityFromSignature } from "../src/lib/derive.js";
-import { KeyCache } from "../src/lib/keyCache.js";
-import { runSpendChain, type RunSpendDeps, type SpendContext } from "../src/lib/spendFlow.js";
-import type { OwnerNote } from "../src/lib/indexerClient.js";
+import { deriveIdentityFromSignature } from "@bongtu/client/derive";
+import { KeyCache } from "@bongtu/client/keyCache";
+import { runSpendChain, type SpendIo, type SpendContext } from "@bongtu/client/spendFlow";
+import type { OwnerNote } from "@bongtu/client/indexerClient";
 import {
   buildTransfer10x2Request,
   legCircuit,
@@ -53,7 +53,7 @@ import {
   type SelectableNote,
   type SpendCrypto,
   type WalletInputNote,
-} from "../src/lib/spend.js";
+} from "@bongtu/client/spend";
 import { CIRCUIT_ASSET_BYTES, DEFAULTS, H, B } from "../src/config.js";
 
 const SIG = "0x" + "a1".repeat(32) + "b2".repeat(32) + "1c";
@@ -134,7 +134,7 @@ test("DEPRECATION PIN: no route, plan or merge leg answers transfer10 anymore", 
     planSpendAction("transfer", notes, { to: PAYEE_ADDR, amount: "250" }).circuit as string,
     "transfer10",
   );
-  const merge: import("../src/lib/spend.js").SpendLeg = { leg: "merge", inputs: [], mergedValue: "0" };
+  const merge: import("@bongtu/client/spend").SpendLeg = { leg: "merge", inputs: [], mergedValue: "0" };
   assert.equal(legCircuit(merge), "transfer10x2", "a merge leg proves transfer10x2");
   const wide = selectable(Array(25).fill(100n));
   for (const leg of planSpendChain("transfer", wide, "2500")) {
@@ -368,7 +368,7 @@ test("a merge leg folds the ten largest notes into one note + a zero change note
 // The flow's own routing: the SAME machine the screens run, with every I/O edge
 // faked, so what is asserted is which circuit gets proved and which pool entry point
 // gets called — the two decisions a wrong route would only reveal on-chain.
-function flowDeps(f: ReturnType<typeof fixture>, trace: { circuit: string | null; submitted: string[] }): Partial<RunSpendDeps> {
+function flowDeps(f: ReturnType<typeof fixture>, trace: { circuit: string | null; submitted: string[] }): SpendIo {
   const dummy: Calldata = { a: ["0", "0"], b: [["0", "0"], ["0", "0"]], c: ["0", "0"], pub: [] };
   return {
     ensureChain: async () => {},
@@ -385,7 +385,7 @@ function flowDeps(f: ReturnType<typeof fixture>, trace: { circuit: string | null
       pathIndices: Array.from({ length: H }, () => 0),
       root: f.root,
     }),
-    proveInBrowser: async (request) => {
+    prove: async (request) => {
       trace.circuit = request.circuit;
       return dummy;
     },
@@ -409,6 +409,8 @@ function flowCtx(f: ReturnType<typeof fixture>): SpendContext {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     connection: { address: "0x1", provider: {}, signer: {} } as any,
     indexerUrl: "http://indexer",
+    pool: "0x0000000000000000000000000000000000000b0b",
+    explorer: "https://x",
     notes: f.notes,
     sessionPubkey: WALLET.compressedPubkey,
     reloadNotes: async () => f.notes,

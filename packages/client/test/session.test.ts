@@ -1,4 +1,4 @@
-// Headless gates for what the wallet writes to browser storage (src/lib/session.ts) —
+// Headless gates for what the wallet writes to browser storage (src/session.ts) —
 // the login record, and the account→key binding. Covered:
 //
 //   (1) ROUND-TRIP — save → load returns the record; clear removes it.
@@ -26,7 +26,7 @@ import {
   saveSession,
   type StorageLike,
   type StoredSession,
-} from "../src/lib/session.js";
+} from "../src/session.js";
 
 function memStorage(): StorageLike & { map: Map<string, string> } {
   const map = new Map<string, string>();

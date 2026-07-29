@@ -25,11 +25,13 @@ import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { decodeAddress, encodeAddress } from "@bongtu/core/pubkey";
 import { DEFAULTS } from "../../config.js";
-import { runSpendChain, type SpendOutcome } from "../../lib/spendFlow.js";
-import { previewSpend } from "../../lib/spend.js";
+import { runSpendChain, type SpendOutcome } from "@bongtu/client/spendFlow";
+import { previewSpend } from "@bongtu/client/spend";
+import { keyCache } from "../../lib/keyCache.js";
+import { proveInBrowser } from "../../lib/prove.js";
 import { useWallet } from "../App.js";
 import { useActionMachine, stepsForRun } from "../actionMachine.js";
-import { formatKkrw, parseKkrw } from "../../lib/money.js";
+import { formatKkrw, parseKkrw } from "@bongtu/client/money";
 import { amountError, recipientError } from "../format.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
 import { activeStep, chainSteps, SPEND_STEPS } from "../components/StagedProgress.js";
@@ -84,7 +86,15 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
       (onStage) =>
         runSpendChain(
           kind,
-          { connection, indexerUrl, notes, sessionPubkey: session.compressedPubkey, reloadNotes },
+          {
+            connection,
+            indexerUrl,
+            pool: DEFAULTS.pool,
+            explorer: DEFAULTS.explorer,
+            notes,
+            sessionPubkey: session.compressedPubkey,
+            reloadNotes,
+          },
           // The flow/witness layer only ever sees the canonical hex form — base58
           // stops at this edge.
           {
@@ -92,6 +102,9 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
             amount: amountWei.toString(),
           },
           onStage,
+          // The engine takes the app's lock + prover through its deps seam: proving
+          // is in-browser snarkjs over the same-origin circuit assets.
+          { keyCache, prove: (request) => proveInBrowser(request, DEFAULTS.circuitBaseUrl) },
         ),
       refreshAfterAction,
     );

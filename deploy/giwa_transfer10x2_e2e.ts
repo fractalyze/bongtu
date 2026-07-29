@@ -27,9 +27,6 @@
 //     against an in-memory tree, proves both transfer10x2 witnesses on CPU and
 //     snarkjs-verifies them against circuits/out/transfer10x2.vkey.json.
 
-// The wallet sources read import.meta.env (a Vite inject); pull the wallet's own
-// ambient declaration into this program so the root tsc pass sees the same types.
-/// <reference path="../apps/wallet-web/src/vite-env.d.ts" />
 import { commitment } from "@bongtu/core/note";
 import { ImtTree } from "@bongtu/core/imt";
 import { loadSnarkjs } from "@bongtu/core/extern";
@@ -42,8 +39,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// The wallet's production spend path, imported as-is (tsx resolves the NodeNext
-// ".js" specifiers to the .ts sources exactly as the wallet's own tests do).
+// The production spend path, imported as-is from the shared client engine (tsx
+// resolves the NodeNext specifiers to the .ts sources exactly as its tests do).
 import {
   planSpendChain,
   legCircuit,
@@ -54,8 +51,8 @@ import {
   type SpendLeg,
   type MembershipWitness,
   type WalletInputNote,
-} from "../apps/wallet-web/src/lib/spend.js";
-import { deriveIdentityFromSignature } from "../apps/wallet-web/src/lib/derive.js";
+} from "@bongtu/client/spend";
+import { deriveIdentityFromSignature } from "@bongtu/client/derive";
 import { toWire } from "@bongtu/core/proving";
 
 const HERE = dirname(fileURLToPath(import.meta.url));

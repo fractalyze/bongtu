@@ -40,7 +40,7 @@ import {
   nullifier,
 } from "@bongtu/core/note";
 import { ml_kem768, kemSsToLimbs, kemHexToBytes, kemBytesToHex } from "@bongtu/core/kem";
-import { ARBITER_KEM_PK } from "@bongtu/core/network";
+import { ARBITER_KEM_PK, ARBITER_PUBKEY_X, ARBITER_PUBKEY_Y, H } from "@bongtu/core/network";
 import { unpackPubkey } from "@bongtu/core/pubkey";
 import { foldToRoot } from "@bongtu/core/imt";
 import { TRANSFER10_ARITY } from "@bongtu/core/envelope";
@@ -54,7 +54,6 @@ import type {
   ProvingRequest,
 } from "@bongtu/core/proving";
 import type { WalletIdentity } from "./derive.js";
-import { DEFAULTS, H } from "../config.js";
 
 // --- app-facing input shapes (all field elements as decimal strings) ------------
 
@@ -476,7 +475,7 @@ export function freshSpendCrypto(rand: RandField, drawKem: KemDrawFn = freshKemM
   return {
     ecdhPrivateKey: rand(),
     encryptionNonce: toEncryptionNonce(rand()),
-    authorityPubKey: DEFAULTS.arbiterPubKey,
+    authorityPubKey: [ARBITER_PUBKEY_X, ARBITER_PUBKEY_Y],
     kemSs: kem.kemSs,
     kemCiphertext: kem.kemCiphertext,
     changeSalt: rand(),

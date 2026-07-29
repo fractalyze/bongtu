@@ -19,17 +19,21 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { createWalletClient, custom, hashTypedData } from "viem";
-import { DEFAULTS } from "../src/config.js";
-import { giwaSepolia } from "../src/lib/chain.js";
-import { keyDerivationTypedData, deriveIdentityFromSignature } from "../src/lib/derive.js";
-import { signKeyDerivation, type Connection } from "../src/lib/connection.js";
-import { deriveLoginIdentity } from "../src/lib/identity.js";
+import { CHAIN_ID, POOL_ADDRESS } from "@bongtu/core/network";
+import { giwaSepolia } from "../src/chain.js";
+import { keyDerivationTypedData, deriveIdentityFromSignature } from "../src/derive.js";
+import { signKeyDerivation, type Connection } from "../src/connection.js";
+import { deriveLoginIdentity } from "../src/identity.js";
 
 // --- pinned pre-migration facts (captured 2026-07-28 from the ethers v5 code) -------
 
 /** ethers.utils._TypedDataEncoder.hash(domain, types, message) over
  *  keyDerivationTypedData(91342, <live pool>, "1") — what the wallet signs. */
 const PIN_DIGEST = "0xbcd5b9b0aff8503b5e576e8b430743428a29a97354e57052d7e7c450f73676b9";
+
+/** The live deployment's KDF domain facts — what wallet-web's config.ts
+ *  KEY_DERIVATION threads into the engine (same one home: @bongtu/core/network). */
+const KDF = { chainId: CHAIN_ID, pool: POOL_ADDRESS, keyVersion: "1" };
 
 /** A fixed stand-in for the wallet's deterministic 65-byte signature. */
 const FIXED_SIG = ("0x" + "a1".repeat(32) + "b2".repeat(32) + "1c") as `0x${string}`;
@@ -71,7 +75,7 @@ function mockConnection(signedPayloads: string[]): Connection {
 // ------------------------------------------------------------------------------------
 
 test("the typed-data struct still hashes to the pre-migration EIP-712 digest", () => {
-  const typed = keyDerivationTypedData(DEFAULTS.chainId, DEFAULTS.pool, DEFAULTS.keyVersion);
+  const typed = keyDerivationTypedData(KDF.chainId, KDF.pool, KDF.keyVersion);
   const digest = hashTypedData({
     domain: {
       name: typed.domain.name,
@@ -87,7 +91,7 @@ test("the typed-data struct still hashes to the pre-migration EIP-712 digest", (
 });
 
 test("signKeyDerivation sends a payload hashing to the pinned digest, and the fixed signature derives the pinned key", async () => {
-  const typed = keyDerivationTypedData(DEFAULTS.chainId, DEFAULTS.pool, DEFAULTS.keyVersion);
+  const typed = keyDerivationTypedData(KDF.chainId, KDF.pool, KDF.keyVersion);
   const signedPayloads: string[] = [];
   const connection = mockConnection(signedPayloads);
 
@@ -111,10 +115,10 @@ test("signKeyDerivation sends a payload hashing to the pinned digest, and the fi
 });
 
 test("the full login derivation path reproduces the pinned identity from the mock wallet", async () => {
-  // deriveLoginIdentity builds the typed data itself (DEFAULTS.chainId/pool/keyVersion)
+  // deriveLoginIdentity builds the typed data itself (from the threaded KDF config)
   // and signs through the connection — the exact path a real login takes.
   const signedPayloads: string[] = [];
-  const identity = await deriveLoginIdentity(mockConnection(signedPayloads), { doubleSign: false });
+  const identity = await deriveLoginIdentity(mockConnection(signedPayloads), { doubleSign: false }, KDF);
   assert.equal(identity.compressedPubkey, PIN_COMPRESSED);
   assert.equal(identity.keypair.formattedPrivateKey, PIN_SCALAR);
   assert.equal(

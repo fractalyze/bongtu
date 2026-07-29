@@ -20,7 +20,7 @@
 // own ("waiting"), so the screen can say what it is waiting for.
 
 import { commitment } from "@bongtu/core/note";
-import { DEFAULTS } from "../config.js";
+import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
 import type { Connection } from "./connection.js";
 import {
   assertPoolKemEpoch,
@@ -30,7 +30,7 @@ import {
   submitWithdraw,
   walletErrorMessage,
 } from "./connection.js";
-import { keyCache, type KeyCache } from "./keyCache.js";
+import type { KeyCache } from "./keyCache.js";
 import { getHead, getSignedPath, type OwnerNote } from "./indexerClient.js";
 import { pollUntil, type PollForActionOptions } from "./refresh.js";
 import {
@@ -49,7 +49,6 @@ import {
   type MembershipWitness,
 } from "./spend.js";
 import type { WalletIdentity } from "./derive.js";
-import { proveInBrowser } from "./prove.js";
 
 /** The coarse stages a spend leg passes through (no witness sub-stage — witness is
  *  ~150 ms and invisible; the multi-second cost is the proof). "unlock" is the
@@ -70,6 +69,10 @@ export type OnSpendStage = (stage: SpendStage, leg: LegProgress) => void;
 export interface SpendContext {
   connection: Connection;
   indexerUrl: string;
+  /** the pool address every leg proves against and submits to (app config). */
+  pool: string;
+  /** the explorer base URL the success link is built on (app config). */
+  explorer: string;
   notes: OwnerNote[];
   /** the logged-in session's compressed bjj pubkey — what the just-in-time
    *  derivation must reproduce before any of these notes may be spent, and the payee
@@ -96,7 +99,10 @@ export interface RunSpendDeps {
   keyCache: KeyCache;
   getHead: typeof getHead;
   getSignedPath: typeof getSignedPath;
-  proveInBrowser: typeof proveInBrowser;
+  /** Turn a ProvingRequest into Groth16 calldata. The APP supplies this: wallet-web
+   *  injects in-browser snarkjs (prove.ts proveInBrowser with its circuit asset
+   *  base URL applied); payroll-web will inject its prover-service adapter. */
+  prove: (request: ProvingRequest) => Promise<Calldata>;
   submitTransfer: typeof submitTransfer;
   submitTransfer10x2: typeof submitTransfer10x2;
   submitWithdraw: typeof submitWithdraw;
@@ -104,13 +110,16 @@ export interface RunSpendDeps {
    *  policy (refresh.ts), so tests can run a chain without real seconds. */
   poll: PollForActionOptions;
 }
-const DEFAULT_DEPS: RunSpendDeps = {
+
+/** What every spend must be handed: the app's lock instance and its prover. The
+ *  engine-side edges (chain guard, indexer reads, submits) default to the real ones. */
+export type SpendIo = Pick<RunSpendDeps, "keyCache" | "prove"> & Partial<RunSpendDeps>;
+
+const DEFAULT_DEPS: Omit<RunSpendDeps, "keyCache" | "prove"> = {
   ensureChain,
   assertPoolKemEpoch,
-  keyCache,
   getHead,
   getSignedPath,
-  proveInBrowser,
   submitTransfer,
   submitTransfer10x2,
   submitWithdraw,
@@ -176,7 +185,7 @@ async function openSpendSession(
   const locked = !io.keyCache.isUnlocked();
   onStage(locked ? "unlock" : "assemble", leg);
   await io.ensureChain(ctx.connection);
-  await io.assertPoolKemEpoch(ctx.connection, DEFAULTS.pool);
+  await io.assertPoolKemEpoch(ctx.connection, ctx.pool);
   // Nothing is read, proven or submitted before this resolves; the key leaves via
   // built.request only as witness input to the in-browser prover.
   const identity = await io.keyCache.unlock(ctx.connection, ctx.sessionPubkey);
@@ -203,7 +212,7 @@ async function runLeg(
   }
 
   onStage("prove", leg);
-  const calldata = await io.proveInBrowser(built.request, DEFAULTS.circuitBaseUrl);
+  const calldata = await io.prove(built.request);
 
   onStage("submit", leg);
   // The tx carries the SAME encapsulation the proof's kemBinding committed to
@@ -216,10 +225,10 @@ async function runLeg(
   }[action.circuit];
   const res = await submitFor(
     ctx.connection,
-    DEFAULTS.pool,
+    ctx.pool,
     calldata,
     crypto.kemCiphertext,
-    DEFAULTS.explorer,
+    ctx.explorer,
   );
   return {
     outcome: { txHash: res.txHash, explorerUrl: res.explorerUrl },
@@ -304,9 +313,9 @@ export async function runSpendChain(
   ctx: SpendContext,
   args: { to?: string; amount: string },
   onStage: OnSpendStage,
-  deps: Partial<RunSpendDeps> = {},
+  deps: SpendIo,
 ): Promise<SpendOutcome> {
-  const io = { ...DEFAULT_DEPS, ...deps };
+  const io: RunSpendDeps = { ...DEFAULT_DEPS, ...deps };
   // Planning is pure and touches nothing, so it happens FIRST: a wallet that cannot
   // afford the amount learns that before it is asked for a signature.
   const plan = planSpendChain(kind, ctx.notes, args.amount);

@@ -20,6 +20,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   deriveKeypair,
@@ -37,10 +38,10 @@ import {
   scalarFromSignature,
   keyDerivationTypedData,
   type WalletIdentity,
-} from "../src/lib/derive.js";
-import { sumUnspent, trialDecryptEvents } from "../src/lib/balance.js";
-import { walletErrorMessage } from "../src/lib/connection.js";
-import type { FeedEvent } from "../src/lib/indexerClient.js";
+} from "@bongtu/client/derive";
+import { sumUnspent, trialDecryptEvents } from "@bongtu/client/balance";
+import { walletErrorMessage } from "@bongtu/client/connection";
+import type { FeedEvent } from "@bongtu/client/indexerClient";
 import {
   buildTransferRequest,
   buildWithdrawRequest,
@@ -49,12 +50,12 @@ import {
   type SelectableNote,
   type WalletInputNote,
   type MembershipWitness,
-} from "../src/lib/spend.js";
+} from "@bongtu/client/spend";
 import { recipientError } from "../src/ui/format.js";
 import { CIRCUITS_VERSION, DEFAULTS, H, B } from "../src/config.js";
 import { ml_kem768, kemSsToLimbs, kemHexToBytes, kemBytesToHex } from "@bongtu/core/kem";
 import { ARBITER_KEM_PK } from "@bongtu/core/network";
-import type { KemMaterial } from "../src/lib/spend.js";
+import type { KemMaterial } from "@bongtu/client/spend";
 import { resolveWalletProxy } from "../vite.config.js";
 
 // Deterministic ML-KEM material (fixed encapsulation randomness against the real
@@ -68,7 +69,7 @@ const FIXED_KEM: KemMaterial = {
 // A fixed stand-in for what eth_signTypedData_v4 returns (65-byte ECDSA sig). MetaMask
 // is deterministic per (account, domain, message), so a fixed hex models a fixed account.
 const SIG = "0x" + "a1".repeat(32) + "b2".repeat(32) + "1c";
-// Pinned regression anchors (recomputed by src/lib/derive.ts, cross-checked below).
+// Pinned regression anchors (recomputed by @bongtu/client/derive, cross-checked below).
 const PIN_SCALAR = 2232542207878167874305209947598685605095785653266525372150719396610432433903n;
 const PIN_COMPRESSED = "0x05c818db6e4feb82639a2170ec769abcdbfc9077833153ed2266a52b653c1f96";
 
@@ -579,4 +580,20 @@ test("spend path: a base58 recipient normalized via decodeAddress builds the ide
     decodeAddress(encodeAddress(f.recipient)), "600", f.crypto,
   );
   assert.deepEqual(viaB58.request, viaHex.request);
+});
+
+test("the app shell derives ONLY through the owner module (no inlined derivation)", () => {
+  // The package half of this gate (loginFlow holds no derivation recipe) lives in
+  // @bongtu/client's suite; the APP half is a source fact about App.tsx, so it is
+  // gated here where the file belongs. A second inlined typed-data → sign → derive
+  // copy could drift from identity.ts and unlock a key the notes are not owned by.
+  const app = readFileSync(new URL("../src/ui/App.tsx", import.meta.url).pathname, "utf8");
+  assert.match(app, /deriveLoginIdentity/, "the login must use the owner module");
+  for (const inlined of [
+    "keyDerivationTypedData",
+    "signKeyDerivation",
+    "deriveIdentityFromSignature",
+  ]) {
+    assert.ok(!app.includes(inlined), `the derivation is re-implemented via ${inlined}`);
+  }
 });

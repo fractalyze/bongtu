@@ -3,6 +3,7 @@
   "// note": "Type-checks the runnable scripts (deploy/, circuits/, contracts/test/fixtures/) plus the sdk sources they import directly via NodeNext .js specifiers. The sdk has its own tsconfig for `npm test`; this one is the cross-tree gate.",
   "include": [
     "packages/core/src/**/*.ts",
+    "packages/client/src/**/*.ts",
     "deploy/**/*.ts",
     "circuits/**/*.ts",
     "contracts/test/fixtures/**/*.ts",

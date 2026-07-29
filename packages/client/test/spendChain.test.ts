@@ -26,16 +26,17 @@ import { ImtTree } from "@bongtu/core/imt";
 import { packPubkey } from "@bongtu/core/pubkey";
 import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
 
-import { deriveIdentityFromSignature } from "../src/lib/derive.js";
-import { KeyCache } from "../src/lib/keyCache.js";
+import { deriveIdentityFromSignature } from "../src/derive.js";
+import { KeyCache } from "../src/keyCache.js";
 import {
   runSpendChain,
   CHAIN_FAILURE_REASSURANCE,
   MERGE_NOT_INDEXED_MESSAGE,
   type RunSpendDeps,
+  type SpendIo,
   type SpendContext,
-} from "../src/lib/spendFlow.js";
-import type { OwnerNote } from "../src/lib/indexerClient.js";
+} from "../src/spendFlow.js";
+import type { OwnerNote } from "../src/indexerClient.js";
 import {
   legCircuit,
   pendingLegOf,
@@ -43,8 +44,8 @@ import {
   SpendSelectionError,
   type SelectableNote,
   type SpendLeg,
-} from "../src/lib/spend.js";
-import { H, B } from "../src/config.js";
+} from "../src/spend.js";
+import { H, B } from "@bongtu/core/network";
 
 const SIG = "0x" + "a1".repeat(32) + "b2".repeat(32) + "1c";
 const WALLET = deriveIdentityFromSignature(SIG);
@@ -270,7 +271,7 @@ function chainWorld(values: bigint[]) {
     return { txHash: `0x${circuit}${submitted.length}`, explorerUrl: `https://x/tx/${circuit}` };
   };
 
-  const deps = (over: Partial<RunSpendDeps> = {}): Partial<RunSpendDeps> => ({
+  const deps = (over: Partial<RunSpendDeps> = {}): SpendIo => ({
     ensureChain: async () => {},
     assertPoolKemEpoch: async () => {},
     keyCache,
@@ -287,7 +288,7 @@ function chainWorld(values: bigint[]) {
         root: tree.getRoot().toString(),
       };
     },
-    proveInBrowser: async (request): Promise<Calldata> => {
+    prove: async (request): Promise<Calldata> => {
       record(request);
       return { a: ["0", "0"], b: [["0", "0"], ["0", "0"]], c: ["0", "0"], pub: [] };
     },
@@ -302,6 +303,8 @@ function chainWorld(values: bigint[]) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     connection: { address: "0x1", provider: {}, signer: {} } as any,
     indexerUrl: "http://indexer",
+    pool: "0x0000000000000000000000000000000000000b0b",
+    explorer: "https://x",
     get notes() {
       return notes.filter((n) => !n.spent);
     },

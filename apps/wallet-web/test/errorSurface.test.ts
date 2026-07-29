@@ -24,7 +24,7 @@ import {
   REFRESH_FAILED_TOAST,
   type OwnerSnapshot,
   type RefreshSinks,
-} from "../src/lib/refresh.js";
+} from "@bongtu/client/refresh";
 import { installGlobalErrorSurface, toasts, toastBug, BUG_TOAST_MESSAGE } from "../src/lib/toasts.js";
 
 const SNAP: OwnerSnapshot = { notes: [], history: [], historyNextBefore: null };

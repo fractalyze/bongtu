@@ -1,25 +1,21 @@
-// The wallet edge, and the home of `Connection` — the one shape every other module
-// works against (SPEC §6/§7). wagmi owns HOW a wallet is reached (every installed
-// extension via EIP-6963, WalletConnect for phones — the RainbowKit modal does the
-// choosing); this module turns whatever wagmi connected into a `Connection`, obtains
-// the deterministic eth_signTypedData_v4 signature the KDF consumes (derive.ts), and
-// submits the finished proofs over viem. Everything security-relevant (key
-// derivation, balance, witness assembly) lives in the PURE modules and is
-// unit-tested; the wagmi-facing half of this file is the thin I/O edge (no wallet in
-// the headless env), while the viem half (signing, submits, reads) is gated in
-// test/accountWatch.test.ts over fake EIP-1193 transports.
+// The home of `Connection` — the one shape every other module works against
+// (SPEC §6/§7) — and everything that operates ON a live one over viem: the
+// deterministic eth_signTypedData_v4 signature the KDF consumes (derive.ts),
+// the chain guard, the pool-KEM-epoch guard, and the proof/token submits + reads.
+// How a browser REACHES a wallet (wagmi, EIP-6963, WalletConnect) is the app's
+// business: apps/wallet-web/src/lib/wagmi.ts turns whatever wagmi connected into
+// the `Connection` this module consumes. Everything here is wallet-library-free
+// and gated headlessly: the account-watch sequences in this package's suite
+// (test/accountWatch.test.ts), the submit/guard paths over fake EIP-1193
+// transports in apps/wallet-web/test/connection.test.ts — that file also gates
+// the app's wagmi half, so it stays where both subjects live.
 
 import {
-  createPublicClient,
-  createWalletClient,
-  custom,
-  http,
   parseAbi,
   type Address,
-  type PublicClient,
   type WalletClient,
+  type PublicClient,
 } from "viem";
-import { disconnect, getAccount, reconnect, watchAccount } from "wagmi/actions";
 import { causeChain, classifyChainFailure, errorCode } from "@bongtu/core/errors";
 import type { KeyDerivationTypedData } from "./derive.js";
 import type { WalletTransport } from "./loginGuard.js";
@@ -35,7 +31,6 @@ import {
   isPreKemProbeError,
 } from "@bongtu/core/network";
 import { GAS_PRICE, giwaSepolia } from "./chain.js";
-import { wagmiConfig } from "./wagmi.js";
 
 // The shared per-function ABI fragments (@bongtu/core/network) — only the pool
 // functions the wallet touches, parsed once for viem. deposit is the 0-in/2-out
@@ -72,22 +67,6 @@ interface Eip1193 {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;
 }
 
-/** Whether an EIP-1193 provider is injected — true in extension browsers AND in
- *  MetaMask Mobile's in-app browser; false in a plain mobile browser, where the
- *  paths to a connection are WalletConnect or the deep link below. */
-export function hasInjectedWallet(): boolean {
-  return Boolean((globalThis as { ethereum?: unknown }).ethereum);
-}
-
-/** MetaMask Mobile deep link that reopens THIS page inside the app's dapp
- *  browser (which injects window.ethereum). Universal-link form, so it also
- *  routes to the app store when the app is missing. Onboarding's last resort
- *  when there is neither an extension nor WalletConnect in the build. */
-export function metamaskDeepLink(): string {
-  const { host, pathname } = window.location;
-  return `https://metamask.app.link/dapp/${host}${pathname}`;
-}
-
 /**
  * A connected wallet, whatever it is connected THROUGH. Every downstream module —
  * identity, keyCache, the flows, the submit helpers — sees only this shape, so which
@@ -108,10 +87,6 @@ export interface Connection {
    *  different network-switch failure message). */
   transport: WalletTransport;
 }
-
-/** The one public client — receipts and view reads go to the GIWA RPC directly,
- *  never through the wallet (a phone over WalletConnect shouldn't relay eth_call). */
-const publicClient: PublicClient = createPublicClient({ chain: giwaSepolia, transport: http() });
 
 /**
  * A human-readable message from ANY wallet/RPC failure. Provider errors
@@ -147,90 +122,6 @@ export function walletErrorMessage(e: unknown): string {
 /** The connected account's native (gas) ETH balance on GIWA. */
 export async function readGasBalance(connection: Connection): Promise<bigint> {
   return connection.publicClient.getBalance({ address: connection.address as Address });
-}
-
-/** Wrap the connector wagmi has live into the `Connection` the app consumes, or
- *  null when nothing is connected. The wallet client rides the connector's raw
- *  EIP-1193 provider, so signatures and txs reach whichever wallet the user
- *  actually picked in the modal; reads ride the app's own public client. */
-export async function currentConnection(): Promise<Connection | null> {
-  const account = getAccount(wagmiConfig);
-  if (account.status !== "connected" || !account.connector || !account.address) return null;
-  const injected = (await account.connector.getProvider()) as Eip1193;
-  const walletClient = createWalletClient({
-    account: account.address,
-    chain: giwaSepolia,
-    transport: custom(injected),
-  });
-  return {
-    address: account.address,
-    walletClient,
-    publicClient,
-    injected,
-    transport: account.connector.type === "walletConnect" ? "walletconnect" : "injected",
-  };
-}
-
-/** The login's connection source (loginFlow.runLogin): the wallet the RainbowKit
- *  modal just connected. Throws readably when pressed before any wallet is live —
- *  the Onboarding wiring opens the modal first, so this is a belt, not a path. */
-export async function requireConnection(): Promise<Connection> {
-  const connection = await currentConnection();
-  if (!connection) throw new Error("No wallet connected. Connect a wallet first.");
-  return connection;
-}
-
-/**
- * SILENT reconnect for a stored session: wagmi re-opens its remembered connector
- * (eth_accounts for an extension — never a popup; the WalletConnect connector
- * reloads its own stored session — never a QR modal), and the same account must
- * still be reported. Returns null when nothing reconnects or the account changed —
- * the caller then falls back to the normal connect flow. Deliberately does NOT
- * switch chains (that can prompt); the action flows call `ensureChain` before
- * anything chain-dependent.
- */
-export async function restoreConnection(expectedAddress: string): Promise<Connection | null> {
-  try {
-    await reconnect(wagmiConfig);
-  } catch {
-    return null;
-  }
-  const connection = await currentConnection();
-  if (!connection || connection.address.toLowerCase() !== expectedAddress.toLowerCase()) return null;
-  return connection;
-}
-
-/** Silent, fire-and-forget reconnect with no session to check against: lets the
- *  Onboarding Connect button skip the modal when wagmi still holds an authorised
- *  connector from a previous visit. Never prompts (same guarantee as above). */
-export function warmReconnect(): void {
-  void reconnect(wagmiConfig).catch(() => {});
-}
-
-/**
- * End the wallet connection on an explicit sign-out: wagmi disconnects the live
- * connector (for WalletConnect that ends the session — without it the wallet app
- * keeps showing bongtu as connected) and forgets it, so the next visit cannot
- * silently reconnect a pairing the user believes they closed. Best-effort:
- * signing out must not fail because a relay is down.
- */
-export async function endWalletConnection(): Promise<void> {
-  try {
-    await disconnect(wagmiConfig);
-  } catch {
-    // the local state is cleared either way; a WC relay will time the pairing out.
-  }
-}
-
-/**
- * The account the connected wallet has selected RIGHT NOW, lowercased; null when
- * none is connected. wagmi tracks the connector's accountsChanged events, so this
- * follows the wallet live while `connection.address` is frozen at connect time —
- * making this the only honest answer to "whose key would a derivation produce?"
- * after a mid-session account switch (keyCache.ts).
- */
-export async function currentAccount(): Promise<string | null> {
-  return getAccount(wagmiConfig).address?.toLowerCase() ?? null;
 }
 
 export interface WalletWatchHandlers {
@@ -274,19 +165,6 @@ export function accountWatchHandler(
       handlers.disconnected?.();
     }
   };
-}
-
-/**
- * Subscribe to wallet-account changes through wagmi's one account store; returns
- * one unsubscribe. `accountsChanged` fires on a switch to a DIFFERENT address —
- * even when the switch transits a disconnected state (see accountWatchHandler);
- * `disconnected` when a live connection ends (the WalletConnect peer hanging up,
- * an extension revoking access). What `disconnected` should DO stays the
- * CALLER's choice: App signs out only a WalletConnect session (a remote peer
- * ending the session is a real sign-out; an extension hiccup is not).
- */
-export function watchWallet(handlers: WalletWatchHandlers): () => void {
-  return watchAccount(wagmiConfig, { onChange: accountWatchHandler(handlers) });
 }
 
 // EIP-3085/3326 params for GIWA Sepolia, derived from the ONE network module so a

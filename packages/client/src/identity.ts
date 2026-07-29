@@ -8,7 +8,6 @@
 // lock, and the login hands what it derives straight to the lock (keyCache.seed);
 // nothing else may keep the value this function returns.
 
-import { DEFAULTS } from "../config.js";
 import {
   keyDerivationTypedData,
   deriveIdentityFromSignature,
@@ -21,6 +20,16 @@ import { signKeyDerivation, type Connection } from "./connection.js";
  *  what it signed (loginGuard.loginNeedsDeterminismCheck decides). */
 export interface LoginSignaturePlan {
   doubleSign: boolean;
+}
+
+/** The EIP-712 domain facts the KDF signs over (SPEC §6) — deployment config the
+ *  APP supplies (wallet-web config.ts KEY_DERIVATION): this package reads none of
+ *  its own. Same values => same struct => same derived key, so a deployment must
+ *  pass identical values everywhere it derives. */
+export interface KeyDerivationConfig {
+  chainId: number;
+  pool: string;
+  keyVersion: string;
 }
 
 /**
@@ -41,9 +50,10 @@ export interface LoginSignaturePlan {
 export async function deriveLoginIdentity(
   connection: Connection,
   plan: LoginSignaturePlan,
+  kdf: KeyDerivationConfig,
   sign: typeof signKeyDerivation = signKeyDerivation,
 ): Promise<WalletIdentity> {
-  const typed = keyDerivationTypedData(DEFAULTS.chainId, DEFAULTS.pool, DEFAULTS.keyVersion);
+  const typed = keyDerivationTypedData(kdf.chainId, kdf.pool, kdf.keyVersion);
   const sig = await sign(connection, typed);
   if (plan.doubleSign) assertDeterministicSignatures(sig, await sign(connection, typed));
   return deriveIdentityFromSignature(sig);
@@ -52,8 +62,11 @@ export async function deriveLoginIdentity(
 /** The lock's lazy re-derive (keyCache.unlock). Always a single signature: by the time
  *  a key is re-derived the login has already established that this wallet is
  *  deterministic, and the derived key is checked against the session's anyway. */
-export function deriveTransientIdentity(connection: Connection): Promise<WalletIdentity> {
-  return deriveLoginIdentity(connection, { doubleSign: false });
+export function deriveTransientIdentity(
+  connection: Connection,
+  kdf: KeyDerivationConfig,
+): Promise<WalletIdentity> {
+  return deriveLoginIdentity(connection, { doubleSign: false }, kdf);
 }
 
 // No brand name: the connected wallet may be any injected wallet (walletBrand.ts), and

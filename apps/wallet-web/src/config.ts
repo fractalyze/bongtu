@@ -7,7 +7,7 @@
 // authority envelope to it (non-repudiation on every op, SPEC §2 Q2), so it
 // must ship in the client. No PRIVATE key ever lives in the public wallet: the
 // user's bjj spending key is DERIVED from a MetaMask signature at runtime
-// (src/lib/derive.ts) and never persisted.
+// (@bongtu/client/derive) and never persisted.
 
 import {
   ARBITER_PUBKEY_X,
@@ -67,6 +67,16 @@ export const DEFAULTS = {
   // vercel.json rewrite in deployments and the vite dev proxy locally.
   // Files: `${circuitBaseUrl}/{transfer,withdraw}.wasm` and `.zkey`.
   circuitBaseUrl: "/circuits",
+} as const;
+
+/** The EIP-712 KDF domain facts (@bongtu/client/identity KeyDerivationConfig) this
+ *  deployment derives every spending key under — threaded into the engine at the
+ *  two derivation call sites (login deps in App.tsx, the lock's lazy re-derive in
+ *  lib/keyCache.ts). Same values everywhere or the two would derive different keys. */
+export const KEY_DERIVATION = {
+  chainId: DEFAULTS.chainId,
+  pool: DEFAULTS.pool,
+  keyVersion: DEFAULTS.keyVersion,
 } as const;
 
 // first 8 of sha256 over the FOUR keys the wallet proves against, concatenated in

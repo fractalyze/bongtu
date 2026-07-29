@@ -7,7 +7,7 @@
 // config in lib/wagmi.ts), react-query (wagmi v2's required cache), RainbowKit (the
 // connect modal listing every installed extension via EIP-6963 + WalletConnect when
 // the build carries VITE_WC_PROJECT_ID). `reconnectOnMount` is OFF: the silent
-// restore is driven explicitly by App's session-restore effect (lib/connection.ts),
+// restore is driven explicitly by App's session-restore effect (lib/wagmi.ts),
 // so a page load can never pop anything.
 
 import { StrictMode } from "react";

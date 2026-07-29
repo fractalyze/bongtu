@@ -1,0 +1,24 @@
+{
+  "name": "@bongtu/client",
+  "version": "0.0.0",
+  "description": "bongtu client engine — the React-free, wagmi-free protocol layer both apps drive: key derivation + the in-memory KeyCache lock, login/session/key-binding, witness assembly (spend/deposit), the prove+submit flow orchestrations, viem submits over a `Connection`, indexer reads and refresh policy, and the kKRW money edge. App config (pool, token, explorer, prover) is threaded in through each flow's ctx/deps seam — this package reads no env and imports no app config.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "private": true,
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@bongtu/core": "*",
+    "viem": "^2.55.10"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

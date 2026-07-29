@@ -13,6 +13,7 @@
     "test": "node --import tsx --test --test-force-exit test/*.test.ts"
   },
   "dependencies": {
+    "@bongtu/client": "*",
     "@bongtu/core": "*",
     "@bongtu/ui": "*",
     "@rainbow-me/rainbowkit": "^2.2.11",

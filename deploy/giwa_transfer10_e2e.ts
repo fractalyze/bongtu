@@ -13,9 +13,6 @@
 //   GIWA_RPC (default: the sdk network RPC_URL) + DEPLOYER_KEY (env) required.
 //   Run: npx tsx deploy/giwa_transfer10_e2e.ts
 
-// The wallet sources read import.meta.env (a Vite inject); pull the wallet's own
-// ambient declaration into this program so the root tsc pass sees the same types.
-/// <reference path="../apps/wallet-web/src/vite-env.d.ts" />
 import { deriveKeypair, commitment } from "@bongtu/core/note";
 import { packPubkey } from "@bongtu/core/pubkey";
 import { RPC_URL, explorerTxUrl } from "@bongtu/core/network";
@@ -27,17 +24,17 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// The wallet's production spend path, imported as-is (tsx resolves the NodeNext
-// ".js" specifiers to the .ts sources exactly as the wallet's own tests do).
+// The production spend path, imported as-is from the shared client engine (tsx
+// resolves the NodeNext specifiers to the .ts sources exactly as its tests do).
 import {
   selectInputNotes,
   buildTransfer10Request,
   freshSpendCrypto,
   type SelectableNote,
   type MembershipWitness,
-} from "../apps/wallet-web/src/lib/spend.js";
-import { randField } from "../apps/wallet-web/src/lib/spend.js";
-import { deriveIdentityFromSignature } from "../apps/wallet-web/src/lib/derive.js";
+} from "@bongtu/client/spend";
+import { randField } from "@bongtu/client/spend";
+import { deriveIdentityFromSignature } from "@bongtu/client/derive";
 import { toWire } from "@bongtu/core/proving";
 
 const HERE = dirname(fileURLToPath(import.meta.url));

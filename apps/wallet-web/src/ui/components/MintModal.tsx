@@ -16,8 +16,8 @@ import {
   readGasBalance,
   walletErrorMessage,
   type Connection,
-} from "../../lib/connection.js";
-import { parseKkrw } from "../../lib/money.js";
+} from "@bongtu/client/connection";
+import { parseKkrw } from "@bongtu/client/money";
 import { shortenPubkey } from "../format.js";
 import { ExplorerLink } from "./ExplorerLink.js";
 import { Modal } from "./Modal.js";

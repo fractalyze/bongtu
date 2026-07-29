@@ -1,4 +1,4 @@
-// Headless gates for the UI-edge money layer (src/lib/money.ts) — the ONLY place raw
+// Headless gates for the UI-edge money layer (src/money.ts) — the ONLY place raw
 // wei becomes a human kKRW string and back. Locked policy under test:
 //
 //   (1) FORMAT — raw / 10^18, up to 6 fraction digits TRUNCATED beyond 6 (never
@@ -21,7 +21,7 @@ import {
   allowanceLabel,
   MAX_NOTE_WEI,
   MAX_UINT256,
-} from "../src/lib/money.js";
+} from "../src/money.js";
 
 const WEI = 10n ** 18n;
 

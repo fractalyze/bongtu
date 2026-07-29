@@ -18,7 +18,7 @@ import {
   markLockIntroSeen,
   shouldShowLockIntro,
 } from "../src/lib/lockIntro.js";
-import type { StorageLike } from "../src/lib/session.js";
+import type { StorageLike } from "@bongtu/client/session";
 import { LockIntro } from "../src/ui/screens/LockIntro.js";
 
 /** An in-memory localStorage stand-in (the app passes the real one). */

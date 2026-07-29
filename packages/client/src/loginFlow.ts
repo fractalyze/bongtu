@@ -10,10 +10,10 @@
 // randomised signature would otherwise strand (loginGuard.ts).
 
 import type { WalletIdentity } from "./derive.js";
-import { deriveLoginIdentity, type LoginSignaturePlan } from "./identity.js";
+import type { LoginSignaturePlan } from "./identity.js";
 import { obtainViewToken } from "./indexerClient.js";
 import { assertKeyUnchanged, loginNeedsDeterminismCheck } from "./loginGuard.js";
-import { ensureChain, requireConnection } from "./connection.js";
+import { ensureChain } from "./connection.js";
 import type { Connection } from "./connection.js";
 import { loadKeyBinding, saveKeyBinding, saveSession, type StoredSession } from "./session.js";
 
@@ -23,9 +23,10 @@ export interface LoginContext {
 
 /** Every I/O edge a login touches, injectable so the refusals gate headlessly. */
 export interface RunLoginDeps {
-  /** The wallet the connect modal just opened (connection.ts requireConnection).
-   *  Its `transport` decides the determinism rule below — a WalletConnect wallet
-   *  this browser has never derived under pays the double signature. */
+  /** The wallet the connect modal just opened (wallet-web wagmi.ts
+   *  requireConnection). Its `transport` decides the determinism rule below — a
+   *  WalletConnect wallet this browser has never derived under pays the double
+   *  signature. */
   openConnection: () => Promise<Connection>;
   /** Prompt the wallet onto GIWA BEFORE anything signs: the derivation's typed
    *  data pins domain.chainId to GIWA, and wallets reject a v4 request whose
@@ -39,10 +40,14 @@ export interface RunLoginDeps {
   saveSession: (session: StoredSession) => void;
 }
 
-const DEFAULT_DEPS: RunLoginDeps = {
-  openConnection: requireConnection,
+/** What every login must be handed: how to reach a wallet (`openConnection` — the
+ *  wagmi edge) and how to derive under this deployment's KDF config
+ *  (`deriveIdentity` — deriveLoginIdentity partially applied). The engine-side
+ *  edges default to the real ones. */
+export type LoginIo = Pick<RunLoginDeps, "openConnection" | "deriveIdentity"> & Partial<RunLoginDeps>;
+
+const DEFAULT_DEPS: Omit<RunLoginDeps, "openConnection" | "deriveIdentity"> = {
   ensureChain,
-  deriveIdentity: deriveLoginIdentity,
   obtainViewToken,
   loadKeyBinding,
   saveKeyBinding,
@@ -65,11 +70,8 @@ export interface LoginResult {
  * wallet cannot be trusted to reproduce this account's key — and when it throws,
  * nothing has been written.
  */
-export async function runLogin(
-  ctx: LoginContext,
-  deps: Partial<RunLoginDeps> = {},
-): Promise<LoginResult> {
-  const io = { ...DEFAULT_DEPS, ...deps };
+export async function runLogin(ctx: LoginContext, deps: LoginIo): Promise<LoginResult> {
+  const io: RunLoginDeps = { ...DEFAULT_DEPS, ...deps };
   const connection = await io.openConnection();
   await io.ensureChain(connection);
 

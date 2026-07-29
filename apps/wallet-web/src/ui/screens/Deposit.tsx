@@ -16,11 +16,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { DEFAULTS } from "../../config.js";
-import { runDeposit, type DepositOutcome } from "../../lib/depositFlow.js";
-import { readTokenState } from "../../lib/connection.js";
+import { runDeposit, type DepositOutcome } from "@bongtu/client/depositFlow";
+import { readTokenState } from "@bongtu/client/connection";
+import { keyCache } from "../../lib/keyCache.js";
+import { proveInBrowser } from "../../lib/prove.js";
 import { useWallet } from "../App.js";
 import { useActionMachine } from "../actionMachine.js";
-import { formatKkrw, parseKkrw } from "../../lib/money.js";
+import { formatKkrw, parseKkrw } from "@bongtu/client/money";
 import { amountError } from "../format.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
 import { SuccessPanel } from "../components/SuccessPanel.js";
@@ -79,9 +81,18 @@ export function Deposit(): ReactNode {
     void action.submit(
       (onStage) =>
         runDeposit(
-          { connection, sessionPubkey: session.compressedPubkey },
+          {
+            connection,
+            pool: DEFAULTS.pool,
+            token: DEFAULTS.token,
+            explorer: DEFAULTS.explorer,
+            sessionPubkey: session.compressedPubkey,
+          },
           { amount: amountWei.toString() },
           onStage,
+          // The engine takes the app's lock + prover through its deps seam: proving
+          // is in-browser snarkjs over the same-origin circuit assets.
+          { keyCache, prove: (request) => proveInBrowser(request, DEFAULTS.circuitBaseUrl) },
         ),
       refreshAfterAction,
     );

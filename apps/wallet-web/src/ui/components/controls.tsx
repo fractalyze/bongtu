@@ -4,7 +4,7 @@
 
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
 import { DEFAULTS } from "../../config.js";
-import { amountCaretIndex, groupAmountInput } from "../../lib/money.js";
+import { amountCaretIndex, groupAmountInput } from "@bongtu/client/money";
 
 type ButtonVariant = "primary" | "ghost" | "danger";
 type ButtonSize = "md" | "lg" | "sm";

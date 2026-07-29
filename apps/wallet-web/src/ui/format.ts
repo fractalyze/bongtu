@@ -1,10 +1,10 @@
 // Small presentation helpers (PURE, no React): what a form says about what the user
 // typed, and how a value reads on screen. Money formatting/PARSING itself lives in
-// src/lib/money.ts (the single raw-wei <-> kKRW edge) — amountError below only judges
+// @bongtu/client/money (the single raw-wei <-> kKRW edge) — amountError below only judges
 // what that parser returns.
 
 import { decodeAddress } from "@bongtu/core/pubkey";
-import { parseKkrw } from "../lib/money.js";
+import { parseKkrw } from "@bongtu/client/money";
 
 /**
  * Why an amount can't be spent yet, or null when it can: the parse rules (money.ts —

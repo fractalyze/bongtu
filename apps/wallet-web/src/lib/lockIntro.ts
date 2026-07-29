@@ -8,7 +8,7 @@
 //
 // Pure + storage-injected like session.ts, so the gating is unit-tested headlessly.
 
-import type { StorageLike } from "./session.js";
+import type { StorageLike } from "@bongtu/client/session";
 
 export const LOCK_INTRO_KEY = "bongtu.lockIntro.v1";
 

@@ -5,7 +5,7 @@
 // full id in place. Values are raw wei; formatKkrw is the one UI edge (never Number).
 
 import type { ReactNode } from "react";
-import { formatKkrw } from "../../lib/money.js";
+import { formatKkrw } from "@bongtu/client/money";
 import { shortenPubkey } from "../format.js";
 import { useCopyFeedback } from "../hooks.js";
 import { IconButton } from "./controls.js";

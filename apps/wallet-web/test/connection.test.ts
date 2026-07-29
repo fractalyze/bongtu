@@ -1,4 +1,5 @@
-// Headless gates for the viem/wagmi wallet edge (src/lib/connection.ts), driven by
+// Headless gates for the viem wallet edge (@bongtu/client/connection) and the app's
+// wagmi config (src/lib/wagmi.ts), driven by
 // FAKE EIP-1193 transports — no wallet, no relay, no RPC. What is gated here:
 //
 //   (1) SUBMIT — every pool/token write goes out as eth_sendTransaction with the
@@ -35,7 +36,7 @@ import {
   type PublicClient,
 } from "viem";
 import { ARBITER_KEM_PK_HASH, POOL_ABI_FRAGMENTS } from "@bongtu/core/network";
-import { giwaSepolia, GAS_PRICE } from "../src/lib/chain.js";
+import { giwaSepolia, GAS_PRICE } from "@bongtu/client/chain";
 import { buildConnectors } from "../src/lib/wagmi.js";
 import {
   assertPoolKemEpoch,
@@ -45,7 +46,7 @@ import {
   submitTransfer,
   walletErrorMessage,
   type Connection,
-} from "../src/lib/connection.js";
+} from "@bongtu/client/connection";
 import { describeWallet, NEUTRAL_WALLET_NAME } from "../src/lib/walletBrand.js";
 import type { Calldata } from "@bongtu/core/proving";
 

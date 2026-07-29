@@ -1,5 +1,5 @@
 // Headless gates for the wallet's LOCK — the in-memory hold on the spending key
-// (src/lib/keyCache.ts). This is the module that decides how often the user sees a
+// (src/keyCache.ts). This is the module that decides how often the user sees a
 // signature popup and how long a key stays usable, so every branch is pinned here:
 //
 //   (0) LOGIN SEEDING — the login already paid for a signature, so it hands the
@@ -25,10 +25,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { deriveIdentityFromSignature } from "../src/lib/derive.js";
-import { ACCOUNT_MISMATCH_MESSAGE } from "../src/lib/identity.js";
-import { IDLE_WIPE_MS, KeyCache, type KeyCacheDeps } from "../src/lib/keyCache.js";
-import type { Connection } from "../src/lib/connection.js";
+import { deriveIdentityFromSignature } from "../src/derive.js";
+import { ACCOUNT_MISMATCH_MESSAGE } from "../src/identity.js";
+import { IDLE_WIPE_MS, KeyCache, type KeyCacheWiring } from "../src/keyCache.js";
+import type { Connection } from "../src/connection.js";
 
 const SESSION_SIG = "0x" + "a1".repeat(32) + "b2".repeat(32) + "1c";
 const OTHER_SIG = "0x" + "c3".repeat(32) + "d4".repeat(32) + "1b";
@@ -57,7 +57,7 @@ function harness(opts: { suppressTimer?: boolean } = {}) {
     armed: false,
   };
   let pending: (() => void) | null = null;
-  const deps: Partial<KeyCacheDeps> = {
+  const deps: KeyCacheWiring = {
     derive: async () => {
       state.derives++;
       return deriveIdentityFromSignature(state.sig);
@@ -115,25 +115,18 @@ test("the login derives through identity.ts — there is ONE derivation recipe",
   // A second copy of typed-data → sign → derive outside identity.ts could drift from
   // the lock's copy (a changed domain, a changed key version), and the two would then
   // produce different keys for the same account: a login that unlocks a key the notes
-  // are not owned by. The seam is a source fact, so it is gated as one.
-  const read = (rel: string): string =>
-    readFileSync(new URL(rel, import.meta.url).pathname, "utf8");
+  // are not owned by. The seam is a source fact, so it is gated as one. (Each APP's
+  // shell is gated the same way in that app's own suite — the package only vouches
+  // for its own files.)
+  const login = readFileSync(new URL("../src/loginFlow.ts", import.meta.url).pathname, "utf8");
 
-  // The login flow is the one caller, and it calls the owner module rather than the
-  // three primitives underneath it.
-  const login = read("../src/lib/loginFlow.ts");
-  assert.match(login, /deriveLoginIdentity/, "the login must use the owner module");
-
-  // The shell holds no recipe at all — not even the call, which now lives in the flow.
-  const app = read("../src/ui/App.tsx");
-  for (const file of [app, login]) {
-    for (const inlined of [
-      "keyDerivationTypedData",
-      "signKeyDerivation",
-      "deriveIdentityFromSignature",
-    ]) {
-      assert.ok(!file.includes(inlined), `the derivation is re-implemented via ${inlined}`);
-    }
+  // The flow takes `deriveIdentity` through its deps and holds no recipe of its own.
+  for (const inlined of [
+    "keyDerivationTypedData",
+    "signKeyDerivation",
+    "deriveIdentityFromSignature",
+  ]) {
+    assert.ok(!login.includes(inlined), `the derivation is re-implemented via ${inlined}`);
   }
 });
 

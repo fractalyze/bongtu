@@ -1,4 +1,4 @@
-// Headless gates for the PURE /history row mapping (src/lib/activity.ts) the
+// Headless gates for the PURE /history row mapping (src/activity.ts) the
 // activity feed keys its copy and amount sign on. Locked policy under test:
 //
 //   (1) every wire HistoryKind has a verb, in plain words (no note/UTXO jargon);
@@ -15,8 +15,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { ACTIVITY_VERB, activityDirection, appendHistoryPage } from "../src/lib/activity.js";
-import type { HistoryItem, HistoryKind } from "../src/lib/indexerClient.js";
+import { ACTIVITY_VERB, activityDirection, appendHistoryPage } from "../src/activity.js";
+import type { HistoryItem, HistoryKind } from "../src/indexerClient.js";
 
 const KINDS: HistoryKind[] = ["received", "sent", "withdraw", "deposit"];
 

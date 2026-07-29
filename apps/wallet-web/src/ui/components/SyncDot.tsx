@@ -9,7 +9,7 @@
 
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { fetchHealth, type Health } from "../../lib/indexerClient.js";
+import { fetchHealth, type Health } from "@bongtu/client/indexerClient";
 
 export type SyncState = "synced" | "syncing" | "stale";
 

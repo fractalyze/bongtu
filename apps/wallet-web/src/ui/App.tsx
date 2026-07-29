@@ -21,19 +21,20 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { DEFAULTS } from "../config.js";
+import { DEFAULTS, KEY_DERIVATION } from "../config.js";
+import { walletErrorMessage, type Connection } from "@bongtu/client/connection";
 import {
   endWalletConnection,
+  requireConnection,
   restoreConnection,
   warmReconnect,
   watchWallet,
-  walletErrorMessage,
-  type Connection,
-} from "../lib/connection.js";
-import { runLogin } from "../lib/loginFlow.js";
+} from "../lib/wagmi.js";
+import { runLogin } from "@bongtu/client/loginFlow";
+import { deriveLoginIdentity } from "@bongtu/client/identity";
 import { keyCache } from "../lib/keyCache.js";
 import type { WalletDescription } from "../lib/walletBrand.js";
-import { sumUnspent } from "../lib/balance.js";
+import { sumUnspent } from "@bongtu/client/balance";
 import {
   buildNotesUrl,
   buildHistoryUrl,
@@ -43,9 +44,9 @@ import {
   fetchHistoryPage,
   type OwnerNote,
   type HistoryItem,
-} from "../lib/indexerClient.js";
-import { appendHistoryPage } from "../lib/activity.js";
-import { clearKeyBindings, clearSession, loadSession, type StoredSession } from "../lib/session.js";
+} from "@bongtu/client/indexerClient";
+import { appendHistoryPage } from "@bongtu/client/activity";
+import { clearKeyBindings, clearSession, loadSession, type StoredSession } from "@bongtu/client/session";
 import { markLockIntroSeen, shouldShowLockIntro } from "../lib/lockIntro.js";
 import {
   loadOwnerSnapshot,
@@ -55,7 +56,7 @@ import {
   AUTO_REFRESH_MS,
   RECONNECT_NOTICE,
   type OwnerSnapshot,
-} from "../lib/refresh.js";
+} from "@bongtu/client/refresh";
 import { installGlobalErrorSurface, toastError, toasts } from "../lib/toasts.js";
 import { ToastHost } from "@bongtu/ui/Toast";
 import { useHashRoute, navigate, useWalletDescription } from "./hooks.js";
@@ -339,9 +340,15 @@ export function App(): ReactNode {
         // identity it returns never enters React state: the only reference that
         // outlives this function is the one keyCache.seed takes below (memory-only,
         // idle-wiped).
-        const { connection: conn, identity: id, session: sess, tokenless } = await runLogin({
-          indexerUrl: INDEXER_URL,
-        });
+        const { connection: conn, identity: id, session: sess, tokenless } = await runLogin(
+          { indexerUrl: INDEXER_URL },
+          {
+            // The wallet the RainbowKit modal just connected (wagmi.ts), deriving
+            // under THIS deployment's KDF domain facts — the engine reads no config.
+            openConnection: requireConnection,
+            deriveIdentity: (c, plan) => deriveLoginIdentity(c, plan, KEY_DERIVATION),
+          },
+        );
         if (tokenless) {
           // No token to read with later, so load ONCE now with a key-signed query,
           // while the key is still in hand.
