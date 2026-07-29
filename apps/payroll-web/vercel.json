@@ -4,6 +4,10 @@
     {
       "source": "/indexer/:path*",
       "destination": "https://gpu-server.tailec11d1.ts.net:10000/:path*"
+    },
+    {
+      "source": "/prover/:path*",
+      "destination": "https://gpu-server.tailec11d1.ts.net:10000/prover/:path*"
     }
   ]
 }
