@@ -23,7 +23,7 @@ otherwise inspectable on-chain — its correctness is bound off-chain by the pro
 public signal and the arbiter's decapsulation
 ([security-model.md](security-model.md#post-quantum-the-hybrid-authority-envelope-key)).
 
-`rotateArbiter`, `setDisburseAllowed` and `_authorizeUpgrade` are `onlyOwner`. Every operation runs
+`rotateArbiter` and `_authorizeUpgrade` are `onlyOwner`. Every operation runs
 `whenInitialized` before `nonReentrant`, so a call against an uninitialized proxy reverts
 `NotInitialized` rather than tripping the latch. ERC-20 moves follow CEI (`SafeERC20`, after the
 tree update). The underlying token **must** be non-fee-on-transfer and non-rebasing: the amount is
