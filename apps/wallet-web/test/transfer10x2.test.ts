@@ -379,7 +379,7 @@ function flowDeps(f: ReturnType<typeof fixture>, trace: { circuit: string | null
       arm: () => () => {},
     }),
     getHead: async () => ({ root: f.root, nextLeafIndex: f.inputs.length }),
-    getPath: async (_url: string, leafIndex: number) => ({
+    getSignedPath: async (_url: string, leafIndex: number) => ({
       leafIndex,
       siblings: f.memberships[leafIndex].pathElements,
       pathIndices: Array.from({ length: H }, () => 0),

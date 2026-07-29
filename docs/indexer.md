@@ -109,7 +109,7 @@ so a cold backfill does not open one socket per block.
 |---|---|---|
 | `GET /head` | `{ root, nextLeafIndex }` of the ingested mirror | none |
 | `GET /events?cursor=&limit=` | the ciphertext feed a wallet trial-decrypts: per op `{ seq, txHash, blockNumber, kind, epoch, ecdhPublicKey, encryptionNonce, slices[], ciphertext[], disclosure? }` | none |
-| `GET /path/{leafIndex}` | `{ leafIndex, siblings[], pathIndices[], root }`; 404 out of range; **422** for a disburse-batch interior leaf in public mode | none |
+| `GET /path/{leafIndex}` | `{ leafIndex, siblings[], pathIndices[], root }`; 404 out of range; **422** for a disburse-batch interior leaf in public mode | none for a single-append leaf (siblings are public chain data); **bjj signature or view token + leaf ownership** for a batch-interior leaf in arbiter mode (its siblings are other recipients' commitments) — 400/401 unauthenticated, **403** for a leaf the proven owner does not hold |
 | `GET /nullifiers` | the spent-nullifier set derived from events | none |
 | `GET /alarms` | one discriminated feed: every non-passing disclosure (`type:"disclosure"`) plus, arbiter mode only, envelope cross-check failures (`type:"envelope"`) | none |
 | `GET /health` | `{ ok, lastBlock, nextLeafIndex, batchSize, alarms, lastSuccessAt, lastError, lastErrorAt, consecutiveFailures }`; `ok` is false when the tail poll is persistently failing | none |
@@ -159,7 +159,7 @@ string. `docker-compose.yml` forwards both.
    ─────────────                         ───────────────
    chain data only                       chain data + EVERY owner's decrypted notes
    /notes, /history absent (404)         /notes, /history present, per-owner signature-gated
-   batch-interior /path -> 422           batch-interior /path served
+   batch-interior /path -> 422           batch-interior /path served to its proven owner only
 ```
 
 The read-auth governs *who may query*, not what the instance can see. An arbiter-mode indexer is

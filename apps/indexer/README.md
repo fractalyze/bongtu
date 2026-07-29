@@ -26,7 +26,7 @@ response bodies against them.
 |---|---|
 | `GET /head` | `{ root, nextLeafIndex }` — ingested mirror state |
 | `GET /events?cursor=&limit=` | the ciphertext feed a wallet trial-decrypts: `[{ seq, txHash, blockNumber, kind, epoch, ecdhPublicKey, encryptionNonce, slices:[{offset, elts, leafIndex}], ciphertext[], disclosure? }]` |
-| `GET /path/{leafIndex}` | `{ leafIndex, siblings[], pathIndices[], root }`; 404 out-of-range; **422** for a disburse-batch interior leaf in public mode (served in arbiter mode) |
+| `GET /path/{leafIndex}` | `{ leafIndex, siblings[], pathIndices[], root }`; 404 out-of-range; **422** for a disburse-batch interior leaf in public mode (served in arbiter mode — to the leaf's proven owner only: `/notes` read-auth + ownership, else 400/401/403) |
 | `GET /alarms` | one discriminated feed: every non-passing disclosure (`{type:"disclosure"}`, status `mismatch` / `unverifiable` / `withheld`) plus, arbiter mode only, envelope cross-check failures (`{type:"envelope"}`) |
 | `GET /nullifiers` | `string[]` — the spent-nullifier set from events (public, key-free) |
 | `GET /health` | `{ ok, lastBlock, nextLeafIndex, batchSize, alarms, lastSuccessAt, lastError, lastErrorAt, consecutiveFailures }` — `ok` is false when the tail poll is persistently failing |

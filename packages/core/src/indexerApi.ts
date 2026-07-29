@@ -209,6 +209,20 @@ export function getPath(indexerUrl: string, leafIndex: number): Promise<PathResu
   return getJson<PathResult>(`${trim(indexerUrl)}/path/${leafIndex}`);
 }
 
+/** Merkle path with the signed read-auth attached (same `owner/ts/sig` triple as
+ *  /notes). Required to open a WITHIN-BATCH leaf on an arbiter indexer — the
+ *  server checks the sig AND that the ledger holds `leafIndex` under this owner
+ *  (401/403 otherwise); auth is ignored for single-append leaves, so a wallet can
+ *  sign every membership fetch uniformly. */
+export function getSignedPath(
+  indexerUrl: string,
+  leafIndex: number,
+  ownerCompressed: string,
+  ownerPrivateKey: FieldInput,
+): Promise<PathResult> {
+  return getJson<PathResult>(`${trim(indexerUrl)}/path/${leafIndex}?${signedAuthQuery(ownerCompressed, ownerPrivateKey)}`);
+}
+
 export function getEvents(indexerUrl: string, limit = 5000): Promise<FeedEvent[]> {
   return getJson<FeedEvent[]>(`${trim(indexerUrl)}/events?limit=${limit}`);
 }
@@ -239,12 +253,18 @@ export function signedReadUrl(
   ownerCompressed: string,
   ownerPrivateKey: FieldInput,
 ): string {
+  return `${trim(indexerUrl)}/${route}?${signedAuthQuery(ownerCompressed, ownerPrivateKey)}`;
+}
+
+/** The `owner=&ts=&sig=` auth triple every signed read carries (SPEC §6b v2) —
+ *  one implementation, shared by the owner feeds and the gated /path read. */
+function signedAuthQuery(ownerCompressed: string, ownerPrivateKey: FieldInput): string {
   const owner = ownerCompressed.trim();
   const pub = unpackPubkey(owner); // validates the compressed pubkey
   const ts = Math.floor(Date.now() / 1000); // unix seconds; server allows |now-ts| <= 300
   const msg = notesAuthMessage(pub, ts);
   const sig = signNotesAuth(ownerPrivateKey, msg);
-  return `${trim(indexerUrl)}/${route}?owner=${encodeURIComponent(owner)}&ts=${ts}&sig=${packSignature(sig)}`;
+  return `owner=${encodeURIComponent(owner)}&ts=${ts}&sig=${packSignature(sig)}`;
 }
 
 /** The signed `GET /notes` URL — the owner's decrypted note list. */

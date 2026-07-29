@@ -107,7 +107,7 @@ function spendDeps(trace: Trace, keyCache: KeyCache): Partial<RunSpendDeps> {
       trace.head++;
       return { root: MEMBERSHIP_ROOT, nextLeafIndex: 1 };
     },
-    getPath: async () => {
+    getSignedPath: async () => {
       trace.path++;
       return {
         leafIndex: 0,

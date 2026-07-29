@@ -17,6 +17,11 @@
 //      sig path; a tokenless (public-mode) server honours no token at all. It
 //      runs ONCE against the extracted function, and each route then only has to
 //      prove it honours the verdict and serves its own projection.
+//   5. ROUTES — /notes and /history honour the verdict; 503 pre-ledger.
+//   6. PATH GATE — /path stays auth-free for single-append leaves but demands
+//      the same read-auth PLUS leaf ownership for a within-batch leaf (whose
+//      siblings are other recipients' commitments, servable only in arbiter
+//      mode): unauthenticated 400/401, authenticated-but-not-the-owner 403.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -49,6 +54,7 @@ import {
 import { authChallenge, authRedeem } from "../src/api/routes/auth.js";
 import { notes } from "../src/api/routes/notes.js";
 import { history } from "../src/api/routes/history.js";
+import { path as pathRoute } from "../src/api/routes/path.js";
 import type { Indexer } from "../src/ingest.js";
 import type { RouteContext, RouteResult } from "../src/api/router.js";
 
@@ -441,4 +447,62 @@ test("/notes and /history 503 while the arbiter ledger is still unbuilt", () => 
 test("the /auth endpoints refuse to pretend when there is no service behind them", () => {
   assert.equal(call(authChallenge, null, `owner=${ownerCompressed}`).status, 503);
   assert.equal(call(authRedeem, null, "", { owner: ownerCompressed, challenge: "1", sig: "0x00" }).status, 503);
+});
+
+// ============================ (6) PATH GATE ==================================
+
+// /path serves single-append leaves to ANYONE (their siblings are recomputable
+// from public chain data), but a REAL path into a disburse batch exists only in
+// arbiter mode and its low levels are other recipients' commitments — so that
+// read demands the shared read-auth PLUS ownership of the queried leaf.
+test("/path gates a within-batch leaf behind read-auth + leaf ownership", () => {
+  const svc = svcAt();
+  // Leaves 0..3 are single-append; leaves 4..7 are an arbiter-filled batch
+  // (isBatch on block 1). OWNER holds leaf 5 in the ledger; nobody holds 6.
+  const pathIx = {
+    arbiterMode: true,
+    ledger: {
+      notesOf: (x: bigint, y: bigint) =>
+        x === OWNER.publicKey[0] && y === OWNER.publicKey[1] ? [{ ...FAKE_NOTE, leafIndex: 5 }] : [],
+    },
+    tree: {
+      B: 4,
+      nextLeafIndex: () => 8,
+      isBatch: (k: number) => k === 1,
+      path: () => ({ siblings: [1n, 2n, 3n], pathIndices: [0, 1, 0], root: 42n }),
+    },
+  } as unknown as Indexer;
+  const at = (leafIndex: number, query: string): RouteResult =>
+    pathRoute.handle({ ix: pathIx, tokens: svc, params: [String(leafIndex)], query: new URLSearchParams(query) });
+
+  const signedQ = new URL(buildNotesUrl("http://x", ownerCompressed, OWNER.formattedPrivateKey), "http://x")
+    .searchParams.toString();
+  const { challenge } = svc.issueChallenge(ownerCompressed);
+  const issued = svc.redeemChallenge(ownerCompressed, challenge, signFor(OWNER, challenge, HOME));
+  assert.ok(issued);
+  const tokenQ = `owner=${ownerCompressed}&token=${encodeURIComponent(issued.token)}`;
+
+  // A single-append leaf needs no auth at all — parity with a public indexer.
+  const free = at(1, "");
+  assert.equal(free.status, 200);
+  assert.equal(free.headers?.["x-bongtu-auth"], undefined, "no enforced-auth notice on the ungated read");
+
+  // The batch leaf refuses the very same unauthenticated request…
+  assert.equal(at(5, "").status, 400, "no owner param");
+  assert.equal(at(5, `owner=${ownerCompressed}`).status, 400, "no token and no ts/sig");
+  const now = Math.floor(Date.now() / 1000);
+  assert.equal(at(5, signedQuery(OTHER, now)).status, 401, "signature by the wrong key");
+
+  // …and serves the proven owner through EITHER proof, with the enforced notice.
+  for (const q of [signedQ, tokenQ]) {
+    const served = at(5, q);
+    assert.equal(served.status, 200);
+    assert.deepEqual(served.body, { leafIndex: 5, siblings: ["1", "2", "3"], pathIndices: [0, 1, 0], root: "42" });
+    assert.match(served.headers?.["x-bongtu-auth"] ?? "", /ENFORCED/);
+  }
+
+  // Proven — but not the holder of THIS leaf: a recipient may open its own batch
+  // slot, never a neighbour's.
+  assert.equal(at(6, signedQ).status, 403);
+  assert.equal(at(6, tokenQ).status, 403);
 });

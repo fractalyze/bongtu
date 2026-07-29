@@ -31,7 +31,7 @@ import {
   walletErrorMessage,
 } from "./connection.js";
 import { keyCache, type KeyCache } from "./keyCache.js";
-import { getHead, getPath, type OwnerNote } from "./indexerClient.js";
+import { getHead, getSignedPath, type OwnerNote } from "./indexerClient.js";
 import { pollUntil, type PollForActionOptions } from "./refresh.js";
 import {
   buildTransferRequest,
@@ -95,7 +95,7 @@ export interface RunSpendDeps {
   /** the wallet's lock — holds the spending key between actions (keyCache.ts). */
   keyCache: KeyCache;
   getHead: typeof getHead;
-  getPath: typeof getPath;
+  getSignedPath: typeof getSignedPath;
   proveInBrowser: typeof proveInBrowser;
   submitTransfer: typeof submitTransfer;
   submitTransfer10x2: typeof submitTransfer10x2;
@@ -109,7 +109,7 @@ const DEFAULT_DEPS: RunSpendDeps = {
   assertPoolKemEpoch,
   keyCache,
   getHead,
-  getPath,
+  getSignedPath,
   proveInBrowser,
   submitTransfer,
   submitTransfer10x2,
@@ -119,16 +119,21 @@ const DEFAULT_DEPS: RunSpendDeps = {
 
 // Circuit choice and note selection are PURE + unit-tested (spend.ts
 // planSpendChain); this wiring only fetches the live membership witnesses for the
-// selected leaves — freshly per leg, because each leg moves the root.
+// selected leaves — freshly per leg, because each leg moves the root. Every fetch
+// is SIGNED with the (already-unlocked) spending key: a disbursed note lives
+// inside a batch, and the arbiter indexer only opens a batch slot to the owner
+// who proves it (routes/path.ts); for single-append leaves the auth is ignored.
 async function fetchMemberships(
   io: RunSpendDeps,
   indexerUrl: string,
+  identity: WalletIdentity,
   inputs: WalletInputNote[],
 ): Promise<MembershipWitness[]> {
   const head = await io.getHead(indexerUrl);
   const memberships: MembershipWitness[] = [];
   for (const n of inputs) {
-    const p = await io.getPath(indexerUrl, n.leafIndex); // 422 for a within-batch leaf in public mode
+    // 422 for a within-batch leaf in public mode
+    const p = await io.getSignedPath(indexerUrl, n.leafIndex, identity.compressedPubkey, identity.keypair.formattedPrivateKey);
     memberships.push({ root: head.root, pathElements: p.siblings, leafIndex: n.leafIndex });
   }
   return memberships;
@@ -190,7 +195,7 @@ async function runLeg(
   onStage: OnSpendStage,
   leg: LegProgress,
 ): Promise<{ outcome: SpendOutcome; payeeSalt: string }> {
-  const memberships = await fetchMemberships(io, ctx.indexerUrl, action.inputs);
+  const memberships = await fetchMemberships(io, ctx.indexerUrl, identity, action.inputs);
   const crypto = freshSpendCrypto(randField);
   const built = buildRequest(action, identity, memberships, crypto);
   if (!built.meta.membershipOk) {

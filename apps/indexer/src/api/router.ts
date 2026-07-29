@@ -5,6 +5,8 @@
 //                                    encryptionNonce, epoch, slices:[{offset,elts,
 //                                    leafIndex}], kind, ciphertext[], disclosure? }]
 //   GET /path/:leafIndex     -> { leafIndex, siblings[], pathIndices[], root }
+//                               (batch-interior leaf: /notes read-auth + leaf
+//                                ownership required — routes/path.ts)
 //   GET /alarms              -> [Alarm]  (single discriminated feed: every
 //                               non-passing disclosure as { type: "disclosure" },
 //                               plus — arbiter mode only — every envelope
@@ -32,7 +34,8 @@
 // All endpoints serve INGESTED state (the MirrorTree is asserted against the
 // contract per insert and at every scanned head), so the API stays mutually
 // consistent and available even when the RPC is not. In arbiter mode /path also
-// serves within-batch leaves (the ledger filled them); public mode 422s those.
+// serves within-batch leaves (the ledger filled them) — but only to the leaf's
+// authenticated owner; public mode 422s those.
 //
 // Dispatch is a plain ordered `routes` table matched by (method, pattern), NOT an
 // if/else ladder: each route's `handle` is a PURE function of the indexer + parsed

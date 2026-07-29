@@ -20,7 +20,8 @@
 //      a recipient's GET /notes lists its disburse-batch note (value/salt/leaf,
 //      spent=false); after the transfer spends it, the note reads spent=true (from
 //      the input envelope alone) and the payee's new note is present; GET /path for
-//      that batch leaf now folds to root() (the ledger filled the batch); the
+//      that batch leaf folds to root() (the ledger filled the batch) but ONLY for
+//      the authenticated leaf owner — unauthenticated 400, another owner 403; the
 //      arbiter /nullifiers carries the spent set; bad /notes params 400; the
 //      authority-tampered disburse surfaces a { type: "envelope" } cross-check
 //      alarm on /alarms (the recovered leaves cannot fold to the on-chain
@@ -40,7 +41,7 @@ import { poseidon2, poseidonN } from "@bongtu/core/poseidon";
 import { ecdhSharedSecret, poseidonDecrypt } from "@bongtu/core/note";
 import { packPubkey } from "@bongtu/core/pubkey";
 import { signNotesAuth, notesAuthMessage, packSignature } from "@bongtu/core/eddsa";
-import { obtainViewToken } from "@bongtu/core/indexerApi";
+import { obtainViewToken, getSignedPath } from "@bongtu/core/indexerApi";
 import { ImtTree } from "@bongtu/core/imt";
 import { Indexer } from "../src/ingest.js";
 import { parseKemKey } from "../src/chain.js";
@@ -265,14 +266,22 @@ async function runArbiter(sc: any): Promise<void> {
     );
     ok(tWrongOwner.status === 401, "recipient#0's token on the payee's owner → 401");
 
-    // ARBITER /path into the disburse batch now serves a REAL path folding to root.
-    step("ARBITER /path — within-batch leaf now servable (ledger filled the batch)");
-    const bp = await get(abase, `/path/${r0.leafIndex}`);
-    ok(bp.status === 200, `GET /path/${r0.leafIndex} → 200 in arbiter mode (was 422 public)`);
-    const p = bp.body as { siblings: string[]; pathIndices: number[]; root: string };
+    // ARBITER /path into the disburse batch serves a REAL path folding to root —
+    // but ONLY to the authenticated owner of the queried leaf (routes/path.ts):
+    // its siblings are the other recipients' commitments, which is exactly the
+    // data public mode calls not-chain-recoverable.
+    step("ARBITER /path — within-batch leaf servable to its authenticated owner only");
+    const bpUnauthed = await get(abase, `/path/${r0.leafIndex}`);
+    ok(bpUnauthed.status === 400, `unauthenticated GET /path/${r0.leafIndex} (batch interior) → 400 (auth required)`);
+    const bpNeighbour = await get(abase, `/path/${r0.leafIndex + 1}?owner=${r0Compressed}&token=${encodeURIComponent(vt.token)}`);
+    ok(bpNeighbour.status === 403, "recipient#0 authed on recipient#1's batch slot → 403");
+    // The sdk's signed client (the wallet's membership fetch) is the happy path.
+    const p = await getSignedPath(abase, r0.leafIndex, r0Compressed, BigInt(sc.recipient0PrivateKey));
     const folded = foldToRoot(BigInt(sc.disburseHonest.outCommits[0]), p.siblings.map(BigInt), p.pathIndices);
     ok(folded.toString() === sc.headRoot, `batch leaf ${r0.leafIndex} path folds to head root`);
     ok(p.root === sc.headRoot, `/path/${r0.leafIndex} reports head root`);
+    const bpToken = await get(abase, `/path/${r0.leafIndex}?owner=${r0Compressed}&token=${encodeURIComponent(vt.token)}`);
+    ok(bpToken.status === 200, "the view token authorises the same batch-slot read (dual auth)");
 
     // /nullifiers (also served in arbiter mode) carries every spent nullifier.
     step("ARBITER /nullifiers — spent nullifier set");

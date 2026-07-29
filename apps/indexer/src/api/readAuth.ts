@@ -1,7 +1,8 @@
-// The read-auth the two ARBITER-ONLY owner feeds share (SPEC §6b v2): /notes and
-// /history ask the SAME question — "does this caller control the queried key?" —
-// so they ask it in ONE place, and the routes differ only in the projection they
-// serve afterwards.
+// The read-auth the ARBITER-ONLY owner reads share (SPEC §6b v2): /notes,
+// /history and the batch-interior half of /path ask the SAME question — "does
+// this caller control the queried key?" — so they ask it in ONE place, and the
+// routes differ only in the projection (or extra ownership check) they add
+// afterwards.
 //
 // AUTH — ENFORCED. The auditor-key indexer decrypts every user's notes and
 // activity, so an unauthenticated feed would expose everyone's payroll to anyone

@@ -10,14 +10,16 @@
 //     can read its own notes even though the arbiter indexer holds everyone's;
 //   - `GET /events` + `GET /nullifiers` for the key-only trial-decrypt discovery
 //     primitive (`trialDecryptEvents` — tested, not a wallet balance path);
-//   - `GET /head` + `GET /path/{leafIndex}` to build a spend's membership witness;
+//   - `GET /head` + signed `GET /path/{leafIndex}` to build a spend's membership
+//     witness — signed because a disbursed note sits inside a batch, and the
+//     arbiter indexer only opens a batch slot to its proven owner;
 //   - paged `GET /history` (`fetchHistoryPage`) for the activity feed — the app
 //     holds one page at a time and asks for the next by cursor, so a long-lived
 //     account does not download its entire history to render four Home rows.
 
 export {
   getHead,
-  getPath,
+  getSignedPath,
   getEvents,
   buildNotesUrl,
   fetchNotes,

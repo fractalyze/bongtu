@@ -275,7 +275,10 @@ function chainWorld(values: bigint[]) {
     assertPoolKemEpoch: async () => {},
     keyCache,
     getHead: async () => ({ root: tree.getRoot().toString(), nextLeafIndex: tree.getNextLeafIndex() }),
-    getPath: async (_url: string, leafIndex: number) => {
+    getSignedPath: async (_url: string, leafIndex: number, ownerCompressed: string) => {
+      // Every membership fetch must be signed AS the spending wallet — the arbiter
+      // indexer only opens a batch slot to the leaf's proven owner.
+      assert.equal(ownerCompressed, WALLET.compressedPubkey);
       const p = tree.merklePath(leafIndex);
       return {
         leafIndex,
