@@ -54,10 +54,14 @@ import {
   DEPOSIT_MODAL_DEPS,
   depositModalView,
   mintTestKkrw,
+  mintView,
+  NO_GAS_MESSAGE,
   openDepositModal,
+  openMint,
   readDepositAccount,
   readGas,
   type DepositModalState,
+  type MintState,
 } from "../lib/depositModal.js";
 import { keyCache } from "../lib/keyCache.js";
 import { proveViaService } from "../lib/proverClient.js";
@@ -229,7 +233,7 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
 
   // Money disbursed TO or BY this account must appear unprompted; a tick never
   // overlaps itself or a run, and a tokenless session reads only while unlocked.
-  const busy = pay.phase === "running" || deposit?.stage != null || deposit?.minting === true;
+  const busy = pay.phase === "running" || deposit?.stage != null || deposit?.mint?.pending === true;
   useEffect(() => {
     if (!wallet) return;
     let inflight = false;
@@ -402,20 +406,33 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
     }
   };
 
+  /** Patch the OPEN mint popup — a no-op once it (or the dialog) is closed, the
+   *  same late-write rule patchDeposit follows. */
+  const patchMint = (patch: Partial<MintState>): void =>
+    setDeposit((d) => (d?.mint == null ? d : { ...d, mint: { ...d.mint, ...patch } }));
+
   const startMint = async (): Promise<void> => {
-    if (!wallet || deposit === null) return;
-    patchDeposit({ error: null });
-    if (!(await gasOk(wallet.connection))) return;
-    patchDeposit({ minting: true });
+    if (!wallet || deposit?.mint == null) return;
+    const amountWei = mintView(deposit.mint).amountWei;
+    if (amountWei === null) return;
+    patchMint({ error: null });
+    if (!(await gasOk(wallet.connection))) {
+      // The dialog's gas notice (with the faucet link) is BEHIND the popup — the
+      // popup has to say it too, or the operator watches a dead Mint button.
+      patchMint({ error: NO_GAS_MESSAGE });
+      return;
+    }
+    patchMint({ pending: true });
     try {
-      await mintTestKkrw(wallet.connection, DEFAULTS.token, DEPOSIT_MODAL_DEPS);
+      const tx = await mintTestKkrw(wallet.connection, DEFAULTS.token, amountWei, DEPOSIT_MODAL_DEPS);
+      patchMint({ tx });
       // The minted kKRW is public and sits in the wallet — the dialog's own readout
       // is what changed, so re-read it here (the private balance did not move).
       await readDepositBalances(wallet.connection);
     } catch (e) {
-      patchDeposit({ error: payrollErrorMessage(e) });
+      patchMint({ error: payrollErrorMessage(e) });
     } finally {
-      patchDeposit({ minting: false });
+      patchMint({ pending: false });
     }
   };
 
@@ -610,6 +627,9 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
           onAmountChange={(amount) => patchDeposit({ amount })}
           onClose={() => setDeposit(null)}
           onDeposit={() => void startDeposit()}
+          onOpenMint={() => patchDeposit({ mint: openMint() })}
+          onCloseMint={() => patchDeposit({ mint: null })}
+          onMintAmountChange={(amount) => patchMint({ amount })}
           onMint={() => void startMint()}
         />
       )}
@@ -727,9 +747,6 @@ function StageChecklist({ stage }: { stage: SpendStage }): ReactNode {
               }`}
             />
             {STAGE_LABEL[st]}
-            {st === "prove" && state === "active" && (
-              <span className="text-muted font-normal">— up to ~20s for a full batch</span>
-            )}
           </li>
         );
       })}

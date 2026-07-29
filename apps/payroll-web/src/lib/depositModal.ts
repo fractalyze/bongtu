@@ -9,23 +9,16 @@
 // is MockERC20 whose `mint` is permissionless, so the operator self-mints and pays
 // their own GIWA gas — no faucet service, no operator key. A zero-gas account is
 // pre-checked and told plainly (with the faucet link) instead of failing inside
-// the wallet with an opaque provider object.
+// the wallet with an opaque provider object. The mint is its OWN popup over the
+// deposit dialog — an empty amount the operator fills, a Mint press, a completion
+// view with the transaction — not a one-tap fixed ration off the label row: a
+// stray click must not send a transaction.
 
-import type { Connection } from "@bongtu/client/connection";
+import type { Connection, SubmitResult } from "@bongtu/client/connection";
 import { mintTestToken, readGasBalance, readTokenState } from "@bongtu/client/connection";
 import type { DepositStage } from "@bongtu/client/depositFlow";
 import { formatKkrw } from "@bongtu/client/money";
 import { parseDepositAmount } from "./errors.js";
-
-/**
- * The FIXED ration one [Mint] tap adds: 1,000,000 kKRW at the token's 18 decimals.
- * Fixed, not a second amount field, because this dialog already has one and the
- * mint is a means to it, not a decision of its own — and one tap has to cover a
- * whole test pay run (255 random recipients) without sending the operator back for
- * more. Payroll owns the constant rather than importing the wallet's FAUCET_AMOUNT:
- * the two apps mint for different reasons and may diverge.
- */
-export const MINT_AMOUNT = 1_000_000n * 10n ** 18n;
 
 /** What the dialog says when the connected account cannot pay for either tx. The
  *  faucet link is rendered next to it (config gasFaucet), so the next step is one
@@ -37,6 +30,20 @@ export const NO_GAS_MESSAGE =
  *  blocks: guessing "none" would lock a funded operator out of their own deposit. */
 export type GasState = "unknown" | "none" | "funded";
 
+/** The mint popup over the deposit dialog. `null` on the deposit state is
+ *  "closed" — the same no-open-flag rule the deposit itself follows. */
+export interface MintState {
+  /** the typed kKRW amount to mint — starts EMPTY (a prefilled number reads as a
+   *  fixed ration rather than a field to fill in; wallet U-W9 lesson). */
+  amount: string;
+  /** true while the mint tx is in flight — the popup cannot be closed under it. */
+  pending: boolean;
+  /** the confirmed mint — flips the popup to its completion view, so the Mint
+   *  button cannot be pressed twice for one visit. */
+  tx: SubmitResult | null;
+  error: string | null;
+}
+
 /** Everything the open dialog holds. `null` in the console's state is "closed" —
  *  there is no separate open flag, so a stale amount cannot outlive a close. */
 export interface DepositModalState {
@@ -44,8 +51,8 @@ export interface DepositModalState {
   amount: string;
   /** the running deposit's stage, null when no deposit is in flight. */
   stage: DepositStage | null;
-  /** true while the self-mint tx is in flight. */
-  minting: boolean;
+  /** the mint popup, null when closed. */
+  mint: MintState | null;
   /** the account's PUBLIC kKRW (ERC-20 balanceOf) — not the shielded pool balance.
    *  null until the first read lands, or after one fails: never a false zero. */
   tokenBalance: bigint | null;
@@ -82,11 +89,15 @@ export function openDepositModal(shortfallWei: bigint | null): DepositModalState
   return {
     amount: prefillAmount(shortfallWei),
     stage: null,
-    minting: false,
+    mint: null,
     tokenBalance: null,
     gas: "unknown",
     error: null,
   };
+}
+
+export function openMint(): MintState {
+  return { amount: "", pending: false, tx: null, error: null };
 }
 
 /** What the dialog may do right now, and what it says about it. */
@@ -118,7 +129,10 @@ export function depositModalView(state: DepositModalState): DepositModalView {
       : parsed.wei <= 0n
         ? "Enter an amount above zero."
         : null;
-  const busy = state.stage !== null || state.minting;
+  // An OPEN mint popup does not make the deposit busy — only its in-flight tx
+  // does: the popup overlays the dialog anyway, and a finished mint must leave
+  // the deposit's own buttons live the moment the popup closes.
+  const busy = state.stage !== null || state.mint?.pending === true;
   // `unknown` gas stays actionable — only a READ ZERO disables. A wallet that
   // fails anyway still surfaces its own message through payrollErrorMessage.
   const gasless = state.gas === "none";
@@ -130,7 +144,38 @@ export function depositModalView(state: DepositModalState): DepositModalView {
     busy,
     notice: gasless ? NO_GAS_MESSAGE : null,
     depositLabel: state.stage !== null ? DEPOSIT_STAGE_LABEL[state.stage] : "Deposit",
-    mintLabel: state.minting ? "Minting…" : `Mint ${formatKkrw(MINT_AMOUNT)} test kKRW`,
+    mintLabel: "No kKRW?",
+  };
+}
+
+/** What the mint POPUP may do right now. Same field grammar as the deposit's own
+ *  amount (parseDepositAmount): the two fields sit one popup apart and must not
+ *  word the same mistake differently. */
+export interface MintView {
+  amountWei: bigint | null;
+  /** null while the field is untouched — an empty popup does not open shouting. */
+  amountError: string | null;
+  canMint: boolean;
+  /** the tx is in flight: no second Mint press, no close out from under it. */
+  busy: boolean;
+}
+
+export function mintView(mint: MintState): MintView {
+  const typed = mint.amount.trim() !== "";
+  const parsed = parseDepositAmount(mint.amount);
+  const amountWei = parsed.ok && parsed.wei > 0n ? parsed.wei : null;
+  const amountError = !typed
+    ? null
+    : !parsed.ok
+      ? parsed.error
+      : parsed.wei <= 0n
+        ? "Enter an amount above zero."
+        : null;
+  return {
+    amountWei,
+    amountError,
+    canMint: !mint.pending && mint.tx === null && amountWei !== null,
+    busy: mint.pending,
   };
 }
 
@@ -175,12 +220,13 @@ export async function readDepositAccount(
   return { tokenBalance: balance, gas };
 }
 
-/** Mint the fixed ration to the connected account itself — the permissionless
+/** Mint the typed amount to the connected account itself — the permissionless
  *  MockERC20 path. To ANYONE else would be a transfer the operator did not ask for. */
 export async function mintTestKkrw(
   connection: Connection,
   token: string,
+  amountWei: bigint,
   deps: DepositModalDeps,
-): Promise<void> {
-  await deps.mintTestToken(connection, token, connection.address, MINT_AMOUNT);
+): Promise<SubmitResult> {
+  return deps.mintTestToken(connection, token, connection.address, amountWei);
 }

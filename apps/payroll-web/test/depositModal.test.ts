@@ -5,8 +5,9 @@
 //     shortfall), and what the deposit button says while a deposit runs;
 //   - the gas belt: a READ ZERO disables both actions and selects the plain
 //     message; an unread/failed gas read must NOT lock a funded operator out;
-//   - the mint: fixed ration, to the connected account itself, through a fake
-//     wallet edge (no RPC, no chain).
+//   - the mint POPUP: the typed amount, to the connected account itself, through
+//     a fake wallet edge (no RPC, no chain); a confirmed mint gates a second
+//     press out.
 //
 // Every I/O edge is injected (DepositModalDeps), so the whole file runs headless.
 
@@ -16,11 +17,12 @@ import assert from "node:assert/strict";
 import type { Connection } from "@bongtu/client/connection";
 import { parseKkrw } from "@bongtu/client/money";
 import {
-  MINT_AMOUNT,
   NO_GAS_MESSAGE,
   depositModalView,
   mintTestKkrw,
+  mintView,
   openDepositModal,
+  openMint,
   prefillAmount,
   readDepositAccount,
   readGas,
@@ -70,7 +72,7 @@ test("opening with no shortfall starts empty, with nothing read and nothing runn
   assert.deepEqual(openDepositModal(null), {
     amount: "",
     stage: null,
-    minting: false,
+    mint: null,
     tokenBalance: null,
     gas: "unknown",
     error: null,
@@ -108,16 +110,20 @@ test("the deposit button carries the running stage, and a stage blocks both acti
   assert.equal(proving.canMint, false, "and neither can a mint");
 });
 
-test("a running mint says so and blocks the deposit under it", () => {
-  const minting = depositModalView(state({ amount: "100", minting: true }));
-  assert.equal(minting.mintLabel, "Minting…");
-  assert.equal(minting.busy, true);
-  assert.equal(minting.canDeposit, false);
+test("an in-flight mint tx blocks the deposit under it; a merely OPEN popup does not", () => {
+  const pending = depositModalView(
+    state({ amount: "100", mint: { ...openMint(), pending: true } }),
+  );
+  assert.equal(pending.busy, true);
+  assert.equal(pending.canDeposit, false);
+
+  const justOpen = depositModalView(state({ amount: "100", mint: openMint() }));
+  assert.equal(justOpen.busy, false, "closing the popup must leave live buttons behind it");
+  assert.equal(justOpen.canDeposit, true);
 });
 
-test("the mint button names the fixed ration it will add", () => {
-  assert.equal(depositModalView(state()).mintLabel, "Mint 1,000,000 test kKRW");
-  assert.equal(MINT_AMOUNT, 1_000_000n * KKRW);
+test("the mint link only OFFERS the popup — no amount, no transaction in its label", () => {
+  assert.equal(depositModalView(state()).mintLabel, "No kKRW?");
 });
 
 test("an empty field opens quiet; a bad one names its cause; a good one unlocks Deposit", () => {
@@ -179,13 +185,45 @@ test("the two reads fail SEPARATELY — a dead token read must not erase the gas
 
 // ---------------------------- the mint --------------------------------------------
 
-test("the mint sends the fixed ration to the CONNECTED account itself", async () => {
+test("a fresh popup opens EMPTY and quiet, with Mint locked until an amount lands", () => {
+  const fresh = mintView(openMint());
+  assert.equal(fresh.amountError, null, "an untouched field must not open shouting");
+  assert.equal(fresh.canMint, false);
+  assert.equal(fresh.busy, false);
+});
+
+test("the popup's field speaks the deposit field's grammar and gates the Mint press", () => {
+  assert.match(mintView({ ...openMint(), amount: "1.5.5" }).amountError ?? "", /valid amount/);
+  assert.match(mintView({ ...openMint(), amount: "0" }).amountError ?? "", /above zero/);
+  const good = mintView({ ...openMint(), amount: "1,000" });
+  assert.equal(good.amountError, null);
+  assert.equal(good.amountWei, 1000n * KKRW);
+  assert.equal(good.canMint, true);
+});
+
+test("a pending or CONFIRMED mint locks the Mint press — one visit, one transaction", () => {
+  const pending = mintView({ ...openMint(), amount: "1,000", pending: true });
+  assert.equal(pending.canMint, false);
+  assert.equal(pending.busy, true);
+  const confirmed = mintView({
+    ...openMint(),
+    amount: "1,000",
+    tx: { txHash: "0xmint", explorerUrl: "http://explorer.test/0xmint" },
+  });
+  assert.equal(confirmed.canMint, false);
+});
+
+test("the mint sends the TYPED amount to the CONNECTED account itself", async () => {
   const d = deps({});
-  await mintTestKkrw(CONNECTION, TOKEN, d);
-  assert.deepEqual(d.calls.mint, [[TOKEN, ACCOUNT, MINT_AMOUNT]]);
+  const tx = await mintTestKkrw(CONNECTION, TOKEN, 777n * KKRW, d);
+  assert.deepEqual(d.calls.mint, [[TOKEN, ACCOUNT, 777n * KKRW]]);
+  assert.equal(tx.txHash, "0xmint", "the popup's completion view hangs off this");
 });
 
 test("a rejected mint throws to the caller — the dialog words it, nothing is swallowed", async () => {
   const rejected = Object.assign(new Error("User rejected the request"), { code: 4001 });
-  await assert.rejects(mintTestKkrw(CONNECTION, TOKEN, deps({ mint: rejected })), /User rejected/);
+  await assert.rejects(
+    mintTestKkrw(CONNECTION, TOKEN, 1n * KKRW, deps({ mint: rejected })),
+    /User rejected/,
+  );
 });

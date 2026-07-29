@@ -15,8 +15,14 @@
 import type { ReactNode } from "react";
 import { formatKkrw, groupAmountInput } from "@bongtu/client/money";
 import { DEFAULTS } from "../config.js";
-import { DEPOSIT_STAGE_LABEL, depositModalView, type DepositModalState } from "../lib/depositModal.js";
-import { Button, Spinner } from "./controls.js";
+import {
+  DEPOSIT_STAGE_LABEL,
+  depositModalView,
+  mintView,
+  type DepositModalState,
+  type MintState,
+} from "../lib/depositModal.js";
+import { Button, shortHex, Spinner } from "./controls.js";
 import type { DepositStage } from "@bongtu/client/depositFlow";
 
 export function DepositModal({
@@ -24,12 +30,18 @@ export function DepositModal({
   onAmountChange,
   onClose,
   onDeposit,
+  onOpenMint,
+  onCloseMint,
+  onMintAmountChange,
   onMint,
 }: {
   state: DepositModalState;
   onAmountChange: (amount: string) => void;
   onClose: () => void;
   onDeposit: () => void;
+  onOpenMint: () => void;
+  onCloseMint: () => void;
+  onMintAmountChange: (amount: string) => void;
   onMint: () => void;
 }): ReactNode {
   const view = depositModalView(state);
@@ -66,14 +78,15 @@ export function DepositModal({
           <span className="flex items-baseline justify-between gap-3">
             <span className="text-[12px] text-muted">Amount</span>
             {/* the mint rides the label row as a link — a side path off the
-                deposit, never a second headline button */}
+                deposit, never a second headline button. It only OPENS the mint
+                popup; the transaction is behind that popup's own Mint press. */}
             <button
               type="button"
               disabled={!view.canMint}
-              onClick={onMint}
+              onClick={onOpenMint}
               className="text-[12px] font-medium text-primary hover:underline cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {state.minting ? "Minting…" : `No kKRW? ${view.mintLabel}`}
+              {view.mintLabel}
             </button>
           </span>
           {/* same scale as the balance box above, ticker inside the field */}
@@ -121,6 +134,97 @@ export function DepositModal({
           </>
         )}
 
+      </div>
+      {state.mint !== null && (
+        <MintPopup
+          mint={state.mint}
+          onAmountChange={onMintAmountChange}
+          onClose={onCloseMint}
+          onMint={onMint}
+        />
+      )}
+    </div>
+  );
+}
+
+/** The wallet's mint grammar (wallet-web MintModal), in payroll's own controls:
+ *  an empty amount the operator fills, one Mint press, then a completion view
+ *  with the transaction — never a second Mint button after a confirmed mint. */
+function MintPopup({
+  mint,
+  onAmountChange,
+  onClose,
+  onMint,
+}: {
+  mint: MintState;
+  onAmountChange: (amount: string) => void;
+  onClose: () => void;
+  onMint: () => void;
+}): ReactNode {
+  const view = mintView(mint);
+  return (
+    <div className="fixed inset-0 z-30 bg-backdrop flex items-center justify-center p-6">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Get test kKRW"
+        className="w-full max-w-[360px] bg-surface border border-border rounded-2xl p-6 flex flex-col gap-4"
+      >
+        <div className="text-[15px] font-semibold">Get test kKRW</div>
+        {mint.tx !== null ? (
+          <>
+            <div className="text-[12.5px]">Test kKRW added to your account.</div>
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="font-mono text-[12px] text-muted">{shortHex(mint.tx.txHash)}</span>
+              <a
+                className="text-[12px] font-medium text-primary hover:underline"
+                href={mint.tx.explorerUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                View on explorer
+              </a>
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={onClose}>Close</Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="text-[12.5px] text-muted">
+              Mints test kKRW to your connected account — you only pay gas.
+            </div>
+            <label className="flex flex-col gap-1">
+              <span className="text-[12px] text-muted">Amount</span>
+              <span
+                className={`flex items-baseline gap-2 border rounded-xl px-3.5 py-3 bg-surface focus-within:border-border-strong ${
+                  view.amountError !== null ? "border-err" : "border-border"
+                }`}
+              >
+                <input
+                  type="text"
+                  aria-label="Mint amount (kKRW)"
+                  className="flex-1 min-w-0 bg-transparent outline-none text-[15px] text-right tabular-nums"
+                  value={mint.amount}
+                  placeholder="0"
+                  disabled={view.busy}
+                  onChange={(e) => onAmountChange(groupAmountInput(e.target.value))}
+                />
+                <span className="text-[13px] text-muted">kKRW</span>
+              </span>
+            </label>
+            {view.amountError && <div className="text-[12.5px] text-err">{view.amountError}</div>}
+            {mint.error && <div className="text-[12.5px] text-err">{mint.error}</div>}
+            <div className="flex gap-2 justify-end items-center">
+              <Button variant="ghost" disabled={view.busy} onClick={onClose}>
+                Close
+              </Button>
+              <Button disabled={!view.canMint} onClick={onMint}>
+                {view.busy ? "Minting…" : "Mint"}
+              </Button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
