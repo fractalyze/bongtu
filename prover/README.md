@@ -99,6 +99,34 @@ override `VITE_PROVER_URL`) and `deploy/giwa_disburse256.ts`
 (`BONGTU_PROVER_URL`). If `circuits/inputs/disburse256.json` is missing,
 regenerate it: `cd circuits && npx tsx gen_disburse256_input.ts`.
 
+## Production run on the GPU box (as deployed 2026-07-29)
+
+The live instance is a **systemd user service** so a crash or reboot cannot
+silently kill proving (`loginctl` linger is on for this box):
+
+```sh
+# unit: ~/.config/systemd/user/bongtu-prover.service
+#   run.sh, CUDA_VISIBLE_DEVICES=0, Restart=on-failure (30s backoff),
+#   MemoryMax=16G host-side, PROVER_ALLOWED_ORIGINS = the payroll origins
+systemctl --user status bongtu-prover    # logs: journalctl --user -u bongtu-prover
+```
+
+Exposure is a **path mount on the existing indexer funnel port** (funnel can
+only use 443/8443/10000, and all three are taken):
+
+```sh
+tailscale funnel --bg --https=10000 --set-path=/prover http://127.0.0.1:8700
+```
+
+so `https://gpu-server.tailec11d1.ts.net:10000/prover/*` reaches the service
+with the `/prover` prefix STRIPPED, and the payroll `vercel.json` rewrites
+`/prover/:path*` to that URL (the browser's Origin header rides through the
+rewrite — that is what the allowlist gates). Footgun: removing a path mount
+with `tailscale serve ... off` DOWNGRADES port 10000 from Funnel to
+tailnet-only and cuts the LIVE indexer off the public internet — after any
+mount change, re-check `tailscale serve status` says "Funnel on" and curl the
+public indexer /health.
+
 ## Ops invariants (measured, do not relax)
 
 - **One instance per GPU, single-process uvicorn.** The compiled prover pins
