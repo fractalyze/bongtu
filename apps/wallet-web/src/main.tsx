@@ -16,6 +16,7 @@ import { WagmiProvider } from "wagmi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RainbowKitProvider } from "@rainbow-me/rainbowkit";
 import "@rainbow-me/rainbowkit/styles.css";
+import { isMobileDevice } from "@bongtu/client/device";
 import { wagmiConfig } from "./lib/wagmi.js";
 import { App } from "./ui/App.js";
 import "./styles.css";
@@ -23,16 +24,37 @@ import "./styles.css";
 const root = document.getElementById("app");
 if (!root) throw new Error("no #app root in index.html");
 
+/** The desktop-only door — the wallet's extension connectors and circuit
+ *  downloads break halfway on a phone, so refuse at the root, BEFORE the
+ *  wagmi/RainbowKit stack mounts; device.ts owns the verdict. */
+function DesktopOnly() {
+  return (
+    <div className="min-h-full flex items-center justify-center p-6">
+      <div className="w-full max-w-[420px] bg-surface border border-border rounded-2xl p-8 flex flex-col gap-3 text-center">
+        <div className="text-lg font-bold">
+          <span className="text-primary">Bongtu</span> Wallet
+        </div>
+        <div className="text-[14px] font-semibold">This wallet is desktop-only.</div>
+        <div className="text-[12.5px] text-muted">Please open this page on a PC.</div>
+      </div>
+    </div>
+  );
+}
+
 const queryClient = new QueryClient();
 
 createRoot(root).render(
   <StrictMode>
-    <WagmiProvider config={wagmiConfig} reconnectOnMount={false}>
-      <QueryClientProvider client={queryClient}>
-        <RainbowKitProvider modalSize="compact">
-          <App />
-        </RainbowKitProvider>
-      </QueryClientProvider>
-    </WagmiProvider>
+    {isMobileDevice(navigator.userAgent, navigator.maxTouchPoints) ? (
+      <DesktopOnly />
+    ) : (
+      <WagmiProvider config={wagmiConfig} reconnectOnMount={false}>
+        <QueryClientProvider client={queryClient}>
+          <RainbowKitProvider modalSize="compact">
+            <App />
+          </RainbowKitProvider>
+        </QueryClientProvider>
+      </WagmiProvider>
+    )}
   </StrictMode>,
 );
