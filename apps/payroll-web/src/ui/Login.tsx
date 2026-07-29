@@ -22,15 +22,30 @@ function PayrollHero(): ReactNode {
     <svg
       viewBox="0 0 360 156"
       role="img"
-      aria-label="One envelope paying out to many recipients"
+      aria-label="A pay envelope paying out to many recipients"
       className="w-full max-w-[360px] h-auto"
     >
-      {/* envelope */}
+      {/* pay envelope (월급봉투): an upright open envelope with banknotes peeking
+          out the top — not a mail letter. Bills first so the pocket overlaps them. */}
       <g>
-        <rect x="18" y="46" width="96" height="64" rx="10" fill="var(--color-surface)" stroke="var(--color-primary)" strokeWidth="2.5" />
-        <path d="M20 52 L66 86 L112 52" fill="none" stroke="var(--color-primary)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+        {/* banknotes sticking out, slightly fanned */}
+        <g transform="translate(40,30) rotate(-8 22 13)">
+          <rect width="44" height="26" rx="3.5" fill="var(--color-surface)" stroke="var(--color-pos)" strokeWidth="2" />
+          <circle cx="22" cy="13" r="6.5" fill="none" stroke="var(--color-pos)" strokeWidth="1.6" />
+        </g>
+        <g transform="translate(54,24) rotate(5 22 13)">
+          <rect width="44" height="26" rx="3.5" fill="var(--color-surface)" stroke="var(--color-pos)" strokeWidth="2" />
+          <circle cx="22" cy="13" r="6.5" fill="none" stroke="var(--color-pos)" strokeWidth="1.6" />
+          <text x="22" y="17.5" textAnchor="middle" fontSize="11" fontWeight="700" fill="var(--color-pos)">₩</text>
+        </g>
+        {/* envelope pocket: portrait, open mouth at the top */}
+        <rect x="32" y="56" width="68" height="56" rx="7" fill="var(--color-surface)" stroke="var(--color-primary)" strokeWidth="2.5" />
+        {/* open mouth: the inner back edge the bills rise from */}
+        <path d="M36 58 H96" stroke="var(--color-border-strong)" strokeWidth="2" strokeLinecap="round" />
+        {/* the pocket's front seam — the classic pay-envelope fold line */}
+        <path d="M32 72 C 52 80, 80 80, 100 72" fill="none" stroke="var(--color-primary)" strokeWidth="2" strokeLinecap="round" opacity="0.55" />
         {/* shield badge on the envelope's corner */}
-        <g transform="translate(96,34)">
+        <g transform="translate(84,96)">
           <path
             d="M16 2 L28 7 V16 C28 24.5 23 30.5 16 33 C9 30.5 4 24.5 4 16 V7 Z"
             fill="var(--color-primary)"
@@ -42,7 +57,7 @@ function PayrollHero(): ReactNode {
       {targets.map((y) => (
         <path
           key={y}
-          d={`M124 78 C 180 78, 200 ${y}, 252 ${y}`}
+          d={`M104 84 C 170 84, 198 ${y}, 252 ${y}`}
           fill="none"
           stroke="var(--color-border-strong)"
           strokeWidth="1.6"
