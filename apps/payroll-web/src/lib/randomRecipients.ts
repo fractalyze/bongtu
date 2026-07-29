@@ -141,6 +141,10 @@ export async function generateRecipientsChunked(
   if (count === 0) {
     throw new Error("The balance is too small to generate a test payroll. Deposit first.");
   }
+  // Yield BEFORE any field work: the caller's spinner setState has not painted
+  // yet when this promise body starts, and the stream's two scalar mults are
+  // the single heaviest slice — running them pre-paint reads as a dead click.
+  await yieldFn();
   const amounts = splitAmounts(targetKkrw(balanceWei), count);
   const next = addressStream();
   for (let start = 0; start < count; start += chunkSize) {
