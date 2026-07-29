@@ -1,21 +1,32 @@
-// The pay console — the single main page behind the service login (LOCKED
-// design): sticky header (brand, pool, wallet), a full-width worksheet of
-// {recipient address, amount} rows, a compact stat bar, and a 3-state footer
-// (covered / covered-but-fragmented / insufficient-with-deposit-CTA). One click
-// on [Send] runs the WHOLE chain — transfer10x2 merges until one note covers the
+// The pay console — the single main page behind the service login, framed as a
+// TESTNET TOOL for trying batch transfers (USER-APPROVED mock, U-P7):
+//
+//   header      brand "Bongtu Payroll Tool" + TESTNET badge | [Sign out]
+//   status bar  full-width under the header: connect prompt, or the connected
+//               wallet's eth account · bongtu address · kKRW balance · [Deposit]
+//   payees      only once the wallet is connected: ONE centered
+//               [Generate random recipients] button, or the generated worksheet
+//               (255 editable/deletable rows) with a [Regenerate] affordance
+//   bottom bar  fixed: "Total outgoing: X kKRW (N recipients)" + [Send]
+//
+// One click on [Send] (after a confirmation that names the random-recipient
+// framing) runs the WHOLE chain — transfer10x2 merges until one note covers the
 // total (@bongtu/client runMergeChain), then the 1-in/256-out disburse (this
 // app's builder, seed randomization intact) — with a wallet-style progress rail
-// and a per-row done screen. Every proof goes to the prover service.
+// and a done screen. Every proof goes to the prover service.
 //
-// The WALLET session lives here (not on the login page): the header offers
-// [Connect wallet] while none exists, and the actions that need a key —
-// send, deposit — prompt for the connect instead of failing. The connect chain
-// is unchanged: injected provider → ensureChain → EIP-712 sign (the shared
-// KDF) → keyCache seed → indexer view token. The idle wipe and an account
-// switch drop the wallet session exactly as before; the service session stands.
+// The WALLET session lives here (not on the login page): the status bar offers
+// [Connect wallet] while none exists. The connect chain is unchanged: injected
+// provider → ensureChain → EIP-712 sign (the shared KDF) → keyCache seed →
+// indexer view token. The idle wipe and an account switch drop the wallet
+// session exactly as before; the service session stands. Sign out is the
+// reverse coupling (lib/signOut.ts): it ends the service session AND locks the
+// key cache — the unmount clears every piece of transient state (nothing here
+// is persisted; there is no draft).
 //
-// All decisions the table renders are pure and tested (lib/worksheet.ts): this
-// component only wires them to React state and the engine flows.
+// All decisions the views render are pure and tested (lib/worksheet.ts,
+// lib/randomRecipients.ts, lib/statusBar.ts): this component only wires them to
+// React state and the engine flows.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
@@ -39,30 +50,24 @@ import { openInjectedConnection, watchInjectedAccount } from "../lib/connect.js"
 import { keyCache } from "../lib/keyCache.js";
 import { proveViaService } from "../lib/proverClient.js";
 import { runPayRun, type PayRunResult } from "../lib/payRun.js";
+import { generateRecipients, plannedRowCount } from "../lib/randomRecipients.js";
+import { statusBarState } from "../lib/statusBar.js";
 import { toastError, toasts } from "../lib/toasts.js";
 import {
   MAX_ROWS,
-  addRow,
-  blankRow,
   checkWorksheet,
-  clearDraft,
-  loadDraft,
   removeRow,
-  rowsFromCsv,
-  saveDraft,
   sendReadiness,
   type RowIssue,
   type WorksheetRow,
 } from "../lib/worksheet.js";
-import { Button, CellInput, Stat, shortHex } from "./controls.js";
+import { Button, CellInput, TestnetBadge, shortHex } from "./controls.js";
 
 const INDEXER_URL = DEFAULTS.indexerUrl;
 const AUTO_REFRESH_MS = 3000;
 
 /** What every balance-shaped slot says before the first read lands. */
 const BALANCE_LOADING = "Loading";
-/** …and what it says while no wallet is connected: there is nothing to read. */
-const BALANCE_NO_WALLET = "—";
 
 const prove = (request: Parameters<typeof proveViaService>[1]) =>
   proveViaService(DEFAULTS.proverUrl, request);
@@ -98,22 +103,18 @@ type PayPhase =
   | { phase: "done"; result: PayRunResult; paid: { address: string; amount: string }[] };
 
 export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
-  const storage = typeof localStorage === "undefined" ? null : localStorage;
-  const [rows, setRows] = useState<WorksheetRow[]>(() => loadDraft(storage));
+  const [rows, setRows] = useState<WorksheetRow[]>([]);
   const [wallet, setWallet] = useState<WalletSession | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [notes, setNotes] = useState<OwnerNote[] | null>(null);
   const [dataError, setDataError] = useState<string | null>(null);
 
   const [pay, setPay] = useState<PayPhase>({ phase: "idle" });
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [depositOpen, setDepositOpen] = useState(false);
   const [depositAmount, setDepositAmount] = useState("");
   const [depositStage, setDepositStage] = useState<DepositStage | null>(null);
   const [depositError, setDepositError] = useState<string | null>(null);
-
-  // Draft-persist what the employer types — a wallet session never survives a
-  // reload, the half-built sheet should (injectable-storage seam, tested).
-  useEffect(() => saveDraft(rows, storage), [rows, storage]);
 
   const disconnectWallet = useCallback((): void => {
     keyCache.lock();
@@ -121,11 +122,19 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
     setWallet(null);
     setNotes(null);
     setDataError(null);
+    setRows([]);
+    // The deposit panel is wallet-session state too: a switched account must not
+    // inherit the previous session's open panel and typed amount.
+    setDepositOpen(false);
+    setDepositAmount("");
+    setDepositError(null);
+    setConfirmOpen(false);
   }, []);
 
   // The wallet session lives exactly as long as the lock holds the key: the
-  // idle wipe (or an explicit lock) drops the console back to its connect
-  // affordance — it must not keep rendering balances for a key it no longer holds.
+  // idle wipe (or an explicit lock — Sign out included) drops the console back
+  // to its connect affordance — it must not keep rendering balances or a
+  // generated sheet for a key it no longer holds.
   useEffect(() => {
     return keyCache.subscribe(() => {
       if (!keyCache.isUnlocked()) disconnectWallet();
@@ -235,34 +244,26 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
   // read as an empty balance.
   const readiness = useMemo(() => sendReadiness(check, notes), [check, notes]);
   const balance = notes === null ? null : sumUnspent(notes);
-  const balanceText =
-    wallet === null ? BALANCE_NO_WALLET : balance === null ? BALANCE_LOADING : formatKkrw(balance);
+  const bar = statusBarState(
+    wallet === null ? null : { ethAccount: wallet.connection.address, bongtuAddress: wallet.pubkey },
+    balance,
+  );
+  // The generate/regenerate gate: 0 rows plannable = disabled + "Deposit first".
+  // An unknown balance also plans 0 — the tool never generates against a guess.
+  const plannedRows = plannedRowCount(balance);
   const issueFor = (index: number, field: RowIssue["field"]): RowIssue | undefined =>
     check.issues.find((i) => i.index === index && i.field === field);
 
   const setCell = (i: number, patch: Partial<WorksheetRow>): void =>
     setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
 
-  // CSV paste fill: a whole-sheet replace, so a payroll export IS the worksheet.
-  const [csvOpen, setCsvOpen] = useState(false);
-  const [csvText, setCsvText] = useState("");
-  const applyCsv = (): void => {
-    try {
-      setRows(rowsFromCsv(csvText));
-      setCsvText("");
-      setCsvOpen(false);
-    } catch (e) {
-      toastError((e as Error).message);
-    }
+  const generate = (): void => {
+    if (balance === null || plannedRows === 0) return;
+    setRows(generateRecipients(balance));
   };
 
   const startPay = async (): Promise<void> => {
-    // Send needs a spending key: with no wallet session, the button IS the
-    // connect prompt (never a raw "no key" error).
-    if (!wallet) {
-      void connectWallet();
-      return;
-    }
+    if (!wallet) return;
     if (readiness.kind !== "ready" && readiness.kind !== "ready-fragmented") return;
     const recipients = check.recipients;
     setPay({ phase: "running", stage: "assemble", leg: { index: 0, count: readiness.kind === "ready" ? 1 : readiness.mergeCount + 1 } });
@@ -299,16 +300,16 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
   };
 
   const closeDone = (): void => {
-    // The sheet was paid: a fresh worksheet greets the next payroll.
-    setRows([blankRow()]);
-    clearDraft(storage);
+    // The sheet was paid: back to the empty state — the next test run generates
+    // a fresh random sheet against the fresh balance.
+    setRows([]);
     setPay({ phase: "idle" });
     void refresh();
   };
 
   const startDeposit = async (): Promise<void> => {
-    // Same rule as Send: a deposit signs with the wallet, so the action prompts
-    // for the connect when none exists.
+    // A deposit signs with the wallet, so the action prompts for the connect
+    // when none exists (the status bar's [Connect wallet] is the same chain).
     if (!wallet) {
       void connectWallet();
       return;
@@ -344,40 +345,21 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
   };
 
   const shortfall = readiness.kind === "insufficient" ? readiness.shortfallWei : null;
+  const sendable = readiness.kind === "ready" || readiness.kind === "ready-fragmented";
+  // A background refresh can flip the sheet unsendable while the confirm is up;
+  // close it then, so it cannot silently reappear when sendability returns.
+  useEffect(() => {
+    if (!sendable) setConfirmOpen(false);
+  }, [sendable]);
 
   return (
     <div className="min-h-full flex flex-col">
       <header className="sticky top-0 z-10 bg-surface border-b border-border">
-        <div className="max-w-[1100px] mx-auto px-5 py-3 flex items-center gap-4 flex-wrap">
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-lg font-bold text-primary">Bongtu</span>
-            <span className="font-semibold">Payroll</span>
-          </div>
-          <span className="font-mono text-[11px] text-muted bg-surface-2 rounded-lg px-2 py-1">
-            pool {shortHex(DEFAULTS.pool)}
-          </span>
-          <div className="ml-auto flex items-center gap-3">
-            {wallet ? (
-              <>
-                <div className="text-right">
-                  <div className="text-[11px] text-muted">Balance</div>
-                  <div className="text-[15px] font-semibold tabular-nums">
-                    {balance === null ? BALANCE_LOADING : `${formatKkrw(balance)} kKRW`}
-                  </div>
-                </div>
-                <span
-                  className="w-8 h-8 rounded-full bg-primary text-primary-ink text-[11px] font-semibold flex items-center justify-center"
-                  title={wallet.connection.address}
-                >
-                  {wallet.connection.address.slice(2, 4).toUpperCase()}
-                </span>
-                <span className="font-mono text-[12px] text-muted">{shortHex(wallet.connection.address)}</span>
-              </>
-            ) : (
-              <Button disabled={connecting} onClick={() => void connectWallet()}>
-                {connecting ? "Connecting…" : "Connect wallet"}
-              </Button>
-            )}
+        <div className="max-w-[1100px] mx-auto px-5 py-3 flex items-center gap-2">
+          <span className="text-lg font-bold text-primary">Bongtu</span>
+          <span className="text-lg font-semibold">Payroll Tool</span>
+          <TestnetBadge />
+          <div className="ml-auto">
             <Button variant="ghost" onClick={onSignOut}>
               Sign out
             </Button>
@@ -385,174 +367,46 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
         </div>
       </header>
 
-      <main className="max-w-[1100px] mx-auto w-full px-5 py-5 flex flex-col gap-4 flex-1">
-        {dataError && <Banner message={dataError} onRetry={() => void refresh()} retryLabel="Retry" />}
-
-        {/* stat bar */}
-        <div className="bg-surface border border-border rounded-xl px-5 py-3 grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <Stat label="Balance" value={balanceText} />
-          <Stat label="Rows" value={`${check.filledCount} / ${MAX_ROWS}`} />
-          <Stat label="Total" value={formatKkrw(check.totalWei)} />
-          {/* Coverage goes red ONLY on a real shortfall — an unread balance is
-              Loading, never Short: the employer may well be funded. */}
-          <Stat
-            label="Coverage"
-            tone={
-              readiness.kind === "insufficient"
-                ? "err"
-                : readiness.kind === "blocked" || readiness.kind === "loading"
-                  ? "ink"
-                  : "pos"
-            }
-            value={
-              readiness.kind === "insufficient"
-                ? "Short"
-                : readiness.kind === "ready"
-                  ? "Covered"
-                  : readiness.kind === "ready-fragmented"
-                    ? "Covered · merge needed"
-                    : readiness.kind === "loading"
-                      ? wallet === null
-                        ? BALANCE_NO_WALLET
-                        : BALANCE_LOADING
-                      : "—"
-            }
-          />
-        </div>
-
-        {/* worksheet */}
-        <div className="bg-surface border border-border rounded-xl overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border">
-            <span className="text-[13px] font-semibold">Payees</span>
-            <span className="text-[12px] text-muted tabular-nums">
-              {check.filledCount}/{MAX_ROWS}
-            </span>
-            <div className="ml-auto flex gap-2">
-              <Button variant="secondary" onClick={() => setCsvOpen((v) => !v)}>
-                Paste CSV
+      {/* status bar — full-width, under the header (lib/statusBar.ts decides) */}
+      <div className="bg-surface-2 border-b border-border">
+        <div className="max-w-[1100px] mx-auto px-5 py-2.5 flex items-center gap-4 flex-wrap min-h-[46px]">
+          {bar.kind === "disconnected" ? (
+            <>
+              <span className="text-[13px] text-muted">Please connect your wallet</span>
+              <Button disabled={connecting} onClick={() => void connectWallet()}>
+                {connecting ? "Connecting…" : "Connect wallet"}
               </Button>
-              <Button
-                variant="secondary"
-                disabled={rows.length >= MAX_ROWS}
-                onClick={() => setRows(addRow)}
-                title={rows.length >= MAX_ROWS ? `At most ${MAX_ROWS} rows` : undefined}
-              >
-                {rows.length >= MAX_ROWS ? `+ Add row (${MAX_ROWS}/${MAX_ROWS})` : "+ Add row"}
-              </Button>
-            </div>
-          </div>
-          {csvOpen && (
-            <div className="px-4 py-3 border-b border-border bg-surface-2 flex flex-col gap-2">
-              <textarea
-                className="w-full bg-surface border border-border rounded-lg px-2.5 py-2 text-[12.5px] font-mono resize-y focus:outline-none focus:border-border-strong"
-                rows={4}
-                spellCheck={false}
-                placeholder={"Paste one payee per line as address,amount\ne.g. 3xk…address,1000"}
-                value={csvText}
-                onChange={(e) => setCsvText(e.target.value)}
-              />
-              <div className="flex gap-2 justify-end">
-                <Button variant="ghost" onClick={() => setCsvOpen(false)}>
-                  Close
-                </Button>
-                <Button variant="secondary" onClick={applyCsv}>
-                  Fill the sheet
+            </>
+          ) : (
+            <>
+              <span className="font-mono text-[12px]" title={bar.ethAccount}>
+                {shortHex(bar.ethAccount)}
+              </span>
+              <span className="text-muted">·</span>
+              <span className="font-mono text-[12px]" title={bar.bongtuAddress}>
+                {shortHex(bar.bongtuAddress)}
+              </span>
+              <span className="text-muted">·</span>
+              <span className="text-[13px] font-semibold tabular-nums">
+                {/* an unread balance is Loading — never a false zero */}
+                {bar.balanceWei === null ? BALANCE_LOADING : `${formatKkrw(bar.balanceWei)} kKRW`}
+              </span>
+              <div className="ml-auto">
+                <Button variant="secondary" onClick={() => setDepositOpen((v) => !v)}>
+                  Deposit
                 </Button>
               </div>
-            </div>
+            </>
           )}
-          <table className="w-full text-[13px] border-collapse">
-            <thead>
-              <tr className="text-left text-muted text-[12px]">
-                <th className="px-4 py-2 w-[52px] font-medium">#</th>
-                <th className="px-2 py-2 font-medium">Recipient address</th>
-                <th className="px-2 py-2 w-[180px] font-medium text-right">Amount (kKRW)</th>
-                <th className="px-2 py-2 w-[48px]" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => {
-                const addrIssue = issueFor(i, "address");
-                const amtIssue = issueFor(i, "amount");
-                return (
-                  <tr key={i} className="border-t border-border align-top">
-                    <td className="px-4 py-1.5 text-muted tabular-nums">{i + 1}</td>
-                    <td className="px-2 py-1.5">
-                      <CellInput
-                        mono
-                        ariaLabel={`Recipient address ${i + 1}`}
-                        value={r.address}
-                        placeholder="bongtu address (3… base58 or 0x… hex)"
-                        invalid={addrIssue !== undefined}
-                        onChange={(v) => setCell(i, { address: v })}
-                      />
-                      {addrIssue && <div className="text-[11.5px] text-err mt-0.5">{addrIssue.message}</div>}
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <CellInput
-                        align="right"
-                        ariaLabel={`Amount ${i + 1}`}
-                        value={r.amount}
-                        placeholder="0"
-                        invalid={amtIssue !== undefined}
-                        onChange={(v) => setCell(i, { amount: groupAmountInput(v) })}
-                      />
-                      {amtIssue && <div className="text-[11.5px] text-err mt-0.5 text-right">{amtIssue.message}</div>}
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <Button variant="ghost" aria-label={`Delete row ${i + 1}`} onClick={() => setRows((rs) => removeRow(rs, i))}>
-                        ✕
-                      </Button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
         </div>
+      </div>
 
-        {/* footer: the 3-state send bar */}
-        <div className="bg-surface border border-border rounded-xl px-5 py-4 flex items-center gap-4 flex-wrap">
-          <div className="text-[13px] text-muted flex-1 min-w-[240px]">
-            {/* Neutral, muted, no CTA: until the balance is known there is nothing
-                to promise and nothing to blame the employer for. A read that
-                actually FAILED is already named by the banner above. */}
-            {readiness.kind === "loading" &&
-              (wallet === null
-                ? "Connect your wallet to load the balance and send."
-                : dataError !== null
-                  ? "The balance could not be read. See the notice above."
-                  : "Loading the balance…")}
-            {readiness.kind === "blocked" &&
-              (check.issues.length > 0
-                ? "Fix the highlighted cells to send."
-                : "Enter recipient addresses and amounts.")}
-            {readiness.kind === "ready" && "Balance covers the sheet. One payout transaction will be sent."}
-            {readiness.kind === "ready-fragmented" &&
-              `Your balance is split across notes: ${readiness.mergeCount} merge${readiness.mergeCount === 1 ? "" : "s"}, then the payout — ${readiness.mergeCount + 1} signatures in total.`}
-            {readiness.kind === "insufficient" && shortfall !== null && (
-              <span className="text-err font-medium">
-                Balance is short by {formatKkrw(shortfall)} kKRW. Deposit below, then send.
-              </span>
-            )}
-          </div>
-          {/* deposit stays reachable but quiet while the balance covers the sheet */}
-          {readiness.kind !== "insufficient" && (
-            <Button variant="ghost" onClick={() => setDepositOpen((v) => !v)}>
-              Deposit
-            </Button>
-          )}
-          <Button
-            disabled={wallet !== null && readiness.kind !== "ready" && readiness.kind !== "ready-fragmented"}
-            onClick={() => void startPay()}
-          >
-            {wallet === null ? "Connect wallet" : "Send"}
-          </Button>
-        </div>
+      <main className="max-w-[1100px] mx-auto w-full px-5 py-5 flex flex-col gap-4 flex-1 pb-[88px]">
+        {dataError && <Banner message={dataError} onRetry={() => void refresh()} retryLabel="Retry" />}
 
         {/* deposit: a highlighted CTA when the sheet cannot be covered, a quiet
-            panel behind the Deposit button otherwise (wallet-web grammar) */}
-        {(readiness.kind === "insufficient" || depositOpen) && (
+            panel behind the status bar's Deposit button otherwise */}
+        {wallet !== null && (readiness.kind === "insufficient" || depositOpen) && (
           <div
             className={`rounded-xl px-5 py-4 border flex flex-col gap-3 ${
               readiness.kind === "insufficient" ? "bg-warn-bg border-warn-border" : "bg-surface border-border"
@@ -578,11 +432,7 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
                 </Button>
               )}
               <Button disabled={depositStage !== null} onClick={() => void startDeposit()}>
-                {depositStage !== null
-                  ? DEPOSIT_STAGE_LABEL[depositStage]
-                  : wallet === null
-                    ? "Connect wallet"
-                    : "Deposit"}
+                {depositStage !== null ? DEPOSIT_STAGE_LABEL[depositStage] : "Deposit"}
               </Button>
             </div>
             {depositError && <div className="text-[12.5px] text-err">{depositError}</div>}
@@ -592,10 +442,170 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
             </div>
           </div>
         )}
+
+        {/* payees — only once the wallet is connected */}
+        {wallet !== null &&
+          (rows.length === 0 ? (
+            /* empty state: ONE centered generate button */
+            <div className="bg-surface border border-border rounded-xl flex-1 flex flex-col items-center justify-center gap-3 py-16">
+              <Button disabled={plannedRows === 0} onClick={generate}>
+                Generate random recipients
+              </Button>
+              {plannedRows === 0 && (
+                <div className="text-[12px] text-muted">
+                  {balance === null ? BALANCE_LOADING : "Deposit first"}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="bg-surface border border-border rounded-xl overflow-hidden flex flex-col">
+              <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border">
+                <span className="text-[13px] font-semibold">Payees</span>
+                <span className="text-[12px] text-muted tabular-nums">
+                  {check.filledCount}/{MAX_ROWS}
+                </span>
+                <div className="ml-auto">
+                  {/* replaces the WHOLE list with a fresh random sheet */}
+                  <Button variant="secondary" disabled={plannedRows === 0} onClick={generate}>
+                    Regenerate
+                  </Button>
+                </div>
+              </div>
+              <div className="overflow-y-auto max-h-[60vh]">
+                <table className="w-full text-[13px] border-collapse">
+                  <thead>
+                    <tr className="text-left text-muted text-[12px]">
+                      <th className="px-4 py-2 w-[52px] font-medium">#</th>
+                      <th className="px-2 py-2 font-medium">Recipient address</th>
+                      <th className="px-2 py-2 w-[180px] font-medium text-right">Amount (kKRW)</th>
+                      <th className="px-2 py-2 w-[48px]" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r, i) => {
+                      const addrIssue = issueFor(i, "address");
+                      const amtIssue = issueFor(i, "amount");
+                      return (
+                        <tr key={i} className="border-t border-border align-top">
+                          <td className="px-4 py-1.5 text-muted tabular-nums">{i + 1}</td>
+                          <td className="px-2 py-1.5">
+                            <CellInput
+                              mono
+                              ariaLabel={`Recipient address ${i + 1}`}
+                              value={r.address}
+                              placeholder="bongtu address (3… base58 or 0x… hex)"
+                              invalid={addrIssue !== undefined}
+                              onChange={(v) => setCell(i, { address: v })}
+                            />
+                            {addrIssue && <div className="text-[11.5px] text-err mt-0.5">{addrIssue.message}</div>}
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <CellInput
+                              align="right"
+                              ariaLabel={`Amount ${i + 1}`}
+                              value={r.amount}
+                              placeholder="0"
+                              invalid={amtIssue !== undefined}
+                              onChange={(v) => setCell(i, { amount: groupAmountInput(v) })}
+                            />
+                            {amtIssue && <div className="text-[11.5px] text-err mt-0.5 text-right">{amtIssue.message}</div>}
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <Button variant="ghost" aria-label={`Delete row ${i + 1}`} onClick={() => setRows((rs) => removeRow(rs, i))}>
+                              ✕
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
       </main>
 
+      {/* the fixed bottom bar: total + send (sendReadiness keeps it truthful) */}
+      {wallet !== null && (
+        <div className="fixed bottom-0 inset-x-0 z-10 bg-surface border-t border-border">
+          <div className="max-w-[1100px] mx-auto px-5 py-3.5 flex items-center gap-4 flex-wrap">
+            <div className="text-[14px] font-semibold tabular-nums">
+              Total outgoing: {formatKkrw(check.totalWei)} kKRW ({check.filledCount} recipient
+              {check.filledCount === 1 ? "" : "s"})
+            </div>
+            <div className="text-[12.5px] text-muted flex-1 min-w-[200px]">
+              {/* Neutral, muted, no CTA until the balance is known — a failed read
+                  is already named by the banner above. */}
+              {readiness.kind === "loading" &&
+                (dataError !== null ? "The balance could not be read. See the notice above." : "Loading the balance…")}
+              {readiness.kind === "blocked" &&
+                (check.issues.length > 0 ? "Fix the highlighted cells to send." : "Generate recipients to send.")}
+              {readiness.kind === "ready" && "Balance covers the sheet. One payout transaction will be sent."}
+              {readiness.kind === "ready-fragmented" &&
+                `Your balance is split across notes: ${readiness.mergeCount} merge${readiness.mergeCount === 1 ? "" : "s"}, then the payout — ${readiness.mergeCount + 1} signatures in total.`}
+              {readiness.kind === "insufficient" && shortfall !== null && (
+                <span className="text-err font-medium">
+                  Balance is short by {formatKkrw(shortfall)} kKRW. Deposit above, then send.
+                </span>
+              )}
+            </div>
+            <Button disabled={!sendable} onClick={() => setConfirmOpen(true)}>
+              Send
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {confirmOpen && (
+        <ConfirmSend
+          totalWei={check.totalWei}
+          recipientCount={check.filledCount}
+          mergeCount={readiness.kind === "ready-fragmented" ? readiness.mergeCount : 0}
+          onCancel={() => setConfirmOpen(false)}
+          onConfirm={() => {
+            setConfirmOpen(false);
+            void startPay();
+          }}
+        />
+      )}
       {pay.phase === "running" && <ProgressRail stage={pay.stage} leg={pay.leg} />}
       {pay.phase === "done" && <DoneScreen result={pay.result} paid={pay.paid} onClose={closeDone} />}
+    </div>
+  );
+}
+
+/** The send confirmation. One line is REQUIRED by the testnet framing: the
+ *  operator is reminded the payees are random test addresses, not people. */
+function ConfirmSend({
+  totalWei,
+  recipientCount,
+  mergeCount,
+  onCancel,
+  onConfirm,
+}: {
+  totalWei: bigint;
+  recipientCount: number;
+  mergeCount: number;
+  onCancel: () => void;
+  onConfirm: () => void;
+}): ReactNode {
+  return (
+    <div className="fixed inset-0 z-20 bg-backdrop flex items-center justify-center p-6">
+      <div className="w-full max-w-[420px] bg-surface border border-border rounded-2xl p-6 flex flex-col gap-4">
+        <div className="text-[15px] font-semibold">Send the payout?</div>
+        <div className="text-[13.5px]">
+          {formatKkrw(totalWei)} kKRW to {recipientCount} recipient{recipientCount === 1 ? "" : "s"} in one
+          private transaction
+          {mergeCount > 0 ? ` (after ${mergeCount} merge transaction${mergeCount === 1 ? "" : "s"})` : ""}.
+        </div>
+        <div className="text-[12.5px] text-muted">Recipients are randomly generated for this testnet run.</div>
+        <div className="flex gap-2 justify-end">
+          <Button variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button onClick={onConfirm}>Send</Button>
+        </div>
+      </div>
     </div>
   );
 }

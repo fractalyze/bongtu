@@ -1,20 +1,20 @@
-// The pay worksheet's PURE core: row editing rules, per-row validation, the
-// localStorage draft, and the footer's 3-state readiness verdict. Framework-free
-// so the whole table's behavior gates headlessly (test/worksheet.test.ts); the
-// Console view only renders what these functions decide.
+// The pay worksheet's PURE core: row editing rules, per-row validation, and the
+// footer's 3-state readiness verdict. Framework-free so the whole table's
+// behavior gates headlessly (test/worksheet.test.ts); the Console view only
+// renders what these functions decide. Rows come from the random generator
+// (lib/randomRecipients.ts) and stay editable — nothing here persists them: a
+// test worksheet is regenerated, not drafted.
 //
 // Amounts are typed in kKRW (the wallet's money grammar — @bongtu/client/money
 // parseKkrw/formatKkrw, 18 decimals) and validated to raw wei here; the disburse
 // builder and the merge planner only ever see wei. Addresses are bongtu addresses
 // (base58check or legacy 32-byte hex), normalized to canonical hex through the
-// sdk's ONE normalization point (decodeAddress) — the same rule the CSV path and
-// the wallet's recipient field apply.
+// sdk's ONE normalization point (decodeAddress) — the same rule the wallet's
+// recipient field applies.
 
 import { decodeAddress } from "@bongtu/core/pubkey";
 import { parseKkrw } from "@bongtu/client/money";
 import { planDisburseChain, SpendSelectionError, type SelectableNote } from "@bongtu/client/spend";
-import type { StorageLike } from "@bongtu/client/session";
-import { parseRecipientsCsv } from "./csv.js";
 import type { RecipientRow } from "./disburse.js";
 
 /** One worksheet row, exactly as typed (validation never rewrites the cells). */
@@ -29,15 +29,10 @@ export const MAX_ROWS = 255;
 
 export const blankRow = (): WorksheetRow => ({ address: "", amount: "" });
 
-/** Append a blank row, refusing past the cap (the [+] button's rule). */
-export function addRow(rows: WorksheetRow[]): WorksheetRow[] {
-  return rows.length >= MAX_ROWS ? rows : [...rows, blankRow()];
-}
-
-/** Remove row `i`; an emptied worksheet keeps one blank row to type into. */
+/** Remove row `i`. Deleting the last row leaves an EMPTY list — the view
+ *  renders zero rows as the generator's empty state, not a blank cell. */
 export function removeRow(rows: WorksheetRow[], i: number): WorksheetRow[] {
-  const next = rows.filter((_, j) => j !== i);
-  return next.length === 0 ? [blankRow()] : next;
+  return rows.filter((_, j) => j !== i);
 }
 
 /** A row-anchored problem, worded for the cell it belongs to. */
@@ -148,74 +143,6 @@ export function checkWorksheet(rows: WorksheetRow[], selfAddress?: string): Work
     });
   }
   return { issues, filledCount, recipients, totalWei };
-}
-
-/** CSV text -> worksheet rows (the paste-fill path). parseRecipientsCsv owns the
- *  format (pubkey,amount per line; base58/hex normalized; integer amounts, read
- *  as whole kKRW exactly like a typed cell). Throws with the offending line. */
-export function rowsFromCsv(text: string): WorksheetRow[] {
-  const parsed = parseRecipientsCsv(text);
-  if (parsed.length === 0) throw new Error("No payee rows found in the pasted CSV.");
-  if (parsed.length > MAX_ROWS) {
-    throw new Error(`The CSV has ${parsed.length} rows — at most ${MAX_ROWS} payees per run.`);
-  }
-  return parsed.map((r) => ({ address: r.pubkey, amount: r.amount }));
-}
-
-// --- draft persistence (typed rows survive a reload; the login does not) ---------
-
-export const WORKSHEET_DRAFT_KEY = "bongtu.payroll.draft.v1";
-
-/** Persist the typed rows. Addresses + amounts only — both are things the
- *  employer authored, no key material, no chain state. Best-effort (a blocked
- *  storage just loses the convenience). */
-export function saveDraft(rows: WorksheetRow[], storage: StorageLike | null): void {
-  try {
-    storage?.setItem(WORKSHEET_DRAFT_KEY, JSON.stringify(rows));
-  } catch {
-    // quota/privacy-mode write failure — the draft is a convenience only.
-  }
-}
-
-/** The saved draft, or one blank row when absent/malformed (malformed records
- *  are dropped so the next save starts clean). */
-export function loadDraft(storage: StorageLike | null): WorksheetRow[] {
-  if (!storage) return [blankRow()];
-  let raw: string | null = null;
-  try {
-    raw = storage.getItem(WORKSHEET_DRAFT_KEY);
-  } catch {
-    return [blankRow()];
-  }
-  if (!raw) return [blankRow()];
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) throw new Error("not an array");
-    const rows = parsed
-      .filter(
-        (r): r is WorksheetRow =>
-          typeof r === "object" && r !== null &&
-          typeof (r as WorksheetRow).address === "string" &&
-          typeof (r as WorksheetRow).amount === "string",
-      )
-      .slice(0, MAX_ROWS);
-    return rows.length === 0 ? [blankRow()] : rows;
-  } catch {
-    try {
-      storage.removeItem(WORKSHEET_DRAFT_KEY);
-    } catch {
-      // nothing to clean if storage is unreachable
-    }
-    return [blankRow()];
-  }
-}
-
-export function clearDraft(storage: StorageLike | null): void {
-  try {
-    storage?.removeItem(WORKSHEET_DRAFT_KEY);
-  } catch {
-    // nothing to clean if storage is unreachable
-  }
 }
 
 // --- the footer's verdict ---------------------------------------------------------

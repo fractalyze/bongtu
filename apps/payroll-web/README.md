@@ -1,6 +1,7 @@
-# bongtu payroll (Bongtu Payroll)
+# bongtu payroll (Bongtu Payroll Tool)
 
-A login-gated **single-page pay console** for the employer (SPEC §7 employer-mode),
+A login-gated **single-page TESTNET tool for trying batch transfers** (SPEC §7
+employer-mode),
 built on the shared **`@bongtu/client`** protocol engine. Same bjj identity as the
 public wallet — the wallet connect runs the same EIP-712 → bjj derivation under the ONE
 `@bongtu/client/identity KEY_DERIVATION` config, so the console and the wallet derive
@@ -9,7 +10,8 @@ workspace **source directly**, so every commitment / nullifier / ciphertext it b
 is byte-identical to what the prover service proves and the contract verifies.
 
 There is no auditor mode here anymore (the arbiter seat is the arbiter indexer's
-`/notes`); this app is **login + worksheet only**. All copy is English.
+`/notes`); this app is **login + a generated test worksheet only**. All copy is
+English, branded "Bongtu Payroll Tool" with a TESTNET badge on both screens.
 
 ## The one page — behind a two-stage login
 
@@ -23,24 +25,34 @@ There is no auditor mode here anymore (the arbiter seat is the arbiter indexer's
   call drops the service session back to the login page. Against a dev prover with
   `PROVER_AUTH_SHA256` unset, `/auth/check` answers 200 for anything — sign-in is
   free locally.
-- **Wallet session (inside the console)** — `[Connect wallet]` in the header while
-  none exists: connect the injected wallet → `ensureChain` → EIP-712 sign → the
-  in-memory `KeyCache` hold (`src/lib/keyCache.ts`) → indexer **view token** so
-  background balance reads never need the key. Nothing persists: a refresh, the
-  10-min idle wipe, or an account switch drops the wallet session (the service
-  session stands). Send/deposit without a wallet session prompt for the connect.
-- **Worksheet** — full-width rows of `{recipient address, amount (kKRW)}`; `[+]` adds
-  a row (capped at **255** = B−1, one slot is the employer's change note), CSV paste
-  fills the sheet (`lib/csv.ts` — exactly two cells `pubkey,amount` per line,
-  base58check/hex both fine; a third cell is rejected by line number rather than
-  truncated, so a thousands-comma cannot become a 1000x underpay), per-row inline
-  errors (bad address, duplicate, self-pay, bad amount), rows draft-persisted to
-  localStorage (`lib/worksheet.ts`, injectable-storage seam).
-- **Footer** — one note covers the total → `[Send]`; covered but fragmented →
-  `[Send]` and the run auto-inserts merge legs; insufficient → the **Deposit** CTA
-  takes over with the exact shortfall (deposit is de-emphasized otherwise). Until the
-  first balance read lands there is a fourth, neutral state: Loading, send disabled,
-  no deposit CTA — an unread balance is never reported as Short.
+- **Wallet session (the status bar)** — a full-width bar under the header:
+  `[Connect wallet]` while none exists; connected, it shows the short eth account,
+  the short bongtu address, the live kKRW balance (Loading until the first read —
+  never a false zero) and `[Deposit]`. The connect chain is unchanged: injected
+  wallet → `ensureChain` → EIP-712 sign → the in-memory `KeyCache` hold
+  (`src/lib/keyCache.ts`) → indexer **view token** so background balance reads
+  never need the key. Nothing persists: a refresh, the 10-min idle wipe, or an
+  account switch drops the wallet session (the service session stands).
+  `[Sign out]` (header) ends the service session AND locks the key cache
+  (`lib/signOut.ts`).
+- **Payees (generated, not typed)** — rendered only once the wallet is connected.
+  Empty state = one `[Generate random recipients]` button: it fills the sheet
+  with **255** rows (B−1, one slot is the employer's change note) of fresh random
+  bjj addresses (CSPRNG scalar → `deriveKeypair` → `packPubkey`) and random
+  positive integer kKRW amounts summing to **floor(80% of the balance)** — always
+  strictly under the balance; a balance too small for 255 rows of ≥1 kKRW makes
+  fewer rows (`rowCount = min(255, target)`), and a zero/unknown balance disables
+  the button — a known-too-small balance shows a "Deposit first" hint, an unknown
+  balance shows the loading treatment (`lib/randomRecipients.ts`). Rows stay
+  editable (per-row inline errors: bad address, duplicate, self-pay, bad amount)
+  and deletable; `[Regenerate]` replaces the whole list. No CSV paste, no manual
+  add-row, no draft persistence — a test sheet is regenerated, not authored.
+- **Bottom bar (fixed)** — `Total outgoing: X kKRW (N recipients)` + `[Send]`,
+  which opens a confirmation naming the random-recipient framing before running.
+  One note covers the total → send; covered but fragmented → the run auto-inserts
+  merge legs; insufficient → the **Deposit** panel takes over with the exact
+  shortfall. Until the first balance read lands there is a fourth, neutral state:
+  Loading, send disabled — an unread balance is never reported as Short.
 
 ## What [Send] runs
 
@@ -103,11 +115,13 @@ src/
                        @bongtu/core/network, the KDF from @bongtu/client/identity
   main.tsx             React entry
   lib/
-    worksheet.ts       PURE: rows, validation, draft, the footer readiness verdict
+    worksheet.ts       PURE: rows, validation, the footer readiness verdict
+    randomRecipients.ts PURE: the 255-row random payee generator (80% target)
+    statusBar.ts       PURE: the status bar's connected/disconnected selection
+    signOut.ts         Sign out = drop service session + lock the key cache
     disburse.ts        PURE: recipients + funding note + membership -> ProvingRequest
                        + the 2054-element ciphertext (CSPRNG pads/salts/shuffle)
     payRun.ts          the whole run: client merge chain, then the disburse leg
-    csv.ts             recipient CSV parser (the paste-fill path)
     errors.ts          the wording boundary: shared-classifier verdicts in the
                        console's voice + the deposit field's amount errors
     serviceAuth.ts     the service session: Basic value builder, /auth/check
@@ -120,18 +134,20 @@ src/
     toasts.ts          the one toast queue (@bongtu/ui)
   ui/
     App.tsx            service-login gate (session == the held Basic value)
-    Login.tsx          hero + the ID/password [Sign in] form
-    Console.tsx        header (wallet connect) / worksheet / stat bar / footer /
-                       progress rail / done
+    Login.tsx          hero + the two-line testnet tagline + [Sign in] form
+    Console.tsx        header / status bar / generated payees / fixed send bar /
+                       confirm / progress rail / done
     controls.tsx       shared control looks on the wallet token palette
 test/
-  worksheet.test.ts    rows, validation (self-pay), csv fill, draft seam, readiness
+  worksheet.test.ts    rows, validation (self-pay), readiness verdict
+  randomRecipients.test.ts generation invariants: 255 distinct valid rows, 80% sum
+  statusBar.test.ts    bar state selection (null balance stays loading)
+  signOut.test.ts      sign-out drops the service session AND locks the key cache
   proverClient.test.ts adapter + pub-length pins + auth header + base-URL defaults
   serviceAuth.test.ts  the service session: Basic value, sign-in probe, holder
   kdf.test.ts          identity coincidence with wallet-web (shared KEY_DERIVATION)
   assemble.test.ts     the disburse assembly gate (kept from the previous console)
   randomness.test.ts   recipient-count privacy: per-batch CSPRNG draws + shuffle
-  csv.test.ts          CSV normalization, cell-count and header-heuristic gate
   payRun.test.ts       batch bounds + terminal-leg failure wording (injected I/O)
   errors.test.ts       the wording boundary's gate
 ```

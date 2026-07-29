@@ -60,7 +60,6 @@ export function CellInput({
   );
 }
 
-/** A stat-bar tile: muted label over a tabular value. */
 export function Stat({ label, value, tone = "ink" }: { label: string; value: ReactNode; tone?: "ink" | "pos" | "err" }): ReactNode {
   const toneCls = tone === "pos" ? "text-pos" : tone === "err" ? "text-err" : "text-ink";
   return (
@@ -68,6 +67,17 @@ export function Stat({ label, value, tone = "ink" }: { label: string; value: Rea
       <span className="text-[11px] text-muted">{label}</span>
       <span className={`text-[15px] font-semibold tabular-nums truncate ${toneCls}`}>{value}</span>
     </div>
+  );
+}
+
+/** The TESTNET badge pill — sits next to the brand on BOTH the login page and
+ *  the console header: this whole console is a testnet tool, and the badge is
+ *  how every screen says so. */
+export function TestnetBadge(): ReactNode {
+  return (
+    <span className="text-[10px] font-semibold tracking-[0.08em] text-warn bg-warn-bg border border-warn-border rounded-full px-2 py-0.5 self-center">
+      TESTNET
+    </span>
   );
 }
 

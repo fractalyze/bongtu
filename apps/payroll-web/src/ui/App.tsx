@@ -18,6 +18,7 @@ import { ToastHost } from "@bongtu/ui/Toast";
 import { DEFAULTS } from "../config.js";
 import { keyCache } from "../lib/keyCache.js";
 import { serviceAuth, signInToProver } from "../lib/serviceAuth.js";
+import { signOutOfService } from "../lib/signOut.js";
 import { toasts } from "../lib/toasts.js";
 import { Console } from "./Console.js";
 import { Login } from "./Login.js";
@@ -59,7 +60,7 @@ export function App(): ReactNode {
   return (
     <div className="relative min-h-full">
       {authed ? (
-        <Console onSignOut={() => serviceAuth.drop()} />
+        <Console onSignOut={signOutOfService} />
       ) : (
         <Login onSignIn={(id, pw) => void signIn(id, pw)} busy={signingIn} error={loginError} />
       )}

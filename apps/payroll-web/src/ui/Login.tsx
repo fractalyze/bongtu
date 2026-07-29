@@ -3,13 +3,15 @@
 // GET /auth/check), not UI theater. The wallet is NOT connected here: MetaMask
 // lives inside the Console, where the actions that need it are.
 //
-// Copy is deliberately minimal (LOCKED): product title + tagline + the form.
+// Copy is deliberately minimal (LOCKED): brand + TESTNET badge + the two-line
+// test-console tagline + the form.
 // The hero is an inline SVG on the shared CSS tokens (no external assets):
 // a shield-marked envelope fanning out to many small notes — the product in one
 // picture, one funding note privately paying a whole payroll.
 
 import { useState } from "react";
 import type { FormEvent, ReactNode } from "react";
+import { TestnetBadge } from "./controls.js";
 
 /** The payroll hero: envelope+shield on the left, a fan of pay-flow lines to a
  *  column of recipient notes on the right. Token-driven colors only. */
@@ -89,11 +91,17 @@ export function Login({
         onSubmit={submit}
         className="w-full max-w-[420px] bg-surface border border-border rounded-2xl p-8 flex flex-col items-center gap-5 text-center shadow-[0_8px_28px_-18px_rgba(17,24,39,0.18)]"
       >
-        <div className="flex items-baseline gap-2">
+        <div className="flex items-center gap-2">
           <span className="text-2xl font-bold text-primary">Bongtu</span>
-          <span className="text-2xl font-bold">Payroll</span>
+          <span className="text-2xl font-bold">Payroll Tool</span>
+          <TestnetBadge />
         </div>
-        <p className="text-[13.5px] text-muted -mt-2">Payroll administration, at scale.</p>
+        <div className="-mt-2">
+          <p className="text-[15px] font-semibold">A test console for batch payroll</p>
+          <p className="text-[13px] text-muted mt-0.5">
+            Pay up to 255 recipients in a single private transaction.
+          </p>
+        </div>
         <PayrollHero />
         <label className="w-full flex flex-col gap-1 text-left">
           <span className="text-[11px] text-muted">ID</span>

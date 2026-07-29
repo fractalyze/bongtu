@@ -1,26 +1,19 @@
 // Headless gate for the pay worksheet's pure core (lib/worksheet.ts): row
-// editing rules (add/remove/cap-255), per-row validation (address decode,
-// duplicates, amounts), the CSV paste fill, the injected-storage draft, and the
-// footer's 3-state verdict — including the single-note vs fragmented split,
-// which must come from the SAME planner the run executes.
+// editing rules (remove/cap-255), per-row validation (address decode,
+// duplicates, amounts), and the footer's 3-state verdict — including the
+// single-note vs fragmented split, which must come from the SAME planner the
+// run executes.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { deriveKeypair } from "@bongtu/core/note";
 import { packPubkey, encodeAddress } from "@bongtu/core/pubkey";
-import type { StorageLike } from "@bongtu/client/session";
 import {
   MAX_ROWS,
-  WORKSHEET_DRAFT_KEY,
-  addRow,
   blankRow,
   checkWorksheet,
-  clearDraft,
-  loadDraft,
   removeRow,
-  rowsFromCsv,
-  saveDraft,
   sendReadiness,
   SELF_PAY_MESSAGE,
   type WorksheetRow,
@@ -35,19 +28,16 @@ const row = (address: string, amount: string): WorksheetRow => ({ address, amoun
 const notes = (values: bigint[]) =>
   values.map((v, i) => ({ value: v.toString(), salt: `5${i}`, leafIndex: i, spent: false }));
 
-// ---------------------------- rows: add / remove / cap ----------------------------
+// ---------------------------- rows: remove / cap ----------------------------------
 
-test("addRow appends a blank row and refuses past the 255 cap", () => {
-  assert.equal(addRow([blankRow()]).length, 2);
-  const full = Array.from({ length: MAX_ROWS }, () => blankRow());
-  assert.equal(addRow(full).length, MAX_ROWS, "the [+] button's rule: no 256th row");
-  assert.equal(MAX_ROWS, 255, "B=256 outputs minus the employer's change slot");
+test("MAX_ROWS is 255 — B=256 outputs minus the employer's change slot", () => {
+  assert.equal(MAX_ROWS, 255);
 });
 
-test("removeRow drops the row but an emptied sheet keeps one blank row to type into", () => {
+test("removeRow drops the row; deleting the last one leaves an EMPTY list (the generator empty state)", () => {
   const rows = [row(ADDR_A, "100"), row(ADDR_B, "200")];
   assert.deepEqual(removeRow(rows, 0), [row(ADDR_B, "200")]);
-  assert.deepEqual(removeRow([row(ADDR_A, "100")], 0), [blankRow()]);
+  assert.deepEqual(removeRow([row(ADDR_A, "100")], 0), []);
 });
 
 // ---------------------------- validation ------------------------------------------
@@ -134,64 +124,6 @@ test("more than 255 filled rows is an issue even if every row is individually fi
   );
   const check = checkWorksheet(rows);
   assert.ok(check.issues.some((i) => i.message.includes(`${MAX_ROWS}`)));
-});
-
-// ---------------------------- CSV paste fill --------------------------------------
-
-test("CSV paste fills rows through the one csv parser (base58/hex normalized)", () => {
-  const rows = rowsFromCsv(`${ADDR_A},100\n${encodeAddress(ADDR_B)},250`);
-  assert.deepEqual(rows, [
-    { address: ADDR_A.toLowerCase(), amount: "100" },
-    { address: ADDR_B.toLowerCase(), amount: "250" },
-  ]);
-  // …and what it fills validates exactly like typed cells (amounts are kKRW).
-  const check = checkWorksheet(rows);
-  assert.deepEqual(check.issues, []);
-  assert.equal(check.totalWei, 350n * KKRW);
-});
-
-test("CSV paste rejects an empty paste, a bad line, and an over-cap sheet", () => {
-  assert.throws(() => rowsFromCsv("# comments only\n"), /No payee rows/);
-  assert.throws(() => rowsFromCsv(`${ADDR_A}`), /line 1/);
-  const over = Array.from(
-    { length: MAX_ROWS + 1 },
-    (_, i) => `${packPubkey(deriveKeypair(6000000000n + BigInt(i) * 1013n).publicKey)},1`,
-  ).join("\n");
-  assert.throws(() => rowsFromCsv(over), new RegExp(`${MAX_ROWS}`));
-});
-
-// ---------------------------- draft save/restore ----------------------------------
-
-function memoryStorage(): StorageLike & { map: Map<string, string> } {
-  const map = new Map<string, string>();
-  return {
-    map,
-    getItem: (k) => map.get(k) ?? null,
-    setItem: (k, v) => void map.set(k, v),
-    removeItem: (k) => void map.delete(k),
-  };
-}
-
-test("the draft round-trips through the injected storage seam", () => {
-  const storage = memoryStorage();
-  const rows = [row(ADDR_A, "1,000"), row("half typed", "")];
-  saveDraft(rows, storage);
-  assert.ok(storage.map.has(WORKSHEET_DRAFT_KEY));
-  assert.deepEqual(loadDraft(storage), rows, "typed cells restore verbatim, valid or not");
-  clearDraft(storage);
-  assert.deepEqual(loadDraft(storage), [blankRow()]);
-});
-
-test("a missing, malformed, or hostile draft restores as one blank row", () => {
-  assert.deepEqual(loadDraft(null), [blankRow()]);
-  assert.deepEqual(loadDraft(memoryStorage()), [blankRow()]);
-  const bad = memoryStorage();
-  bad.map.set(WORKSHEET_DRAFT_KEY, "{not json");
-  assert.deepEqual(loadDraft(bad), [blankRow()]);
-  assert.equal(bad.map.has(WORKSHEET_DRAFT_KEY), false, "malformed records are dropped");
-  const wrongShape = memoryStorage();
-  wrongShape.map.set(WORKSHEET_DRAFT_KEY, JSON.stringify([{ address: 5 }, { address: "a", amount: "1" }]));
-  assert.deepEqual(loadDraft(wrongShape), [{ address: "a", amount: "1" }]);
 });
 
 // ---------------------------- footer 3-state --------------------------------------
