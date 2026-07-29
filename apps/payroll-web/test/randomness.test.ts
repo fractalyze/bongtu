@@ -138,3 +138,16 @@ test("a known recipient lands at a DIFFERENT slot across runs (shuffle is real)"
   // is astronomically unlikely (~256^-2), so distinct positions prove the shuffle.
   assert.ok(new Set(slots).size > 1, `recipient slot never moved across runs: ${slots.join(",")}`);
 });
+
+test("the encryption nonce fits the circuit's 128-bit slot under REAL entropy", () => {
+  // Regression for the a40f1c6 nonce bug: the CSPRNG draw is a full field element
+  // (< 2^248), but SymmetricEncrypt packs the nonce with messageLength into ONE
+  // Poseidon slot and constrains nonce < 2^128 — an unclamped draw made witness
+  // generation fail with probability ~1-2^-120, i.e. every real pay run. The
+  // seeded-double tests can never catch this (their generator masks to 128 bits
+  // by construction), so the assert runs on the default-entropy batches.
+  for (const inp of BATCHES) {
+    const n = BigInt(inp.encryptionNonce);
+    assert.ok(n >= 0n && n < 1n << 128n, `nonce ${n} exceeds the 128-bit circuit slot`);
+  }
+});

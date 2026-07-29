@@ -32,6 +32,7 @@ import {
   KEM_CIPHERTEXT_BYTES,
 } from "@bongtu/core/kem";
 import { ARBITER_KEM_PK } from "@bongtu/core/network";
+import { toEncryptionNonce } from "@bongtu/client/spend";
 import { SUBGROUP_ORDER, type Point } from "@bongtu/core/babyjub";
 import { toWire } from "@bongtu/core/proving";
 import type { DisburseInput, ProvingRequest } from "@bongtu/core/proving";
@@ -272,7 +273,10 @@ export function buildDisburseRequest(
   // constants the whole receiver-envelope keystream was predictable, so an observer
   // could decrypt [value, salt] for every slot and read off the real count directly.
   const ecdh = BigInt(entropy.randField());
-  const nonce = BigInt(entropy.randField());
+  // Clamped to 128 bits: SymmetricEncrypt constrains nonce < 2^128 (the nonce shares
+  // a Poseidon state slot with messageLength * 2^128), so a full-width field draw
+  // fails witness generation. The wallet's freshSpendCrypto clamps the same way.
+  const nonce = BigInt(toEncryptionNonce(entropy.randField()));
 
   const root = BigInt(membership.root);
   const pathElements = membership.pathElements.map((x) => BigInt(x));
