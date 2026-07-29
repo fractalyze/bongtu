@@ -118,6 +118,11 @@ Encryption is a Poseidon sponge (`SymmetricEncrypt` in-circuit, `poseidonEncrypt
 on-chain `(ecdhPublicKey, encryptionNonce, ciphertext, kemCiphertext)`, the auditor recovers the
 plaintext with no user key and no nullifier linkage.
 
+`encryptionNonce` MUST be < 2^128: the circuit packs it with `messageLength` into one Poseidon
+state slot, so a full-width field draw fails witness generation (probability ~1−2^-120). Every
+client draws through the 128-bit clamp (`toEncryptionNonce` in `@bongtu/client/spend`) — an
+unclamped draw shipped once and made console pay runs unprovable until `45601e9`.
+
 Plaintext field order is a consensus artifact — reordering passes a TypeScript round-trip and
 breaks decryption of live-chain envelopes. `packages/core/src/envelope.ts` owns both directions.
 

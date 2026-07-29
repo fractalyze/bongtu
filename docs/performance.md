@@ -137,6 +137,11 @@ range checks — which is +22% on `deposit` and under +0.1% on `disburse256`.
   regen recipe and the root `README.md` status (measured 2026-07-24). The prover service keeps the
   compiled zkey resident so production proofs are the warm number; a cold service boot pays the
   compile once.
+- **Prover-service round trip** (what the payroll console actually waits on, measured 2026-07-29 on
+  a loaded shared box): warm `/prove` **disburse256 2.3 s · transfer10x2 0.3 s · deposit 0.2 s**.
+  Witness generation dominates the disburse figure — **1.1 s** through the in-process compiled-`.so`
+  calculator, down from 5.7–7.5 s under the retired node/WASM subprocess (~5x; the pipeline and the
+  resident-worker design are in [`prover/README.md`](../prover/README.md)).
 - **Browser transfer** (headless Chromium, real): warm proof **3.5–5.4 s** on a 24-thread desktop,
   measured 2026-07-26 on the pre-KEM transfer circuit; the hybrid circuit adds ~4% constraints.
   The laptop figure carried alongside it in `apps/wallet-web/src/lib/prove.ts` — 7–20 s — is a

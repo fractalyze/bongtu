@@ -54,3 +54,5 @@ not re-derive what those files own.
   ~2.5min, 1.24GB zkey) → export verifier/vkey → witness → `rabbitsnark circom prove` on GPU0
   (cold zkey-compile ~120s + warm proof ~0.47s). Runner: `jolt-zorch/.venv/bin/python -m
   rabbitsnark.cli circom prove <zkey> <proof> <public> --wtns <wtns>` from `rabbitsnark-py`.
+  A circuit change ALSO requires rebuilding that circuit's witness `.so` + `w2s`
+  (`circuits/build_witness_so.sh`) — the prover service fails at boot without a matching pair.

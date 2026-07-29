@@ -179,6 +179,7 @@ the faucet grant. `packages/core/src/network.ts` exports
 | `deploy/deploy_local.sh` | anvil + Deploy + getter read-back + Smoke — the local gate |
 | `deploy/test_upgrade_ladder_v5.sh` | scratch-anvil drill of the full live-pool ladder (Deploy → PQ → self-send → transfer10 → transfer10x2) + cast end-state checks + the V5-vs-V1 negative pre-flight |
 | `deploy/giwa_disburse256.ts` | the live 256-recipient disburse runner (rebuild mirror → deposit → prover service → `disburseWithCiphertexts` → measure L2 gas and L1 data fee) |
+| `deploy/giwa_payroll_e2e.ts` | the payroll console's whole pay run against live GIWA, driving the console's own modules (mint → deposit → forced merge leg → 3-recipient disburse → signed `/notes` checks), every proof via the prover service |
 | `deploy/e2e_m0.sh`, `deploy/e2e_orchestrator.ts` | the cross-circuit spend-cycle end-to-end on a local anvil |
 | `deploy/upload_circuits.sh` | uploads the wallet's proving assets (wasm + zkey) to the Vercel Blob store under a `CIRCUITS_VERSION` path, refusing assets whose zkey hash misses the pin in the wallet's `config.ts` |
 

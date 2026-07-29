@@ -61,7 +61,7 @@ endpoint, and none may be added.
   slot, warn/info tones). Classname-based on the apps' Tailwind tokens; each app
   compiles its own CSS (wallet-web declares the package as a Tailwind `@source`).
 - **Per-app wiring** — apps own their copy (plain words, no jargon) and the routing:
-  wallet-web's `src/lib/refresh.ts` (`runRefresh` — the one refresh path, with the
+  `@bongtu/client` `refresh.ts` (`runRefresh` — the one refresh path, with the
   never-toast/never-blank rules enforced headlessly), `src/lib/toasts.ts` (the app's
   queue + the class-5 global handlers), `src/lib/connection.ts`
   (`walletErrorMessage`/`chainSwitchMessage` — the wallet's words over the core

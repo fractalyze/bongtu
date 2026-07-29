@@ -46,6 +46,10 @@ $SNARKJS groth16 setup                out/<name>.r1cs "$PTAU" out/<name>.zkey
 $SNARKJS zkey export verificationkey  out/<name>.zkey out/<name>.vkey.json
 $SNARKJS zkey export solidityverifier out/<name>.zkey out/<name>_verifier.sol
 $NODE out/<name>_js/generate_witness.js out/<name>_js/<name>.wasm inputs/<name>.json out/<name>.wtns
+# ^ the WASM path is the REFERENCE for tests and CPU proving. The prover service
+#   computes production witnesses from a compiled circuit .so instead —
+#   pipeline: circuits/build_witness_so.sh, service design: prover/README.md,
+#   byte-identity gate against this WASM path: circuits/wtns_compare.py.
 $SNARKJS groth16 prove  out/<name>.zkey out/<name>.wtns out/<name>.proof.json out/<name>.public.json
 $SNARKJS groth16 verify out/<name>.vkey.json out/<name>.public.json out/<name>.proof.json   # prints OK
 ```

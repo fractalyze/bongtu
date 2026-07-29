@@ -11,7 +11,7 @@ verifies. Run commands and the test layout are owned by `apps/wallet-web/README.
 ## Key derivation
 
 There is no seed and no persisted private key. The spending key is a pure function of a wallet
-signature over a domain-separated EIP-712 struct (`src/lib/derive.ts`, `src/lib/connection.ts`):
+signature over a domain-separated EIP-712 struct (`@bongtu/client` `derive.ts` + `connection.ts` — the engine package both web apps share):
 
 ```
 domain  = { name: "bongtu", version: keyVersion, chainId: 91342, verifyingContract: <pool> }
@@ -48,10 +48,10 @@ Two different secrets, two different lifetimes.
 **Viewing** runs on a view token. Connecting derives the key once, signs a challenge with it, and
 trades that for an HMAC token from the indexer (`/auth/challenge` + `/auth/token`, see
 `docs/indexer.md`); the token and the compressed pubkey are all that reach `localStorage`
-(`src/lib/session.ts`). Balance and activity read with the token alone — no key, no popup — so a
+(`@bongtu/client` `session.ts`). Balance and activity read with the token alone — no key, no popup — so a
 returning visit restores silently as long as the wallet still reports the same account.
 
-**Spending** runs on the key itself, held by `src/lib/keyCache.ts` — the wallet's *lock*, and the
+**Spending** runs on the key itself, held by the `@bongtu/client` `KeyCache` (wired app-side in `src/lib/keyCache.ts`) — the wallet's *lock*, and the
 only place the bjj private key lives between actions. It is memory-only: never storage, never React
 state, gone on reload.
 
@@ -78,7 +78,7 @@ A held key belongs to exactly one wallet account. If the selected account change
 refuses the action outright (`ACCOUNT_MISMATCH_MESSAGE`) rather than derive and spend under a
 stranger's key — and when a held key already proves the mismatch, it refuses without a popup.
 
-The login itself is a flow, not component code: `runLogin` (`src/lib/loginFlow.ts`) takes the
+The login itself is a flow, not component code: `runLogin` (`@bongtu/client` `loginFlow.ts`) takes the
 wallet the connect modal just opened (`connection.ts requireConnection`), derives, runs the two
 checks below, trades the identity for a view token and persists — and when a check fails it throws
 having written **nothing**. `App.connectWallet` is left with the lock, the screen state and the
@@ -178,7 +178,7 @@ useWalletDescription`).
 ## Which circuit a spend uses
 
 A spending circuit takes a **fixed** number of input notes, so the number of notes a payment needs
-decides which circuit can prove it. The user never picks; `planSpendAction` (`src/lib/spend.ts`)
+decides which circuit can prove it. The user never picks; `planSpendAction` (`@bongtu/client` `spend.ts`)
 does, from amount-aware largest-first selection:
 
 | the payment needs | send | withdraw |
@@ -212,11 +212,11 @@ and no circuit above can spend more than ten at once. Withdraw is stricter still
 circuit, so three notes is already past it. That state is common, not exotic, and the wallet does not
 answer it by sending the user off to tidy up first.
 
-`planSpendChain` (`src/lib/spend.ts`) plans the **whole** way from the balance held to the payment
+`planSpendChain` (`@bongtu/client` `spend.ts`) plans the **whole** way from the balance held to the payment
 asked for: zero or more merge legs — `transfer10x2` self-sends folding the ten largest notes into
 ONE merged note plus a zero-value change note, both the sender's own — then the terminal payment or
 withdrawal. `runSpendChain`
-(`src/lib/spendFlow.ts`) runs the legs back to back. One Confirm starts the whole thing; each leg is
+(`@bongtu/client` `spendFlow.ts`) runs the legs back to back. One Confirm starts the whole thing; each leg is
 one wallet approval. Duplicate output owners are safe in a merge because receiver ciphertext *i* is
 encrypted under `encryptionNonce + i` (§11-8 v1.1), the property that also made self-send legal; the
 shared-keystream ban applies only to `disburse`.
@@ -233,7 +233,7 @@ transaction, with the assemble/prove/submit stage of the leg in flight written u
 until the indexer has seen the transaction, so leg *n+1* literally cannot be built until then. The
 plan marks that note with a negative leaf index naming the leg that will produce it (`pendingLeaf`);
 the runner polls `reloadNotes` for the commitment it knows the merge created — the same bounded-poll
-policy as the post-action refresh (`pollUntil`, `src/lib/refresh.ts`) — and substitutes the real note
+policy as the post-action refresh (`pollUntil`, `@bongtu/client` `refresh.ts`) — and substitutes the real note
 with its real leaf. This is a reported stage of its own, so the screen says what the pause is for.
 Freshly appended transfer outputs *do* have paths: the indexer's 422 "no path" applies only to
 leaves inside a `disburse` batch (§11-7).

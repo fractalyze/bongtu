@@ -152,9 +152,12 @@ npm workspaces monorepo: workspace packages export **raw `src/*.ts`** (no build 
 - [`circuits/`](circuits/README.md): the circom circuits (transfer, disburse, withdraw, deposit)
 - [`contracts/`](contracts/README.md): Foundry `BongtuPool` + verifiers
 - [`packages/core/`](packages/core/README.md): `@bongtu/core`: IMT, Poseidon, keys, note crypto, proving wire types
-- [`prover/`](prover/README.md): GPU prover service, holds the disburse256 zkey resident
+- `packages/client/`: `@bongtu/client`: the browser-side engine both web apps drive — connection, key
+  derivation/lock, deposit and spend flows, indexer reads
+- `packages/ui/`: `@bongtu/ui`: shared error-surface components (toast host, banner)
+- [`prover/`](prover/README.md): GPU prover service — three circuits resident, in-process witness workers
 - [`apps/indexer/`](apps/indexer/README.md): event ingest, tree mirror, `/notes` + disclosure alarms (arbiter mode)
-- [`apps/payroll-web/`](apps/payroll-web/README.md): employer + auditor console
+- [`apps/payroll-web/`](apps/payroll-web/README.md): the employer pay console — MetaMask login, one worksheet, batch disburse
 - [`apps/wallet-web/`](apps/wallet-web/README.md): self-custody wallet, in-browser proving
 - [`deploy/`](deploy/README.md): deploy scripts, the live 256-disburse runner, the e2e gate
 - [`docs/`](docs/): reference docs, one file per topic (index below)
