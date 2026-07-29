@@ -29,6 +29,10 @@ services:
       retries: 12
       start_period: 10s
     restart: unless-stopped
+    # Ceilings ~20x observed usage (14MiB): a runaway query is contained instead
+    # of taking the shared host with it.
+    mem_limit: 1g
+    cpus: 1
 
   indexer:
     build:
@@ -69,6 +73,11 @@ services:
     ports:
       - "${INDEXER_PORT:-8600}:8600"
     restart: unless-stopped
+    # Ceilings ~20x observed steady-state (94MiB / <1 cpu; a from-genesis rescan
+    # is the CPU spike): a leak or decode loop is contained instead of taking the
+    # shared host with it.
+    mem_limit: 2g
+    cpus: 2
 
 volumes:
   pgdata:
