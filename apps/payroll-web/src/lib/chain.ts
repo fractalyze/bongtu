@@ -53,7 +53,8 @@ export async function submitDisburse(
     account: connection.address as Address,
     chain: giwaSepolia,
     // Pinned, never estimated: wallet-stack auto-estimation once overpaid ~1500x.
-    gasPrice: await connection.publicClient.getGasPrice(),
+    // 3x headroom over the floor quote — same rationale as the client submits.
+    gasPrice: (await connection.publicClient.getGasPrice()) * 3n,
     // Chain-derived nonce, same rationale as the client submits: the wallet's
     // tracker desyncs after speed-up/cancel surgery.
     nonce: await connection.publicClient.getTransactionCount({

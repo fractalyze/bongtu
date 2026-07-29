@@ -157,7 +157,9 @@ test("submitTransfer sends the pinned gas price and byte-exact calldata, then wa
   // The price is the CHAIN's word (eth_gasPrice), never wallet-stack estimation
   // (which once overpaid ~1500x) and no longer a fixed pin that goes stale when
   // the sequencer moves its floor.
-  assert.equal(BigInt(tx.gasPrice), 0xf4610n, "gas price == the node's eth_gasPrice quote");
+  // 3x the node's quote: a tx priced exactly at the floor goes pending the
+  // moment the floor drifts up a block later (observed live).
+  assert.equal(BigInt(tx.gasPrice), 0xf4610n * 3n, "gas price == 3x the node's eth_gasPrice quote");
   // The nonce comes from the chain's pending count, not the wallet's tracker —
   // MetaMask's cache desyncs after speed-up/cancel surgery ("nonce too low").
   assert.equal(BigInt(tx.nonce), 42n, "nonce == the chain's pending transaction count");
@@ -205,7 +207,7 @@ test("mintTestToken (dev faucet) submits at the same pinned gas price", async ()
   assert.ok(sent);
   const tx = (sent.params as [Record<string, string>])[0];
   assert.equal(tx.to?.toLowerCase(), token);
-  assert.equal(BigInt(tx.gasPrice), 0xf4610n, "mint pays the same chain-quoted price");
+  assert.equal(BigInt(tx.gasPrice), 0xf4610n * 3n, "mint pays the same 3x chain-quoted price");
 });
 
 // ======================== (2) KEM EPOCH GUARD ===============================

@@ -338,7 +338,10 @@ function asProofArgs(calldata: Calldata) {
  *  overpaid ~1500x); asking the node directly is not estimation, and a fixed
  *  pin goes stale the day the sequencer moves its floor. */
 async function chainGasPrice(connection: Connection): Promise<bigint> {
-  return connection.publicClient.getGasPrice();
+  // 3x headroom over the node's quote: eth_gasPrice IS the current floor, and a
+  // tx priced exactly at it goes pending the moment the floor drifts up a block
+  // later (observed live). Still ~40% under the old fixed pin.
+  return (await connection.publicClient.getGasPrice()) * 3n;
 }
 
 async function nextNonce(connection: Connection): Promise<number> {

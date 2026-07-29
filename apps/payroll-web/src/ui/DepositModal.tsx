@@ -8,15 +8,16 @@
 // balance the session card already shows: this dialog is about what there is left
 // to shield.
 //
-// While a deposit or mint is in flight the dialog cannot be closed — it is driving
-// wallet popups, and the stage line under the button is the only place the run is
-// narrated.
+// While a deposit runs the dialog cannot be closed — it is driving wallet popups —
+// and its WHOLE body becomes the staged progress view (approve → prove → submit,
+// the wallet grammar), never just a relabeled button.
 
 import type { ReactNode } from "react";
 import { formatKkrw, groupAmountInput } from "@bongtu/client/money";
 import { DEFAULTS } from "../config.js";
-import { depositModalView, type DepositModalState } from "../lib/depositModal.js";
-import { Button, CellInput, Spinner } from "./controls.js";
+import { DEPOSIT_STAGE_LABEL, depositModalView, type DepositModalState } from "../lib/depositModal.js";
+import { Button, Spinner } from "./controls.js";
+import type { DepositStage } from "@bongtu/client/depositFlow";
 
 export function DepositModal({
   state,
@@ -41,6 +42,12 @@ export function DepositModal({
         className="w-full max-w-[420px] bg-surface border border-border rounded-2xl p-6 flex flex-col gap-4"
       >
         <div className="text-[15px] font-semibold">Deposit</div>
+        {state.stage !== null ? (
+          /* the run in flight: the whole dialog becomes the staged progress view
+             (the wallet grammar) — never just a relabeled button */
+          <DepositProgress stage={state.stage} />
+        ) : (
+          <>
         <div className="text-[12.5px] text-muted">
           Converts public kKRW into private pool balance. Up to two wallet confirmations: the
           approval (when needed) and the deposit.
@@ -56,15 +63,35 @@ export function DepositModal({
         </div>
 
         <label className="flex flex-col gap-1">
-          <span className="text-[11px] text-muted">Amount (kKRW)</span>
-          <CellInput
-            align="right"
-            ariaLabel="Deposit amount (kKRW)"
-            value={state.amount}
-            placeholder="0"
-            invalid={view.amountError !== null}
-            onChange={(v) => onAmountChange(groupAmountInput(v))}
-          />
+          <span className="flex items-baseline justify-between gap-3">
+            <span className="text-[12px] text-muted">Amount</span>
+            {/* the mint rides the label row as a link — a side path off the
+                deposit, never a second headline button */}
+            <button
+              type="button"
+              disabled={!view.canMint}
+              onClick={onMint}
+              className="text-[12px] font-medium text-primary hover:underline cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {state.minting ? "Minting…" : `No kKRW? ${view.mintLabel}`}
+            </button>
+          </span>
+          {/* same scale as the balance box above, ticker inside the field */}
+          <span
+            className={`flex items-baseline gap-2 border rounded-xl px-3.5 py-3 bg-surface focus-within:border-border-strong ${
+              view.amountError !== null ? "border-err" : "border-border"
+            }`}
+          >
+            <input
+              type="text"
+              aria-label="Deposit amount (kKRW)"
+              className="flex-1 min-w-0 bg-transparent outline-none text-[15px] text-right tabular-nums"
+              value={state.amount}
+              placeholder="0"
+              onChange={(e) => onAmountChange(groupAmountInput(e.target.value))}
+            />
+            <span className="text-[13px] text-muted">kKRW</span>
+          </span>
         </label>
         {view.amountError && <div className="text-[12.5px] text-err">{view.amountError}</div>}
 
@@ -88,21 +115,59 @@ export function DepositModal({
             Close
           </Button>
           <Button disabled={!view.canDeposit} onClick={onDeposit}>
-            {state.stage !== null && <Spinner />}
-            {view.depositLabel}
+            Deposit
           </Button>
         </div>
+          </>
+        )}
 
-        {/* the mint: a side path off the deposit, never the headline — the operator
-            came here to shield, not to fund a test token */}
-        <div className="border-t border-border pt-3.5 flex items-center gap-3 flex-wrap">
-          <span className="text-[12.5px] text-muted flex-1 min-w-[120px]">No kKRW?</span>
-          <Button variant="secondary" disabled={!view.canMint} onClick={onMint}>
-            {state.minting && <Spinner />}
-            {view.mintLabel}
-          </Button>
-        </div>
       </div>
+    </div>
+  );
+}
+
+/** The deposit run as the wallet-style staged checklist: approve → prove →
+ *  submit, with unlock as a transient first row while it happens. */
+const DEPOSIT_STAGE_ORDER: DepositStage[] = ["approve", "prove", "submit"];
+function DepositProgress({ stage }: { stage: DepositStage }): ReactNode {
+  const activeAt = stage === "unlock" ? -1 : DEPOSIT_STAGE_ORDER.indexOf(stage);
+  return (
+    <div className="flex flex-col gap-3 py-2">
+      <ol className="flex flex-col gap-2.5">
+        {stage === "unlock" && (
+          <li className="flex items-center gap-2.5 text-[13.5px] font-medium">
+            <span className="w-5 h-5 rounded-full bg-primary text-primary-ink flex items-center justify-center animate-pulse-soft">
+              <Spinner />
+            </span>
+            {DEPOSIT_STAGE_LABEL.unlock}
+          </li>
+        )}
+        {DEPOSIT_STAGE_ORDER.map((st, i) => {
+          const s = i < activeAt ? "done" : i === activeAt ? "active" : "todo";
+          return (
+            <li
+              key={st}
+              className={`flex items-center gap-2.5 text-[13.5px] ${
+                s === "done" ? "text-pos" : s === "active" ? "font-medium" : "text-muted"
+              }`}
+            >
+              <span
+                className={`w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-semibold shrink-0 ${
+                  s === "done"
+                    ? "bg-pos-bg text-pos animate-check-pop"
+                    : s === "active"
+                      ? "bg-primary text-primary-ink animate-pulse-soft"
+                      : "bg-surface-2 text-muted"
+                }`}
+              >
+                {s === "done" ? "✓" : i + 1}
+              </span>
+              {DEPOSIT_STAGE_LABEL[st]}
+            </li>
+          );
+        })}
+      </ol>
+      <div className="text-[12px] text-muted">Confirm the wallet prompts and keep this window open.</div>
     </div>
   );
 }
