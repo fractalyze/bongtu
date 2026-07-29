@@ -397,9 +397,6 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
           {bar.kind === "disconnected" ? (
             <>
               <span className="text-[13.5px] font-medium">Please connect your wallet</span>
-              <span className="text-[12.5px] text-muted hidden sm:inline">
-                Approve the connection and one signature in MetaMask.
-              </span>
               <div className="ml-auto">
                 <Button disabled={connecting} onClick={() => void connectWallet()}>
                   {connecting && <Spinner />}
