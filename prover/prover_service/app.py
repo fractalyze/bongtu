@@ -19,11 +19,12 @@
 #                     503 engines not ready yet
 #
 # Circuits: one resident engine per BONGTU_CIRCUITS registry name
-# (config.CIRCUITS — disburse256 + transfer10x2 by default). disburse (1×256,
-# 2.79M constraints) NEEDS the GPU; transfer10x2 rides along so the employer
-# console's merge legs prove on the same warm box. transfer/withdraw prove in
+# (config.CIRCUITS — disburse256 + transfer10x2 + deposit by default). disburse
+# (1×256, 2.79M constraints) NEEDS the GPU; transfer10x2 and deposit ride along
+# so the employer console — which does no in-browser proving at all — runs its
+# whole merge-and-fund flow on the same warm box. transfer/withdraw prove in
 # the wallet's browser (a self-custody wallet never sends spending-key witnesses
-# to a server) and deposit proves CPU-side wherever it is assembled.
+# to a server).
 #
 # Ops shape (from the measured GPU contract): the compiled disburse256 prover
 # pins ~25GB of GPU memory, so run EXACTLY ONE instance per GPU with ONE uvicorn

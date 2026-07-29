@@ -48,11 +48,11 @@ class StubEngine:
 
 @pytest.fixture
 def client(monkeypatch):
-    """A ready service with BOTH registry circuits stubbed in."""
+    """A ready service with EVERY registry circuit stubbed in."""
     monkeypatch.setattr(
         app_module,
         "engines",
-        {name: StubEngine(name) for name in ("disburse256", "transfer10x2")},
+        {name: StubEngine(name) for name in ("disburse256", "transfer10x2", "deposit")},
     )
     monkeypatch.setitem(app_module.state, "status", "ready")
     # TestClient outside a `with` never runs the lifespan -> no init thread.
@@ -66,6 +66,11 @@ def disburse_body() -> dict:
 def transfer10x2_body() -> dict:
     fixture = REPO_ROOT / "circuits" / "inputs" / "transfer10x2.json"
     return {"circuit": "transfer10x2", "input": json.loads(fixture.read_text())}
+
+
+def deposit_body() -> dict:
+    fixture = REPO_ROOT / "circuits" / "inputs" / "deposit.json"
+    return {"circuit": "deposit", "input": json.loads(fixture.read_text())}
 
 
 # -- origin gate (G3 matrix) ------------------------------------------------
@@ -124,6 +129,24 @@ def test_transfer10x2_routes_to_its_engine(client):
     assert not app_module.engines["disburse256"].proved_inputs
 
 
+def test_deposit_routes_to_its_engine_with_its_pub_len(client):
+    # The payroll funding path (U-P3): the committed deposit fixture proves on the
+    # deposit engine, whose calldata carries the vkey's 19 public signals.
+    r = client.post("/prove", json=deposit_body())
+    assert r.status_code == 200
+    assert len(r.json()["pub"]) == 19
+    assert app_module.engines["deposit"].proved_inputs
+    assert not app_module.engines["disburse256"].proved_inputs
+
+
+def test_deposit_off_this_instance_is_400_naming_bongtu_circuits(client, monkeypatch):
+    monkeypatch.setattr(app_module, "engines", {"disburse256": StubEngine("disburse256")})
+    monkeypatch.setattr(config, "ENABLED_CIRCUITS", ["disburse256"])
+    r = client.post("/prove", json=deposit_body())
+    assert r.status_code == 400
+    assert "BONGTU_CIRCUITS=disburse256" in r.json()["detail"]
+
+
 def test_wellformed_but_unregistered_circuit_is_400_naming_bongtu_circuits(
     client, monkeypatch
 ):
@@ -173,7 +196,7 @@ def test_unsatisfiable_input_is_400(client, monkeypatch):
 
 def test_ready_reports_wire_tags_and_per_circuit_num_public(client):
     body = client.get("/ready").json()
-    assert body["circuits"] == ["disburse", "transfer10x2"]
-    assert body["num_public"] == {"disburse": 11, "transfer10x2": 68}
+    assert body["circuits"] == ["disburse", "transfer10x2", "deposit"]
+    assert body["num_public"] == {"disburse": 11, "transfer10x2": 68, "deposit": 19}
     # Every circuit-keyed /ready field speaks WIRE tags, boot_seconds included.
-    assert set(body["boot_seconds"]) == {"disburse", "transfer10x2"}
+    assert set(body["boot_seconds"]) == {"disburse", "transfer10x2", "deposit"}

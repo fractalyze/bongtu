@@ -7,9 +7,9 @@
 #
 # One deliberate omission: the TS `Circuit` union also has "transfer10" (10-in /
 # 10-out). This service registers only the circuits in config.CIRCUITS
-# (disburse256 + transfer10x2), and transfer10 proves in-browser on CPU like
-# transfer/withdraw/deposit, so there is no variant for it here — an unknown tag
-# is rejected at validation, which is the right answer for a circuit this
+# (disburse256 + transfer10x2 + deposit), and transfer10 proves in-browser on
+# CPU like transfer/withdraw, so there is no variant for it here — an unknown
+# tag is rejected at validation, which is the right answer for a circuit this
 # service cannot prove. Add one only if it ever joins the registry.
 #
 # Field elements arrive as decimal strings (JSON has no bigint; the TS side

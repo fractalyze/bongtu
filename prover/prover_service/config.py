@@ -59,6 +59,7 @@ def _path(env_key: str, default: Path) -> Path:
 # builds (circuits/out/<name>.vkey.json == len(<name>.public.json)):
 #   disburse256  11  (also the committed contracts/test/fixtures/disburse256.public.json)
 #   transfer10x2 68
+#   deposit      19
 # tests/test_registry.py cross-checks these against circuits/out when the
 # artifacts exist locally.
 #
@@ -103,11 +104,27 @@ CIRCUITS: dict[str, CircuitConfig] = {
         warmup_input=_path("BONGTU_TRANSFER10X2_WARMUP_INPUT", INPUTS_DIR / "transfer10x2.json"),
         num_public=68,
     ),
+    "deposit": CircuitConfig(
+        name="deposit",
+        wire_tag="deposit",
+        env_prefix="BONGTU_DEPOSIT",
+        # 6.8MB zkey — tiny next to its siblings, so it costs the box almost
+        # nothing to hold resident. It is here because payroll-web (unlike the
+        # self-custody wallet) does NO in-browser proving: the employer console
+        # funds the pool through the same service that proves its disburse.
+        zkey=_path("BONGTU_DEPOSIT_ZKEY", CIRCUITS_OUT / "deposit.zkey"),
+        wasm=_path("BONGTU_DEPOSIT_WASM", CIRCUITS_OUT / "deposit_js" / "deposit.wasm"),
+        gen_witness=_path(
+            "BONGTU_DEPOSIT_GEN_WITNESS", CIRCUITS_OUT / "deposit_js" / "generate_witness.js"
+        ),
+        warmup_input=_path("BONGTU_DEPOSIT_WARMUP_INPUT", INPUTS_DIR / "deposit.json"),
+        num_public=19,
+    ),
 }
 
 # wire tag -> registry name, for /prove routing (every tag maps to exactly one
-# registered circuit; tags absent here — deposit/transfer/withdraw — are the
-# CPU-side circuits this service never serves).
+# registered circuit; tags absent here — transfer/withdraw — are the wallet's
+# own circuits: a self-custody wallet never sends spending-key witnesses here).
 WIRE_TAG_TO_CIRCUIT: dict[str, str] = {c.wire_tag: c.name for c in CIRCUITS.values()}
 
 

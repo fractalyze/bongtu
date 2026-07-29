@@ -3,7 +3,7 @@
 #
 #   bash prover/run.sh
 #
-# Boot is EAGER: every BONGTU_CIRCUITS zkey (default disburse256,transfer10x2)
+# Boot is EAGER: every BONGTU_CIRCUITS zkey (default disburse256,transfer10x2,deposit)
 # is parsed + GPU-compiled and one warm-up proof runs per circuit (~3min total)
 # before GET /ready flips to 200. The compiled state pins ~25GB of GPU memory
 # for the life of the process — run exactly ONE instance per GPU. --workers 1

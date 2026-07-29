@@ -10,12 +10,13 @@ Node shell-out pair.
 
 The service is a **circuit registry** (`prover_service/config.py CIRCUITS`):
 one resident engine per registered circuit, `BONGTU_CIRCUITS` (comma list)
-choosing which entries boot. Two circuits are registered:
+choosing which entries boot. Three circuits are registered:
 
 | registry name | wire tag | zkey | publics | why it is here |
 |---|---|---|---|---|
 | `disburse256` | `disburse` | 1.24GB | 11 | 1×256, 2.79M constraints — **needs** the GPU |
 | `transfer10x2` | `transfer10x2` | 95MB | 68 | 10-in/2-out merge/pay leg — CPU-provable, but the employer console proves its **merge chains** here so a payroll run stays on the warm box |
+| `deposit` | `deposit` | 6.8MB | 19 | 0-in/2-out funding mint — tiny, rides along because the payroll console does NO in-browser proving: its deposits prove on the same warm box |
 
 This is a **top-level directory, not an npm package**: it is Python, runs only
 on the employer's GPU box, and is institution-internal (binds `127.0.0.1` by
@@ -35,7 +36,7 @@ of truth); `prover_service/schema.py` mirrors them 1:1 and must be kept in sync.
 | endpoint | behaviour |
 |---|---|
 | `GET /healthz` | 200 — process liveness |
-| `GET /ready` | 200 `{status:"ready", circuits:["disburse","transfer10x2"], num_public:{...}, boot_seconds:{...}}` once **every** registered engine is compiled + warm (`circuits` lists wire tags in boot order); 503 `{status:"initializing"\|"failed"}` before/on failure |
+| `GET /ready` | 200 `{status:"ready", circuits:["disburse","transfer10x2","deposit"], num_public:{...}, boot_seconds:{...}}` once **every** registered engine is compiled + warm (`circuits` lists wire tags in boot order); 503 `{status:"initializing"\|"failed"}` before/on failure |
 | `POST /prove` | body = a `ProvingRequest` (`{circuit:"disburse"\|"transfer10x2", input:{...}, backend?:"gpu"}`, field elements as decimal strings) → 200 `Calldata` `{a,b,c,pub}` — snarkjs `exportSolidityCallData` form (G2 inner-swap applied), every value a 0x 32-byte hex word, splat straight into the matching `BongtuPool` entrypoint |
 
 Witness handling: the service accepts the **circuit input JSON** (exactly what
@@ -48,7 +49,7 @@ employer flow already has in hand.
 Errors: 422 = schema violation, **including the §11-8 two-time-pad guard**
 (duplicate DISBURSE output owner pubkeys are rejected before any proving work;
 transfer10x2 allows duplicates — a self-merge is its headline use); 400 = a
-CPU-side circuit (deposit/transfer/withdraw) / a registry circuit missing from
+CPU-side circuit (transfer/withdraw) / a registry circuit missing from
 this instance's `BONGTU_CIRCUITS` (the detail names the knob) / cpu backend /
 unsatisfiable witness input (circom's `Assert Failed` — the client's batch is
 at fault); 403 = Origin gate (below); 500 = witness **infra** failure
@@ -139,11 +140,11 @@ regenerate it: `cd circuits && npx tsx gen_disburse256_input.ts`.
 Env knobs (all optional): `PROVER_HOST`/`PROVER_PORT` (127.0.0.1:8700,
 consumed by `run.sh`); the rest default in `prover_service/config.py` —
 `BONGTU_CIRCUITS` (comma list of registry names, default
-`disburse256,transfer10x2`), `PROVER_ALLOWED_ORIGINS` (unset = allow all),
+`disburse256,transfer10x2,deposit`), `PROVER_ALLOWED_ORIGINS` (unset = allow all),
 `BONGTU_CIRCUITS_OUT`, per-circuit path overrides
 (`BONGTU_DISBURSE_ZKEY`/`_WASM`/`_GEN_WITNESS` + the legacy-named
 `BONGTU_WARMUP_INPUT`; `BONGTU_TRANSFER10X2_ZKEY`/`_WASM`/`_GEN_WITNESS`/
-`_WARMUP_INPUT`), `BONGTU_NODE_BIN`, `BONGTU_WITNESS_TIMEOUT` (seconds,
+`_WARMUP_INPUT`; same family under `BONGTU_DEPOSIT_*`), `BONGTU_NODE_BIN`, `BONGTU_WITNESS_TIMEOUT` (seconds,
 default 300), `PROVER_DETERMINISTIC` (=1 for byte-stable test proofs).
 
 ```

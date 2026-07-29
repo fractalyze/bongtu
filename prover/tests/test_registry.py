@@ -32,15 +32,24 @@ def reload_config(monkeypatch):
 # -- registry ---------------------------------------------------------------
 
 
-def test_registry_has_both_circuits_with_pinned_wire_tags_and_pub_counts():
-    assert set(config.CIRCUITS) == {"disburse256", "transfer10x2"}
-    d, t = config.CIRCUITS["disburse256"], config.CIRCUITS["transfer10x2"]
+def test_registry_has_every_circuit_with_pinned_wire_tags_and_pub_counts():
+    assert set(config.CIRCUITS) == {"disburse256", "transfer10x2", "deposit"}
+    d, t, p = (
+        config.CIRCUITS["disburse256"],
+        config.CIRCUITS["transfer10x2"],
+        config.CIRCUITS["deposit"],
+    )
     assert (d.wire_tag, d.num_public) == ("disburse", 11)
     assert (t.wire_tag, t.num_public) == ("transfer10x2", 68)
-    assert config.WIRE_TAG_TO_CIRCUIT == {"disburse": "disburse256", "transfer10x2": "transfer10x2"}
+    assert (p.wire_tag, p.num_public) == ("deposit", 19)
+    assert config.WIRE_TAG_TO_CIRCUIT == {
+        "disburse": "disburse256",
+        "transfer10x2": "transfer10x2",
+        "deposit": "deposit",
+    }
 
 
-@pytest.mark.parametrize("name", ["disburse256", "transfer10x2"])
+@pytest.mark.parametrize("name", ["disburse256", "transfer10x2", "deposit"])
 def test_registry_num_public_matches_the_built_vkey_when_present(name):
     # circuits/out is a gitignored build product — absent on CI runners, present
     # on any box that can actually serve the circuit. Where it exists, the
@@ -97,11 +106,12 @@ def test_per_circuit_env_overrides_land_on_their_circuit(reload_config, tmp_path
     assert cfg.CIRCUITS["transfer10x2"].wasm.name == "transfer10x2.wasm"
 
 
-def test_transfer10x2_default_warmup_input_is_the_committed_fixture():
-    assert config.CIRCUITS["transfer10x2"].warmup_input == (
-        REPO_ROOT / "circuits" / "inputs" / "transfer10x2.json"
+@pytest.mark.parametrize("name", ["transfer10x2", "deposit"])
+def test_default_warmup_input_is_the_committed_fixture(name):
+    assert config.CIRCUITS[name].warmup_input == (
+        REPO_ROOT / "circuits" / "inputs" / f"{name}.json"
     )
-    assert config.CIRCUITS["transfer10x2"].warmup_input.exists()
+    assert config.CIRCUITS[name].warmup_input.exists()
 
 
 # -- PROVER_ALLOWED_ORIGINS -------------------------------------------------
