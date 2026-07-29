@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { decodeAddress } from "@bongtu/core/pubkey";
-import { generateRecipients, plannedRowCount, targetKkrw } from "../src/lib/randomRecipients.js";
+import { generateRecipients, generateRecipientsChunked, plannedRowCount, targetKkrw } from "../src/lib/randomRecipients.js";
 import { MAX_ROWS, checkWorksheet } from "../src/lib/worksheet.js";
 
 const KKRW = 10n ** 18n;
@@ -70,4 +70,16 @@ test("regenerate REPLACES the sheet: two runs over the same balance share no add
   const b = generateRecipients(balance).map((r) => r.address);
   // 248-bit CSPRNG scalars: any overlap means the generator is not drawing fresh
   assert.ok(b.every((addr) => !a.has(addr)));
+});
+
+test("chunked generation streams the SAME invariants: 255 distinct rows, exact sum", async () => {
+  const balance = 1000n * 10n ** 18n;
+  const chunks: number[] = [];
+  const rows: { address: string; amount: string }[] = [];
+  await generateRecipientsChunked(balance, (c) => { chunks.push(c.length); rows.push(...c); }, 32, async () => {});
+  assert.equal(rows.length, 255);
+  assert.ok(chunks.length > 1, "delivery is actually chunked");
+  assert.equal(new Set(rows.map((r) => decodeAddress(r.address))).size, 255);
+  const total = rows.reduce((s, r) => s + BigInt(r.amount), 0n);
+  assert.equal(total, 800n, "sum is exactly floor(80%) of 1000 kKRW");
 });

@@ -51,7 +51,7 @@ import { openInjectedConnection, watchInjectedAccount } from "../lib/connect.js"
 import { keyCache } from "../lib/keyCache.js";
 import { proveViaService } from "../lib/proverClient.js";
 import { runPayRun, type PayRunResult } from "../lib/payRun.js";
-import { generateRecipients, plannedRowCount } from "../lib/randomRecipients.js";
+import { generateRecipientsChunked, plannedRowCount } from "../lib/randomRecipients.js";
 import { statusBarState } from "../lib/statusBar.js";
 import { toastError, toasts } from "../lib/toasts.js";
 import {
@@ -273,9 +273,16 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
   const setCell = (i: number, patch: Partial<WorksheetRow>): void =>
     setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
 
+  const [generating, setGenerating] = useState(false);
   const generate = (): void => {
-    if (balance === null || plannedRows === 0) return;
-    setRows(generateRecipients(balance));
+    if (balance === null || plannedRows === 0 || generating) return;
+    setGenerating(true);
+    setRows([]);
+    // Chunked: rows stream in ~32 per event-loop turn, so the spinner paints
+    // instead of the tab freezing through 255 scalar mults.
+    void generateRecipientsChunked(balance, (chunk) => setRows((rs) => [...rs, ...chunk])).finally(() =>
+      setGenerating(false),
+    );
   };
 
   const startPay = async (): Promise<void> => {
@@ -470,8 +477,9 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
           (rows.length === 0 ? (
             /* empty state: ONE centered generate button */
             <div className="bg-surface border border-border rounded-xl flex-1 flex flex-col items-center justify-center gap-3 py-16">
-              <Button disabled={plannedRows === 0} onClick={generate}>
-                Generate random recipients
+              <Button disabled={plannedRows === 0 || generating} onClick={generate}>
+                {generating && <Spinner />}
+                {generating ? "Generating…" : "Generate random recipients"}
               </Button>
               {plannedRows === 0 && (
                 <div className="text-[12px] text-muted">
@@ -488,8 +496,9 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
                 </span>
                 <div className="ml-auto">
                   {/* replaces the WHOLE list with a fresh random sheet */}
-                  <Button variant="secondary" disabled={plannedRows === 0} onClick={generate}>
-                    Regenerate
+                  <Button variant="secondary" disabled={plannedRows === 0 || generating} onClick={generate}>
+                    {generating && <Spinner />}
+                    {generating ? "Generating…" : "Regenerate"}
                   </Button>
                 </div>
               </div>
@@ -563,7 +572,7 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
                     </span>
                   )}
                 </div>
-                <Button disabled={!sendable} onClick={() => setConfirmOpen(true)}>
+                <Button disabled={!sendable || generating} onClick={() => setConfirmOpen(true)}>
                   Send
                 </Button>
               </div>
