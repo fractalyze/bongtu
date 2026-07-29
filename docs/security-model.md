@@ -161,7 +161,7 @@ escapes, `CheckNullifiers` binds a fresh nullifier, membership holds, the value 
 `enabled = 1`, and `CheckSum` mints `X` from nothing — a repeatable, permissionless drain through
 `withdraw` or `transfer`, and through `disburse` for a compromised discloser.
 `enabled[i] * IsZero(inputCommitments[i]) === 0` restores the SMT's implicit invariant explicitly on
-every spending base. Regression gates: `circuits/test_zero_leaf_unsat.sh` (witness unsatisfiable) and
+every spending base. Regression gates: `circuits/gates/test_zero_leaf_unsat.sh` (witness unsatisfiable) and
 the contract enforcement tests. See [circuits.md](circuits.md#soundness-invariants).
 
 ## Residual gaps

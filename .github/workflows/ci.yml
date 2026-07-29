@@ -16,7 +16,7 @@
 #                        need a live RPC + a deployed pool + CPU proofs and stay a
 #                        LOCAL gate (apps/indexer/test/pg_integration.sh). One
 #                        parallel `docker build` (~1-2 min), off the critical path.
-#   forge                contracts: forge test + deploy/deploy_local.sh (full
+#   forge                contracts: forge test + deploy/gates/deploy_local.sh (full
 #                        B=256 stack deploy + smoke deposit on a self-contained
 #                        anvil). forge-std is vendored under contracts/lib/ and
 #                        all fixtures (poseidon2.hex, committed real Groth16
@@ -31,7 +31,7 @@
 #                        the full from-scratch build: pinned circom release
 #                        binary + pinned zeto checkout + circomlib + the Hermez
 #                        pot22 ptau (sha256-pinned, 4.8 GB, cached, touched ONLY
-#                        on this path), runs prove_all.sh, gates
+#                        on this path), runs build/prove_all.sh, gates
 #                        `git diff --exit-code circuits/verifiers` (drift can
 #                        only appear when circuits change = exactly the miss
 #                        path), runs the three CIRCUIT SOUNDNESS gates
@@ -48,7 +48,7 @@
 #                        produce proofs that verify against the committed
 #                        on-chain verifiers — which is also why caching the
 #                        built artifacts is sound.
-#   e2e-m0               restores circuits/out and runs deploy/e2e_m0.sh
+#   e2e-m0               restores circuits/out and runs deploy/gates/e2e_m0.sh
 #                        (anvil deposit -> disburse16 -> transfer -> withdraw).
 #   indexer-conformance  restores circuits/out and runs the indexer anvil
 #                        scenario incl. arbiter mode, ingesting into a postgres
@@ -72,7 +72,7 @@
 #     multi-minute setup, and its only consumer is the GPU proving path
 #     excluded above — nothing a hosted runner could run consumes it.
 #   - GIWA live deploy / live-chain smoke (the deploy scripts in GIWA mode,
-#     deploy/giwa_disburse256.ts): both need the funded deployer key from the
+#     the deploy/live/ drivers): both need the funded deployer key from the
 #     gitignored .env; this workflow is deliberately secret-free. (The local-
 #     anvil mode of deploy_local.sh IS included, in the forge job.)
 
@@ -220,7 +220,7 @@ jobs:
       - name: local deploy + smoke gate (deploy_local.sh, self-contained anvil :8550)
         # The only gate exercising Deploy.s.sol/Smoke.s.sol wiring (proxy init,
         # verifier wiring, addresses round-trip); deployer = anvil account 0.
-        run: bash deploy/deploy_local.sh
+        run: bash deploy/gates/deploy_local.sh
 
   prover-pytest:
     runs-on: ubuntu-latest
@@ -248,12 +248,12 @@ jobs:
       - name: compute artifact cache key
         id: key
         # The key must cover everything that decides what circuits/out CONTAINS —
-        # including the witness INPUTS. The generators (circuits/gen_*.ts,
+        # including the witness INPUTS. The generators (circuits/fixtures/gen_*.ts,
         # fixture_lib.ts) and the @bongtu/core primitives they build notes with
         # produce the committed inputs/*.json that the soundness gates below
         # consume, so a change there with unchanged .circom sources would
         # otherwise hit a stale cache and skip both the rebuild and those gates.
-        run: echo "key=circuits-out-v1-${{ hashFiles('.github/ci-pins.env', 'circuits/**/*.circom', 'circuits/lib/**', 'circuits/prove_all.sh', 'circuits/gen_*.ts', 'circuits/fixture_lib.ts', 'packages/core/src/**') }}" >> "$GITHUB_OUTPUT"
+        run: echo "key=circuits-out-v1-${{ hashFiles('.github/ci-pins.env', 'circuits/**/*.circom', 'circuits/lib/**', 'circuits/build/prove_all.sh', 'circuits/fixtures/gen_*.ts', 'circuits/fixtures/fixture_lib.ts', 'packages/core/src/**') }}" >> "$GITHUB_OUTPUT"
       - name: check for cached circuits/out (lookup only — dependents restore it)
         id: outcache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -341,14 +341,14 @@ jobs:
           fi
           echo "PTAU=$PTAU_FILE" >> "$GITHUB_ENV"
 
-      - name: build + CPU-prove the small circuits (prove_all.sh)
+      - name: build + CPU-prove the small circuits (build/prove_all.sh)
         if: steps.outcache.outputs.cache-hit != 'true'
         run: |
           export SNARKJS="node --max-old-space-size=6144 $BONGTU_NODE_MODULES/.bin/snarkjs"
-          cd circuits && bash prove_all.sh
+          cd circuits && bash build/prove_all.sh
 
       - name: committed verifiers match the rebuilt ones (drift gate)
-        # prove_all.sh copies fresh solidity verifiers into circuits/verifiers/;
+        # build/prove_all.sh copies fresh solidity verifiers into circuits/verifiers/;
         # a diff here means someone updated circuits without recommitting them.
         if: steps.outcache.outputs.cache-hit != 'true'
         run: git diff --exit-code circuits/verifiers
@@ -364,9 +364,9 @@ jobs:
         # cache save, so a failing build never becomes the cached artifact.
         if: steps.outcache.outputs.cache-hit != 'true'
         run: |
-          bash circuits/test_zero_leaf_unsat.sh
-          npx tsx circuits/assert_attacks_throw.ts
-          npx tsx circuits/auditor_decrypt_check.ts
+          bash circuits/gates/test_zero_leaf_unsat.sh
+          npx tsx circuits/gates/assert_attacks_throw.ts
+          npx tsx circuits/gates/auditor_decrypt_check.ts
 
       - name: save circuits/out artifact cache
         if: steps.outcache.outputs.cache-hit != 'true'
@@ -420,7 +420,7 @@ jobs:
           key: ${{ needs.circuits.outputs.key }}
           fail-on-cache-miss: true
       - name: M0 e2e gate (anvil deposit -> disburse16 -> transfer -> withdraw)
-        run: bash deploy/e2e_m0.sh
+        run: bash deploy/gates/e2e_m0.sh
 
   indexer-conformance:
     needs: circuits

@@ -19,7 +19,7 @@
 // the proof fixture is ever re-proven.
 //
 // The spent input note is read from disburse256.input.json (the witness input
-// the committed proof was generated from — NOT circuits/inputs/disburse256.json,
+// the committed proof was generated from — NOT circuits/fixtures/inputs/disburse256.json,
 // whose local tree differs); override with BONGTU_DISBURSE256_INPUT. Emits
 // disburse256.oracle.json for Disburse256.t.sol.
 //

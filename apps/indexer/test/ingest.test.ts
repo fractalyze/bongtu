@@ -74,7 +74,7 @@ function encodeEventLog(
   return { topics, data };
 }
 // THE fixture arbiter's bjj scalar, declared once for the whole repo.
-import { FIXTURE_ARBITER_SCALAR } from "../../../circuits/fixture_lib.js";
+import { FIXTURE_ARBITER_SCALAR } from "../../../circuits/fixtures/fixture_lib.js";
 import { health } from "../src/api/routes/health.js";
 import { ViewTokenService } from "../src/api/viewtoken.js";
 

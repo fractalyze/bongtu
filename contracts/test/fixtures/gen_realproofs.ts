@@ -1,7 +1,7 @@
 // Consolidated real-proof fixture for the U3 soundness/accept tests.
 //
 // Reads the committed circuits/out/<name>.{proof,public}.json (regenerate via
-// circuits/prove_all.sh + gen_attack_inputs.ts if out/ is gone), exports
+// circuits/build/prove_all.sh + gen_attack_inputs.ts if out/ is gone), exports
 // Solidity-ready calldata (snarkjs handles the pi_b G2 swap), and — using the
 // U1 ImtTree oracle — precomputes, per circuit, the input commitments the
 // contract must append to reproduce the proof's membership root and the oracle
@@ -20,7 +20,7 @@ import { loadSnarkjs } from "@bongtu/core/extern";
 // The fixture KEM material (deterministic keypair + per-fixture encapsulation)
 // is owned by the circuits fixture preamble — same-source as the inputs the
 // proofs were generated from, so ct/limbs/binding stay consistent by construction.
-import { AUTHORITY_KEM, kemDraw } from "../../../circuits/fixture_lib.js";
+import { AUTHORITY_KEM, kemDraw } from "../../../circuits/fixtures/fixture_lib.js";
 
 // snarkjs comes back `any` from the shared external loader (@bongtu/core/extern).
 const snarkjs = loadSnarkjs();
@@ -117,7 +117,7 @@ async function main(): Promise<void> {
   // Two fixtures share the circuit: the partly-filled spend (4 real inputs, a
   // payment + change, the rest padded) and the full-arity consolidation (all 10
   // inputs real, merged into one self-owned output). Seed = the REAL input
-  // commitments only — `circuits/fixture_lib.ts membership()` builds the
+  // commitments only — `circuits/fixtures/fixture_lib.ts membership()` builds the
   // membership tree from those, and a padded slot carries a zeros path it never
   // proves against (enabled=0). transfer10 publics (141): [107..116]=nf
   // [117]=root [128..137]=oc [139..140]=authorityPubKey.
@@ -172,7 +172,7 @@ async function main(): Promise<void> {
   // NOTE: withdraw_attack (enabled=0 on a value-carrying input) and the pure
   // mint-from-nothing (nullifier=0/value!=0/enabled=0) are NO LONGER provable —
   // the circuit value-belt `(1-enabled[i])*inputValues[i]===0` makes their
-  // witnesses unsatisfiable (see circuits/assert_attacks_throw.ts). There is
+  // witnesses unsatisfiable (see circuits/gates/assert_attacks_throw.ts). There is
   // therefore no attack proof/calldata to emit; the vector is closed one layer
   // deeper than the old contract-injection defense.
 

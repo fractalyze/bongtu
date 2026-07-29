@@ -82,7 +82,7 @@ export const DEFAULTS = {
 // a one-time re-download instead of serving a mismatched key from disk (a stale key fails
 // on-chain verify with no self-heal). Bump this the moment ANY zkey changes on disk.
 // A bump is live only with its two companions in the SAME change: upload the new
-// assets (deploy/upload_circuits.sh — refuses a hash that doesn't match this pin)
+// assets (deploy/gates/upload_circuits.sh — refuses a hash that doesn't match this pin)
 // and point vercel.json's /circuits rewrite at the new circuits/<version>/ path.
 // (2109f115 -> f91bd0d2: transfer10 left the set — deprecated 2026-07-28 — and
 // transfer10x2 joined it; the other three keys are unchanged.)

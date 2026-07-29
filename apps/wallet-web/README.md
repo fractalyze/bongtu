@@ -68,7 +68,7 @@ only it can read its row even though the arbiter holds everyone's. Balance =
 ### 3 · Transfer (2-in / 2-out) · 4 · Withdraw (2-in / 1-out)
 
 The small CPU circuits, provable in-browser (SPEC §6). `src/lib/spend.ts` (pure)
-assembles the witness the same way `deploy/e2e_orchestrator.ts` does by hand, in
+assembles the witness the same way `deploy/gates/e2e_orchestrator.ts` does by hand, in
 `ProvingRequest` form (`@bongtu/core/proving`):
 
 - Spend 1–2 of the wallet's notes (a single note pads input[1] to `{nullifier:0,

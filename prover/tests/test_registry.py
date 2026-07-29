@@ -109,7 +109,7 @@ def test_per_circuit_env_overrides_land_on_their_circuit(reload_config, tmp_path
 @pytest.mark.parametrize("name", ["transfer10x2", "deposit"])
 def test_default_warmup_input_is_the_committed_fixture(name):
     assert config.CIRCUITS[name].warmup_input == (
-        REPO_ROOT / "circuits" / "inputs" / f"{name}.json"
+        REPO_ROOT / "circuits" / "fixtures" / "inputs" / f"{name}.json"
     )
     assert config.CIRCUITS[name].warmup_input.exists()
 

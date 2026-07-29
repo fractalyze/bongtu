@@ -185,7 +185,7 @@ ingests into **real Postgres**: `run.sh` honors an exported `TEST_DATABASE_URL`
 (admin connection string; CI provides a postgres **service container**) and otherwise
 spins a throwaway `postgres:16-alpine` docker container (trap-removed). If neither is
 possible it SKIPs with a loud banner — never a silent pass. It also needs the CPU
-proving artifacts under `circuits/out/` (`cd circuits && bash prove_all.sh` first) and
+proving artifacts under `circuits/out/` (`cd circuits && bash build/prove_all.sh` first) and
 runs as the `indexer-conformance` job in CI — treat it as a final gate, not a
 per-iteration loop (repo `CLAUDE.md` "Heavy gates").
 

@@ -1,6 +1,6 @@
 // Scenario driver for the indexer test (a trimmed sibling of
-// deploy/e2e_orchestrator.ts; both share the deploy-and-drive skeleton in
-// deploy/lib/e2e_harness.ts). Deploys a fresh B=16 pool on a live anvil and
+// deploy/gates/e2e_orchestrator.ts; both share the deploy-and-drive skeleton in
+// deploy/live/lib/e2e_harness.ts). Deploys a fresh B=16 pool on a live anvil and
 // runs the full cross-circuit cycle the indexer must ingest, then returns the
 // secrets the test needs to trial-decrypt + check (recipient keys, amounts,
 // salts, subtree root, single-append leaf commitments).
@@ -37,7 +37,7 @@ import {
 
 // The deploy-and-drive skeleton (anvil connection, forge-artifact deploys, the
 // UUPS pool proxy, the CPU prove() wrapper, shared actor/salt/amount fixtures)
-// is the harness shared with deploy/e2e_orchestrator.ts — repo test/ops
+// is the harness shared with deploy/gates/e2e_orchestrator.ts — repo test/ops
 // infrastructure, not an npm package export, hence the relative path out of
 // apps/indexer.
 import {
@@ -45,7 +45,7 @@ import {
   EMPLOYER, AUTHORITY, AUTHORITY_KEM, PAYEE, RCPTS, kemDraw, kemCtHex,
   sD0, sD1, sR, sPay, sChg, sPadT, sPadW, sRes,
   amounts, V,
-} from "../../../deploy/lib/e2e_harness.js";
+} from "../../../deploy/live/lib/e2e_harness.js";
 
 /** The disburse authority (non-repudiation) envelope plaintext (SPEC §4),
  *  laid out by the owning codec (@bongtu/core/envelope). */

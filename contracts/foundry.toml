@@ -9,15 +9,15 @@ ffi = true
 # read ./test                  : fixtures (poseidon2.hex, realproofs.json, disburse256.*) for tests + deploy scripts
 # read ./src                   : VerifierDrift.t.sol reads the shipped verifiers as text
 # read ../circuits/verifiers   : ...and the snarkjs-generated originals it must equal
-# read-write ../deploy         : Deploy.s.sol writes addresses.<chainid>.json there; Smoke.s.sol reads it back
+# read-write ../deploy         : forge/Deploy.s.sol writes addresses.<chainid>.json there; forge/Smoke.s.sol reads it back
 fs_permissions = [
     { access = "read", path = "./test" },
     { access = "read", path = "./src" },
     { access = "read", path = "../circuits/verifiers" },
     { access = "read-write", path = "../deploy" },
 ]
-# The deploy/upgrade scripts live in ../deploy (outside this project root) and
-# import a sibling there — deploy/AddressBook.sol, the one declaration of the
+# The deploy/upgrade scripts live in ../deploy/forge (outside this project root)
+# and import a sibling there — deploy/forge/AddressBook.sol, the one declaration of the
 # addresses.<chainid>.json field list. solc refuses imports outside the project
 # unless the directory is allow-listed.
 allow_paths = ["../deploy"]

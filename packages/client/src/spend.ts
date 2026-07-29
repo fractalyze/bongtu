@@ -4,7 +4,7 @@
 // in the browser view AND the headless spend-witness gate. It imports the sdk crypto
 // DIRECTLY, so every commitment / nullifier is byte-identical to what snarkjs proves
 // and the contract verifies — the witness objects produced here are EXACTLY the
-// circom `main` inputs deploy/e2e_orchestrator.ts assembles by hand, in
+// circom `main` inputs deploy/gates/e2e_orchestrator.ts assembles by hand, in
 // ProvingRequest form (@bongtu/core/proving).
 //
 // What it does NOT do (SPEC §6 boundary): it does not prove (browser snarkjs, see
@@ -624,7 +624,7 @@ function assembleInputs(
   // Pad the unused slots with value-0 notes owned by the wallet: nullifier 0,
   // enabled 0, zeros path (membership disabled; the value belt forces value 0 -> no
   // mint), each on its OWN salt so no two pads share a commitment. This is the
-  // convention the committed circuits/inputs/transfer10x2_merge.json (and
+  // convention the committed circuits/fixtures/inputs/transfer10x2_merge.json (and
   // transfer10.json) fixtures carry.
   for (let i = 0; i < padCount; i++) {
     const s = BigInt(padSalts[i]);
@@ -746,7 +746,7 @@ function parsePayee(recipientCompressed: string): Point {
  * IMT append, and transfer10's eight zero-value output pads were pure gas.
  *
  * The two uses, both through this one builder (the shape the committed
- * circuits/inputs/transfer10x2_merge.json fixture carries):
+ * circuits/fixtures/inputs/transfer10x2_merge.json fixture carries):
  *   - a payment needing 3–10 notes (recipient = the payee, change back home);
  *   - a self-merge (recipient = the wallet's own address, amount = the full
  *     input total), which lands everything in ONE note with a ZERO-value change
@@ -821,14 +821,14 @@ export function buildTransfer10x2Request(
  * @deprecated The wallet routes NOTHING here anymore (user decision 2026-07-28):
  * transfer10 stays deployed on chain, but every >2-input spend and every merge
  * leg proves transfer10x2 above. Kept only for the committed
- * deploy/giwa_transfer10_e2e.ts driver of the still-live V4 entrypoint.
+ * live driver of the (now deprecated) V4 entrypoint used.
  *
  * Assemble a transfer10 ProvingRequest: spend 1–10 of the wallet's notes, pay
  * `recipientCompressed` `amount`, send the change back to the wallet. Same shape as
  * buildTransferRequest at arity 10 — the extra input slots are padded (nullifier 0,
  * value 0, enabled 0, zeros path, a value-0 self-owned commitment) and the extra
  * OUTPUT slots are real value-0 notes back to the wallet, which is exactly what the
- * committed circuits/inputs/transfer10.json fixture carries.
+ * committed circuits/fixtures/inputs/transfer10.json fixture carries.
  *
  * The two uses, both through this one builder:
  *   - a payment needing 3–10 notes (recipient = the payee);

@@ -60,7 +60,7 @@ export const DEFAULTS = {
 
 // Build-time env, typed by assertion instead of the vite/client ImportMeta
 // augmentation: this module is ALSO type-checked by the ROOT cross-tree
-// tsconfig (deploy/giwa_payroll_e2e.ts imports the console's own modules),
+// tsconfig (deploy/live/giwa_payroll_e2e.ts imports the console's own modules),
 // which has no Vite types — `import.meta.env?.` would not compile there. The
 // optional access still survives Vite's static replacement and the plain node
 // test runtime.

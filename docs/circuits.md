@@ -242,7 +242,7 @@ circuits/                                          include spelling        resol
     node_modules/circomlib/circuits/babyjub.circom              $ZETO
 ```
 
-`prove_all.sh` passes three roots — `-l "$ZETO" -l "$CIRCOMLIB" -l lib`, with
+`build/prove_all.sh` passes three roots — `-l "$ZETO" -l "$CIRCOMLIB" -l lib`, with
 `CIRCOMLIB` defaulting to `$ZETO/node_modules`. Only two do work:
 
 | `-l` root | resolves |

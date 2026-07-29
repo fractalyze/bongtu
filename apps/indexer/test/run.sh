@@ -15,7 +15,7 @@
 #   cd indexer && npm test        # (== bash test/run.sh) exits 0 iff all pass
 #
 # anvil runs in the background and is trap-killed on exit (no GPU/ETH; CPU proofs
-# against circuits/out zkeys, same as deploy/e2e_m0.sh).
+# against circuits/out zkeys, same as deploy/gates/e2e_m0.sh).
 #
 # Postgres-only (U-I4): the gate ingests into REAL Postgres. TEST_DATABASE_URL
 # (admin connection string) is honored when exported (CI service container);
@@ -83,7 +83,7 @@ fi
 echo "== preflight: forge build + zkey/wasm presence =="
 ( cd "$ROOT/contracts" && "$FORGE" build >/dev/null ) || fail "forge build failed"
 for n in deposit disburse transfer transfer10 withdraw; do
-  [ -f "$ROOT/circuits/out/${n}.zkey" ] || fail "missing circuits/out/${n}.zkey (run: cd circuits && bash prove_all.sh)"
+  [ -f "$ROOT/circuits/out/${n}.zkey" ] || fail "missing circuits/out/${n}.zkey (run: cd circuits && bash build/prove_all.sh)"
   [ -f "$ROOT/circuits/out/${n}_js/${n}.wasm" ] || fail "missing circuits/out/${n}_js/${n}.wasm"
 done
 

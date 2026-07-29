@@ -72,7 +72,7 @@ command -v "$DOCKER" >/dev/null 2>&1 || fail "docker not found (this is a docker
 "$DOCKER" info >/dev/null 2>&1 || fail "docker daemon not reachable"
 ( cd "$ROOT/contracts" && "$FORGE" build >/dev/null ) || fail "forge build failed"
 for n in deposit disburse transfer withdraw; do
-  [ -f "$ROOT/circuits/out/${n}.zkey" ] || fail "missing circuits/out/${n}.zkey (run: cd circuits && bash prove_all.sh)"
+  [ -f "$ROOT/circuits/out/${n}.zkey" ] || fail "missing circuits/out/${n}.zkey (run: cd circuits && bash build/prove_all.sh)"
   [ -f "$ROOT/circuits/out/${n}_js/${n}.wasm" ] || fail "missing circuits/out/${n}_js/${n}.wasm"
 done
 

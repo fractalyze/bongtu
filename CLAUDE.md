@@ -25,7 +25,7 @@ not re-derive what those files own.
   returns to idle (~15 MiB) and kill stray prover PIDs.
 - **Live pool is canonical**: the deployed GIWA pool (`deploy/addresses.91342.json`) is
   reused going forward — do not redeploy for new work; UUPS upgrade only if circuits change.
-- **Heavy gates**: iterate on `packages/core` tests + `tsc`; run `deploy/e2e_m0.sh` and the indexer
+- **Heavy gates**: iterate on `packages/core` tests + `tsc`; run `deploy/gates/e2e_m0.sh` and the indexer
   conformance test (`cd apps/indexer && npm test`) as the final gate, not per iteration (each spins
   an anvil + CPU proofs).
 - **Indexer arbiter mode**: `AUTHORITY_KEY` (the arbiter bjj private key) flips the indexer
@@ -55,4 +55,4 @@ not re-derive what those files own.
   (cold zkey-compile ~120s + warm proof ~0.47s). Runner: `jolt-zorch/.venv/bin/python -m
   rabbitsnark.cli circom prove <zkey> <proof> <public> --wtns <wtns>` from `rabbitsnark-py`.
   A circuit change ALSO requires rebuilding that circuit's witness `.so` + `w2s`
-  (`circuits/build_witness_so.sh`) — the prover service fails at boot without a matching pair.
+  (`circuits/build/build_witness_so.sh`) — the prover service fails at boot without a matching pair.

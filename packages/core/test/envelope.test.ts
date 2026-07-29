@@ -11,8 +11,8 @@
 //   p1.A  apps/payroll-web/src/lib/disburse.ts   (assemble.test.ts fixture(3), B=256;
 //                                               recorded from the GENUINE function
 //                                               output — decrypted ciphertext tail)
-//   p1.B  deploy/e2e_orchestrator.ts           (its inline actor material, B=16)
-//   p1.C  deploy/giwa_disburse256.ts           (its inline actor material +
+//   p1.B  deploy/gates/e2e_orchestrator.ts           (its inline actor material, B=16)
+//   p1.C  the live GIWA 256-disburse run       (its inline actor material +
 //                                               deploy/addresses.91342.json arbiter, B=256)
 //   p1.D  apps/indexer/test/scenario.ts        (honest disburse leg == p1.B material,
 //                                               plus the disburse#3 authority-tampered
@@ -62,7 +62,7 @@ import {
   ml_kem768,
 } from "../src/kem.js";
 // THE fixture arbiter's bjj scalar, declared once for the whole repo.
-import { FIXTURE_ARBITER_SCALAR } from "../../../circuits/fixture_lib.js";
+import { FIXTURE_ARBITER_SCALAR } from "../../../circuits/fixtures/fixture_lib.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..", "..");
@@ -110,7 +110,7 @@ const PINS: Record<string, string> = {
 const AUTHORITY = deriveKeypair(FIXTURE_ARBITER_SCALAR); // the ONE fixture arbiter key
 
 // The fixture arbiter ML-KEM keypair + the disburse256 fixture encapsulation
-// (label-derived randomness), mirroring circuits/fixture_lib.ts — the committed
+// (label-derived randomness), mirroring circuits/fixtures/fixture_lib.ts — the committed
 // disburse256 proof's authority tail is encrypted under the HYBRID key
 // (pq-envelope-design.md §2), so the p2/p3 ground-truth recompute needs the
 // same kemSs limbs the witness carried.
@@ -634,10 +634,10 @@ test("transfer10 builder rejects wrong arity and a mismatched input owner in ANY
 });
 
 test("transfer10 fixture parity: the committed witness input agrees with the sdk", () => {
-  // circuits/inputs/transfer10.json is what the committed proof was generated
+  // circuits/fixtures/inputs/transfer10.json is what the committed proof was generated
   // from, so the codec and the note primitives must agree with it field for field.
   const inp = JSON.parse(
-    readFileSync(join(ROOT, "circuits", "inputs", "transfer10.json"), "utf8"),
+    readFileSync(join(ROOT, "circuits", "fixtures", "inputs", "transfer10.json"), "utf8"),
   ) as Record<string, string[] | string[][] | string>;
   const arr = (k: string): bigint[] => (inp[k] as string[]).map(BigInt);
   const owners = (inp.outputOwnerPublicKeys as unknown as string[][]).map(
@@ -770,12 +770,12 @@ test("transfer10x2 builder rejects wrong arity and a mismatched input owner in A
 });
 
 test("transfer10x2 fixture parity: both committed witness inputs agree with the sdk", () => {
-  // circuits/inputs/transfer10x2{,_merge}.json are what the committed proofs were
+  // circuits/fixtures/inputs/transfer10x2{,_merge}.json are what the committed proofs were
   // generated from: the partly-filled payment+change spend and the pure merge
   // (all ten inputs real, output 1 a ZERO change note).
   for (const fixture of ["transfer10x2", "transfer10x2_merge"]) {
     const inp = JSON.parse(
-      readFileSync(join(ROOT, "circuits", "inputs", `${fixture}.json`), "utf8"),
+      readFileSync(join(ROOT, "circuits", "fixtures", "inputs", `${fixture}.json`), "utf8"),
     ) as Record<string, string[] | string[][] | string>;
     const arr = (k: string): bigint[] => (inp[k] as string[]).map(BigInt);
     const owners = (inp.outputOwnerPublicKeys as unknown as string[][]).map(

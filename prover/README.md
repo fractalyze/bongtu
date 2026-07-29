@@ -43,7 +43,7 @@ Witness handling: the service accepts the **circuit input JSON** (exactly what
 `apps/payroll-web` assembles and POSTs) and computes the witness server-side
 with the **compiled rabbitsnark witness calculator**
 (`circuits/out/lib<circuit>.so` + `<circuit>_w2s.json`, built by
-`circuits/build_witness_so.sh`): ~1s CPU for the 2.79M-constraint disburse256,
+`circuits/build/build_witness_so.sh`): ~1s CPU for the 2.79M-constraint disburse256,
 ~5x faster than the retired `node generate_witness.js` (WASM) subprocess it
 replaced (U-P5), with an elementwise-identical witness vector (gate below). No
 `.wtns` upload path exists — no consumer produces one, and the input JSON is
@@ -53,7 +53,7 @@ what the employer flow already has in hand.
 
 Swapping witness calculators is only safe if the new one computes the SAME
 vector: a wrong witness does not fail, it proves a different statement, and
-Groth16 has no way to tell you so. `circuits/wtns_compare.py` (stdlib-only, no
+Groth16 has no way to tell you so. `circuits/build/wtns_compare.py` (stdlib-only, no
 venv needed) is the check — run it after any change to the .so pipeline or the
 circuits, against the WASM calculator as the reference:
 
@@ -61,7 +61,7 @@ circuits, against the WASM calculator as the reference:
 # 1. reference: the WASM calculator's own .wtns (~6s for disburse256)
 node circuits/out/disburse256_js/generate_witness.js \
   circuits/out/disburse256_js/disburse256.wasm \
-  circuits/inputs/disburse256.json /tmp/ref.wtns
+  circuits/fixtures/inputs/disburse256.json /tmp/ref.wtns
 
 # 2. candidate: the bytes the service's witness seam actually returns (~1s)
 (cd prover && .venv/bin/python -c '
@@ -74,11 +74,11 @@ open("/tmp/new.bin", "wb").write(h.compute(json.loads(c.warmup_input.read_text()
 h.close()')
 
 # 3. compare element by element (exit 1 names the first differing index)
-python3 circuits/wtns_compare.py /tmp/ref.wtns /tmp/new.bin
+python3 circuits/build/wtns_compare.py /tmp/ref.wtns /tmp/new.bin
 # BYTE-IDENTICAL: 2796497 witness elements (89487904 bytes)
 ```
 
-Substitute `transfer10x2` / `deposit` (and their `circuits/inputs/*.json`) for
+Substitute `transfer10x2` / `deposit` (and their `circuits/fixtures/inputs/*.json`) for
 the other two registry circuits. Boot enforces the weaker half of this
 automatically: `engine.py` refuses to serve a circuit whose .so witness length
 disagrees with its zkey's `num_vars`, the drift a stale half of the artifact
@@ -130,7 +130,7 @@ Prerequisite: the **gitignored** circuit artifacts must exist under
 `circuits/out/` for every circuit in `BONGTU_CIRCUITS` — the `.zkey`
 (disburse256 1.24GB, transfer10x2 95MB) plus the `lib<circuit>.so` +
 `<circuit>_w2s.json` witness-calculator pair
-(`cd circuits && bash build_witness_so.sh` — toolchain paths and the
+(`cd circuits && bash build/build_witness_so.sh` — toolchain paths and the
 patched-fork caveat are documented in that script; ~2min per circuit). The
 zkey CPU build pipeline is in `docs/toolchain.md`; the GPU regen recipe (after
 any circuit change) is the "GPU regen recipe" bullet in the repo `CLAUDE.md`
@@ -144,18 +144,18 @@ bash prover/run.sh      # boots eagerly (~3min for both circuits), then GET /rea
 
 # smoke: prove the committed fixture inputs (either circuit)
 curl -s http://127.0.0.1:8700/ready
-node -e 'const i=require("./circuits/inputs/disburse256.json");
+node -e 'const i=require("./circuits/fixtures/inputs/disburse256.json");
   fetch("http://127.0.0.1:8700/prove",{method:"POST",headers:{"content-type":"application/json"},
   body:JSON.stringify({circuit:"disburse",input:i})}).then(r=>r.json()).then(c=>console.log(c.pub))'
-node -e 'const i=require("./circuits/inputs/transfer10x2.json");
+node -e 'const i=require("./circuits/fixtures/inputs/transfer10x2.json");
   fetch("http://127.0.0.1:8700/prove",{method:"POST",headers:{"content-type":"application/json"},
   body:JSON.stringify({circuit:"transfer10x2",input:i})}).then(r=>r.json()).then(c=>console.log(c.pub))'
 ```
 
 Consumers: `apps/payroll-web` employer-mode (URL in `src/config.ts`, build-time
-override `VITE_PROVER_URL`) and `deploy/giwa_disburse256.ts`
-(`BONGTU_PROVER_URL`). If `circuits/inputs/disburse256.json` is missing,
-regenerate it: `cd circuits && npx tsx gen_disburse256_input.ts`.
+override `VITE_PROVER_URL`) and the `deploy/live/` drivers
+(`BONGTU_PROVER_URL`). If `circuits/fixtures/inputs/disburse256.json` is missing,
+regenerate it: `npx tsx circuits/fixtures/gen_disburse256_input.ts`.
 
 ## Production run on the GPU box (as deployed 2026-07-29)
 
@@ -198,7 +198,7 @@ public indexer /health.
   order: per circuit witness-worker spawn (loads the .so + w2s resident) →
   `parse_zkey` → `zkey_to_terms` (coefficient table cached — `compile_circom`
   discards it) → `compile_circom` → one warm-up proof against its
-  `circuits/inputs/<circuit>.json` fixture (JAX JIT). For disburse256 that
+  `circuits/fixtures/inputs/<circuit>.json` fixture (JAX JIT). For disburse256 that
   is ~2s + ~23s + ~3s + ~2min + ~9s; transfer10x2 adds a small fraction of
   that (95MB zkey). `/ready` flips only after the LAST warm-up lands. A warm
   disburse `POST /prove` is then ~2s wall: ~1s in-process CPU witness compute

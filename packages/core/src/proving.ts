@@ -17,8 +17,8 @@
 //     self-custody wallet never sends spending-key witnesses to a server).
 //
 // The `input` field of each variant is EXACTLY the object the corresponding circom
-// `main` consumes — the same shape deploy/e2e_orchestrator.ts and
-// deploy/giwa_disburse256.ts assemble. Field elements are FieldInput
+// `main` consumes — the same shape deploy/gates/e2e_orchestrator.ts and the
+// deploy/live/ drivers assemble. Field elements are FieldInput
 // (bigint | number | string): provers stringify them to decimal for the witness
 // calculator, so a request deserialized from JSON (field elements as decimal
 // strings) is accepted as-is. Points are [x, y] pairs (PointInput).

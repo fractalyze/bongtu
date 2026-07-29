@@ -13,7 +13,7 @@ hybrid ML-KEM-768 envelope upgrade) or **hybrid** (after it).
 
 Whole-transaction `gasUsed` from the GIWA receipts of the end-to-end run against the live pool
 `0x93365980784ef504613EF5822ce1289CF858Fc10` on arbiter epoch 1, **measured 2026-07-28**
-(`deploy/giwa_gas_survey.ts`, fresh identities per run):
+(`deploy/live/giwa_gas_survey.ts`, fresh identities per run):
 
 | operation | L2 gas | L1 data fee | tx |
 |---|---|---|---|
@@ -92,7 +92,7 @@ what makes all-ciphertext-on-chain expensive; L2 execution and calldata are.
 
 Any "L1 fee is a rounding error" figure computed at an unpinned gas price is an artifact of
 overpaying on L2: ethers' auto-estimate overpays GIWA by ~1500×, so the runner pins `gasPrice` from
-`GIWA_GAS_FLOOR_GWEI` (`packages/core/src/network.ts`, `deploy/giwa_disburse256.ts`) — see
+`GIWA_GAS_FLOOR_GWEI` (`packages/core/src/network.ts`, the `deploy/live/` drivers) — see
 [deployment.md](deployment.md#chain-facts).
 
 ## Where the gas goes
@@ -121,10 +121,10 @@ Three levers follow directly, none implemented:
 
 | circuit | constraints | zkey | proven by |
 |---|---|---|---|
-| `deposit` | 14,127 | 6.5 MB | `circuits/prove_all.sh` (CPU); also in-browser |
-| `withdraw` | 54,319 | 24 MB | `circuits/prove_all.sh` (CPU); also in-browser |
-| `transfer` | 64,394 | 28 MB | `circuits/prove_all.sh` (CPU); also in-browser |
-| `disburse` (1×16) | 208,719 | 92 MB | `circuits/prove_all.sh` (CPU) |
+| `deposit` | 14,127 | 6.5 MB | `circuits/build/prove_all.sh` (CPU); also in-browser |
+| `withdraw` | 54,319 | 24 MB | `circuits/build/prove_all.sh` (CPU); also in-browser |
+| `transfer` | 64,394 | 28 MB | `circuits/build/prove_all.sh` (CPU); also in-browser |
+| `disburse` (1×16) | 208,719 | 92 MB | `circuits/build/prove_all.sh` (CPU) |
 | `disburse256` (1×256) | 2,796,719 | 1.3 GB | `prover/` only — rabbitsnark on GPU, zkey held resident |
 
 Constraint counts and zkey sizes measured 2026-07-27 (`snarkjs r1cs info`, `ls` over

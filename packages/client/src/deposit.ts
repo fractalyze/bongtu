@@ -3,7 +3,7 @@
 // in the browser view AND a headless gate, importing the sdk crypto DIRECTLY so every
 // output commitment is byte-identical to what snarkjs proves and the contract verifies.
 // The witness object produced here is EXACTLY the circom `main` input the
-// deploy/e2e_orchestrator.ts deposit section assembles by hand, in ProvingRequest form.
+// deploy/gates/e2e_orchestrator.ts deposit section assembles by hand, in ProvingRequest form.
 //
 // A deposit mints TWO outputs — note(V) at index 0 and note(0) at index 1 — BOTH owned
 // by the depositor. Deposit has NO membership and NO nullifiers, and it publishes no

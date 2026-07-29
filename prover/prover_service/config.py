@@ -23,7 +23,7 @@ os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 CIRCUITS_OUT = Path(os.environ.get("BONGTU_CIRCUITS_OUT", REPO_ROOT / "circuits" / "out"))
-INPUTS_DIR = REPO_ROOT / "circuits" / "inputs"
+INPUTS_DIR = REPO_ROOT / "circuits" / "fixtures" / "inputs"
 
 
 @dataclass(frozen=True)
@@ -38,7 +38,7 @@ class CircuitConfig:
     pub length disagrees with it.
 
     `so` + `w2s` are the compiled in-process witness calculator pair
-    (circuits/build_witness_so.sh); `input_order` is the circuit's signal
+    (circuits/build/build_witness_so.sh); `input_order` is the circuit's signal
     DECLARATION order (public signals first) — the compiled calculator takes
     inputs positionally, so the request JSON's keys are reordered to this
     before flattening (witness.flatten_ordered). The order is a property of
@@ -83,7 +83,7 @@ CIRCUITS: dict[str, CircuitConfig] = {
         env_prefix="BONGTU_DISBURSE",
         # The 1.24GB disburse256 Groth16 proving key (gitignored artifact; the
         # GPU regen recipe lives in CLAUDE.md "GPU regen recipe" +
-        # .dev/milestone-m1.md — circuits/build_witness_so.sh builds the
+        # .dev/milestone-m1.md — circuits/build/build_witness_so.sh builds the
         # .so/w2s witness pair).
         zkey=_path("BONGTU_DISBURSE_ZKEY", CIRCUITS_OUT / "disburse256.zkey"),
         so=_path("BONGTU_DISBURSE_SO", CIRCUITS_OUT / "libdisburse256.so"),
@@ -108,7 +108,7 @@ CIRCUITS: dict[str, CircuitConfig] = {
             "outputOwnerPublicKeys",
         ),
         # The committed satisfying input used for the boot warm-up proof
-        # (circuits/gen_disburse256_input.ts writes it).
+        # (circuits/fixtures/gen_disburse256_input.ts writes it).
         warmup_input=_path("BONGTU_WARMUP_INPUT", INPUTS_DIR / "disburse256.json"),
         num_public=11,
     ),

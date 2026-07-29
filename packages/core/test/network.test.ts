@@ -13,7 +13,7 @@
 //      bases, the POOL_ABI_FRAGMENTS fragment strings) are pinned byte-for-byte to the
 //      values previously hand-copied across apps/payroll-web/src/lib/chain.ts,
 //      apps/wallet-web/src/lib/metamask.ts, both app config.ts files, and
-//      deploy/giwa_disburse256.ts — the copies this module replaced.
+//      the live GIWA disburse runner — the copies this module replaced.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -88,7 +88,7 @@ test("facts outside the deploy artifact are pinned to the pre-module copies", ()
   // SPEC §4 IMT height — was re-declared per app config.
   assert.equal(H, 32);
   // GIWA wants ~0.001 gwei; ethers' auto-estimate overpays ~1500x. 0.005 gwei
-  // safe floor — was copied in chain.ts / metamask.ts / giwa_disburse256.ts.
+  // safe floor — was copied in chain.ts / metamask.ts / the live GIWA runner.
   assert.equal(GIWA_GAS_FLOOR_GWEI, "0.005");
   // Chain endpoints — were copied in both app config.ts files.
   assert.equal(RPC_URL, "https://sepolia-rpc.giwa.io");

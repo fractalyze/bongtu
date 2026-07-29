@@ -25,11 +25,17 @@ belts); per-file Zeto provenance and the deliberate modifications are in
 with no dependency on any untracked Zeto file. Upstream Zeto sub-checks and circomlib
 still resolve from external checkouts via `-l` (paths below).
 
+The `.circom` sources stay at the top level (that is what the toolchain compiles);
+everything around them is grouped by role — `lib/` the vendored bases, `fixtures/`
+the input generators and their committed JSON, `build/` the compile + prove
+pipeline, `gates/` the pass/fail security checks, `verifiers/` the committed
+snarkjs exports, `out/` the gitignored build products.
+
 ## Build + prove (the U2 gate)
 
 ```sh
-cd circuits && bash prove_all.sh              # 8x "snarkJS: OK" and exit 0
-cd circuits && bash prove_all.sh transfer10   # one circuit only (targeted regen)
+cd circuits && bash build/prove_all.sh              # 8x "snarkJS: OK" and exit 0
+cd circuits && bash build/prove_all.sh transfer10   # one circuit only (targeted regen)
 ```
 
 For each of deposit / disburse / transfer / transfer10 / transfer10x2 / withdraw:
@@ -52,34 +58,34 @@ recommitting its verifier fails the build).
 - `verifiers/` is **committed**: the raw snarkjs solidity exports.
   `contracts/src/verifiers/*.sol` are the same bytes with only the contract renamed
   (e.g. `Groth16Verifier` → `TransferVerifier`).
-- `disburse256` is **not** in `prove_all.sh`: its ~1.24 GB zkey takes a multi-minute
+- `disburse256` is **not** in `build/prove_all.sh`: its ~1.24 GB zkey takes a multi-minute
   setup and it is proven on GPU (rabbitsnark). The regen recipe after any circuit
   change is the "GPU regen recipe" bullet in the repo [`CLAUDE.md`](../CLAUDE.md);
   the prover service that holds the zkey resident is
   [`prover/`](../prover/README.md).
-- `build_witness_so.sh` builds the **compiled witness calculators** the prover
+- `build/build_witness_so.sh` builds the **compiled witness calculators** the prover
   service loads (`out/lib<name>.so` + `out/<name>_w2s.json`, gitignored) for
   the three GPU-served circuits via the circom MLIR backend — ~7x faster
-  witness-gen than the WASM pair. `witness_rt/` is the vendored (patched)
+  witness-gen than the WASM pair. `build/witness_rt/` is the vendored (patched)
   r1cs-solver runtime MLIR it links; toolchain caveats are in the script
   header. Rebuild after any circuit change, alongside the zkey.
-- `wtns_compare.py` element-wise compares a snarkjs `.wtns` against a raw
+- `build/wtns_compare.py` element-wise compares a snarkjs `.wtns` against a raw
   witness dump — the byte-identity gate for that swap (a wrong witness still
   proves, just a different statement). Stdlib only, no venv; the three-command
   recipe is [`prover/README.md`](../prover/README.md) "Byte-identity gate".
 
 ## Witness-input generators
 
-All generators run on tsx (`npx tsx <file>.ts`), are PRNG-free (fixtures are
+All generators live in `fixtures/`, run on tsx (`npx tsx circuits/fixtures/<file>.ts`), are PRNG-free (fixtures are
 byte-reproducible — regenerating leaves a clean tree), share their key material and
-helpers through `fixture_lib.ts`, and write committed JSON into `inputs/`:
+helpers through `fixtures/fixture_lib.ts`, and write committed JSON into `fixtures/inputs/`:
 
 | generator | writes |
 |---|---|
-| `gen_inputs.ts` | the satisfying inputs (`deposit/disburse/transfer/withdraw.json`, plus the four 10-input fixtures: `transfer10{,x2}.json` — 4 real + 6 padded inputs — and `transfer10_consolidate.json` / `transfer10x2_merge.json` — all 10 real, merged into one self-owned note) from real `ImtTree` membership witnesses |
-| `gen_disburse256_input.ts` | `disburse256.json` — the production 1×256 input; also the prover service's boot warm-up proof |
-| `gen_attack_inputs.ts` | `withdraw_mint/attack/padded.json` + `transfer10{,x2}_attack.json` — the §5.2 value-belt attack vectors |
-| `gen_zero_leaf_inputs.ts` / `gen_disburse_zero_leaf.ts` | the zero-commitment-belt attack vectors for transfer/transfer10/transfer10x2/withdraw and the disburse base |
+| `fixtures/gen_inputs.ts` | the satisfying inputs (`deposit/disburse/transfer/withdraw.json`, plus the four 10-input fixtures: `transfer10{,x2}.json` — 4 real + 6 padded inputs — and `transfer10_consolidate.json` / `transfer10x2_merge.json` — all 10 real, merged into one self-owned note) from real `ImtTree` membership witnesses |
+| `fixtures/gen_disburse256_input.ts` | `disburse256.json` — the production 1×256 input; also the prover service's boot warm-up proof |
+| `fixtures/gen_attack_inputs.ts` | `withdraw_mint/attack/padded.json` + `transfer10{,x2}_attack.json` — the §5.2 value-belt attack vectors |
+| `fixtures/gen_zero_leaf_inputs.ts` / `gen_disburse_zero_leaf.ts` | the zero-commitment-belt attack vectors for transfer/transfer10/transfer10x2/withdraw and the disburse base |
 
 ## Security gates
 
@@ -88,12 +94,12 @@ scripts fail loudly if a belt regresses (the exploits they close are documented 
 `.dev/spec-decisions.md` §5.2 and `docs/zeto-derivation.md`):
 
 ```sh
-bash test_zero_leaf_unsat.sh          # zero-commitment belt UNSAT for all 5 spending circuits
-npx tsx assert_attacks_throw.ts       # value belt: mint/attack THROW, padded SUCCEEDS
-npx tsx auditor_decrypt_check.ts      # deposit/withdraw envelopes decrypt with the arbiter key alone
+bash circuits/gates/test_zero_leaf_unsat.sh      # zero-commitment belt UNSAT for all 5 spending circuits
+npx tsx circuits/gates/assert_attacks_throw.ts   # value belt: mint/attack THROW, padded SUCCEEDS
+npx tsx circuits/gates/auditor_decrypt_check.ts  # deposit/withdraw envelopes decrypt with the arbiter key alone
 ```
 
-All three need a built `out/` (run `prove_all.sh` first) plus the external snarkjs /
+All three need a built `out/` (run `build/prove_all.sh` first) plus the external snarkjs /
 circomlib (`BONGTU_NODE_MODULES`, repo [`CLAUDE.md`](../CLAUDE.md)).
 
 ## License

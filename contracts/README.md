@@ -46,7 +46,7 @@ forge test    # 87 tests, all committed-fixture-driven — no network, no GPU
 `./test` (fixtures), `./src` + `../circuits/verifiers` (the verifier drift gate reads both
 copies as text), and read-write on `../deploy` (the deploy scripts write
 `addresses.<chainid>.json` there). The same suite runs as the `forge` CI job,
-followed by `deploy/deploy_local.sh` (see [`deploy/README.md`](../deploy/README.md)).
+followed by `deploy/gates/deploy_local.sh` (see [`deploy/README.md`](../deploy/README.md)).
 
 ## Fixtures
 

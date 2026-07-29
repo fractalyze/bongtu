@@ -192,7 +192,7 @@ largest *k* do, so a selection that overruns the arity proves no *k*-note cover 
 slots are padded (`nullifier 0`, `value 0`, `enabled 0`, zeros path, and a real value-0 self-owned
 commitment on its own salt) — the contract-derived `enabled=0` disables the slot's membership and
 the §5.2 value belt forces its value to 0, so a pad can neither prove membership nor mint. Unused
-This is the convention `circuits/inputs/transfer10x2.json` carries, and
+This is the convention `circuits/fixtures/inputs/transfer10x2.json` carries, and
 `test/transfer10x2.test.ts` checks both sides against it.
 
 **`transfer10` is deprecated** (user decision, 2026-07-28): the 10-in / 10-*out* circuit and its V4
@@ -203,7 +203,7 @@ depth-32 IMT append — the dominant per-op gas — and a real spend only ever n
 (a merge's change note is value-0 — still a real note with a nonzero commitment). Its assets also
 left the wallet's download set. `test/transfer10x2.test.ts` and `test/spendChain.test.ts` carry
 deprecation pins that fail the moment any plan, merge leg or submit routes to `transfer10` again;
-`deploy/giwa_transfer10x2_e2e.ts` is the live driver (`--dry` for a network-free structural check).
+`deploy/live/giwa_transfer10x2_e2e.ts` is the live driver (`--dry` for a network-free structural check).
 
 ## A spend is a chain, not a transaction
 

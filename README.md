@@ -146,10 +146,14 @@ headline 256-disburse has run end-to-end on this pool (tx `0xe254240a…`, `next
 
 ## Layout
 
-npm workspaces monorepo: workspace packages export **raw `src/*.ts`** (no build step) as `@bongtu/*`;
-`circuits/`, `contracts/`, `prover/`, `deploy/` stay top-level (non-npm toolchains). Each has its own README.
+npm workspaces monorepo: workspace packages export **raw `src/*.ts`** (no build step) as `@bongtu/*`.
+Four kinds of directory, split by what runs the code. `apps/` and `packages/` are the npm world
+divided by role — apps are the things you run, packages are the things they import. `contracts/`,
+`circuits/` and `prover/` are toolchain islands, each owned by a non-npm toolchain (Foundry, circom,
+Python). `deploy/` is the one-shot operations hand: nothing imports it, it acts on a chain.
+Each has its own README.
 
-- [`circuits/`](circuits/README.md): the circom circuits (transfer, disburse, withdraw, deposit)
+- [`circuits/`](circuits/README.md): the circom circuits (transfer, disburse, withdraw, deposit) + their fixtures, build pipeline and soundness gates
 - [`contracts/`](contracts/README.md): Foundry `BongtuPool` + verifiers
 - [`packages/core/`](packages/core/README.md): `@bongtu/core`: IMT, Poseidon, keys, note crypto, proving wire types
 - `packages/client/`: `@bongtu/client`: the browser-side engine both web apps drive — connection, key
@@ -159,7 +163,7 @@ npm workspaces monorepo: workspace packages export **raw `src/*.ts`** (no build 
 - [`apps/indexer/`](apps/indexer/README.md): event ingest, tree mirror, `/notes` + disclosure alarms (arbiter mode)
 - [`apps/payroll-web/`](apps/payroll-web/README.md): the employer pay console — MetaMask login, one worksheet, batch disburse
 - [`apps/wallet-web/`](apps/wallet-web/README.md): self-custody wallet, in-browser proving
-- [`deploy/`](deploy/README.md): deploy scripts, the live 256-disburse runner, the e2e gate
+- [`deploy/`](deploy/README.md): forge scripts, live-chain drivers, anvil gates — recorded addresses at the top
 - [`docs/`](docs/): reference docs, one file per topic (index below)
 - [`.dev/`](.dev/README.md): working docs: milestone trackers and decision records
 

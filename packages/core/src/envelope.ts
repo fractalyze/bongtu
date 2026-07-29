@@ -16,7 +16,7 @@
 // indexer scenario) and consumer (indexer arbiter ledger, payroll-web auditor
 // ledger) goes through it. TWO deliberate exceptions stay hand-rolled as
 // independent checks and must NOT import this module:
-// circuits/auditor_decrypt_check.ts (the circuit-parity gate) and
+// circuits/gates/auditor_decrypt_check.ts (the circuit-parity gate) and
 // apps/indexer/test/ingest.test.ts makeSim (the ingest suite's synthetic
 // envelope builder).
 //

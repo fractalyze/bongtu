@@ -141,7 +141,7 @@ def _infra_hint(circuit: CircuitConfig) -> str:
     return (
         f"check {circuit.env_prefix}_SO / {circuit.env_prefix}_W2S "
         "(prover_service/config.py) and the circuits/out artifacts "
-        "(circuits/build_witness_so.sh regenerates them)"
+        "(circuits/build/build_witness_so.sh regenerates them)"
     )
 
 
@@ -183,7 +183,7 @@ class WitnessHost:
                 raise WitnessInfraError(
                     f"{self.circuit.name} witness artifact missing: {path} "
                     f"(set {self.circuit.env_prefix}{knob} or run "
-                    "circuits/build_witness_so.sh)"
+                    "circuits/build/build_witness_so.sh)"
                 )
         self.proc = subprocess.Popen(
             self._argv(),

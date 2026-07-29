@@ -428,7 +428,7 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     ///         reach. Ordering is pinned OUTSIDE the contract, by the deploy
     ///         script's pre-flight: it reads the Initializable version out of the
     ///         ERC-7201 slot and refuses anything below 3, the same require
-    ///         `deploy/UpgradeSelfSend.s.sol` uses for the V2-then-V3 step.
+    ///         `deploy/forge/upgrades/UpgradeSelfSend.s.sol` uses for the V2-then-V3 step.
     function initializeV4(ITransfer10Verifier _transfer10Verifier) external onlyOwner reinitializer(4) {
         if (address(_transfer10Verifier) == address(0)) revert ZeroVerifier();
         transfer10Verifier = _transfer10Verifier;
@@ -444,7 +444,7 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     ///         {initializeV4} — the payload would also run on a pool that never
     ///         took V2..V4 and would then put those payloads permanently out of
     ///         reach. Ordering is pinned OUTSIDE the contract, by the
-    ///         Initializable-slot pre-flight in `deploy/UpgradeTransfer10x2.s.sol`
+    ///         Initializable-slot pre-flight in `deploy/forge/upgrades/UpgradeTransfer10x2.s.sol`
     ///         (the V2-then-V3-then-V4 pattern), which refuses anything below 4.
     function initializeV5(ITransfer10x2Verifier _transfer10x2Verifier) external onlyOwner reinitializer(5) {
         if (address(_transfer10x2Verifier) == address(0)) revert ZeroVerifier();

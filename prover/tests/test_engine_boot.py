@@ -1,7 +1,7 @@
 # engine.py boot gate — the .so/zkey artifact-pair check.
 #
 # A circuit's proving artifacts come from two independent pipelines over the
-# same .circom: circuits/build_witness_so.sh emits the witness calculator
+# same .circom: circuits/build/build_witness_so.sh emits the witness calculator
 # (lib<name>.so + <name>_w2s.json) and the snarkjs setup emits the .zkey. A
 # stale half is the expected drift after any circuit edit, and nothing else in
 # the boot notices it — the worker computes a witness of ITS length, the prover

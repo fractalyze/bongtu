@@ -211,11 +211,11 @@ contract RealProofTest is Base {
     /// enabled=(nullifier!=0) alone did NOT catch it, because for a zero nullifier
     /// the contract injects enabled=0 — AGREEING with the malicious proof.
     ///
-    /// There is therefore no attack calldata to submit: `circuits/gen_realproofs.ts`
+    /// There is therefore no attack calldata to submit: `contracts/test/fixtures/gen_realproofs.ts`
     /// no longer emits a `withdraw_attack` entry, and both the pure mint
     /// (nullifier=0/value!=0/enabled=0) and the value-carrying forgery
     /// (nullifier!=0/value!=0/enabled=0) FAIL `generate_witness` on the belt —
-    /// proven verbatim by `circuits/assert_attacks_throw.ts`. This test pins that
+    /// proven verbatim by `circuits/gates/assert_attacks_throw.ts`. This test pins that
     /// closure: the fixture generator refuses to produce an attack proof.
     function testMintFromNothingUnprovableAtCircuitLevel() public view {
         // The circuit belt makes the attack witness unsatisfiable, so the fixture

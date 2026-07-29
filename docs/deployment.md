@@ -59,7 +59,7 @@ Clients never trust their bundled copy. Before drawing KEM material they read
 cannot produce a proof such a pool would accept. So a stale bundle produces a readable error, never
 a wasted proof or a silently mis-keyed envelope.
 
-`deploy/UpgradePq.s.sol` is the reusable form of this migration for a local or testnet pool. It
+`deploy/forge/upgrades/UpgradePq.s.sol` is the reusable form of this migration for a local or testnet pool. It
 defaults to rotating the *same* bjj key (the epoch boundary exists to be the KEM boundary, not to
 churn identities) and must land together with the hybrid clients and the dual-ABI indexer.
 
@@ -79,7 +79,7 @@ provable). Its payload is `initializeV3` — a **verifier-only** swap: the new `
 plus the new implementation, and **no epoch**, because no arbiter key material changed. `deposit`,
 `withdraw` and `disburse` keep the verifiers the PQ upgrade installed.
 
-`deploy/UpgradeSelfSend.s.sol` is the reusable form. It refuses to run on a pool that has not taken
+`deploy/forge/upgrades/UpgradeSelfSend.s.sol` is the reusable form. It refuses to run on a pool that has not taken
 `initializeV2` first: `reinitializer(3)` would accept a never-V2 pool and burn the version past 2,
 stranding it on its pre-PQ verifiers with no way back.
 
@@ -99,7 +99,7 @@ nullifier state below it). It is zero until the payload runs, and `transfer10` c
 a bare `upgradeTo` would leave a pool that advertises the entry point and reverts on every call to
 it.
 
-`deploy/UpgradeTransfer10.s.sol` is the reusable form. Two pre-flight requires, both read from the
+`deploy/forge/upgrades/UpgradeTransfer10.s.sol` is the reusable form. Two pre-flight requires, both read from the
 Initializable version slot before anything is broadcast:
 
 | require | why |
@@ -128,7 +128,7 @@ in a **new storage slot appended after every earlier one**, zero until the paylo
 `upgradeTo` would advertise the entry point and revert on every call to it, which is why the swap and
 the payload travel in one `upgradeToAndCall`.
 
-`deploy/UpgradeTransfer10x2.s.sol` is the reusable form. Two pre-flight requires, both read from the
+`deploy/forge/upgrades/UpgradeTransfer10x2.s.sol` is the reusable form. Two pre-flight requires, both read from the
 Initializable version slot before anything is broadcast (`BongtuPool.initializeV5`'s natspec names
 this script as where the ordering is enforced):
 
@@ -144,7 +144,7 @@ to refuse. The post-check then requires the five earlier verifiers, arbiter key 
 the IMT root + `nextLeafIndex` all unchanged (the tree pair again guards the appended slot).
 
 `transfer10x2Verifier` is an optional field of `addresses.<chainid>.json` — absent until this script
-runs, same marker convention as `transfer10Verifier`. `deploy/test_upgrade_ladder_v5.sh` drills the
+runs, same marker convention as `transfer10Verifier`. `deploy/gates/test_upgrade_ladder_v5.sh` drills the
 full V1→V5 ladder on a scratch anvil, cast-verifies the end state (B=256, verifier set, version slot
 5), and asserts the negative: the V5 script against a fresh V1-only pool must die in pre-flight.
 
@@ -163,25 +163,26 @@ full V1→V5 ladder on a scratch anvil, cast-verifies the end state (B=256, veri
 Mainnet is not launched; everything here is testnet. The runners pin the gas price rather than let
 ethers estimate it: GIWA wants ~0.001 gwei and ethers' auto-estimate overpays by ~1500×, draining
 the faucet grant. `packages/core/src/network.ts` exports
-`GIWA_GAS_FLOOR_GWEI = "0.005"` and `deploy/giwa_disburse256.ts` sets `gasPrice` from it.
+`GIWA_GAS_FLOOR_GWEI = "0.005"` and every `deploy/live/` driver sets `gasPrice` from it.
 
 ## Scripts
 
 | file | does |
 |---|---|
-| `deploy/Deploy.s.sol` | deploys Poseidon + 4 verifiers + (optionally) a mock kKRW + the pool implementation + an `ERC1967Proxy` whose constructor runs `initialize` atomically; writes `addresses.<chainid>.json` |
-| `deploy/UpgradePq.s.sol` | the UUPS migration of an already-deployed pool to the hybrid PQ implementation: deploys the four regenerated verifiers + the new impl, then one `upgradeToAndCall` whose `initializeV2` payload swaps the verifier addresses and mints the epoch carrying both keys; rewrites the verifier/impl entries in `addresses.<chainid>.json` |
-| `deploy/UpgradeSelfSend.s.sol` | the UUPS migration to the self-send transfer circuit: deploys the regenerated `TransferVerifier` + the new impl, then one `upgradeToAndCall` whose `initializeV3` payload swaps only that verifier and mints no epoch; pre-flight asserts the pool is already V2 |
-| `deploy/UpgradeTransfer10.s.sol` | the UUPS migration that adds the `transfer10` entry point: deploys `Transfer10Verifier` + the new impl, then one `upgradeToAndCall` whose `initializeV4` payload installs only that verifier and mints no epoch; pre-flight asserts the pool is V3 and not already V4, and the post-check asserts the IMT root did not move |
-| `deploy/UpgradeTransfer10x2.s.sol` | the UUPS migration that adds the `transfer10x2` entry point: deploys `Transfer10x2Verifier` + the new impl, then one `upgradeToAndCall` whose `initializeV5` payload installs only that verifier and mints no epoch; pre-flight asserts the pool is V4 and not already V5 (version requires first — see the section above), and the post-check asserts the IMT root did not move |
-| `deploy/AddressBook.sol` | the field list of `addresses.<chainid>.json`, declared once, with a read + merge-write the scripts above share (each names only the fields it changes) |
-| `deploy/Smoke.s.sol` | a real `deposit` against the deployed pool using the committed proof fixture |
-| `deploy/deploy_local.sh` | anvil + Deploy + getter read-back + Smoke — the local gate |
-| `deploy/test_upgrade_ladder_v5.sh` | scratch-anvil drill of the full live-pool ladder (Deploy → PQ → self-send → transfer10 → transfer10x2) + cast end-state checks + the V5-vs-V1 negative pre-flight |
-| `deploy/giwa_disburse256.ts` | the live 256-recipient disburse runner (rebuild mirror → deposit → prover service → `disburseWithCiphertexts` → measure L2 gas and L1 data fee) |
-| `deploy/giwa_payroll_e2e.ts` | the payroll console's whole pay run against live GIWA, driving the console's own modules (mint → deposit → forced merge leg → 3-recipient disburse → signed `/notes` checks), every proof via the prover service |
-| `deploy/e2e_m0.sh`, `deploy/e2e_orchestrator.ts` | the cross-circuit spend-cycle end-to-end on a local anvil |
-| `deploy/upload_circuits.sh` | uploads the wallet's proving assets (wasm + zkey) to the Vercel Blob store under a `CIRCUITS_VERSION` path, refusing assets whose zkey hash misses the pin in the wallet's `config.ts` |
+| `deploy/forge/Deploy.s.sol` | deploys Poseidon + 4 verifiers + (optionally) a mock kKRW + the pool implementation + an `ERC1967Proxy` whose constructor runs `initialize` atomically; writes `addresses.<chainid>.json` |
+| `deploy/forge/upgrades/UpgradePq.s.sol` | the UUPS migration of an already-deployed pool to the hybrid PQ implementation: deploys the four regenerated verifiers + the new impl, then one `upgradeToAndCall` whose `initializeV2` payload swaps the verifier addresses and mints the epoch carrying both keys; rewrites the verifier/impl entries in `addresses.<chainid>.json` |
+| `deploy/forge/upgrades/UpgradeSelfSend.s.sol` | the UUPS migration to the self-send transfer circuit: deploys the regenerated `TransferVerifier` + the new impl, then one `upgradeToAndCall` whose `initializeV3` payload swaps only that verifier and mints no epoch; pre-flight asserts the pool is already V2 |
+| `deploy/forge/upgrades/UpgradeTransfer10.s.sol` | the UUPS migration that adds the `transfer10` entry point: deploys `Transfer10Verifier` + the new impl, then one `upgradeToAndCall` whose `initializeV4` payload installs only that verifier and mints no epoch; pre-flight asserts the pool is V3 and not already V4, and the post-check asserts the IMT root did not move |
+| `deploy/forge/upgrades/UpgradeTransfer10x2.s.sol` | the UUPS migration that adds the `transfer10x2` entry point: deploys `Transfer10x2Verifier` + the new impl, then one `upgradeToAndCall` whose `initializeV5` payload installs only that verifier and mints no epoch; pre-flight asserts the pool is V4 and not already V5 (version requires first — see the section above), and the post-check asserts the IMT root did not move |
+| `deploy/forge/AddressBook.sol` | the field list of `addresses.<chainid>.json`, declared once, with a read + merge-write the scripts above share (each names only the fields it changes) |
+| `deploy/forge/Smoke.s.sol` | a real `deposit` against the deployed pool using the committed proof fixture |
+| `deploy/gates/deploy_local.sh` | anvil + Deploy + getter read-back + Smoke — the local gate |
+| `deploy/gates/test_upgrade_ladder_v5.sh` | scratch-anvil drill of the full live-pool ladder (Deploy → PQ → self-send → transfer10 → transfer10x2) + cast end-state checks + the V5-vs-V1 negative pre-flight |
+| `deploy/live/giwa_payroll_e2e.ts` | the payroll console's whole pay run against live GIWA, driving the console's own modules (mint → deposit → forced merge leg → 3-recipient disburse → signed `/notes` checks), every proof via the prover service |
+| `deploy/live/giwa_transfer10x2_e2e.ts` | the live 10-in / 2-out spend gate against GIWA (merge leg + padded spend); `--dry` runs the structural checks with no network |
+| `deploy/live/giwa_gas_survey.ts` | per-action gas measurement against the live pool, feeding the table in [performance.md](performance.md) |
+| `deploy/gates/e2e_m0.sh`, `deploy/gates/e2e_orchestrator.ts` | the cross-circuit spend-cycle end-to-end on a local anvil |
+| `deploy/gates/upload_circuits.sh` | uploads the wallet's proving assets (wasm + zkey) to the Vercel Blob store under a `CIRCUITS_VERSION` path, refusing assets whose zkey hash misses the pin in the wallet's `config.ts` |
 
 Environment knobs and the exact GIWA invocation are in `deploy/README.md`. Two facts that are easy
 to lose and expensive to rediscover:

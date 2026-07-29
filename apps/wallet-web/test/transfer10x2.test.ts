@@ -16,7 +16,7 @@
 //   (2) WITNESS — a transfer10x2 request whose output commitments are the sdk's,
 //       whose value is conserved across the 10-in/2-out shape, and whose padded
 //       slots carry the SAME convention the committed
-//       circuits/inputs/transfer10x2{,_merge}.json fixtures do (those files are
+//       circuits/fixtures/inputs/transfer10x2{,_merge}.json fixtures do (those files are
 //       what the circuit is proved against, so a drift here is a witness that
 //       only fails at proving time).
 //   (3) MERGE LEG — the witness a chain's fold proves: up to ten notes into ONE
@@ -272,8 +272,8 @@ function paddingProfile(w: {
   return { real: 10 - padded.length, padded: padded.length };
 }
 
-test("transfer10x2 padding follows the committed circuits/inputs/transfer10x2.json convention", () => {
-  const fixturePath = new URL("../../../circuits/inputs/transfer10x2.json", import.meta.url).pathname;
+test("transfer10x2 padding follows the committed circuits/fixtures/inputs/transfer10x2.json convention", () => {
+  const fixturePath = new URL("../../../circuits/fixtures/inputs/transfer10x2.json", import.meta.url).pathname;
   const committed = JSON.parse(readFileSync(fixturePath, "utf8"));
   const fromFixture = paddingProfile(committed);
   assert.deepEqual(fromFixture, { real: 4, padded: 6 }, "the fixture is the 4-real/6-pad shape");
@@ -358,7 +358,7 @@ test("a merge leg folds the ten largest notes into one note + a zero change note
 
   // the committed merge fixture carries this exact shape: all-enabled inputs,
   // [full total, 0] outputs, one owner for both.
-  const fixturePath = new URL("../../../circuits/inputs/transfer10x2_merge.json", import.meta.url).pathname;
+  const fixturePath = new URL("../../../circuits/fixtures/inputs/transfer10x2_merge.json", import.meta.url).pathname;
   const committed = JSON.parse(readFileSync(fixturePath, "utf8"));
   assert.deepEqual(committed.enabled, Array(10).fill("1"));
   assert.equal(committed.outputValues[1], "0");

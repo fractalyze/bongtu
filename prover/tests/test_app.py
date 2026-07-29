@@ -64,12 +64,12 @@ def disburse_body() -> dict:
 
 
 def transfer10x2_body() -> dict:
-    fixture = REPO_ROOT / "circuits" / "inputs" / "transfer10x2.json"
+    fixture = REPO_ROOT / "circuits" / "fixtures" / "inputs" / "transfer10x2.json"
     return {"circuit": "transfer10x2", "input": json.loads(fixture.read_text())}
 
 
 def deposit_body() -> dict:
-    fixture = REPO_ROOT / "circuits" / "inputs" / "deposit.json"
+    fixture = REPO_ROOT / "circuits" / "fixtures" / "inputs" / "deposit.json"
     return {"circuit": "deposit", "input": json.loads(fixture.read_text())}
 
 

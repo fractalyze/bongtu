@@ -2,7 +2,7 @@
 #
 # CPU-only (no GPU / rabbitsnark import): validates that (1) the repo's real
 # disburse256 fixture input parses as a DisburseRequest unchanged, (2) every
-# committed circuits/inputs/{deposit,transfer,withdraw,disburse}.json — the
+# committed circuits/fixtures/inputs/{deposit,transfer,withdraw,disburse}.json — the
 # same files the TS generators type against the proving.ts interfaces —
 # round-trips through the discriminated union unchanged, so all edges of the
 # circom-main / fixture / proving.ts / schema.py triangle are pinned by real
@@ -11,7 +11,7 @@
 # rejected — and accept what it accepts, which since U-X3 includes a transfer
 # whose two outputs share one owner (a self-send).
 #
-# No committed fixture is a self-send (circuits/inputs/transfer.json has distinct
+# No committed fixture is a self-send (circuits/fixtures/inputs/transfer.json has distinct
 # owners), so that case is built by collapsing the real fixture's two owners onto
 # one rather than by hand-writing a witness.
 
@@ -29,7 +29,7 @@ from prover_service.schema import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-INPUTS = REPO_ROOT / "circuits" / "inputs"
+INPUTS = REPO_ROOT / "circuits" / "fixtures" / "inputs"
 FIXTURE = INPUTS / "disburse256.json"
 
 request_adapter = TypeAdapter(ProvingRequest)

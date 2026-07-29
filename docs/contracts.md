@@ -153,7 +153,7 @@ only the transfer verifying key moves — so no epoch is minted, since an epoch 
 indexer and the wallets that arbiter key material changed, and none did. `reinitializer(3)` only
 requires version < 3, so the payload would also run on a pool that never took V2 and would then put
 `initializeV2` permanently out of reach; the V2-then-V3 ordering is enforced by
-`deploy/UpgradeSelfSend.s.sol`, whose pre-flight reads the initializer version from storage and
+`deploy/forge/upgrades/UpgradeSelfSend.s.sol`, whose pre-flight reads the initializer version from storage and
 refuses anything below 2.
 
 `initializeV4` (`reinitializer(4)`) is the transfer10 migration payload (U-Z1) and is **add-only**:

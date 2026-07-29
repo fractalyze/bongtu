@@ -42,7 +42,7 @@ def check_witness_size(circuit: CircuitConfig, witness_size: int, num_vars: int)
     """Boot gate: the .so's witness length must EQUAL the zkey's (pure).
 
     The two halves of a circuit's artifact set are built by different pipelines
-    from the same .circom — `circuits/build_witness_so.sh` emits the .so + w2s,
+    from the same .circom — `circuits/build/build_witness_so.sh` emits the .so + w2s,
     the snarkjs setup emits the zkey — so a stale half is the expected drift,
     and it is silent: the worker happily computes a witness of its own length.
 
@@ -59,7 +59,7 @@ def check_witness_size(circuit: CircuitConfig, witness_size: int, num_vars: int)
             f"{witness_size} witness elements but the zkey at {circuit.zkey} "
             f"expects {num_vars} (Groth16 m) — the .so/w2s pair and the zkey "
             f"were built from different circuit revisions; rebuild both "
-            f"(circuits/build_witness_so.sh + the zkey setup) or fix "
+            f"(circuits/build/build_witness_so.sh + the zkey setup) or fix "
             f"{circuit.env_prefix}_SO / {circuit.env_prefix}_ZKEY"
         )
 

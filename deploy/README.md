@@ -1,12 +1,12 @@
 # bongtu deploy — B=256 production stack
 
 Reusable Foundry deploy of the full production BongtuPool stack (M1 U6 / Done#2).
-One script, one node, env-driven — the SAME two scripts run on a local anvil and
+One script, one node, env-driven — the same two scripts run on a local anvil and
 on GIWA Sepolia (only RPC + key + `--verify` differ).
 
 ## What it deploys
 
-`Deploy.s.sol` broadcasts, from a single deployer:
+`forge/Deploy.s.sol` broadcasts, from a single deployer:
 
 1. **Poseidon-v1** — from the circomlibjs creation bytecode (`contracts/test/fixtures/poseidon2.hex`),
    the byte-identical hash the circuits / SDK / tests use (inline `create`).
@@ -43,7 +43,7 @@ Override the two env vars for a production key.
 ## Run locally (the U6 gate)
 
 ```sh
-cd bongtu && bash deploy/deploy_local.sh    # exits 0 iff deploy + smoke pass
+cd bongtu && bash deploy/gates/deploy_local.sh    # exits 0 iff deploy + smoke pass
 ```
 
 It starts a background anvil (chainId 31337, trap-killed on exit — no leak),
@@ -65,7 +65,7 @@ redeploy for new work**; a circuit change ships as a UUPS upgrade (repo
 [`CLAUDE.md`](../CLAUDE.md)). The runbook below is the recipe that produced it,
 kept for a from-scratch redeploy.
 
-GIWA Sepolia is the SAME `Deploy.s.sol` with different env. Facts (verified
+GIWA Sepolia is the SAME `forge/Deploy.s.sol` with different env. Facts (verified
 2026-07-23): chain **91342**, RPC **https://sepolia-rpc.giwa.io**, Blockscout
 explorer https://sepolia-explorer.giwa.io, coinless (gas = ETH), Karst hardfork
 (EIP-7825 per-tx gas cap 16,777,216 — the disburse gas is well under it), BN254
@@ -78,14 +78,14 @@ export DEPLOYER_KEY=0x<funded-giwa-sepolia-key>   # fund via faucet.giwa.io; liv
 # export ARBITER_KEY_X=... ARBITER_KEY_Y=...
 # export TOKEN_ADDRESS=0x<existing-erc20>
 
-forge script ../deploy/Deploy.s.sol:Deploy \
+forge script ../deploy/forge/Deploy.s.sol:Deploy \
   --rpc-url https://sepolia-rpc.giwa.io \
   --broadcast --skip-simulation \
   --verify --verifier blockscout \
   --verifier-url https://sepolia-explorer.giwa.io/api
 ```
 
-`--skip-simulation` is required (and is exactly what the validated `deploy_local.sh`
+`--skip-simulation` is required (and is exactly what the validated `gates/deploy_local.sh`
 uses): `Deploy.s.sol` deploys Poseidon via inline-assembly `create`, which forge's
 on-chain simulation cannot model.
 
@@ -93,7 +93,7 @@ Addresses land in `deploy/addresses.91342.json`. Then the same smoke, pointed at
 GIWA (needs the deployer funded; with the default `MockERC20`, mint is open):
 
 ```sh
-forge script ../deploy/Smoke.s.sol:Smoke --rpc-url https://sepolia-rpc.giwa.io --broadcast --skip-simulation
+forge script ../deploy/forge/Smoke.s.sol:Smoke --rpc-url https://sepolia-rpc.giwa.io --broadcast --skip-simulation
 ```
 
 Notes for the live run:
@@ -106,18 +106,36 @@ Notes for the live run:
 - solc pinned to 0.8.24 here; GIWA EVM is Osaka/Karst — deployment is
   permissionless and BN254 verify is native.
 
-## Files
+## Layout
+
+Canonical data stays at the top; everything else is grouped by what runs it.
+
+- `addresses.31337.json` / `addresses.91342.json` — recorded deployments (local anvil / live GIWA).
+- `arbiter-kem-pk.91342.hex` — the live arbiter's ML-KEM-768 public key.
+
+`forge/` — the Solidity scripts, run through `forge script` from `contracts/`:
 
 - `Deploy.s.sol` — the stack deploy (impl + ERC-1967 proxy) + `addresses.<chainid>.json` writer.
 - `Smoke.s.sol` — real-deposit smoke tx against the deployed pool.
+- `AddressBook.sol` — the one declaration of the addresses-file field list, plus its read + merge-write.
+- `upgrades/UpgradePq.s.sol`, `upgrades/UpgradeSelfSend.s.sol`, `upgrades/UpgradeTransfer10.s.sol`,
+  `upgrades/UpgradeTransfer10x2.s.sol` — the UUPS migrations, in ladder order (V2 → V5).
+
+`live/` — TypeScript drivers against the canonical LIVE GIWA pool. Each needs
+`DEPLOYER_KEY` and pins `gasPrice` from `GIWA_GAS_FLOOR_GWEI`:
+
+- `giwa_payroll_e2e.ts` — the payroll console's whole pay run, driving the console's own modules,
+  every proof through the [`prover/`](../prover/README.md) service.
+- `giwa_transfer10x2_e2e.ts` — the 10-in / 2-out spend gate (`--dry` for a network-free check).
+- `giwa_gas_survey.ts` — per-action gas measurement feeding [`docs/performance.md`](../docs/performance.md).
+- `lib/` — the viem rig + proof toolbox the drivers and the anvil gates share.
+
+`gates/` — the pass/fail scripts (CI and pre-release):
+
 - `deploy_local.sh` — anvil + Deploy + getter reads + Smoke, the U6 gate (also the CI `forge` job's deploy gate).
-- `e2e_m0.sh` / `e2e_orchestrator.ts` — the M0 full spend-cycle e2e (separate).
-- `giwa_disburse256.ts` — the live 256-recipient disburse runner against the deployed
-  GIWA pool: rebuilds the mirror from chain, deposits, POSTs the assembled
-  `ProvingRequest` to the [`prover/`](../prover/README.md) service, submits
-  `disburseWithCiphertexts`, and measures L2 gas + L1 data fee (needs `DEPLOYER_KEY`
-  + a READY prover; pins `gasPrice` so ethers does not overpay).
-- `addresses.31337.json` / `addresses.91342.json` — recorded deployments (local anvil / live GIWA).
+- `e2e_m0.sh` / `e2e_orchestrator.ts` — the M0 full spend-cycle e2e on a fresh anvil.
+- `test_upgrade_ladder_v5.sh` — scratch-anvil drill of the full V1 → V5 ladder + the negative pre-flight.
+- `upload_circuits.sh` — publishes the wallet's proving assets to the Vercel Blob store.
 
 ## License
 

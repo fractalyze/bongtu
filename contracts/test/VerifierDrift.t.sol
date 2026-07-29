@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 
 /// @notice The missing half of the verifier drift gate.
 ///
-/// `circuits/prove_all.sh` writes the snarkjs Groth16 exports into
+/// `circuits/build/prove_all.sh` writes the snarkjs Groth16 exports into
 /// `circuits/verifiers/`, and CI gates THAT directory with
 /// `git diff --exit-code circuits/verifiers` after a rebuild — so a circuit
 /// change that is not recommitted fails. But `contracts/src/verifiers/*.sol` is
