@@ -100,6 +100,21 @@ single GPU. For contrast, Zeto's own published number is 2,763,071 gas for **2 r
 an IMT batch-attach and its per-note ciphertext with one aggregated disclosure hash. *(These are
 391× one measured batch, not a single live 100k run.)*
 
+## What is built
+
+Every surface below runs today, end to end, against the live pool:
+
+| surface | what it is |
+|---|---|
+| [**Bongtu Wallet**](https://bongtu.fractalyze.io) | Self-custody private wallet: spending key derived from a MetaMask signature, proofs generated in the browser, private balance / send / withdraw, per-user activity feed. Desktop-only. |
+| [**Employer Payroll Console**](https://bongtu-payroll.vercel.app) | The mass-payout console (testnet tool, access-gated): deposit public kKRW into the pool, generate a 255-recipient worksheet, and settle it as **one** private disburse, proof served by the GPU prover in seconds. |
+| **GPU prover service** | The employer-side proving box: three circuits resident on one GPU, in-process witness workers, ~0.5 s warm proof for the 256-batch. Auth- and origin-gated; only the employer's own console reaches it. |
+| **Indexer (arbiter mode)** | Mirrors the on-chain tree, decrypts every authority envelope, serves per-owner `/notes` + `/history` behind signature read-auth, and raises disclosure alarms when a batch's ciphertext disagrees with the chain. |
+| **BongtuPool on GIWA Sepolia** | The UUPS-proxied pool in [Status](#status): four Groth16 verifiers, the IMT, the kKRW escrow, and the enforced 2054-element disclosure on every disburse. |
+
+The two web apps are static; the only server-side pieces are the employer's own prover and the
+institution's arbiter indexer — exactly the two parties that hold those roles in the design.
+
 ## Status
 
 Live on **GIWA Sepolia** (chain 91342), behind a **UUPS proxy** carrying the security-hardened circuits and
