@@ -36,8 +36,11 @@ withdraw ≈ 1.28M) the hybrid delta is the 1088-byte `kemCiphertext` carried in
 re-emitted in the event, plus one extra Groth16 public input — the same double-pay lever flagged
 below for disburse ciphertext.
 
-`disburseWithCiphertexts` has **not** been re-measured live since the upgrade; it is an admin-path
-operation and the live 256-recipient figure below is pre-KEM.
+`disburseWithCiphertexts` re-measured live on the hybrid epoch **2026-07-30** (employer-console pay
+run, tx `0xc877f669cc566b571f066cd097a7cba6b181b78e9ce91290f7b8ad86c7be795f`, block 32019031):
+**3,905,519 L2 gas** (15,256 per recipient), L1 data fee ≈ 4.02e-6 ETH. The hybrid delta over the
+pre-KEM live figure below is +33,116 gas (+0.9%) — the KEM ciphertext rides the fixed 2054-element
+disclosure array rather than adding a second large payload.
 
 ## On-chain gas per operation (harness, pre-KEM)
 

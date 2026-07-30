@@ -80,16 +80,16 @@ and would not fit in a block. It pads the batch to a fixed 256 with no per-leaf 
 real recipient count stays hidden) and publishes all 256 ciphertexts on-chain for the auditor,
 bound by one aggregated disclosure hash the proof commits to.
 
-One such batch, measured live on GIWA: **3,872,403 L2 gas** (15,126 per recipient) plus **~4e-6 ETH**
-of L1 data fee
-([tx](https://sepolia-explorer.giwa.io/tx/0xe254240a5df042a163073c028399a5fc63cf87434a7e7ebbf5ddfea73c803bd6)).
+One such batch, measured live on GIWA on the current hybrid ML-KEM pool: **3,905,519 L2 gas**
+(15,256 per recipient) plus **~4e-6 ETH** of L1 data fee
+([tx](https://sepolia-explorer.giwa.io/tx/0xc877f669cc566b571f066cd097a7cba6b181b78e9ce91290f7b8ad86c7be795f)).
 
 A **100,000-person payroll** is 391 of those batches. From the measured per-batch numbers:
 
 | | per 256-batch | ×391 (100,000 people) |
 |---|---|---|
-| L2 gas | 3,872,403 | ~1.51 billion |
-| L2 cost @ 0.005 gwei | ~3.9e-5 ETH | **~0.0076 ETH** |
+| L2 gas | 3,905,519 | ~1.53 billion |
+| L2 cost @ 0.005 gwei | ~2.0e-5 ETH | **~0.0076 ETH** |
 | L1 data fee | ~4e-6 ETH | **~0.0016 ETH** |
 | **total** | | **~0.009 ETH (tens of dollars)** |
 | GPU proving @ 0.47 s | 0.47 s | **~3 minutes** |
@@ -98,8 +98,7 @@ So a full private payroll of 100,000 clears in **a few minutes for well under $5
 single GPU. For contrast, Zeto's own published number is 2,763,071 gas for **2 recipients**
 (~1.38M each), making bongtu **~90× cheaper per recipient**: we replaced Zeto's value-keyed SMT with
 an IMT batch-attach and its per-note ciphertext with one aggregated disclosure hash. *(These are
-391× one measured batch, not a single live 100k run; the batch figure also predates the hybrid
-ML-KEM envelope, which adds the KEM-ciphertext cost.)*
+391× one measured batch, not a single live 100k run.)*
 
 ## Status
 
@@ -113,9 +112,10 @@ enforced four-op auditor disclosure.
 
 Verified on-chain through the proxy: `B()==256`, `disburseCiphertextLen==2054` (disclosure enforced), a real
 envelope-carrying `deposit`. Measured: warm 256-disburse GPU proof **~0.47s** (2.80M constraints); the
-headline 256-disburse has run end-to-end on this pool (tx `0xe254240a…`, `nextLeafIndex` 4→512) at
-3,872,403 L2 gas (15,126 per recipient, far under the Karst cap), plus ~4e-6 ETH of L1 data fee for the
-~66 KB ciphertext array. Per-op gas and proof times: [`docs/performance.md`](docs/performance.md).
+headline 256-disburse runs end-to-end on this pool — freshest on the hybrid ML-KEM epoch
+(tx `0xc877f669…`) at 3,905,519 L2 gas (15,256 per recipient, far under the Karst cap), plus ~4e-6 ETH
+of L1 data fee for the ~66 KB ciphertext array. Per-op gas and proof times:
+[`docs/performance.md`](docs/performance.md).
 
 ## System map
 
