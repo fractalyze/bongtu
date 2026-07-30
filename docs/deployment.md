@@ -26,6 +26,12 @@ constructor args were recovered from its creation transaction). Poseidon is depl
 circomlibjs *creation bytecode* (`contracts/test/fixtures/poseidon2.hex`) — it has no Solidity
 source, so explorer verification does not apply to it.
 
+Every **historical implementation** is source-verified too — the proxy's `Upgraded` events
+enumerate five generations (initial `0x459f80A4…`, hybrid `0xc975D289…`, self-send `0x91fb94B6…`,
+V4 `0x7c1193E5…`, V5 `0xcc7e6c6F…`), each verified from a worktree of the commit that deployed it —
+so any past transaction can be audited against the exact source it executed. Externally, call the
+proxy address simply "the pool contract"; "proxy" is plumbing vocabulary.
+
 `deploy/addresses.91342.json` is canonical — the table above is a convenience copy of it, and
 `packages/core/test/network.test.ts` holds the module constants to the file field-for-field. When
 the two disagree, the JSON is right.

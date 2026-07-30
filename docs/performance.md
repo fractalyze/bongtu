@@ -140,11 +140,18 @@ range checks — which is +22% on `deposit` and under +0.1% on `disburse256`.
   regen recipe and the root `README.md` status (measured 2026-07-24). The prover service keeps the
   compiled zkey resident so production proofs are the warm number; a cold service boot pays the
   compile once.
-- **Prover-service round trip** (what the payroll console actually waits on, measured 2026-07-29 on
-  a loaded shared box): warm `/prove` **disburse256 2.3 s · transfer10x2 0.3 s · deposit 0.2 s**.
-  Witness generation dominates the disburse figure — **1.1 s** through the in-process compiled-`.so`
-  calculator, down from 5.7–7.5 s under the retired node/WASM subprocess (~5x; the pipeline and the
-  resident-worker design are in [`prover/README.md`](../prover/README.md)).
+- **Prover-service round trip** (what the payroll console actually waits on): warm `/prove`
+  **disburse256 1.58 s** on an otherwise idle box (measured 2026-07-30; 2.3 s was the 2026-07-29
+  figure under load — contention moves this number) · **transfer10x2 0.3 s · deposit 0.2 s**.
+  Witness generation dominates the disburse figure. Its measured split (2026-07-30):
+  `circuit_main` **0.79 s**, Montgomery conversions 0.13 s, w2s gather 0.06 s — total ~0.98 s
+  in-process, down from 5.7–7.5 s under the retired node/WASM subprocess (~5x; pipeline in
+  [`prover/README.md`](../prover/README.md)). The Montgomery passes were then cut to the
+  1,327 nonzero inputs and the 2.8M gathered outputs (byte-identical on all three circuits),
+  leaving `circuit_main` as ~90% of witness time. It is **single-threaded by construction**:
+  the circom-MLIR emitter only produces sequential loops and the `.so` links no OpenMP —
+  parallelizing the emitter is the standing lever (the GPU compiler path was removed from
+  prime-ir deliberately, and circom's `<--` hints rule out the levelized R1CS solver on principle).
 - **Browser transfer** (headless Chromium, real): warm proof **3.5–5.4 s** on a 24-thread desktop,
   measured 2026-07-26 on the pre-KEM transfer circuit; the hybrid circuit adds ~4% constraints.
   The laptop figure carried alongside it in `apps/wallet-web/src/lib/prove.ts` — 7–20 s — is a

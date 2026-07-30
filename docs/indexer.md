@@ -119,6 +119,11 @@ so a cold backfill does not open one socket per block.
 Wire shapes are typed by `@bongtu/core/indexerApi`; the routes type their response bodies against
 them and `buildNotesUrl` / `buildHistoryUrl` are the one client-side URL builder.
 
+A disburse derives one "received" per non-self output **and one aggregated "sent" for the payer**
+(amount = the batch's non-self total, `counterparty` null — 255 per-payee rows would bury the
+payer's feed, and a batch has no single other party). History rows are derived at ingest and
+persisted, so a rule change reaches already-ingested batches only through a from-scratch rescan.
+
 **Paging `/history`.** A payroll account's feed grows without bound, so the wallet reads it one page
 at a time: `limit` (default 50, max 200) and `before`, an **exclusive upper bound on `seq`**. The
 cursor is a seq rather than an offset because `seq` is assigned once in chain-apply order and never

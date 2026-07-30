@@ -8,6 +8,12 @@ notes read from an arbiter indexer, and transfer / transfer10x2 / withdraw / dep
 Poseidon-sponge ciphertext it builds is byte-identical to what the provers prove and the contract
 verifies. Run commands and the test layout are owned by `apps/wallet-web/README.md`.
 
+Both web apps are **desktop-only**: a mobile browser gets a "use a PC" notice instead of the app
+(`@bongtu/client` `device.ts`, a user-agent verdict shared by both roots — MetaMask has no injected
+provider in a phone's system browser, and the flows would break mid-way rather than at the door).
+The WalletConnect QR path pairs a *phone-held wallet* to a *desktop browser session*; it does not
+make the apps themselves mobile.
+
 ## Key derivation
 
 There is no seed and no persisted private key. The spending key is a pure function of a wallet
