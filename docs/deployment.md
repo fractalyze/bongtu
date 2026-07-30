@@ -9,14 +9,22 @@ into `packages/core/src/network.ts` so both web apps read one set of constants.
 | role | address |
 |---|---|
 | BongtuPool — ERC-1967 proxy, the canonical pool | `0x93365980784ef504613EF5822ce1289CF858Fc10` |
-| BongtuPool implementation | `0x91fb94B656BE4eb86eD0Cdf4f172f620c61d21f7` |
+| BongtuPool implementation (V5) | `0xcc7e6c6FAae7D32Fc8f54F25e5714e7AEC0159dA` |
 | Poseidon-v1 hasher | `0xaA7778c778C83cE5655d5F217bDfE7782e01Bc50` |
 | DepositVerifier | `0x71F42727670Ad93685665b437711531156E57624` |
 | WithdrawVerifier | `0xBA13CB6c005291aa33b7f68A3ABC26002562A9A7` |
 | Disburse256Verifier (`disburseVerifier`) | `0x378439670AbD2C497443D21113727fa4827b47ea` |
 | TransferVerifier | `0x36B39D3d7ED00EC892a448F7C1a230D35C28B21f` |
+| Transfer10Verifier (historical txs only) | `0xbe07606a6cA99C1cE73Fba1AF6322E6f16bD96C9` |
+| Transfer10x2Verifier | `0x339673F61b4FBDfCBBD896E6c39E73d15cB06d41` |
 | mock kKRW (ERC-20) | `0x17A89cC5FF3395Bb01464c9E422749CcDbFa8C3f` |
 | owner / deployer | `0xe92a97e645351268F3d60d5a27EB842A5b293058` |
+
+All of the above except the Poseidon hasher are **source-verified on the GIWA Blockscout
+explorer** (verified 2026-07-30 via `forge verify-contract --verifier blockscout`; the proxy's
+constructor args were recovered from its creation transaction). Poseidon is deployed from
+circomlibjs *creation bytecode* (`contracts/test/fixtures/poseidon2.hex`) — it has no Solidity
+source, so explorer verification does not apply to it.
 
 `deploy/addresses.91342.json` is canonical — the table above is a convenience copy of it, and
 `packages/core/test/network.test.ts` holds the module constants to the file field-for-field. When
