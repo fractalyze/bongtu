@@ -7,8 +7,7 @@ A private stablecoin transfer layer for institutions, built on
 peer-to-peer transfers already exist, but institutions need more than that, and no one has made
 **private payments work at scale.** bongtu does: one transaction pays up to **256 recipients**, so a
 100,000-person payroll settles in minutes for a few dollars, every amount hidden from the public and
-readable by an auditor. And scale *is* the privacy here: split a mass payout into thousands of
-separate transfers and their timing re-links the sender, undoing the privacy of each.
+readable by an auditor.
 
 A digital 월급봉투: everyone sees the envelopes handed out, only the recipient sees the amount
 inside, and a designated authority can open every envelope. Each is encrypted to a fixed authority
