@@ -107,18 +107,30 @@ def main(so_path: str, w2s_path: str) -> None:
             )
 
         mr_signals = _make_memref(signals_buf)
+        # Convert ONLY the prefix that holds nonzero values: signal 0 (the
+        # constant 1) through the highest input signal. Everything past it is
+        # still zero and Mont(0)=0, so converting all total_signals (5.34M for
+        # disburse256, measured 92ms) was pure waste; zeros INSIDE the prefix
+        # are equally unaffected, so a sparse input layout stays correct.
+        input_end = 1 + (max(int(w2s[input_start + i]) for i in range(len(values))) if values else 0)
         calc._lib._mlir_ciface_to_mont_inplace(
-            ctypes.byref(mr_signals), ctypes.c_int64(0), ctypes.c_int64(calc.total_signals)
+            ctypes.byref(mr_signals), ctypes.c_int64(0), ctypes.c_int64(input_end)
         )
         mr_subcmps = _make_memref(subcmps_buf)
         # An unsatisfiable input aborts INSIDE this call (see module docstring).
         calc._lib._mlir_ciface_circuit_main(ctypes.byref(mr_signals), ctypes.byref(mr_subcmps))
-        calc._lib._mlir_ciface_from_mont_inplace(
-            ctypes.byref(mr_signals), ctypes.c_int64(0), ctypes.c_int64(calc.total_signals)
-        )
 
+        # Gather FIRST (still in Montgomery), then convert only the witness's
+        # 2.8M elements instead of the signal buffer's 5.34M — the other 2.54M
+        # are never read again.
         sig_words = signals_buf.view(np.uint64).reshape(calc.total_signals, 4)
-        witness = sig_words[w2s[: calc.witness_size]].tobytes()
+        witness_arr = np.ascontiguousarray(sig_words[w2s[: calc.witness_size]])
+        witness_bytes = witness_arr.view(np.uint8).ravel()
+        mr_witness = _make_memref(witness_bytes)
+        calc._lib._mlir_ciface_from_mont_inplace(
+            ctypes.byref(mr_witness), ctypes.c_int64(0), ctypes.c_int64(calc.witness_size)
+        )
+        witness = witness_arr.tobytes()
 
         proto.write(
             json.dumps(
