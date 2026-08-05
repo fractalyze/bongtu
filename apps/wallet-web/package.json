@@ -19,6 +19,7 @@
     "@rainbow-me/rainbowkit": "^2.2.11",
     "@remixicon/react": "^4.9.0",
     "@tanstack/react-query": "^5.101.4",
+    "@vercel/analytics": "^2.0.1",
     "ffjavascript": "^0.3.0",
     "poseidon-lite": "^0.3.0",
     "qrcode": "^1.5.4",
