@@ -16,6 +16,7 @@ import { WagmiProvider } from "wagmi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RainbowKitProvider } from "@rainbow-me/rainbowkit";
 import "@rainbow-me/rainbowkit/styles.css";
+import { Analytics } from "@vercel/analytics/react";
 import { isMobileDevice } from "@bongtu/client/device";
 import { wagmiConfig } from "./lib/wagmi.js";
 import { App } from "./ui/App.js";
@@ -56,5 +57,6 @@ createRoot(root).render(
         </QueryClientProvider>
       </WagmiProvider>
     )}
+    <Analytics />
   </StrictMode>,
 );
