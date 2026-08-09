@@ -33,6 +33,12 @@ services:
     # of taking the shared host with it.
     mem_limit: 1g
     cpus: 1
+    # A full disk makes postgres PANIC on every checkpoint and reinitialize in a
+    # loop, printing the whole recovery sequence each time — the same unbounded
+    # log the indexer above is capped against.
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "3" }
 
   indexer:
     build:
@@ -78,6 +84,13 @@ services:
     # shared host with it.
     mem_limit: 2g
     cpus: 2
+    # The tail loop retries every POLL_MS and logs one line per failure, so an
+    # outage it cannot fix (a database in recovery, an RPC that is down) prints
+    # unboundedly into an unrotated json log until the host disk is full — which
+    # is exactly what takes the database down in the first place. Cap it.
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "3" }
 
 volumes:
   pgdata:
