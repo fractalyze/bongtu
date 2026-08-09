@@ -38,7 +38,7 @@ import type { Pool } from "pg";
 import { MirrorTree } from "../src/tree.js";
 import { type OpEnvelope } from "../src/ledger.js";
 import { PostgresLedger } from "../src/postgres.js";
-import { Indexer, type ParsedLog } from "../src/ingest.js";
+import { fetchBlockTimestamp, Indexer, type ParsedLog } from "../src/ingest.js";
 import { abiKnowsKem } from "../src/chain.js";
 import {
   decodeEventLog,
@@ -930,6 +930,47 @@ async function main(): Promise<void> {
     const h3 = health.handle({ ix: pix, tokens: TOKENS, params: [], query: new URLSearchParams() });
     const b3 = h3.body as { ok: boolean; lastSuccessAt: number | null };
     ok(b3.ok === true && b3.lastSuccessAt !== null, "recovered → /health ok:true");
+  }
+
+  // --- block-timestamp retry -------------------------------------------------
+  // A rate-limited getBlock used to fold to timestamp 0, and because history
+  // rows are stamped once at ingest and persisted, those rows claimed
+  // 1970-01-01 permanently (571 live rows did). The policy now retries, and
+  // reports 0 only when it truly has nothing — which the caller escalates.
+  {
+    const noSleep = async (): Promise<void> => {};
+
+    let calls = 0;
+    const flaky = async (n: number): Promise<number> => {
+      calls++;
+      if (calls < 3) throw new Error("429 rate limited");
+      return 1_700_000_000 + n;
+    };
+    ok(
+      (await fetchBlockTimestamp(flaky, 42, 3, noSleep)) === 1_700_000_042 && calls === 3,
+      "a transient rate limit is retried, not folded to 0",
+    );
+
+    let tries = 0;
+    const dead = async (): Promise<number> => {
+      tries++;
+      throw new Error("transport down");
+    };
+    ok(
+      (await fetchBlockTimestamp(dead, 42, 3, noSleep)) === 0 && tries === 3,
+      "every attempt failing reports 0 after exhausting the retries",
+    );
+
+    // A successful call answering 0 is as unusable as a throw.
+    let zeroCalls = 0;
+    const zero = async (): Promise<number> => {
+      zeroCalls++;
+      return 0;
+    };
+    ok(
+      (await fetchBlockTimestamp(zero, 42, 3, noSleep)) === 0 && zeroCalls === 3,
+      "a zero answer is retried like a failure, never accepted as a timestamp",
+    );
   }
 
   console.log(`\n${failures === 0 ? "INGEST UNIT TEST PASS — multicall correlation, self-send history, transfer10 merge/fan-out, transfer10x2 pay/merge, correlation guard, replay convergence, withheld disburse, ledger dedup, pollOnce/health" : `INGEST UNIT TEST FAIL — ${failures} assertion(s)`}`);

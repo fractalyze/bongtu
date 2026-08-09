@@ -98,6 +98,37 @@ const kemOf = (args: any): { binding: bigint; ciphertext: Uint8Array } | null =>
     ? null
     : { binding: bn(args.kemBinding), ciphertext: toBytes(args.kemCiphertext) };
 
+/**
+ * One block's unix-seconds timestamp, retried with a linear backoff. Pure of
+ * viem so the policy gates headlessly: `getBlock` and `sleep` are the injected
+ * edges (the same seam the client packages use).
+ *
+ * A block that a completed log scan returned events for always exists, so a
+ * failure here is the RPC (rate limit, transport), never the chain. Returns 0
+ * ONLY when every attempt failed; the caller treats that as fatal rather than
+ * persisting a zero, because a history row's timestamp is written once and a
+ * wrong one reads as 1970-01-01 forever.
+ */
+export async function fetchBlockTimestamp(
+  getBlock: (blockNumber: number) => Promise<number>,
+  blockNumber: number,
+  attempts = 3,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+): Promise<number> {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const ts = await getBlock(blockNumber);
+      // A zero from a "successful" call is as unusable as a throw: treat it the
+      // same rather than letting it through as a valid timestamp.
+      if (ts > 0) return ts;
+    } catch {
+      // fall through to the backoff
+    }
+    if (i < attempts - 1) await sleep(250 * (i + 1));
+  }
+  return 0;
+}
+
 export class Indexer {
   readonly cfg: ChainConfig;
   readonly publicClient: PublicClient;
@@ -271,16 +302,34 @@ export class Indexer {
     const CONC = 16;
     for (let i = 0; i < blockNums.length; i += CONC) {
       const wave = blockNums.slice(i, i + CONC);
-      // viem getBlock THROWS (BlockNotFoundError) on a missing/pending block,
-      // where ethers returned null — catch to null so a phantom block folds to
-      // timestamp 0 rather than failing the whole ingest (block time is bigint).
-      const blocks = await Promise.all(
-        wave.map((n) => this.publicClient.getBlock({ blockNumber: BigInt(n) }).catch(() => null)),
-      );
-      wave.forEach((n, j) => tsByBlock.set(n, Number(blocks[j]?.timestamp ?? 0)));
+      const blocks = await Promise.all(wave.map((n) => this.blockTimestamp(n)));
+      wave.forEach((n, j) => tsByBlock.set(n, blocks[j]));
     }
-    for (const l of out) l.blockTimestamp = tsByBlock.get(l.blockNumber) ?? 0;
+    for (const l of out) {
+      const ts = tsByBlock.get(l.blockNumber);
+      // Refuse to stamp an activity item with a timestamp we do not have. A 0
+      // renders as 1970-01-01 in every client, and because history rows are
+      // derived once at ingest and persisted, that wrong date is PERMANENT
+      // short of a from-scratch rescan — which is exactly how 571 rows came to
+      // claim 1970 (a bulk rescan whose getBlock calls were rate-limited and
+      // silently folded to 0). Throwing instead leaves the batch uncommitted
+      // for the tail loop to retry, and surfaces in /health lastError.
+      if (!ts) {
+        throw new Error(
+          `no timestamp for block ${l.blockNumber} after retries — refusing to persist history with a zero timestamp`,
+        );
+      }
+      l.blockTimestamp = ts;
+    }
     return out;
+  }
+
+  /** One block's unix-seconds timestamp through the retry policy below. */
+  private blockTimestamp(blockNumber: number): Promise<number> {
+    return fetchBlockTimestamp(
+      async (n) => Number((await this.publicClient.getBlock({ blockNumber: BigInt(n) })).timestamp),
+      blockNumber,
+    );
   }
 
   /**
