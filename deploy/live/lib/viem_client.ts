@@ -157,11 +157,65 @@ export function makeRig(opts: {
   const walletClient = createWalletClient({ account, chain: opts.chain, transport });
   const feefields = opts.gasPrice !== undefined ? { gasPrice: opts.gasPrice } : {};
 
-  const sendWrite = async (address: Address, abi: Abi, fn: string, args: readonly unknown[]): Promise<`0x${string}`> =>
-    walletClient.writeContract(
+  // Size the gas limit ourselves and leave headroom. The default path estimates
+  // against the CURRENT state and sends exactly that, which is not enough here:
+  // every pool op writes Merkle frontier slots, and a slot costs ~20k when it goes
+  // from zero to non-zero versus ~5k to overwrite. A run that submits several ops
+  // back to back advances the tree between the estimate and the inclusion, so a
+  // later op can execute a more expensive path than the one that was priced —
+  // observed as a deposit that ran OUT OF GAS at 2,643,613 while its siblings in
+  // the same run cost 2,637,594-2,647,508. The limit is only a cap: unused gas is
+  // refunded, so the headroom costs nothing and turns a burnt transaction into a
+  // slightly larger cap.
+  const GAS_LIMIT_HEADROOM_NUM = 3n;
+  const GAS_LIMIT_HEADROOM_DEN = 2n;
+  const sendWrite = async (address: Address, abi: Abi, fn: string, args: readonly unknown[]): Promise<`0x${string}`> => {
+    const estimate = await publicClient.estimateContractGas(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      { address, abi, functionName: fn, args, ...feefields } as any,
+      { address, abi, functionName: fn, args, account, ...feefields } as any,
     );
+    return walletClient.writeContract(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      {
+        address,
+        abi,
+        functionName: fn,
+        args,
+        gas: (estimate * GAS_LIMIT_HEADROOM_NUM) / GAS_LIMIT_HEADROOM_DEN,
+        ...feefields,
+      } as any,
+    );
+  };
+
+  // Hold a write open until the node pool will actually SHOW it. A public RPC host
+  // is many nodes behind one name, so a receipt proves the block exists — not that
+  // the node answering the next eth_call has applied it. A driver that reads state
+  // straight after its own write can therefore be handed the PREVIOUS block and see
+  // its transaction as a no-op: observed here as a transfer10x2 that appended its
+  // two leaves correctly on chain while the read right after it still returned the
+  // pre-write nextLeafIndex. A dedicated single node never shows this, which is why
+  // the drivers were written without it.
+  const settle = async (blockNumber: bigint): Promise<void> => {
+    for (let i = 0; i < 40; i++) {
+      if ((await publicClient.getBlockNumber({ cacheTime: 0 })) >= blockNumber) return;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  };
+
+  // Same cause, one step earlier: the node asked for the RECEIPT may be one of the
+  // ones still behind, so a freshly mined transaction reads as not-found. viem's
+  // default wait gives up quickly and throws, which reports a transaction that
+  // actually succeeded as a failure — observed here on a deposit that was mined in
+  // block 45347713 with status 1 while the wait timed out. Wait long enough for a
+  // lagging node to catch up, and keep retrying the not-found answer rather than
+  // treating it as terminal.
+  const receiptOf = (hash: `0x${string}`): Promise<TransactionReceipt> =>
+    publicClient.waitForTransactionReceipt({
+      hash,
+      timeout: 180_000,
+      pollingInterval: 2_000,
+      retryCount: 30,
+    });
 
   const at = (address: string, abi: Abi): Contract => {
     const addr = address as Address;
@@ -180,7 +234,9 @@ export function makeRig(opts: {
         publicClient.readContract({ address: addr, abi, functionName: fn, args } as any),
       write: async (fn, args = []) => {
         const hash = await sendWrite(addr, abi, fn, args);
-        return publicClient.waitForTransactionReceipt({ hash });
+        const receipt = await receiptOf(hash);
+        await settle(receipt.blockNumber);
+        return receipt;
       },
     };
     // ethers-style dynamic dispatch for scenario.ts: `pool.<fn>(...args)`.
@@ -198,7 +254,14 @@ export function makeRig(opts: {
             return publicClient.readContract({ address: addr, abi, functionName: fn, args } as any);
           }
           const hash = await sendWrite(addr, abi, fn, args);
-          const resp: TxResponse = { hash, wait: () => publicClient.waitForTransactionReceipt({ hash }) };
+          const resp: TxResponse = {
+            hash,
+            wait: async () => {
+              const receipt = await receiptOf(hash);
+              await settle(receipt.blockNumber);
+              return receipt;
+            },
+          };
           return resp;
         };
       },
@@ -210,8 +273,9 @@ export function makeRig(opts: {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       { abi, bytecode: ("0x" + bytecode.replace(/^0x/, "")) as `0x${string}`, args, ...feefields } as any,
     );
-    const rcpt = await publicClient.waitForTransactionReceipt({ hash });
+    const rcpt = await receiptOf(hash);
     if (!rcpt.contractAddress) throw new Error("deploy: receipt carried no contractAddress");
+    await settle(rcpt.blockNumber);
     return rcpt.contractAddress;
   };
 
