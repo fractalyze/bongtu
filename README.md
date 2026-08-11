@@ -79,29 +79,35 @@ and would not fit in a block. It pads the batch to a fixed 256 with no per-leaf 
 real recipient count stays hidden) and publishes all 256 ciphertexts on-chain for the auditor,
 bound by one aggregated disclosure hash the proof commits to.
 
-One such batch, measured live on GIWA on the current hybrid ML-KEM pool: **3,905,519 L2 gas**
-(15,256 per recipient) plus **~4e-6 ETH** of L1 data fee
-([tx](https://sepolia-explorer.giwa.io/tx/0xc877f669cc566b571f066cd097a7cba6b181b78e9ce91290f7b8ad86c7be795f)).
+One such batch, measured live on an OP-Stack testnet against the same circuits and the same hybrid
+ML-KEM envelope: **3,905,519 L2 gas** (15,256 per recipient) plus **~4e-6 ETH** of L1 data fee.
 
-A **100,000-person payroll** is 391 of those batches. From the measured per-batch numbers:
+**Everything in this section predates the move to the current chain**, including the costs below and
+the dollar figure after them: the gas was measured on the previous deployment, and the ETH costs
+price it at that chain's 0.005 gwei pin rather than the current one. Nothing here is a measured
+claim about the live pool until it is re-measured there —
+[`docs/performance.md`](docs/performance.md) carries the measured set.
+
+A **100,000-person payroll** is 391 of those batches. From those pre-move per-batch numbers:
 
 | | per 256-batch | ×391 (100,000 people) |
 |---|---|---|
 | L2 gas | 3,905,519 | ~1.53 billion |
-| L2 cost @ 0.005 gwei | ~2.0e-5 ETH | **~0.0076 ETH** |
+| L2 cost @ 0.005 gwei (the pre-move pin) | ~2.0e-5 ETH | **~0.0076 ETH** |
 | L1 data fee | ~4e-6 ETH | **~0.0016 ETH** |
 | **total** | | **~0.009 ETH (tens of dollars)** |
 | GPU proving @ 0.47 s | 0.47 s | **~3 minutes** |
 
-So a full private payroll of 100,000 clears in **a few minutes for well under $50**, proving on a
-single GPU. For contrast, Zeto's own published number is 2,763,071 gas for **2 recipients**
-(~1.38M each), making bongtu **~90× cheaper per recipient**: we replaced Zeto's value-keyed SMT with
-an IMT batch-attach and its per-note ciphertext with one aggregated disclosure hash. *(These are
-391× one measured batch, not a single live 100k run.)*
+On those pre-move numbers a full private payroll of 100,000 clears in **a few minutes for well under
+$50**, proving on a single GPU. For contrast, Zeto's own published number is 2,763,071 gas for
+**2 recipients** (~1.38M each), making bongtu **~90× cheaper per recipient**: we replaced Zeto's
+value-keyed SMT with an IMT batch-attach and its per-note ciphertext with one aggregated disclosure
+hash. *(These are 391× one measured batch, not a single live 100k run.)*
 
 ## What is built
 
-Every surface below runs today, end to end, against the live pool:
+Every surface below is built and has run end to end against the previous deployment; the cutover run
+against the pool in [Status](#status) is pending:
 
 | surface | what it is |
 |---|---|
@@ -109,31 +115,30 @@ Every surface below runs today, end to end, against the live pool:
 | [**Employer Payroll Test Console**](https://payroll.fractalyze.io) | The mass-payout console (testnet tool, access-gated): deposit public kKRW into the pool, generate a 255-recipient worksheet, and settle it as **one** private disburse, proof served by the GPU prover in seconds. |
 | **GPU prover service** | The employer-side proving box: three circuits resident on one GPU, in-process witness workers, ~0.5 s warm proof for the 256-batch. Auth- and origin-gated; only the employer's own console reaches it. |
 | **Indexer (arbiter mode)** | Mirrors the on-chain tree, decrypts every authority envelope, serves per-owner `/notes` + `/history` behind signature read-auth, and raises disclosure alarms when a batch's ciphertext disagrees with the chain. |
-| **BongtuPool on GIWA Sepolia** | The UUPS-proxied pool in [Status](#status): six Groth16 verifiers, the IMT, the kKRW escrow, and the enforced 2054-element disclosure on every disburse. |
+| **BongtuPool on Base Sepolia** | The UUPS-proxied pool in [Status](#status): six Groth16 verifiers, the IMT, the kKRW escrow, and the enforced 2054-element disclosure on every disburse. |
 
 The two web apps are static; the only server-side pieces are the employer's own prover and the
 institution's arbiter indexer — exactly the two parties that hold those roles in the design.
 
 ## Status
 
-Live on **GIWA Sepolia** (chain 91342), behind a **UUPS proxy** carrying the security-hardened circuits and
-enforced four-op auditor disclosure.
+Live on **Base Sepolia** (chain 84532), behind a **UUPS proxy** carrying the security-hardened
+circuits and enforced four-op auditor disclosure. `initialize` produces that whole shape in one
+call, so the pool serves every entry point from its first block and `currentEpoch()` is 0.
 
 | | address |
 |---|---|
-| BongtuPool (proxy, B=256) | [`0x93365980784ef504613EF5822ce1289CF858Fc10`](https://sepolia-explorer.giwa.io/address/0x93365980784ef504613EF5822ce1289CF858Fc10) |
-| BongtuPool implementation | [`0xcc7e6c6FAae7D32Fc8f54F25e5714e7AEC0159dA`](https://sepolia-explorer.giwa.io/address/0xcc7e6c6FAae7D32Fc8f54F25e5714e7AEC0159dA) |
+| BongtuPool (proxy, B=256) | [`0x2a72fea8e97fF79069B3D0165A5DB1Fef7F9322C`](https://sepolia.basescan.org/address/0x2a72fea8e97fF79069B3D0165A5DB1Fef7F9322C) |
+| BongtuPool implementation | [`0x960BDc691bB5F6BAfa45Ee9DD188BB4B925Bcc82`](https://sepolia.basescan.org/address/0x960BDc691bB5F6BAfa45Ee9DD188BB4B925Bcc82) |
 
-Pool proxy, implementation, all six Groth16 verifiers, and the kKRW token are
-**source-verified on the GIWA explorer** (the Poseidon contract is circomlibjs creation
-bytecode — there is no Solidity source to verify).
+Every other address — verifiers, Poseidon, the kKRW token — is in
+[`deploy/addresses.84532.json`](deploy/addresses.84532.json), which is the source of truth; take
+them from it **by field name** rather than copying one that looks familiar. The contracts are not
+source-verified on the explorer; audit them against this repo at the deploying commit.
 
-Verified on-chain through the proxy: `B()==256`, `disburseCiphertextLen==2054` (disclosure enforced), a real
-envelope-carrying `deposit`. Measured: warm 256-disburse GPU proof **~0.47s** (2.80M constraints); the
-headline 256-disburse runs end-to-end on this pool — freshest on the hybrid ML-KEM epoch
-(tx `0xc877f669…`) at 3,905,519 L2 gas (15,256 per recipient, far under the Karst cap), plus ~4e-6 ETH
-of L1 data fee for the ~66 KB ciphertext array. Per-op gas and proof times:
-[`docs/performance.md`](docs/performance.md).
+Verified on-chain through the proxy: `B()==256`, `disburseCiphertextLen==2054` (disclosure enforced),
+a real envelope-carrying `deposit`. Measured: warm 256-disburse GPU proof **~0.47s** (2.80M
+constraints). Per-op gas and proof times: [`docs/performance.md`](docs/performance.md).
 
 ## System map
 
@@ -152,7 +157,7 @@ of L1 data fee for the ~66 KB ciphertext array. Per-op gas and proof times:
                │ tx (a,b,c,pub)                       │ Groth16 calldata
                ▼                                      ▼
 ┌───────────────────────────────────────────────────────────────────┐
-│ BongtuPool (GIWA L2):  4 verifiers + IMT + kKRW escrow            │
+│ BongtuPool (L2):  6 verifiers + IMT + kKRW escrow                 │
 └─────────────────────────────────┬─────────────────────────────────┘
                                   │ events: ciphertext, roots, disclosureHash
                                   ▼
@@ -197,13 +202,13 @@ How to build, test, and run each component lives in its own README:
 - **Core library**: [`packages/core/README.md`](packages/core/README.md)
 - **Contracts** (forge test, gas report): [`contracts/README.md`](contracts/README.md)
 - **Circuits** (prove_all, soundness gates): [`circuits/README.md`](circuits/README.md)
-- **Indexer** (local + live GIWA, Postgres, docker compose): [`apps/indexer/README.md`](apps/indexer/README.md)
+- **Indexer** (local + live chain, Postgres, docker compose): [`apps/indexer/README.md`](apps/indexer/README.md)
 - **Wallet** (dev server, in-browser proving): [`apps/wallet-web/README.md`](apps/wallet-web/README.md)
 - **Payroll console**: [`apps/payroll-web/README.md`](apps/payroll-web/README.md)
 - **GPU prover service**: [`prover/README.md`](prover/README.md)
-- **Deploy + e2e** (local anvil, live GIWA runbook): [`deploy/README.md`](deploy/README.md)
+- **Deploy + e2e** (local anvil, live-chain runbook): [`deploy/README.md`](deploy/README.md)
 
-Copy `.env.example` → `.env` (gitignored) for a funded GIWA deployer key. Toolchain paths are in
+Copy `.env.example` → `.env` (gitignored) for a funded deployer key. Toolchain paths are in
 [`docs/toolchain.md`](docs/toolchain.md).
 
 ## Docs
@@ -216,8 +221,8 @@ System guarantees and inter-component contracts live in [`docs/`](docs/), one fi
   `-l` resolves the vendored and upstream includes.
 - [Contracts](docs/contracts.md): `BongtuPool`'s duties: proof binding, nullifier spend, enforced disclosure,
   events, arbiter epochs, the UUPS proxy and verifier wiring.
-- [Deployment](docs/deployment.md): live GIWA Sepolia addresses, chain facts, the deploy scripts, and the
-  arbiter-key-at-deploy coupling.
+- [Deployment](docs/deployment.md): the live deployment record, chain facts, the one-shot deploy and the
+  UUPS upgrade path, and the arbiter-key-at-deploy coupling.
 - [Indexer](docs/indexer.md): the mirror invariant, single-transaction persist and gap-only resume, the HTTP
   API with its read-auth, and the arbiter-mode trust boundary.
 - [Wallet](docs/wallet.md): key derivation from a MetaMask signature, in-browser proving and the stale-zkey
@@ -235,7 +240,7 @@ System guarantees and inter-component contracts live in [`docs/`](docs/), one fi
 
 How to run each piece is owned by its own README:
 
-- [Deploy](deploy/README.md): the reusable B=256 stack deploy: env config, local anvil gate, live GIWA runbook.
+- [Deploy](deploy/README.md): the reusable B=256 stack deploy: env config, local anvil gate, live-chain runbook.
 - [Prover service](prover/README.md): the resident-GPU proving service: wire contract, boot lifecycle, ops
   invariants (one instance per GPU), env knobs.
 - [Third-party notices](THIRD_PARTY_NOTICES.md): dependency licenses, GPL isolation for build tools, and the

@@ -7,9 +7,9 @@ guaranteed. Mechanisms live in [protocol.md](protocol.md), [circuits.md](circuit
 Naming: **arbiter**, **auditor**, and the circuit/contract identifiers `authority*` /
 `AUTHORITY_KEY` / `ARBITER_KEY_X/Y` all denote the SAME party — the holder of the key material every
 envelope is encrypted to. Docs prose says "arbiter"; "auditor" names its compliance role;
-`authority` is the upstream Zeto vocabulary the code inherits. Since the 2026-07-27 hybrid upgrade
-that material is a **pair**: the bjj private key plus an ML-KEM-768 decapsulation key
-(`AUTHORITY_KEM_KEY`). Opening a post-upgrade envelope needs both.
+`authority` is the upstream Zeto vocabulary the code inherits. That material is a **pair** from
+epoch 0 onward: the bjj private key plus an ML-KEM-768 decapsulation key (`AUTHORITY_KEM_KEY`).
+This pool has never had a classical-only epoch, so opening any envelope it has emitted needs both.
 
 ## Who sees what
 
@@ -82,15 +82,16 @@ payload is ciphertext either way, readable only by each recipient and the arbite
 
 ## Post-quantum: the hybrid authority-envelope key
 
-Everything bongtu encrypts is published on-chain and stays there. The pre-upgrade envelope key was
-`ECDH(ephemeralPrivateKey, arbiterPublicKey)` on BabyJubJub, and **both** points are public — the
-ephemeral key is a public signal copied into every op event, the arbiter key is in `arbiterEpochs`.
-A future ECDLP break therefore retro-decrypts every authority envelope from chain data alone. Since
-the envelope carries the op-wide plaintext including every recipient pubkey, it is also the key that
-unlocks the receiver ciphertexts. That is the harvest-now-decrypt-later exposure the hybrid upgrade
-closes.
+Everything bongtu encrypts is published on-chain and stays there. A classical-only envelope key
+would be `ECDH(ephemeralPrivateKey, arbiterPublicKey)` on BabyJubJub, with **both** points public —
+the ephemeral key is a public signal copied into every op event, the arbiter key is in
+`arbiterEpochs`. A future ECDLP break would therefore retro-decrypt every such envelope from chain
+data alone. Since the envelope carries the op-wide plaintext including every recipient pubkey, it is
+also the key that unlocks the receiver ciphertexts. That harvest-now-decrypt-later exposure is what
+the hybrid key closes.
 
-Since **arbiter epoch 1** (live on GIWA 2026-07-27) the authority envelope key is a hybrid fold of
+The live pool is hybrid from its first block: **arbiter epoch 0** carries both halves of the
+authority key, so the envelope key is a fold of
 the classical ECDH secret and an ML-KEM-768 shared secret, and the shared secret is bound into the
 proof:
 
@@ -129,15 +130,18 @@ both ways: the bundled key is chain-vouched, never trusted-from-bundle.
 
 Scope, stated honestly:
 
-- **Epoch 0 envelopes are ECDH-only forever.** The upgrade seals what comes after it, not what was
-  already published. Every bjj recipient pubkey inside a pre-upgrade envelope is burned at Q-day,
-  and for those identities the receiver-ciphertext attack is not stranded either. Full stranding
-  applies only to identities that never appeared in a pre-upgrade envelope. `arbiterKemPkHash(0) ==
-  0` is the on-chain, audit-facing statement of exactly where that boundary sits.
+- **Every envelope this pool has ever emitted is hybrid.** `initialize` mints epoch 0 carrying both
+  halves, so there is no classical-only prefix to strand: `arbiterKemPkHash(0) != 0` is the
+  on-chain, audit-facing statement of that. The client guard splits the two failures it can see
+  (`arbiterKemPkGuardError`, `packages/core/src/network.ts`): a getter that is absent or reverts —
+  `isPreKemProbeError`, a `CALL_EXCEPTION` — is the pre-KEM pool this build refuses to produce
+  proofs for, while any hash that is *present* but not this build's, a zero among them, is refused
+  as a key mismatch. A zero on-chain never means "pre-KEM"; the pool refuses to store one, so it can
+  only mean an epoch that was never minted.
 - **Receiver ciphertexts are still ECDH-only.** Per-recipient KEM is deferred: it costs ~38k gas per
   recipient (≈ +9.7M on a 256-batch) and only helps an adversary who already holds candidate
-  recipient pubkeys — which, post-upgrade, appear nowhere on-chain in the clear. The interim defence
-  is operational: bongtu addresses are shared off-channel, never published.
+  recipient pubkeys — which appear nowhere on-chain in the clear. The interim defence is
+  operational: bongtu addresses are shared off-channel, never published.
 - **The KEM alarm is arbiter-attested, not publicly recomputable.** The disclosure alarm can be
   re-derived by anyone from public data; confirming a `kemBinding` mismatch requires decapsulating
   under the arbiter's secret key, so a third party can neither verify a raised alarm nor detect a
@@ -146,7 +150,7 @@ Scope, stated honestly:
 - **Signatures are unchanged.** Groth16 and the bjj EdDSA read-auth are classically sound; forgery
   is a forge-later problem, migratable before Q-day. ML-DSA is not part of this work.
 
-Downgrade is structurally unavailable rather than merely discouraged: the upgraded circuits have no
+Downgrade is structurally unavailable rather than merely discouraged: the circuits have no
 ECDH-only encryption path, and the pool rejects any `kemCiphertext` that is not exactly 1088 bytes.
 "Opting out" degenerates into the consistent-but-junk case, i.e. an alarm.
 
@@ -215,4 +219,5 @@ Present-tense, deliberate, and not fixed by anything in the tree today.
   token must be non-fee-on-transfer and non-rebasing, or the pool is insolvent by construction.
 - **Single-key ownership.** The proxy owner, the upgrade authority and the arbiter-rotation
   authority are one testnet EOA. Mainnet calls for a multisig or timelock.
-- **Testnet only.** GIWA mainnet is not launched; every address and measurement here is Sepolia.
+- **Testnet only.** The stack is deployed to Base Sepolia; every address and measurement here is
+  testnet. Nothing in this repo has been deployed to a mainnet.

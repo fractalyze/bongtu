@@ -71,7 +71,7 @@
 #   - disburse256 circuit build: 2.79M constraints -> ~1.24 GB zkey with a
 #     multi-minute setup, and its only consumer is the GPU proving path
 #     excluded above — nothing a hosted runner could run consumes it.
-#   - GIWA live deploy / live-chain smoke (the deploy scripts in GIWA mode,
+#   - live-chain deploy / smoke (the deploy scripts pointed at the live chain,
 #     the deploy/live/ drivers): both need the funded deployer key from the
 #     gitignored .env; this workflow is deliberately secret-free. (The local-
 #     anvil mode of deploy_local.sh IS included, in the forge job.)

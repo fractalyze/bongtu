@@ -6,7 +6,7 @@
 > The two critical risks are retired: the mixed-mode tree lets a disburse-batch note be spent by transfer
 > against one root, and the withdraw-from-nothing hole is closed by the circuit value-belt. Commits:
 > c6059bf (U1) · fffb29a (U2) · 3ae314c + ab9d1ec (U3) · U4 next. **Next milestone: M1** (swap 1×16→1×256 +
-> rabbitsnark GPU, gas assertions, GIWA Sepolia deploy).
+> rabbitsnark GPU, gas assertions, the first testnet deploy).
 
 **M0 retires the two critical risks from the SPEC adversarial review:** (a) a note minted via 256-style
 subtree-attach on the unified mixed-mode tree is spendable by the *other* circuits against the same root, and

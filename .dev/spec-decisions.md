@@ -1,10 +1,12 @@
 # bongtu — Spec (v1 PoC)
 
 > **봉투 (bongtu)** — a digital 월급봉투. Everyone sees envelopes handed out; only the recipient sees the
-> amount inside; a designated authority can open every envelope. An institutional privacy token on GIWA
-> (OP Stack L2), built on Zeto with enforced auditor disclosure.
+> amount inside; a designated authority can open every envelope. An institutional privacy token on an
+> OP Stack L2, built on Zeto with enforced auditor disclosure.
 
-Status: **spec — grilled, adversarially reviewed, locked 2026-07-23.** Target: GIWA Sepolia (91342).
+Status: **spec — grilled, adversarially reviewed, locked 2026-07-23; retired.** Target at the time: a
+public OP-Stack L2 testnet (see §9 — the chain named there was later abandoned; the live deployment
+is recorded in `deploy/addresses.84532.json` and described in `docs/deployment.md`).
 "PoC" = this testnet deliverable; "prod" = mainnet-grade, out of scope but flagged.
 Section 11 is the honest-caveats register; Section 13 is the deferred-prod-requirements register.
 
@@ -34,13 +36,13 @@ wallet onboards — the GASOK user-KPI bridge).
 | Q1 | Keep **all** Zeto payment features; add **256-out batch disburse** as headline; **authority = auditor** on every transfer | Commodity features stay; 256-out + GPU proving is the moat |
 | Q2 | **Single flavor: non-repudiation on every transfer** (no audit-free path) | Compliance identity; halves the circuit matrix; loosenable later, not un-loosenable |
 | Q3 | **Wrapped ERC-20 only**; deposit mints notes 1:1 | Payroll = "deposit token, disburse privately"; issuer-mint preserved but unused |
-| Q3b | Demo token = **bongtu-deployed mock `kKRW`** (18-dec, faucet-mintable); WETH9 is the alternative; a real GIWA stablecoin only if it passes the §5 fee-on-transfer/rebasing check | GIWA coinless, no stablecoin confirmed; controllable + narrative-friendly + unblocks deploy |
-| Q4 | **All ciphertext on-chain** (calldata + events) | GIWA L2 ≈0.001 gwei makes 65KB ≈ sub-cent; buys trustless discovery + seed-only recovery. (Availability is L1-backed via calldata, see §11-7) |
+| Q3b | Demo token = **bongtu-deployed mock `kKRW`** (18-dec, faucet-mintable); WETH9 is the alternative; a real stablecoin on the target chain only if it passes the §5 fee-on-transfer/rebasing check | no native stablecoin confirmed there; controllable + narrative-friendly + unblocks deploy |
+| Q4 | **All ciphertext on-chain** (calldata + events) | L2 gas ≈0.001 gwei makes 65KB ≈ sub-cent; buys trustless discovery + seed-only recovery. (Availability is L1-backed via calldata, see §11-7) |
 | Q5 | **Local-first self-hosted proving**; employer proves on own infra | "Payroll data never leaves your infra"; GPU tier is the paid moat later |
 | Q6 | v1 = **4 circuits** (`transfer` 2×2, `disburse` 1×256, `withdraw` 2×1, `deposit` 0×2), IMT depth-32, Poseidon-v1, **stock 100-bit value range** | See §4 |
-| Q6b | **Drop the merged fund+disburse variant** | Its only benefit was gas ($0.007 at GIWA); merging *links* deposit↔disburse, worse for privacy |
+| Q6b | **Drop the merged fund+disburse variant** | Its only benefit was gas ($0.007 at target-chain prices); merging *links* deposit↔disburse, worse for privacy |
 | Q7 | **One open monorepo `bongtu`** (Apache-2.0); Zeto = vendored dep, Foundry-first | Public-signal offsets are version-coupled; indexer is convenience post-Q4, so open costs no moat |
-| Q8 | **Name = bongtu** | 월급봉투 metaphor maps 1:1; Korean object; no clash with GIWA "Bojagi" |
+| Q8 | **Name = bongtu** | 월급봉투 metaphor maps 1:1; Korean object; no clash with an existing project name |
 | Q9 | Arbiter key = **required `initialize()` arg** + **epoch versioning/rotation**; pubkey injected from storage, never calldata | Kills (0,0) footgun; institutions rotate keys |
 | Q10 | **Two apps**: (1) **admin** with **two role-modes** — *employer-mode* (no arbiter key: CSV→prove→disburse, ledger from own CSV+receipts) and *auditor-mode* (holds arbiter key: decrypts event stream) — and (2) **public** (MetaMask, client-side balance, transfer/withdraw) | Amounts can't live decrypted in a public DB; role-mode split preserves "2 apps" while keeping the auditor independent (see §7 + review note) |
 | Q11 | **Single-party trusted setup** for PoC; phase-2 MPC is a mainnet prerequisite **after circuit freeze** | Testnet = fake money; ceremony is waste until circuits are frozen |
@@ -75,7 +77,7 @@ wallet onboards — the GASOK user-KPI bridge).
 │          disclosureHash verify · (auditor-mode) arbiter-decrypt ledger           │
 │ apps/ admin-web(employer-mode | auditor-mode) · wallet-web(MetaMask wallet)     │
 └──────────────────────────────────────────────────────────────────────────────┘
-                    deploy → GIWA Sepolia (Blockscout verify)
+                    deploy → public OP-Stack L2 testnet
 ```
 
 ---
@@ -212,8 +214,8 @@ value still counts → **mint-from-nothing**. Fix, applied to **every** verifier
 - **Nullifiers:** `mapping(uint256=>bool)` (stock).
 - **ERC-20 custody:** deposit mints then pulls via SafeERC20 (CEI). **Hard constraint:** underlying ERC-20
   **MUST be non-fee-on-transfer and non-rebasing** — the amount is proof-bound before the pull, so a
-  fee/rebase makes the pool insolvent by construction (balance-delta minting is not available). Any future
-  "GIWA stablecoin" selection is gated on verifying this.
+  fee/rebase makes the pool insolvent by construction (balance-delta minting is not available). Selecting
+  any real on-chain stablecoin is gated on verifying this.
 - **Arbiter versioning:** `initialize(...)` **requires** a non-zero key. `arbiterEpochs[e]={key,
   activatedBlock}`; `rotateArbiter(newKey)` appends an epoch + emits an event. The arbiter pubkey public
   input is **read from `arbiterEpochs` storage at execution, never from calldata** (else a sender encrypts to
@@ -337,7 +339,7 @@ serves:
 > **§6b addendum (2026-07-24, indexer-core built + adversarially reviewed).**
 > - **Alarm classes.** Every disclosure that does not fully check out surfaces on `GET /alarms`:
 >   `mismatch` (proven tamper), `unverifiable` (receiver-only publication — the chain covers
->   receiver ++ authority, so it can never complete; this is the live GIWA disburse's flavor), and
+>   receiver ++ authority, so it can never complete; this is the live disburse's flavor), and
 >   `withheld` (plain `disburse()`, nothing published). Receiver-only/withheld are auditor-policy
 >   judgments, not proven tampers — full alarm coverage requires emitting receiver ++ authority
 >   ciphertext, as the conformance scenario's honest disburse does.
@@ -398,7 +400,7 @@ serves:
   it is just not a wallet balance path. The indexer never sees user *spending* keys, but the
   arbiter-mode instance does hold every owner's decrypted notes (§6b) — `/notes` auth governs who may
   query.
-- Recipient gas: PoC uses faucet; GIWA's pre-installed ERC-4337 EntryPoint + paymaster → gasless spend is
+- Recipient gas: PoC uses a faucet; an OP-Stack chain's pre-installed ERC-4337 EntryPoint + paymaster → gasless spend is
   v1.1.
 
 ---
@@ -416,7 +418,7 @@ bongtu/                       # one monorepo, Apache-2.0; npm workspaces = apps/
     indexer/                  # @bongtu/indexer — event ingest, IMT mirror, path API, disclosureHash, arbiter ledger
     admin-web/                # @bongtu/admin-web — role-moded admin console
     wallet-web/               # @bongtu/wallet-web — MetaMask wallet
-  deploy/                     # Foundry scripts → GIWA Sepolia (Blockscout verify)
+  deploy/                     # Foundry scripts → the target testnet
   docs/                       # spec (this file), milestone records, toolchain
 ```
 
@@ -425,55 +427,45 @@ Workspace packages export **raw `src/*.ts`** (`"exports": { "./*": "./src/*.ts" 
 
 ---
 
-## 9. GIWA facts (verified 2026-07-23)
+## 9. Target-chain facts and the first live deploy
 
-Chain 91342, RPC `sepolia-rpc.giwa.io`, Blockscout `sepolia-explorer.giwa.io`, faucet `faucet.giwa.io`.
-Coinless (gas=ETH), L2 gas ≈0.001 gwei. BN254 precompiles present → Groth16 native. **Karst (Osaka) per-tx
-gas cap = 16,777,216** — disburse256 (1.03M) fits with huge margin; naive 256-insert (263M) does not. Deploy
-permissionless, `--verifier blockscout`. Mainnet **not launched** — all PoC data is testnet. Full facts:
-knowledge `giwa-chain-facts-for-deployment`.
+> **Superseded.** This section recorded the chain this spec originally targeted and the deployment
+> made to it in July 2026. That chain was abandoned and the stack redeployed elsewhere; its
+> addresses have been removed from the repo rather than restated here, because the deployer replayed
+> the same CREATE nonce sequence on the new chain and several old addresses collide with *different*
+> live contracts. For where the project runs now, read `docs/deployment.md` and
+> `deploy/addresses.84532.json` — never this section.
 
-### Deployed to GIWA Sepolia — the full B=256 stack is LIVE
+The original target was an OP-Stack L2 testnet: gas paid in ETH at ≈0.001 gwei, BN254 precompiles
+present → Groth16 native, per-tx gas cap 16,777,216 (EIP-7825) — disburse256 (1.03M) fits with huge
+margin, naive 256-insert (263M) does not. Deployment permissionless. Mainnet was not launched; all
+PoC data was testnet. Those properties are why the design's gas arguments hold; the current chain
+was chosen to match them.
 
-**v2 redeploy (2026-07-24)** — behind a **UUPS (ERC-1967) proxy**, carrying the security-hardened circuits
-(zero-commitment belt on all spending paths), the four-op auditor envelopes, and on-chain disclosure
-enforcement (`disburseCiphertextLen==2054`, no plain disburse). This supersedes the v1 pool
-`0x22a2F38a…` (belt/envelope-less, non-upgradeable — left on-chain, no longer referenced).
+### The stack was deployed and exercised there (2026-07-24)
 
-| contract | address |
-|---|---|
-| **BongtuPool (proxy, B=256)** | `0x93365980784ef504613EF5822ce1289CF858Fc10` |
-| BongtuPool impl | `0x459f80A457f11328eBd67aeBFa9F90D05c58b27f` |
-| Poseidon-v1 | `0xaA7778c778C83cE5655d5F217bDfE7782e01Bc50` |
-| DepositVerifier | `0xF3b5D0eb5558B9427Fe599792E728b9B2bD20B2E` |
-| WithdrawVerifier | `0xaA581CFB50F69144C6a9B6380193858E8f4B00Db` |
-| Disburse256Verifier | `0xD030602597CC7F47107e6F96d0d1D6b73a71698F` |
-| TransferVerifier | `0x594408F216d096E8BCB21cdceb58a14186895892` |
-| mock kKRW | `0x17A89cC5FF3395Bb01464c9E422749CcDbFa8C3f` |
+The full B=256 stack went live behind a **UUPS (ERC-1967) proxy**, carrying the security-hardened
+circuits (zero-commitment belt on all spending paths), the four-op auditor envelopes, and on-chain
+disclosure enforcement (`disburseCiphertextLen==2054`, no plain disburse). It superseded an earlier
+belt/envelope-less, non-upgradeable pool on the same chain.
 
-Owner/deployer `0xe92a97e645351268F3d60d5a27EB842A5b293058`; verified on-chain through the proxy:
-`B()==256`, `initialized==true`, `disburseCiphertextLen==2054`, ERC-1967 impl slot → the impl above. A real
-`deposit` (now carrying the auditor envelope) succeeded (nextLeafIndex 0→2, custodied 3000 kKRW). **A real
-256-recipient private disburse then ran end-to-end on this v2 pool** (deposit→disburse256, GPU proof against
-the live root, full receiver++authority ciphertext on-chain): tx
-`0xe254240a5df042a163073c028399a5fc63cf87434a7e7ebbf5ddfea73c803bd6`, nextLeafIndex 4→512, ~15,126 gas/recipient,
-total 2.34e-5 ETH (warm GPU proof 149.8s incl. one-time zkey compile). **Whole
-v2 deploy + smoke cost 1.66e-5 ETH** (L2 0.001 gwei; L1/blob DA fee negligible — the earlier §11-7 DA worry
-stays refuted at these params). Arbiter key = the realproofs authority key
-(`0x08a72afc…`) — the live v2 256-disburse above was proven against it (zkey unchanged, one warm GPU
-prove; the earlier "re-prove needed" follow-up is done). Blockscout `--verify` optional. Addresses in
-`deploy/addresses.91342.json`.
+Verified on-chain through the proxy at the time: `B()==256`, `disburseCiphertextLen==2054`, the
+ERC-1967 impl slot pointing at the deployed implementation. A real `deposit` carrying the auditor
+envelope succeeded (nextLeafIndex 0→2, custodied 3000 kKRW). The whole deploy + smoke cost 1.66e-5
+ETH.
 
-**A real 256-recipient private disburse ran live (2026-07-24, `deploy/giwa_disburse256.ts`):** an employer
-deposited a note, then spent it to **256 recipients in one tx** with a rabbitsnark-GPU proof, publishing all
-256 receiver ciphertexts on-chain. tx `0xc97836e05651756c333fc18bbb4698182f5d5690e41bd103e3e42eb178abc37e`
-— nextLeafIndex 4→512, deposit-note nullifier marked, `disclosureHash` matched (on-chain ciphertext == the
-circuit's), authority pubkey == pool's stored arbiter key. **L2 gas 3,026,697 (< Karst 16.7M; 11,823/recipient)**
-— higher than the plain 1.03M because the 256×4=1024 ciphertext elements ride as calldata + event (the
-"all ciphertext on-chain" choice, SPEC §4/Q4). **L1 data fee only 2,237,831,994,042 wei (~2.2e-6 ETH) even
-for 32KB of ciphertext** — blob DA keeps it ~0.05% of cost, confirming §11-7's calldata worry is moot here.
-(NB: ethers' auto gas-price overpaid ~1500× on the first run; the runner now pins gasPrice=0.005 gwei so the
-true cost is L2 3.03M × ~0.001 gwei + L1 ~2.2e-6 ETH ≈ 0.000005 ETH ≈ $0.016 per 256-payout.)
+**A real 256-recipient private disburse then ran end-to-end there:** an employer deposited a note and
+spent it to **256 recipients in one transaction** with a rabbitsnark-GPU proof, publishing all 256
+receiver ciphertexts on-chain — nextLeafIndex 4→512, deposit-note nullifier marked, `disclosureHash`
+matched (on-chain ciphertext == the circuit's), authority pubkey == the pool's stored arbiter key.
+**L2 gas 3,026,697 (11,823/recipient, far under the cap)** — higher than the plain 1.03M because the
+256×4=1024 ciphertext elements ride as calldata + event (the "all ciphertext on-chain" choice, §4/Q4).
+**L1 data fee only ~2.2e-6 ETH even for 32 KB of ciphertext** — blob DA kept it ~0.05% of cost,
+confirming §11-7's calldata worry is moot at these params. (NB: an auto gas-price estimate overpaid
+~1500× on the first run, which is why the drivers pin the gas price.)
+
+Those are the numbers this spec's arguments were validated against. Current measurements live in
+`docs/performance.md`.
 
 ---
 
@@ -483,7 +475,7 @@ true cost is L2 3.03M × ~0.001 gwei + L1 ~2.2e-6 ETH ≈ 0.000005 ETH ≈ $0.01
 2. `BongtuPool`: single-frontier IMT (§5.1) + contract-derived enabled (§5.2) + any-historical-root map +
    arbiter epochs + ERC-20 custody; **Foundry differential test** (root == reference JS IMT) + accept /
    replay-revert / tamper-revert / enabled-forgery-revert / arbiter-rotation tests green.
-3. Deployed to GIWA Sepolia + Blockscout-verified; **one real 65KB disburse sent, `l1Fee` read from the
+3. Deployed to a public testnet; **one real 65KB disburse sent, `l1Fee` read from the
    receipt and recorded in §9** (replaces the estimated budget).
 4. Indexer running: event ingest, IMT mirror (root-match invariant), path API, disclosureHash-verify alarm,
    auditor-mode arbiter ledger.
@@ -495,7 +487,7 @@ true cost is L2 3.03M × ~0.001 gwei + L1 ~2.2e-6 ETH ≈ 0.000005 ETH ≈ $0.01
 **Gas budget (est., to be replaced by DoD-3 measurement):** disburse dominant term = EIP-7623 calldata floor
 on ~65KB high-entropy ciphertext (~2.6M) + LOG (~0.5M) + Groth16 verify (~0.25M) + pad/attach hashes → ~4.2M,
 under the 16.7M cap. deposit and disburse are **separate txs**, each independently under-cap. "Sub-cent"
-prices L2 execution only; GIWA's L1 DA scalars are unpublished, hence DoD-3.
+prices L2 execution only; the target chain's L1 DA scalars were unpublished, hence DoD-3.
 
 ## 10b. Build order (fast-iteration ladder — apps never block circuits)
 
@@ -506,7 +498,7 @@ prices L2 execution only; GIWA's L1 DA scalars are unpublished, hence DoD-3.
   disburse(1×16) → recipient spends a batch-inserted note via transfer (incl. a padded single-input spend to
   exercise enabled=0) → withdraw`, asserting `contract.root == reference JS IMT root` after every insert and
   that every emitted ciphertext trial-decrypts to a spendable note.
-- **M1:** swap 1×16 → 1×256 + rabbitsnark GPU; gas assertions; GIWA Sepolia deploy + Blockscout verify + real
+- **M1:** swap 1×16 → 1×256 + rabbitsnark GPU; gas assertions; testnet deploy + real
   `l1Fee` (token decision = mock kKRW is the M1 entry gate).
 - **M2:** indexer (event ingest, IMT mirror, path API, disclosureHash verify) + public app.
 - **M3:** admin employer/auditor role-modes + demo script.

@@ -9,8 +9,9 @@
 #
 #   cd bongtu && bash deploy/gates/deploy_local.sh    # exits 0 iff deploy + smoke pass
 #
-# GIWA Sepolia is the SAME two scripts with a different env (RPC + funded key +
-# Blockscout --verify) — see deploy/README.md. Starts anvil in the background and
+# The live testnet is the SAME two scripts with a different env: the RPC, a funded
+# key, and ARBITER_KEM_PK_HASH / ARBITER_KEM_PK, which default only on chain 31337
+# and are REQUIRED off it — see deploy/README.md. Starts anvil in the background and
 # KILLS it on exit (trap); tracks the PID so nothing leaks.
 set -uo pipefail
 
@@ -52,7 +53,7 @@ for _ in $(seq 1 50); do
 done
 [ "$READY" = 1 ] || { cat "$ANVIL_LOG"; fail "anvil did not become ready on :$PORT"; }
 
-# Deployer key/addr default to anvil account 0; DEPLOYER_KEY overrides for GIWA.
+# Deployer key/addr default to anvil account 0; DEPLOYER_KEY overrides for a live run.
 export DEPLOYER_KEY="${DEPLOYER_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}"
 
 # --- 1) deploy the full B=256 stack (broadcast) ----------------------------

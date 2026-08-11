@@ -173,9 +173,9 @@ disburseWithCiphertexts(a,b,c, uint[11] pub, uint256[] receiverCiphertexts,
 - UUPS: one `upgradeToAndCall` swaps the impl AND the four ON-CHAIN verifier addresses
   (the fifth, 1x16 DisburseVerifier, is a test-only artifact regenerated alongside) (new
   vkeys), and the call payload seeds `arbiterKemPkHash[currentEpoch()]` (or rotates to
-  a fresh epoch carrying both keys — preferred, see §7). Pool proxy address
-  `0x93365980784ef504613EF5822ce1289CF858Fc10` (GIWA, `deploy/addresses.91342.json`)
-  is preserved.
+  a fresh epoch carrying both keys — preferred, see §7). The pool proxy address is
+  preserved across the swap; whichever deployment is current, that address is the
+  `pool` field of the committed `deploy/addresses.<chainid>.json`.
 
 Gas estimate per op (measured 2026-07-26 baselines from `docs/performance.md`):
 

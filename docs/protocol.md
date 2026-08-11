@@ -61,7 +61,7 @@ One height-32 append-only Incremental Merkle Tree holds **both** single-leaf app
 | parameter | value | where |
 |---|---|---|
 | height `H` | 32 (2^32 leaf capacity) | `BongtuPool.H`, `ImtTree` default |
-| batch size `B` | 256 on the live pool | `BongtuPool.B`, `deploy/addresses.91342.json` |
+| batch size `B` | 256 on the live pool | `BongtuPool.B`, `deploy/addresses.84532.json` |
 | `LOG_B` | 8 — the level a batch subtree attaches at | derived in `initialize` |
 | empty subtree | `zeros[0] = 0`, `zeros[k] = Poseidon(zeros[k-1], zeros[k-1])` | both implementations |
 | frontier | `filledSubtrees[i]` = the left sibling waiting at level `i` | Tornado lineage |

@@ -1,8 +1,9 @@
 # bongtu deploy — B=256 production stack
 
-Reusable Foundry deploy of the full production BongtuPool stack (M1 U6 / Done#2).
-One script, one node, env-driven — the same two scripts run on a local anvil and
-on GIWA Sepolia (only RPC + key + `--verify` differ).
+Reusable Foundry deploy of the full production BongtuPool stack. One script, one
+node, env-driven — the same two scripts run on a local anvil and on the live
+testnet, given the RPC, a funded key, and the two arbiter KEM variables that anvil
+defaults but a live chain requires (see [Config](#config-env-with-defaults)).
 
 ## What it deploys
 
@@ -10,16 +11,18 @@ on GIWA Sepolia (only RPC + key + `--verify` differ).
 
 1. **Poseidon-v1** — from the circomlibjs creation bytecode (`contracts/test/fixtures/poseidon2.hex`),
    the byte-identical hash the circuits / SDK / tests use (inline `create`).
-2. the **4 real Groth16 verifiers** — `DepositVerifier`, `WithdrawVerifier`,
-   **`Disburse256Verifier`** (production 256-arity), `TransferVerifier`.
+2. the **6 real Groth16 verifiers** — `DepositVerifier`, `WithdrawVerifier`,
+   **`Disburse256Verifier`** (production 256-arity), `TransferVerifier`,
+   `Transfer10Verifier`, `Transfer10x2Verifier`.
 3. a **mock kKRW** ERC-20 (`MockERC20`, 18-dec, non-fee-on-transfer — the only
    shape the pool supports). On a real network, swap this for the real token
-   address (the pool takes the token as a **constructor** arg — there is no
-   `setERC20`; it is immutable).
+   address (the pool takes the token as an `initialize` arg and there is no
+   `setERC20`, so it is fixed for the life of the deployment).
 4. **`BongtuPool(B=256)` behind a UUPS (ERC-1967) proxy**: the implementation is
    deployed first, then a proxy whose constructor runs
    `initialize(arbiterKey, ...)` atomically — seeding arbiter epoch 0 and wiring
-   Poseidon + the 4 verifiers + the token. The **proxy** is the canonical,
+   Poseidon + all six verifiers + the token. That single call produces the full
+   production shape; there is no follow-up initializer. The **proxy** is the canonical,
    upgrade-stable pool address; the addresses file records both `pool` (proxy)
    and `poolImpl`. Owner = the deployer.
 
@@ -33,6 +36,13 @@ Addresses are written to `deploy/addresses.<chainid>.json` (forge also writes
 | `DEPLOYER_KEY` | anvil account 0 | deployer privkey; also the owner |
 | `BATCH_SIZE` | `256` | disburse batch size (production) |
 | `ARBITER_KEY_X` / `ARBITER_KEY_Y` | disburse256 fixture `pub[8..9]` | arbiter authority pubkey |
+| `ARBITER_KEM_PK_HASH` | fixture hash — **chain 31337 only** | `keccak256` of the arbiter's ML-KEM-768 encapsulation key. Off anvil there is no default: `Deploy.s.sol` reads it with `vm.envBytes32`, which reverts when unset, and refuses the fixture value outright |
+| `ARBITER_KEM_PK` | fixture key — **chain 31337 only** | the full encapsulation key recorded next to the hash; must hash to `ARBITER_KEM_PK_HASH`. Off anvil the deploy self-check fails without it (`no ARBITER_KEM_PK recorded`) |
+| `LIVE_RPC` | the sdk `RPC_URL` | the chain the live invocation below and the `live/` drivers talk to (`.env.example` carries it) |
+
+The two KEM knobs are **required off anvil, and deliberately have no live default** — a silent
+fixture fallback would make every auditor envelope world-readable with nothing in the deploy saying
+so ([`Deploy.s.sol` `_resolveKemPkHash`](forge/Deploy.s.sol)).
 
 The default arbiter key is read straight from the committed
 `contracts/test/fixtures/disburse256.public.json` public signals `[8..9]`, i.e.
@@ -56,62 +66,72 @@ the tokens. Proves the full stack is live and correctly wired.
 
 Overridable: `DEPLOY_PORT` (default 8550), `RPC`, `CHAINID`, `FORGE`/`ANVIL`/`CAST`.
 
-## Deploy to GIWA Sepolia (done — the live stack)
+## Deploy to the live testnet (done — the live stack)
 
-The live B=256 stack is already deployed with this pipeline: addresses in the
-committed `deploy/addresses.91342.json` (proxy + impl also in the root
-[`README.md`](../README.md) Status table). **The live pool is canonical — do not
+The live B=256 stack is already deployed with this pipeline; its addresses are in
+the committed `deploy/addresses.84532.json`. **The live pool is canonical — do not
 redeploy for new work**; a circuit change ships as a UUPS upgrade (repo
 [`CLAUDE.md`](../CLAUDE.md)). The runbook below is the recipe that produced it,
 kept for a from-scratch redeploy.
 
-GIWA Sepolia is the SAME `forge/Deploy.s.sol` with different env. Facts (verified
-2026-07-23): chain **91342**, RPC **https://sepolia-rpc.giwa.io**, Blockscout
-explorer https://sepolia-explorer.giwa.io, coinless (gas = ETH), Karst hardfork
-(EIP-7825 per-tx gas cap 16,777,216 — the disburse gas is well under it), BN254
-precompiles present (native Groth16 verify).
+The live chain is the SAME `forge/Deploy.s.sol` with different env. Its facts —
+chain id, RPC, explorer, faucet, gas-price pin — have one home,
+`packages/core/src/network.ts`, and are tabulated in
+[`docs/deployment.md`](../docs/deployment.md#chain-facts). It is an OP-Stack L2:
+EIP-7825 caps a transaction at 16,777,216 gas (the disburse is well under it) and
+the BN254 precompiles are present, so Groth16 verification is native.
 
 ```sh
 cd bongtu/contracts
-export DEPLOYER_KEY=0x<funded-giwa-sepolia-key>   # fund via faucet.giwa.io; lives in .env (gitignored, template .env.example)
-# optional: real arbiter key / real token (else a mock kKRW is deployed)
+export DEPLOYER_KEY=0x<funded-key>   # from the chain's faucet; lives in .env (gitignored, template .env.example)
+export LIVE_RPC=<the chain's RPC>    # docs/deployment.md#chain-facts; .env.example carries the current one
+
+# REQUIRED off anvil — no default, and the fixture value is refused:
+export ARBITER_KEM_PK_HASH=0x<keccak256 of the institutional encapsulation key>
+export ARBITER_KEM_PK=0x<the full 1184-byte encapsulation key>
+
+# optional: real arbiter bjj key / real token (else a mock kKRW is deployed)
 # export ARBITER_KEY_X=... ARBITER_KEY_Y=...
 # export TOKEN_ADDRESS=0x<existing-erc20>
 
 forge script ../deploy/forge/Deploy.s.sol:Deploy \
-  --rpc-url https://sepolia-rpc.giwa.io \
-  --broadcast --skip-simulation \
-  --verify --verifier blockscout \
-  --verifier-url https://sepolia-explorer.giwa.io/api
+  --rpc-url "$LIVE_RPC" \
+  --broadcast --skip-simulation
 ```
 
 `--skip-simulation` is required (and is exactly what the validated `gates/deploy_local.sh`
 uses): `Deploy.s.sol` deploys Poseidon via inline-assembly `create`, which forge's
 on-chain simulation cannot model.
 
-Addresses land in `deploy/addresses.91342.json`. Then the same smoke, pointed at
-GIWA (needs the deployer funded; with the default `MockERC20`, mint is open):
+Addresses land in `deploy/addresses.<chainid>.json`. Then the same smoke, pointed
+at the live chain (needs the deployer funded; with the default `MockERC20`, mint
+is open):
 
 ```sh
-forge script ../deploy/forge/Smoke.s.sol:Smoke --rpc-url https://sepolia-rpc.giwa.io --broadcast --skip-simulation
+forge script ../deploy/forge/Smoke.s.sol:Smoke --rpc-url "$LIVE_RPC" --broadcast --skip-simulation
 ```
 
 Notes for the live run:
 - For a real token, set `TOKEN_ADDRESS=0x<erc20>` (no source edit needed); the
   smoke deposit then needs the deployer to actually hold + approve the deposit's
   `out` amount. With the default `MockERC20` the script mints it.
-- GIWA is an OP-stack L2 → an L1 data fee applies on top of L2 gas; the RPC is
-  rate-limited (Flashblocks RPC `sepolia-rpc-flashblocks.giwa.io` for ~200ms
-  preconfs).
-- solc pinned to 0.8.24 here; GIWA EVM is Osaka/Karst — deployment is
-  permissionless and BN254 verify is native.
+- On an OP-Stack L2 an L1 data fee applies on top of L2 gas, so a receipt's
+  `gasUsed` is not the whole cost.
+- solc is pinned to 0.8.24 here; deployment is permissionless and BN254 verify is
+  native.
+- The deployed contracts are **not** source-verified on the explorer. If a future
+  redeploy wants verification, add the appropriate `--verify` flags for that
+  explorer — do not describe the current deployment as verified.
 
 ## Layout
 
 Canonical data stays at the top; everything else is grouped by what runs it.
 
-- `addresses.31337.json` / `addresses.91342.json` — recorded deployments (local anvil / live GIWA).
-- `arbiter-kem-pk.91342.hex` — the live arbiter's ML-KEM-768 public key.
+- `addresses.31337.json` / `addresses.84532.json` — recorded deployments (local anvil / the live
+  testnet). Take an address from these **by field name**: the deployer replayed the same CREATE
+  nonces on the project's previous chain, so several addresses recur across deployments while
+  naming different contracts.
+- `arbiter-kem-pk.84532.hex` — the live arbiter's ML-KEM-768 public key.
 
 `forge/` — the Solidity scripts, run through `forge script` from `contracts/`:
 

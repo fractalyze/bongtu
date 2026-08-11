@@ -17,14 +17,20 @@ not re-derive what those files own.
   gone repo-wide: every chain path is now viem, a normal dependency; `loadEthers` was removed.)
 - **Commits**: use the `workflow:commit` skill (conventional `type(scope): summary` + why-body).
   **Never append a `Co-Authored-By` trailer** — fractalyze convention, overrides the harness default.
-- **Secrets**: the GIWA deployer key lives in `.env` (gitignored; template `.env.example`).
-  Never commit it; check `git diff --cached` for key material before any push.
+- **Secrets**: the deployer key for the live chain lives in `.env` (gitignored; template
+  `.env.example`). Never commit it; check `git diff --cached` for key material before any push.
 - **GPU (rabbitsnark, M1 proving)**: `CUDA_VISIBLE_DEVICES=0`; never profile with
   nsys/command-buffers (leaked 30 GB once); cold zkey-compile is ~116 s, longer than the
   default 2-min Bash timeout — pass `timeout ≥ 300000`; after a run, confirm GPU memory
   returns to idle (~15 MiB) and kill stray prover PIDs.
-- **Live pool is canonical**: the deployed GIWA pool (`deploy/addresses.91342.json`) is
-  reused going forward — do not redeploy for new work; UUPS upgrade only if circuits change.
+- **Live pool is canonical**: the pool recorded in `deploy/addresses.84532.json` — mirrored into
+  `packages/core/src/network.ts`, which `packages/core/test/network.test.ts` holds to that file
+  field-for-field — is the deployment everything runs against. Reuse it; do not redeploy for new
+  work. A circuit change ships as a UUPS `upgradeToAndCall` carrying a fresh `reinitializer(2)`
+  payload; there is no initializer ladder, `initialize()` alone produces the production shape.
+  **Never transcribe an address by pattern-matching an older value** — the deployer replayed the
+  same CREATE nonces on the previous chain, so several addresses collide across the two while
+  naming *different* contracts. Copy from the record BY FIELD NAME.
 - **Heavy gates**: iterate on `packages/core` tests + `tsc`; run `deploy/gates/e2e_m0.sh` and the indexer
   conformance test (`cd apps/indexer && npm test`) as the final gate, not per iteration (each spins
   an anvil + CPU proofs).

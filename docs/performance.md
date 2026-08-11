@@ -11,9 +11,10 @@ hybrid ML-KEM-768 envelope upgrade) or **hybrid** (after it).
 
 ## Live chain, hybrid envelope
 
-Whole-transaction `gasUsed` from the GIWA receipts of the end-to-end run against the live pool
-`0x93365980784ef504613EF5822ce1289CF858Fc10` on arbiter epoch 1, **measured 2026-07-28**
-(`deploy/live/giwa_gas_survey.ts`, fresh identities per run):
+Whole-transaction `gasUsed` from the receipts of the end-to-end run against the pool of the retired
+GIWA deployment, on that deployment's arbiter epoch 1, **measured 2026-07-28**
+(`deploy/live/gas_survey.ts`, fresh identities per run). These are pre-move numbers; the current
+deployment carries a single arbiter epoch (index 0) and has not been re-measured:
 
 | operation | L2 gas | L1 data fee | tx |
 |---|---|---|---|
@@ -74,10 +75,9 @@ not fit under the cap ([protocol.md](protocol.md#batch-attach-is-olog-b-not-ob))
 
 ### Live chain: the 256-recipient disburse (pre-KEM)
 
-The headline 256-recipient private disbursement, run against the live pool
-`0x93365980784ef504613EF5822ce1289CF858Fc10` — tx
-`0xe254240a5df042a163073c028399a5fc63cf87434a7e7ebbf5ddfea73c803bd6`, block 31560457,
-**receipt read 2026-07-26**, on arbiter epoch 0 (pre-KEM):
+The headline 256-recipient private disbursement, run against the pool of the retired GIWA
+deployment — tx `0xe254240a5df042a163073c028399a5fc63cf87434a7e7ebbf5ddfea73c803bd6`,
+block 31560457, **receipt read 2026-07-26**, on that deployment's arbiter epoch 0 (pre-KEM):
 
 | quantity | value |
 |---|---|
@@ -94,9 +94,10 @@ total at the pinned 0.005 gwei L2 price, and small in absolute terms. Blob data 
 what makes all-ciphertext-on-chain expensive; L2 execution and calldata are.
 
 Any "L1 fee is a rounding error" figure computed at an unpinned gas price is an artifact of
-overpaying on L2: ethers' auto-estimate overpays GIWA by ~1500×, so the runner pins `gasPrice` from
-`GIWA_GAS_FLOOR_GWEI` (`packages/core/src/network.ts`, the `deploy/live/` drivers) — see
-[deployment.md](deployment.md#chain-facts).
+overpaying on L2: a client-side auto-estimate once overpaid by ~1500×, so the drivers pin `gasPrice`
+from `GAS_PRICE_PIN_GWEI` (`packages/core/src/network.ts`, read by the `deploy/live/` drivers). The
+rows above were taken at the 0.005 gwei value that constant carried before the chain move; its
+current value is in [deployment.md](deployment.md#chain-facts).
 
 ## Where the gas goes
 
@@ -165,5 +166,12 @@ range checks — which is +22% on `deposit` and under +0.1% on `disburse256`.
 cd contracts && forge test --match-path "test/GasReport.t.sol" -vv
 cd contracts && forge test --match-path "test/Disburse256.t.sol" -vv
 cd circuits  && $SNARKJS r1cs info out/<name>.r1cs        # $SNARKJS: toolchain.md
-cast receipt <txhash> --rpc-url https://sepolia-rpc.giwa.io
+cast receipt <txhash> --rpc-url "$LIVE_RPC"               # $LIVE_RPC: .env.example
 ```
+
+The three local commands reproduce the harness rows against this tree. The `cast receipt` line
+reads the current deployment's chain — the RPC has one home, listed under
+[deployment.md → Chain facts](deployment.md#chain-facts) and mirrored into `LIVE_RPC` by
+`.env.example`. It does **not** reproduce the live tables above: those transaction hashes were
+written on the retired deployment's chain and do not resolve here. Re-measuring against the
+current deployment (`deploy/live/gas_survey.ts`) is what produces hashes this line can read.

@@ -157,7 +157,7 @@ Two rules make that shape enforceable rather than merely intended:
 | rule | why |
 |---|---|
 | every verifier argument must be non-zero (`ZeroVerifier`) | a zeroed verifier turns its entry point into a call into `address(0)`: live, always reverting, unfixable short of an upgrade |
-| the arbiter key must be non-zero and the KEM pk hash must be non-zero | `(0,0)` is the key foot-gun (§5.3 Q9); a zero hash is the reserved pre-KEM marker, so minting one would make epoch 0 unreadable to hybrid clients |
+| the arbiter key must be non-zero and the KEM pk hash must be non-zero | `(0,0)` is the key foot-gun (§5.3 Q9); a zero hash is reserved to mean "this epoch was never minted", so minting one would make epoch 0 indistinguishable from an unallocated index |
 
 The `initializer` modifier leaves the ERC-7201 version slot at **1**. A future circuit change ships
 as `upgradeToAndCall` carrying its own `reinitializer(2)` payload, written at that time against the
@@ -172,7 +172,7 @@ initializer](#one-initializer) above). No `immutable` or constructor state carri
 meaning.
 
 ```
-        deploy/addresses.91342.json
+        deploy/addresses.84532.json
                   |
    pool  ────────────────>  ERC1967Proxy (canonical, upgrade-stable address)
                                  |  delegatecall

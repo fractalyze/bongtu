@@ -1,39 +1,41 @@
 # Deployment
 
-The live bongtu stack runs on **GIWA Sepolia, chain 91342**. Source of truth for every address is
-`deploy/addresses.91342.json`, written by the deploy script and mirrored (with an equality test)
+The live bongtu stack runs on **Base Sepolia, chain 84532**. Source of truth for every address is
+`deploy/addresses.84532.json`, written by the deploy script and mirrored (with an equality test)
 into `packages/core/src/network.ts` so both web apps read one set of constants.
 
 ## Live addresses
 
-| role | address |
+`deploy/addresses.84532.json` is canonical. Read an address out of it **by field name** and do not
+transcribe one from anywhere else — the deployer replayed the same CREATE nonce sequence it had used
+on the project's previous chain, so several addresses are byte-identical across the two while naming
+**different contracts** (the previous deployment's pool address is this deployment's *token*). An
+address that merely looks familiar is the failure mode this warning exists for.
+
+| role | field in `addresses.84532.json` |
 |---|---|
-| BongtuPool — ERC-1967 proxy, the canonical pool | `0x93365980784ef504613EF5822ce1289CF858Fc10` |
-| BongtuPool implementation | `0xcc7e6c6FAae7D32Fc8f54F25e5714e7AEC0159dA` |
-| Poseidon-v1 hasher | `0xaA7778c778C83cE5655d5F217bDfE7782e01Bc50` |
-| DepositVerifier | `0x71F42727670Ad93685665b437711531156E57624` |
-| WithdrawVerifier | `0xBA13CB6c005291aa33b7f68A3ABC26002562A9A7` |
-| Disburse256Verifier (`disburseVerifier`) | `0x378439670AbD2C497443D21113727fa4827b47ea` |
-| TransferVerifier | `0x36B39D3d7ED00EC892a448F7C1a230D35C28B21f` |
-| Transfer10Verifier | `0xbe07606a6cA99C1cE73Fba1AF6322E6f16bD96C9` |
-| Transfer10x2Verifier | `0x339673F61b4FBDfCBBD896E6c39E73d15cB06d41` |
-| mock kKRW (ERC-20) | `0x17A89cC5FF3395Bb01464c9E422749CcDbFa8C3f` |
-| owner / deployer | `0xe92a97e645351268F3d60d5a27EB842A5b293058` |
+| BongtuPool — ERC-1967 proxy, the canonical pool | `pool` |
+| BongtuPool implementation | `poolImpl` |
+| Poseidon-v1 hasher | `poseidon` |
+| DepositVerifier | `depositVerifier` |
+| WithdrawVerifier | `withdrawVerifier` |
+| Disburse256Verifier | `disburseVerifier` |
+| TransferVerifier | `transferVerifier` |
+| Transfer10Verifier | `transfer10Verifier` |
+| Transfer10x2Verifier | `transfer10x2Verifier` |
+| mock kKRW (ERC-20) | `token` |
+| owner / deployer | `owner` |
 
-All of the above except the Poseidon hasher are **source-verified on the GIWA Blockscout
-explorer** (verified 2026-07-30 via `forge verify-contract --verifier blockscout`; the proxy's
-constructor args were recovered from its creation transaction). Poseidon is deployed from
-circomlibjs *creation bytecode* (`contracts/test/fixtures/poseidon2.hex`) — it has no Solidity
-source, so explorer verification does not apply to it.
+`packages/core/test/network.test.ts` holds the module constants to that file field-for-field, so a
+stale copy in `network.ts` fails in milliseconds instead of at on-chain proof rejection. When the
+two disagree, the JSON is right.
 
-Every implementation the proxy's `Upgraded` events name is source-verified, each from a worktree of
-the commit that deployed it, so any past transaction can be audited against the exact source it
-executed. Externally, call the proxy address simply "the pool contract"; "proxy" is plumbing
-vocabulary.
+The contracts are **not** source-verified on the explorer. Reading them there shows bytecode only;
+audit against this repo at the commit that deployed them. Poseidon additionally has no Solidity
+source at all — it is deployed from circomlibjs *creation bytecode*
+(`contracts/test/fixtures/poseidon2.hex`).
 
-`deploy/addresses.91342.json` is canonical — the table above is a convenience copy of it, and
-`packages/core/test/network.test.ts` holds the module constants to the file field-for-field. When
-the two disagree, the JSON is right.
+Externally, call the proxy address simply "the pool contract"; "proxy" is plumbing vocabulary.
 
 `batchSize` is 256. The **proxy** is the address to integrate against: the implementation and the
 verifier addresses change on a circuit edit, the proxy address does not. The live pool is canonical
@@ -54,16 +56,22 @@ every entry point from its first block, and `currentEpoch()` is 0 on a chain tha
 the result — `B() == 256`, all six verifier getters non-zero and matching the recorded addresses,
 the Initializable version slot reading 1, `currentEpoch() == 0`.
 
-Config is env-driven so the same script targets anvil or a testnet:
+Config is env-driven so the same script targets anvil or a testnet — with one asymmetry: the two KEM
+variables have **no live default and are required off anvil**.
 
 | variable | default |
 |---|---|
 | `DEPLOYER_KEY` | anvil account 0 |
 | `BATCH_SIZE` | 256 |
 | `ARBITER_KEY_X` / `ARBITER_KEY_Y` | the fixture arbiter bjj key (see the coupling section below) |
-| `ARBITER_KEM_PK_HASH` | `keccak256` of the fixture ML-KEM-768 encapsulation key |
-| `ARBITER_KEM_PK` | the full encapsulation key to record next to the hash; must hash to `ARBITER_KEM_PK_HASH` |
+| `ARBITER_KEM_PK_HASH` | `keccak256` of the fixture ML-KEM-768 encapsulation key — **on chain 31337 only**; **REQUIRED** on any other chain |
+| `ARBITER_KEM_PK` | the fixture encapsulation key — **on chain 31337 only**; **REQUIRED** on any other chain, and must hash to `ARBITER_KEM_PK_HASH` |
 | `TOKEN_ADDRESS` | unset — deploys a mock kKRW; set it to an existing non-fee-on-transfer ERC-20 |
+
+Off chain 31337 the script reads the hash with `vm.envBytes32` (which reverts when unset) and then
+rejects the fixture value outright, and its self-check fails without a recorded `ARBITER_KEM_PK`.
+The fixture keypair is public on both halves, so a silent fallback would leave every auditor
+envelope readable with no symptom in the deploy output.
 
 ## Upgrading
 
@@ -99,8 +107,8 @@ envelope is hybrid from the pool's first operation.
 | `KEM_CIPHERTEXT_LEN()` | 1088 |
 
 The key itself is a **public** value distributed off-chain in three places that are equality-tested
-against each other: `deploy/arbiter-kem-pk.91342.hex` (the committed material), the `arbiterKemPk`
-field of `deploy/addresses.91342.json`, and `ARBITER_KEM_PK` in `packages/core/src/network.ts`,
+against each other: `deploy/arbiter-kem-pk.84532.hex` (the committed material), the `arbiterKemPk`
+field of `deploy/addresses.84532.json`, and `ARBITER_KEM_PK` in `packages/core/src/network.ts`,
 which ships it to both web apps. The addresses file also records `arbiterKemPkHash` alongside
 `arbiterKeyX` / `arbiterKeyY`.
 
@@ -119,20 +127,28 @@ envelope, and serving with the wrong one would stamp every honest operation as t
 
 ## Chain facts
 
-| fact | value |
-|---|---|
-| chain id | 91342 |
-| RPC | `https://sepolia-rpc.giwa.io` |
-| explorer | `https://sepolia-explorer.giwa.io` (Blockscout) |
-| gas token | ETH (OP Stack L2) |
-| per-tx gas cap | 16,777,216 (EIP-7825, Karst) — asserted in `contracts/test/Disburse256.t.sol` |
-| BN254 precompiles | present, so Groth16 verification is native |
-| gas price floor used by the runners | `0.005` gwei (`GIWA_GAS_FLOOR_GWEI`) |
+Every fact below has exactly one home — `packages/core/src/network.ts` — from which both apps, the
+indexer and the `deploy/live/` drivers read it. Nothing here is named after the chain, so a future
+move is that module plus the deploy record rather than another repo sweep.
 
-Mainnet is not launched; everything here is testnet. The runners pin the gas price rather than let
-ethers estimate it: GIWA wants ~0.001 gwei and ethers' auto-estimate overpays by ~1500×, draining
-the faucet grant. `packages/core/src/network.ts` exports
-`GIWA_GAS_FLOOR_GWEI = "0.005"` and every `deploy/live/` driver sets `gasPrice` from it.
+| fact | value | export |
+|---|---|---|
+| chain id | 84532 | `CHAIN_ID` |
+| chain name | Base Sepolia | `CHAIN_NAME` |
+| RPC | `https://sepolia.base.org` | `RPC_URL` |
+| explorer | `https://sepolia.basescan.org` | `EXPLORER_BASE` |
+| faucet | `https://portal.cdp.coinbase.com/products/faucet` | `GAS_FAUCET_URL` |
+| gas token | ETH (OP Stack L2) | `NATIVE_CURRENCY` |
+| per-tx gas cap | 16,777,216 (EIP-7825) — asserted in `contracts/test/Disburse256.t.sol` | — |
+| BN254 precompiles | present, so Groth16 verification is native | — |
+| gas price the runners pin | `0.05` gwei | `GAS_PRICE_PIN_GWEI` |
+
+This is a testnet deployment; every address and measurement in these docs is testnet.
+
+The runners **pin** the gas price rather than let a client estimate it — the constant is a hard pin,
+not a floor to be lowered: an auto-estimate can overshoot the real price by orders of magnitude and
+drain a faucet grant in a handful of transactions. Every `deploy/live/` driver builds its viem rig
+with `gasPrice: parseGwei(GAS_PRICE_PIN_GWEI)`.
 
 ## Scripts
 
@@ -143,13 +159,13 @@ the faucet grant. `packages/core/src/network.ts` exports
 | `deploy/forge/Smoke.s.sol` | a real `deposit` against the deployed pool using the committed proof fixture |
 | `deploy/gates/deploy_local.sh` | anvil + Deploy + getter read-back + Smoke — the local gate |
 | `deploy/gates/test_one_shot_deploy.sh` | scratch-anvil drill of the deploy: B=256, all six verifier getters wired and matching the record, Initializable version 1, `currentEpoch() == 0` |
-| `deploy/live/giwa_payroll_e2e.ts` | the payroll console's whole pay run against live GIWA, driving the console's own modules (mint → deposit → forced merge leg → 3-recipient disburse → signed `/notes` checks), every proof via the prover service |
-| `deploy/live/giwa_transfer10x2_e2e.ts` | the live 10-in / 2-out spend gate against GIWA (merge leg + padded spend); `--dry` runs the structural checks with no network |
-| `deploy/live/giwa_gas_survey.ts` | per-action gas measurement against the live pool, feeding the table in [performance.md](performance.md) |
+| `deploy/live/payroll_e2e.ts` | the payroll console's whole pay run against the live pool, driving the console's own modules (mint → deposit → forced merge leg → 3-recipient disburse → signed `/notes` checks), every proof via the prover service |
+| `deploy/live/transfer10x2_e2e.ts` | the live 10-in / 2-out spend gate (merge leg + padded spend); `--dry` runs the structural checks with no network |
+| `deploy/live/gas_survey.ts` | per-action gas measurement against the live pool, feeding the table in [performance.md](performance.md) |
 | `deploy/gates/e2e_m0.sh`, `deploy/gates/e2e_orchestrator.ts` | the cross-circuit spend-cycle end-to-end on a local anvil |
 | `deploy/gates/upload_circuits.sh` | uploads the wallet's proving assets (wasm + zkey) to the Vercel Blob store under a `CIRCUITS_VERSION` path, refusing assets whose zkey hash misses the pin in the wallet's `config.ts` |
 
-Environment knobs and the exact GIWA invocation are in `deploy/README.md`. Two facts that are easy
+Environment knobs and the exact live invocation are in `deploy/README.md`. Two facts that are easy
 to lose and expensive to rediscover:
 
 - **`--skip-simulation` is required.** `Deploy.s.sol` deploys Poseidon via inline-assembly `create`,
@@ -183,7 +199,7 @@ key, arbiter ML-KEM-768 pk), and the fixture encapsulation key travels as `realp
 the same way `realproofs.arbiterKey` does. `ARBITER_KEM_PK_HASH` is the matching deploy knob.
 
 The live pool's stored key is recorded as `arbiterKeyX` / `arbiterKeyY` in
-`deploy/addresses.91342.json` and re-exported as `ARBITER_PUBKEY_X` / `ARBITER_PUBKEY_Y` from
+`deploy/addresses.84532.json` and re-exported as `ARBITER_PUBKEY_X` / `ARBITER_PUBKEY_Y` from
 `packages/core/src/network.ts`. It is a **public** key — shipping it in the browser bundle is
 required, since the wallet encrypts every envelope to it. The same holds for `ARBITER_KEM_PK`. The
 matching private halves (the bjj scalar and the ML-KEM-768 decapsulation key) are the arbiter's

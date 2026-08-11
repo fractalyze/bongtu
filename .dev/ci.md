@@ -13,7 +13,7 @@ Three exclusion classes fall out:
 
 - **GPU** — rabbitsnark disburse256 proving and the prover service boot need a local
   CUDA GPU and the local venv bridge.
-- **Secrets** — GIWA live deploys need the funded deployer key from the gitignored
+- **Secrets** — live-chain deploys need the funded deployer key from the gitignored
   `.env`; the workflow is deliberately secret-free (`permissions: contents: read`,
   actions pinned to commit SHAs, `--ignore-scripts` on the scratch installs).
 - **Cost without a consumer** — the 1.24GB disburse256 zkey build is multi-minute and

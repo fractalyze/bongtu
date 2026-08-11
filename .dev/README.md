@@ -11,7 +11,7 @@ Sorting rule: a document that answers **"what is true now"** goes in `docs/`; on
 - [`milestone-m0.md`](milestone-m0.md) — M0 Goal and Done-criteria tracker (core soundness: 4 units,
   gates, the two retired critical risks).
 - [`milestone-m1.md`](milestone-m1.md) — M1 Goal and Done-criteria tracker (1×256 GPU disburse,
-  GIWA deploy, gas evidence).
+  the first testnet deploy, gas evidence).
 - [`milestone-m2.md`](milestone-m2.md) — M2 Goal and Done-criteria tracker (product surface: React
   wallet, indexer Postgres store, `@bongtu/core` rename).
 - [`architecture-review.md`](architecture-review.md) — the 2026-07-25 depth/seam review: applied,

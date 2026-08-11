@@ -58,13 +58,15 @@ byte-pins *before* the move, run one full heavy-gate pass after. (Leave
 `circuits/auditor_decrypt_check.ts` hand-decoded — it is the independent
 circuit-parity check; see rejected list.)
 
-**#16 — `network.ts` for the live-pool constants.** Both app configs hand-transcribe
-the pool/token/chainId/arbiter-key/H/B/gas-floor facts from
-`deploy/addresses.91342.json`. **Deferred because** every constant describes the LIVE
-GIWA pool: a transcription slip breaks both apps against the live deployment and
-surfaces only at on-chain proof rejection. **Revive** with the
-`addresses.91342.json` equality test written FIRST, ideally bundled with the next
-redeploy / arbiter-epoch rotation.
+**#16 — `network.ts` for the live-pool constants.** Both app configs hand-transcribed
+the pool/token/chainId/arbiter-key/H/B/gas-pin facts from the deployment record.
+**Deferred because** every constant described the pool that was live at the time: a
+transcription slip breaks both apps against the live deployment and surfaces only at
+on-chain proof rejection. **Revive** with the deploy-record equality test written
+FIRST, ideally bundled with the next redeploy / arbiter-epoch rotation. *(Done that
+way — `packages/core/src/network.ts` plus `packages/core/test/network.test.ts`, which
+holds the module to `deploy/addresses.<chainid>.json` field-for-field. It earned its
+keep at the next chain move, which became one module edit instead of a repo sweep.)*
 
 **#17 — wallet trial-decrypt fallback dead seam.** `balanceViaTrialDecrypt` has zero
 callers (no adapter builds its `leafCommitments` map) while the UI error copy

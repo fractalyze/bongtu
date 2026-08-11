@@ -87,8 +87,8 @@ test("happy path returns the session and records the binding", async () => {
 
 // --- the binding check across a deployment move ------------------------------------
 // CHAIN_ID and POOL_ADDRESS are BOTH in the EIP-712 KDF domain, so when either moves
-// every account legitimately derives a different key. Reading the pre-move binding
-// here would fire KEY_CHANGED_MESSAGE — telling every returning user their wallet is
+// every account legitimately derives a different key. Reading another deployment's
+// binding here would fire KEY_CHANGED_MESSAGE — telling every returning user their wallet is
 // broken, with no in-app way out (clearKeyBindings sits behind a Settings screen that
 // needs a live session). session.ts scopes the storage key to the deployment so the
 // real loader finds nothing; these two tests pin BOTH halves of that.
@@ -116,10 +116,10 @@ function overStorage(calls: string[], storage: StorageLike) {
 
 test("a binding left by ANOTHER deployment does not refuse the login", async () => {
   const storage = memStorage();
-  // What the device kept from the pre-move deployment (chain 91342, its own pool):
+  // What the device kept from a DIFFERENT deployment (another chain, another pool):
   // a real binding for this same account, naming a key this build cannot derive.
   storage.map.set(
-    "bongtu.keybinding.91342:0x22a2f38a24a2647e430dc28a5154d390f93ccf7b",
+    "bongtu.keybinding.4242:0x00000000000000000000000000000000000dead1",
     JSON.stringify({ "0xabc": "cpk-from-the-old-deployment" }),
   );
 

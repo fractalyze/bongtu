@@ -67,7 +67,9 @@ event generations and the indexer carries **both** ABI fragment sets. A pre-upgr
 without the KEM fields and enters the ledger as `kem: null`; a hybrid log carries
 `kem: { binding, ciphertext }`. The gate is structural, not arithmetic: there is no epoch lookup and
 no block-number comparison anywhere in the path, so pre-KEM history cannot false-alarm no matter how
-the epoch list evolves. This is verified against the full pre-upgrade history of the live pool.
+the epoch list evolves. The current pool is hybrid from its first block and has no pre-KEM history
+of its own; the V1 fragments are kept because the decode path must stay safe against any pool this
+build is pointed at, and the conformance test exercises both vintages.
 
 A V1-only build against a hybrid pool would fail **silently**, which is the reason for the boot
 guard below: `getLogsChunked` wraps `parseLog` in try/catch-continue, so unknown-topic0 envelope

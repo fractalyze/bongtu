@@ -66,8 +66,8 @@ first, see [`circuits/README.md`](../circuits/README.md)):
 ## Deploy
 
 Deploy scripts live in [`deploy/`](../deploy/README.md) (local anvil gate + the live
-GIWA stack); the live addresses are in `deploy/addresses.91342.json` and the root
-[`README.md`](../README.md) Status table.
+stack); the live addresses are in `deploy/addresses.84532.json` — read them from there
+by field name, not by pattern-matching a familiar-looking value.
 
 ## License
 

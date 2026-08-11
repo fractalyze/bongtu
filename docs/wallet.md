@@ -20,7 +20,7 @@ There is no seed and no persisted private key. The spending key is a pure functi
 signature over a domain-separated EIP-712 struct (`@bongtu/client` `derive.ts` + `connection.ts` — the engine package both web apps share):
 
 ```
-domain  = { name: "bongtu", version: keyVersion, chainId: 91342, verifyingContract: <pool> }
+domain  = { name: "bongtu", version: keyVersion, chainId: 84532, verifyingContract: <pool> }
 types   = { BongtuSpendingKey: [ statement: string, warning: string ] }
 
 sig  = eth_signTypedData_v4(account, domain, types, message)
@@ -105,8 +105,8 @@ env — the modal also offers the QR / deep-link path for phones and extension-l
 
 Whatever the modal connects, `src/lib/connection.ts` wraps it into the same `Connection` every
 other module works against: a viem wallet client over the connector's raw EIP-1193 provider
-(signatures and txs reach the wallet the user picked), the app's one viem public client on the GIWA
-RPC (reads and receipt waits never relay through a phone), and a `transport` tag — `"walletconnect"`
+(signatures and txs reach the wallet the user picked), the app's one viem public client on the
+chain's own RPC (reads and receipt waits never relay through a phone), and a `transport` tag — `"walletconnect"`
 for the WC connector, `"injected"` otherwise — that only the login guard and the chain guard read.
 `identity.ts`, `keyCache.ts`, the action flows and every submit helper cannot tell wallets apart.
 
@@ -143,14 +143,20 @@ gets a clean device, and the next login is a first login again.
 
 **Network switching** goes through the same `ensureChain` (raw EIP-3085/3326 requests through the
 viem wallet client, so the same two RPCs reach an extension or relay to a phone); over WalletConnect
-a wallet that won't move to GIWA Sepolia gets a message saying to switch in the wallet app, since
+a wallet that won't move to the live chain gets a message saying to switch in the wallet app, since
 the raw relay error says nothing a user can act on.
 
-**The derivation payload is migration-pinned.** The bjj key is a pure function of the EIP-712
-payload, so the wallet-stack migration to viem pinned it: `test/deriveDeterminism.test.ts` holds the
-payload's EIP-712 digest and the identity a fixed signature derives, both captured from the
-pre-migration (ethers v5) code, and drives the REAL signing path over a mock provider. Those
-constants are the compatibility contract with every existing user's key — never regenerate them.
+**The derivation payload is pinned, in two different senses.** The bjj key is a pure function of the
+EIP-712 payload, so `packages/client/test/deriveDeterminism.test.ts` drives the REAL signing path
+over a mock provider and pins both ends of it — but the two pins carry opposite rules:
+
+- `PIN_SCALAR` / `PIN_COMPRESSED` — the identity a fixed signature derives, captured from the
+  pre-migration (ethers v5) code. This is the compatibility contract with every existing user's
+  key: **never regenerate it.** A red one means the KDF changed and every user's key rotated.
+- `PIN_DIGEST` — the payload's EIP-712 digest. The domain contains `chainId` and the pool address,
+  so moving the deployment **must** move this digest. Recomputing it as part of such a move is
+  expected and correct; it was last recomputed on 2026-08-11 for the current chain. Only a red
+  `PIN_DIGEST` with the deployment unchanged means the payload drifted.
 
 **Enabling WalletConnect.** Create a project at [Reown Cloud](https://cloud.reown.com) and copy its
 project id (it is public — it identifies the dapp to the relay and has no secret half). Set
@@ -209,7 +215,7 @@ depth-32 IMT append — the dominant per-op gas — and a real spend only ever n
 (a merge's change note is value-0 — still a real note with a nonzero commitment). Its assets also
 left the wallet's download set. `test/transfer10x2.test.ts` and `test/spendChain.test.ts` carry
 deprecation pins that fail the moment any plan, merge leg or submit routes to `transfer10` again;
-`deploy/live/giwa_transfer10x2_e2e.ts` is the live driver (`--dry` for a network-free structural check).
+`deploy/live/transfer10x2_e2e.ts` is the live driver (`--dry` for a network-free structural check).
 
 ## A spend is a chain, not a transaction
 

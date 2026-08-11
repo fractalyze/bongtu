@@ -2,11 +2,12 @@
 // wagmi config (src/lib/wagmi.ts), driven by
 // FAKE EIP-1193 transports — no wallet, no relay, no RPC. What is gated here:
 //
-//   (1) SUBMIT — every pool/token write goes out as eth_sendTransaction with the
-//       PINNED gas price (0.005 gwei — auto-estimation once overpaid ~1500x and
-//       drained the faucet grant), byte-exact calldata for the right function, and
-//       resolves only after the receipt. The KEM-ct length pre-check fires BEFORE
-//       any RPC.
+//   (1) SUBMIT — every pool/token write goes out as eth_sendTransaction with
+//       byte-exact calldata for the right function, and resolves only after the
+//       receipt. The browser apps do NOT pin the gas price (they ask the node for
+//       eth_gasPrice and take 3x); the GAS_PRICE_PIN_GWEI pin is the live drivers'
+//       — see packages/core/src/network.ts. The KEM-ct length pre-check fires
+//       BEFORE any RPC.
 //   (2) KEM EPOCH GUARD — the pool's arbiterKemPkHash(currentEpoch()) must vouch
 //       for the bundled key; a pre-KEM pool (empty eth_call return) fails CLOSED
 //       with the readable message, and a transport failure is NOT mistaken for one.

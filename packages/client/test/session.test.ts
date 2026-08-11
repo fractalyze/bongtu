@@ -181,10 +181,10 @@ test("both storage keys are the deployment's, so moving chain or pool moves the 
   assert.equal(KEY_BINDING_KEY, `bongtu.keybinding.${DEPLOYMENT_TAG}`);
 
   // Change EITHER half of the KDF domain and both storage keys change with it —
-  // the pre-move deployment (chain 91342, its own pool) is the concrete case.
+  // a different deployment (another chain, or the same chain with another pool).
   for (const other of [
-    `91342:${POOL_ADDRESS.toLowerCase()}`,
-    `${CHAIN_ID}:0x22a2f38a24a2647e430dc28a5154d390f93ccf7b`,
+    `4242:${POOL_ADDRESS.toLowerCase()}`,
+    `${CHAIN_ID}:0x00000000000000000000000000000000000dead1`,
   ]) {
     assert.notEqual(other, DEPLOYMENT_TAG);
     assert.notEqual(`bongtu.session.${other}`, SESSION_KEY);
@@ -193,16 +193,17 @@ test("both storage keys are the deployment's, so moving chain or pool moves the 
 });
 
 test("another deployment's records read as ABSENT, not as this deployment's", () => {
-  // A device that logged in before the move still holds both records under the old
-  // tag. Restoring the session would show a receive address whose notes this build
-  // cannot derive a key for; believing the binding would refuse the login outright.
+  // A device that logged in against a different deployment still holds both records
+  // under that tag. Restoring the session would show a receive address whose notes
+  // this build cannot derive a key for; believing the binding would refuse the login
+  // outright.
   const st = memStorage();
-  const oldTag = `91342:0x22a2f38a24a2647e430dc28a5154d390f93ccf7b`;
+  const oldTag = `4242:0x00000000000000000000000000000000000dead1`;
   const oldPubkey = "0x" + "99".repeat(32);
   st.map.set(`bongtu.session.${oldTag}`, JSON.stringify({ ...SESSION, compressedPubkey: oldPubkey }));
   st.map.set(`bongtu.keybinding.${oldTag}`, JSON.stringify({ [SESSION.eoaAddress]: oldPubkey }));
 
-  assert.equal(loadSession(1_000, st), null, "a pre-move session must not restore here");
+  assert.equal(loadSession(1_000, st), null, "another deployment's session must not restore here");
   assert.equal(loadKeyBinding(SESSION.eoaAddress, st), null, "and its binding must not be believed");
 
   // Deliberately not migrated: the old entries are left where they are, and this

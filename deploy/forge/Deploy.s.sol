@@ -35,7 +35,8 @@ import {AddressBook, AddressRecord} from "./AddressBook.sol";
 ///   2. the 6 REAL Groth16 verifiers — Deposit, Withdraw, **Disburse256**
 ///      (production 256-arity), Transfer, Transfer10, Transfer10x2;
 ///   3. a mock kKRW ERC-20 (18-dec, non-fee-on-transfer — the only shape the pool
-///      supports; on GIWA swap this for the real kKRW / WETH9 address, see README);
+///      supports; on a real network swap this for the real kKRW / WETH9 address,
+///      see README);
 ///   4. `BongtuPool(B=256)` behind an `ERC1967Proxy` whose constructor runs
 ///      `initialize` — one call that wires Poseidon, all six verifiers and the
 ///      token, derives the tree parameters, and seeds arbiter epoch 0. The pool
@@ -44,7 +45,7 @@ import {AddressBook, AddressRecord} from "./AddressBook.sol";
 /// Owner = the broadcasting deployer: `initialize` runs through the proxy's
 /// delegatecall, so `__Ownable2Step_init(msg.sender)` records the deployer.
 ///
-/// Config is env-driven so the SAME script targets anvil or GIWA Sepolia:
+/// Config is env-driven so the SAME script targets anvil or the live testnet:
 ///   DEPLOYER_KEY  (uint256 privkey)  default = anvil account 0
 ///   BATCH_SIZE    (uint256)          default = 256 (production)
 ///   ARBITER_KEY_X / ARBITER_KEY_Y    default = the disburse256 fixture's
