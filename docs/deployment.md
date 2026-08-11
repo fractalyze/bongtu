@@ -198,6 +198,27 @@ The coupling is a **pair**, because the envelope is hybrid: the fixtures are bou
 key, arbiter ML-KEM-768 pk), and the fixture encapsulation key travels as `realproofs.kemPublicKey`
 the same way `realproofs.arbiterKey` does. `ARBITER_KEM_PK_HASH` is the matching deploy knob.
 
+Only half of that pair can travel to a live chain, and the consequence is visible. The bjj half
+must stay the fixture key or the smoke proof stops verifying; the KEM half must NOT be the fixture
+key, because that keypair's seed is public (`_resolveKemPkHash` refuses it off anvil). So the smoke
+deposit's envelope is encapsulated to the fixture ML-KEM key while epoch 0 carries the
+institution's — and an arbiter-mode indexer, holding the institutional decapsulation key,
+decapsulates to a different shared secret and raises
+
+```
+ALARM envelope deposit tx=0x… kem binding mismatch — envelope withheld
+```
+
+That alarm is **correct**: the envelope genuinely cannot be opened by this pool's arbiter, which is
+exactly the condition the alarm exists to report. It is a property of the smoke fixture, not of the
+deployment — but it means a live chain deployed this way carries one permanent disclosure alarm
+from its own smoke step, so `/alarms` starts at 1 rather than 0. Expect it, and do not read it as
+tampering. (It did not arise on the previous chain because the smoke ran while epoch 0 still held
+the fixture keypair, and the institutional key only arrived with a later epoch. Collapsing the
+initializer moved the institutional key to epoch 0, which is what surfaces it.) To start a live
+chain at zero alarms, skip the smoke deposit there and prove the wiring with the `cast` read-backs
+instead.
+
 The live pool's stored key is recorded as `arbiterKeyX` / `arbiterKeyY` in
 `deploy/addresses.84532.json` and re-exported as `ARBITER_PUBKEY_X` / `ARBITER_PUBKEY_Y` from
 `packages/core/src/network.ts`. It is a **public** key — shipping it in the browser bundle is
