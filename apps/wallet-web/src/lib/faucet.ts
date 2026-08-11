@@ -1,6 +1,6 @@
 // The dev-faucet amount for the Deposit/shield screen (SPEC §7). The deployed kKRW is
 // MockERC20 whose `mint(to, amount)` is fully permissionless, so any user can self-mint
-// test kKRW from their own MetaMask (paying their own GIWA gas) at ANY time — the
+// test kKRW from their own MetaMask (paying their own gas) at ANY time — the
 // affordance is deliberately not gated on balance (a tester with funds still needs more).
 // The tx submission is viem-bound and lives in connection.ts (mintTestToken).
 

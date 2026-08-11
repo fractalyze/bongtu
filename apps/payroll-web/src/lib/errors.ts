@@ -12,6 +12,7 @@
 import { walletErrorMessage } from "@bongtu/client/connection";
 import { parseKkrw } from "@bongtu/client/money";
 import { classifyChainFailure, describeThrown } from "@bongtu/core/errors";
+import { CHAIN_NAME } from "@bongtu/core/network";
 
 /**
  * The console's message for a failed wallet/RPC interaction. Delegates the two
@@ -24,8 +25,8 @@ export function payrollErrorMessage(e: unknown): string {
   switch (failure.kind) {
     case "chain_switch":
       return failure.rejected
-        ? "Network switch rejected in your wallet. Switch to GIWA Sepolia and try again."
-        : "Could not switch the wallet to GIWA Sepolia.";
+        ? `Network switch rejected in your wallet. Switch to ${CHAIN_NAME} and try again.`
+        : `Could not switch the wallet to ${CHAIN_NAME}.`;
     case "timeout":
       return "No response — the request timed out. Try again in a moment.";
     case "transport":

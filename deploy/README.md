@@ -120,13 +120,13 @@ Canonical data stays at the top; everything else is grouped by what runs it.
 - `Smoke.s.sol` — real-deposit smoke tx against the deployed pool.
 - `AddressBook.sol` — the one declaration of the addresses-file field list, plus its read + merge-write.
 
-`live/` — TypeScript drivers against the canonical LIVE GIWA pool. Each needs
-`DEPLOYER_KEY` and pins `gasPrice` from `GIWA_GAS_FLOOR_GWEI`:
+`live/` — TypeScript drivers against the canonical LIVE pool (`addresses.<chainid>.json`). Each needs
+`DEPLOYER_KEY` and pins `gasPrice` from `GAS_PRICE_PIN_GWEI`:
 
-- `giwa_payroll_e2e.ts` — the payroll console's whole pay run, driving the console's own modules,
+- `payroll_e2e.ts` — the payroll console's whole pay run, driving the console's own modules,
   every proof through the [`prover/`](../prover/README.md) service.
-- `giwa_transfer10x2_e2e.ts` — the 10-in / 2-out spend gate (`--dry` for a network-free check).
-- `giwa_gas_survey.ts` — per-action gas measurement feeding [`docs/performance.md`](../docs/performance.md).
+- `transfer10x2_e2e.ts` — the 10-in / 2-out spend gate (`--dry` for a network-free check).
+- `gas_survey.ts` — per-action gas measurement feeding [`docs/performance.md`](../docs/performance.md).
 - `lib/` — the viem rig + proof toolbox the drivers and the anvil gates share.
 
 `gates/` — the pass/fail scripts (CI and pre-release):

@@ -14,6 +14,7 @@
 
 import type { ReactNode } from "react";
 import { formatKkrw, groupAmountInput } from "@bongtu/client/money";
+import { GAS_TOKEN_PHRASE } from "@bongtu/core/network";
 import { DEFAULTS } from "../config.js";
 import {
   DEPOSIT_STAGE_LABEL,
@@ -117,7 +118,7 @@ export function DepositModal({
               target="_blank"
               rel="noreferrer"
             >
-              Get GIWA Sepolia ETH from the faucet
+              Get {GAS_TOKEN_PHRASE} from the faucet
             </a>
           </div>
         )}

@@ -66,7 +66,7 @@ export function Onboarding(): ReactNode {
           <EnvelopeLogo size={52} />
         </span>
         <h1 className="text-[2rem] leading-tight font-bold mb-1 tracking-[-0.02em] text-primary">bongtu</h1>
-        <p className="text-muted">The privacy wallet for kKRW on GIWA.</p>
+        <p className="text-muted">The privacy wallet for kKRW on {DEFAULTS.chainName}.</p>
         {DEFAULTS.testnet && <TestnetTag className="inline-block mt-2" />}
       </div>
 

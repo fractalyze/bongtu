@@ -10,6 +10,8 @@
 // Pure + storage-injected so expiry/shape handling is unit-tested headlessly
 // (test/session.test.ts); the app passes the real window.localStorage.
 
+import { DEPLOYMENT_TAG } from "@bongtu/core/network";
+
 import type { WalletTransport } from "./loginGuard.js";
 
 /** What survives a page reload: enough to show Home + read data, nothing that spends. */
@@ -35,7 +37,13 @@ export interface StorageLike {
   removeItem(key: string): void;
 }
 
-export const SESSION_KEY = "bongtu.session.v1";
+// SCOPED TO THE DEPLOYMENT, not just to "bongtu": the record holds the bjj pubkey
+// this account derived, and the KDF domain is (chainId, pool) — so on a chain move
+// or a redeploy the stored pubkey names a key this build can no longer derive.
+// Read under an unscoped name it would be RESTORED (the restore matches on the EOA
+// alone) and the user would be shown a receive address whose notes are unspendable
+// here. Under the tag it is simply not found, and the login re-derives cleanly.
+export const SESSION_KEY = `bongtu.session.${DEPLOYMENT_TAG}`;
 
 function defaultStorage(): StorageLike | null {
   try {
@@ -122,7 +130,14 @@ export function clearSession(storage: StorageLike | null = defaultStorage()): vo
 // to sign out gets a clean device, and re-deriving on the next login is exactly what
 // the first-login determinism check covers.
 
-export const KEY_BINDING_KEY = "bongtu.keybinding.v1";
+// Scoped to the deployment for the same reason as SESSION_KEY, and here the cost of
+// NOT scoping it is worse: the binding is a REFUSAL, so a pre-move entry would make
+// every returning user's login fail with "this wallet produced a different signing
+// key than last time" (loginGuard.ts) — accusing a perfectly good wallet, with no
+// in-app way out, when the truth is that the KDF domain moved. Deliberately NOT
+// migrated forward: carrying the old pubkey over is exactly that false mismatch.
+// Stale entries under a previous tag are left to linger; they are two public values.
+export const KEY_BINDING_KEY = `bongtu.keybinding.${DEPLOYMENT_TAG}`;
 
 /** More accounts than anyone uses on one device: past this the map is restarted rather
  *  than grown without bound. */

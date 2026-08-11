@@ -4,6 +4,7 @@
 
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
 import { DEFAULTS } from "../../config.js";
+import { GAS_TOKEN_PHRASE } from "@bongtu/core/network";
 import { amountCaretIndex, groupAmountInput } from "@bongtu/client/money";
 
 type ButtonVariant = "primary" | "ghost" | "danger";
@@ -170,21 +171,24 @@ export function AmountInput({
 }
 
 /**
- * The one error banner. A gas-shaped message additionally links the official
- * GIWA faucet (testnet posture only) so a stuck first-timer has a next step.
+ * The one error banner. A gas-shaped message additionally links the chain's
+ * official faucet (testnet posture only) so a stuck first-timer has a next step.
+ * "Gas-shaped" is decided by the SHARED phrase every such message is built from
+ * (@bongtu/core/network GAS_TOKEN_PHRASE), not by a chain name spelled out here —
+ * a rename would otherwise drop the link silently.
  */
 export function ErrorBanner({ message }: { message: string }): ReactNode {
   return (
     <div className="rounded-xl px-3.5 py-3 text-[0.88rem] flex gap-2.5 items-center justify-between flex-wrap border border-err-border bg-err-bg text-err">
       {message}
-      {DEFAULTS.testnet && /GIWA Sepolia ETH/.test(message) && (
+      {DEFAULTS.testnet && message.includes(GAS_TOKEN_PHRASE) && (
         <a
           className="font-semibold underline text-err"
           href={DEFAULTS.gasFaucet}
           target="_blank"
           rel="noreferrer"
         >
-          Get GIWA Sepolia ETH from the faucet
+          Get {GAS_TOKEN_PHRASE} from the faucet
         </a>
       )}
     </div>

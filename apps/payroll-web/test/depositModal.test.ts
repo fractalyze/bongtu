@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 
 import type { Connection } from "@bongtu/client/connection";
 import { parseKkrw } from "@bongtu/client/money";
+import { GAS_TOKEN_PHRASE } from "@bongtu/core/network";
 import {
   NO_GAS_MESSAGE,
   depositModalView,
@@ -149,7 +150,10 @@ test("a ZERO-gas account disables both actions and selects the plain message", (
   assert.equal(gasless.canDeposit, false);
   assert.equal(gasless.canMint, false);
   assert.equal(gasless.notice, NO_GAS_MESSAGE);
-  assert.match(gasless.notice ?? "", /GIWA Sepolia ETH/, "the message the faucet link hangs off");
+  assert.ok(
+    (gasless.notice ?? "").includes(GAS_TOKEN_PHRASE),
+    "the message the faucet link hangs off",
+  );
 });
 
 test("an UNREAD (or failed) gas read never locks a funded operator out", () => {

@@ -160,7 +160,7 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
     setConnecting(true);
     try {
       const connection = await openInjectedConnection();
-      // The derivation's typed data pins domain.chainId to GIWA, and wallets
+      // The derivation's typed data pins domain.chainId to the live chain, and wallets
       // reject a v4 request whose domain chain differs from the active one — so
       // the add/switch prompt must come BEFORE the signature.
       await ensureChain(connection);

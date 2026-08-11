@@ -114,7 +114,7 @@ export async function runDeposit(
   const locked = !io.keyCache.isUnlocked();
   onStage(locked ? "unlock" : "approve");
   // A silently-restored session may still sit on another chain — align it before
-  // the token reads and every tx below (silent when GIWA is already selected).
+  // the token reads and every tx below (silent when the chain is already selected).
   await io.ensureChain(ctx.connection);
   // Verify the pool's arbiter KEM key hash FIRST: a pre-KEM or foreign-keyed pool
   // can never accept this build's proof, so nothing below — not the approve tx, not

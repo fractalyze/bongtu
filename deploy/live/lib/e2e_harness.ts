@@ -22,7 +22,7 @@
 //
 // The chain-agnostic half — artifact(), the CPU snarkjs prove() wrapper, dec(),
 // and the ok()/step() assertion ledger — lives in ./proof_toolbox.ts, which the
-// GIWA live driver shares too. It is re-exported here so the two anvil drivers
+// live driver shares too. It is re-exported here so the two anvil drivers
 // keep one import site.
 //
 // What deliberately does NOT live here: each driver's scenario legs and
@@ -30,7 +30,7 @@
 // every (key, nonce) pair is unique across both gates — the two-time-pad
 // rule), and the scenario's tamper legs and extra salt families — that
 // material is load-bearing per driver and stays in the drivers.
-// The live GIWA drivers under deploy/live/ also stay independent on purpose:
+// The live drivers under deploy/live/ also stay independent on purpose:
 // they drive the canonical LIVE pool (B=256), not a fresh anvil stack.
 
 import { createHash } from "node:crypto";
@@ -74,7 +74,7 @@ export const GATE_B = 16;
 
 /** Public client + driver wallet (anvil account #0) on the harness anvil (E2E_RPC),
  *  wrapped in the shared viem rig. No gasPrice pin: anvil gas is free (the pin is
- *  a GIWA-only concern). */
+ *  a live-chain-only concern). */
 export function connectAnvil(): Rig {
   return makeRig({ chain: anvilChain(RPC), rpc: RPC, privateKey: PK });
 }

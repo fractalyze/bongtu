@@ -1,5 +1,5 @@
 // The wagmi edge — how the browser REACHES a wallet, in one file: the wagmi Config
-// (GIWA Sepolia only, every installed extension via EIP-6963 discovery — wagmi's
+// (the live chain only, every installed extension via EIP-6963 discovery — wagmi's
 // multiInjectedProviderDiscovery, on by default — and WalletConnect for phones/QR;
 // the RainbowKit connect modal lists all of them), plus the functions that turn
 // whatever wagmi connected into the `Connection` shape the protocol engine
@@ -21,7 +21,7 @@ import { disconnect, getAccount, reconnect, watchAccount } from "wagmi/actions";
 import { connectorsForWallets } from "@rainbow-me/rainbowkit";
 import { walletConnectWallet } from "@rainbow-me/rainbowkit/wallets";
 import { createPublicClient, createWalletClient, custom, type PublicClient } from "viem";
-import { giwaSepolia } from "@bongtu/client/chain";
+import { liveChain } from "@bongtu/client/chain";
 import { accountWatchHandler, type Connection, type WalletWatchHandlers } from "@bongtu/client/connection";
 
 /**
@@ -61,9 +61,9 @@ export function buildConnectors(projectId: string | null): CreateConnectorFn[] {
  *  (restoreConnection below), so a QR modal or popup can never appear
  *  from a mere page load. */
 export const wagmiConfig = createConfig({
-  chains: [giwaSepolia],
+  chains: [liveChain],
   connectors: buildConnectors(walletConnectProjectId()),
-  transports: { [giwaSepolia.id]: http() },
+  transports: { [liveChain.id]: http() },
 });
 
 // --- turning wagmi state into the engine's `Connection` ----------------------------
@@ -88,9 +88,9 @@ export function metamaskDeepLink(): string {
   return `https://metamask.app.link/dapp/${host}${pathname}`;
 }
 
-/** The one public client — receipts and view reads go to the GIWA RPC directly,
+/** The one public client — receipts and view reads go to the chain's RPC directly,
  *  never through the wallet (a phone over WalletConnect shouldn't relay eth_call). */
-const publicClient: PublicClient = createPublicClient({ chain: giwaSepolia, transport: http() });
+const publicClient: PublicClient = createPublicClient({ chain: liveChain, transport: http() });
 
 /** Wrap the connector wagmi has live into the `Connection` the app consumes, or
  *  null when nothing is connected. The wallet client rides the connector's raw
@@ -102,7 +102,7 @@ export async function currentConnection(): Promise<Connection | null> {
   const injected = (await account.connector.getProvider()) as Eip1193;
   const walletClient = createWalletClient({
     account: account.address,
-    chain: giwaSepolia,
+    chain: liveChain,
     transport: custom(injected),
   });
   return {

@@ -22,7 +22,10 @@ import type { WalletTransport } from "./loginGuard.js";
 import type { Calldata } from "@bongtu/core/proving";
 import {
   CHAIN_ID,
+  CHAIN_NAME,
   EXPLORER_BASE,
+  GAS_TOKEN_PHRASE,
+  NATIVE_CURRENCY,
   POOL_ABI_FRAGMENTS,
   ERC20_ABI_FRAGMENTS,
   RPC_URL,
@@ -30,7 +33,7 @@ import {
   explorerTxUrl,
   isPreKemProbeError,
 } from "@bongtu/core/network";
-import { giwaSepolia } from "./chain.js";
+import { liveChain } from "./chain.js";
 
 // The shared per-function ABI fragments (@bongtu/core/network) — only the pool
 // functions the wallet touches, parsed once for viem. deposit is the 0-in/2-out
@@ -77,7 +80,7 @@ export interface Connection {
   address: string;
   /** viem wallet client over the connector's raw EIP-1193 provider: signatures + txs. */
   walletClient: WalletClient;
-  /** viem public client on the GIWA http RPC: reads + receipt waits (never the wallet). */
+  /** viem public client on the chain's http RPC: reads + receipt waits (never the wallet). */
   publicClient: PublicClient;
   /** the raw EIP-1193 provider behind the connector — vendor brand flags
    *  (walletBrand.ts) and nothing else reads it. */
@@ -104,7 +107,7 @@ export function walletErrorMessage(e: unknown): string {
     case "user_rejected":
       return "Transaction rejected in your wallet.";
     case "insufficient_gas":
-      return "Not enough GIWA Sepolia ETH to pay gas. This account needs a little ETH on GIWA Sepolia first.";
+      return `Not enough ${GAS_TOKEN_PHRASE} to pay gas. This account needs a little ETH on ${CHAIN_NAME} first.`;
     case "chain_switch":
       if (failure.rejected) return "Transaction rejected in your wallet.";
       break; // an un-rejected switch failure reads best in viem's own words below
@@ -119,7 +122,7 @@ export function walletErrorMessage(e: unknown): string {
   }
 }
 
-/** The connected account's native (gas) ETH balance on GIWA. */
+/** The connected account's native (gas) ETH balance on the live chain. */
 export async function readGasBalance(connection: Connection): Promise<bigint> {
   return connection.publicClient.getBalance({ address: connection.address as Address });
 }
@@ -167,43 +170,43 @@ export function accountWatchHandler(
   };
 }
 
-// EIP-3085/3326 params for GIWA Sepolia, derived from the ONE network module so a
-// chain move cannot fork the wallet's idea of the chain from the sdk's.
-const GIWA_CHAIN_HEX = "0x" + CHAIN_ID.toString(16);
-const GIWA_CHAIN_PARAMS = {
-  chainId: GIWA_CHAIN_HEX,
-  chainName: "GIWA Sepolia (Testnet)",
+// EIP-3085/3326 params for the live chain, derived from the ONE network module so
+// a chain move cannot fork the wallet's idea of the chain from the sdk's.
+const CHAIN_HEX = "0x" + CHAIN_ID.toString(16);
+const CHAIN_PARAMS = {
+  chainId: CHAIN_HEX,
+  chainName: CHAIN_NAME,
   rpcUrls: [RPC_URL],
   blockExplorerUrls: [EXPLORER_BASE],
-  nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
+  nativeCurrency: NATIVE_CURRENCY,
 };
 
 /**
- * Put the wallet on GIWA Sepolia: switch if it already knows the chain, otherwise
+ * Put the wallet on the live chain: switch if it already knows it, otherwise
  * register it (EIP-3085 error 4902) and switch. Raw EIP-1193 requests through the
  * wallet client so the SAME two RPCs reach an extension or relay to a phone.
  * Without this a user connected on any other network would sign txs that go
- * nowhere — the pool only exists on GIWA.
+ * nowhere — the pool exists on exactly one chain.
  */
-async function ensureGiwaChain(request: Eip1193["request"]): Promise<void> {
+async function switchOrAddChain(request: Eip1193["request"]): Promise<void> {
   try {
-    await request({ method: "wallet_switchEthereumChain", params: [{ chainId: GIWA_CHAIN_HEX }] });
+    await request({ method: "wallet_switchEthereumChain", params: [{ chainId: CHAIN_HEX }] });
   } catch (e) {
     if (errorCode(e) !== 4902) throw e;
     // MetaMask auto-switches after add, but not every wallet does.
-    await request({ method: "wallet_addEthereumChain", params: [GIWA_CHAIN_PARAMS] });
-    await request({ method: "wallet_switchEthereumChain", params: [{ chainId: GIWA_CHAIN_HEX }] });
+    await request({ method: "wallet_addEthereumChain", params: [CHAIN_PARAMS] });
+    await request({ method: "wallet_switchEthereumChain", params: [{ chainId: CHAIN_HEX }] });
   }
 }
 
-/** Put an existing connection's wallet on GIWA Sepolia (silent when the chain is
+/** Put an existing connection's wallet on the live chain (silent when the chain is
  *  already added+selected). The action flows call this before reading token state
  *  or submitting — a silently-reconnected session may still sit on another chain. */
 export async function ensureChain(connection: Connection): Promise<void> {
   const request: Eip1193["request"] = (args) =>
     connection.walletClient.request(args as never) as Promise<unknown>;
   try {
-    await ensureGiwaChain(request);
+    await switchOrAddChain(request);
   } catch (e) {
     // An extension either switches or reports a code the generic message already
     // explains. A remote wallet may simply not implement the switch, or the user may
@@ -213,17 +216,17 @@ export async function ensureChain(connection: Connection): Promise<void> {
   }
 }
 
-/** What to tell a WalletConnect user whose wallet would not move to GIWA Sepolia.
+/** What to tell a WalletConnect user whose wallet would not move to the live chain.
  *  The rejection verdict comes from the shared classifier — a declined EIP-3326
  *  request in any of its shapes (code 4001 / ACTION_REJECTED, viem's typed error,
  *  a SwitchChainError wrapping the user's refusal). */
 export function chainSwitchMessage(e: unknown): string {
   const failure = classifyChainFailure(e);
   if (failure.kind === "user_rejected" || (failure.kind === "chain_switch" && failure.rejected)) {
-    return "You declined the network switch. bongtu only works on GIWA Sepolia.";
+    return `You declined the network switch. bongtu only works on ${CHAIN_NAME}.`;
   }
   return (
-    "Your wallet didn't switch to GIWA Sepolia. Add or select that network in the wallet " +
+    `Your wallet didn't switch to ${CHAIN_NAME}. Add or select that network in the wallet ` +
     "app, then try again."
   );
 }
@@ -333,8 +336,7 @@ function asProofArgs(calldata: Calldata) {
  *  assigns stale nonces ("nonce too low" on submit). Every flow here awaits
  *  each tx to its receipt before the next, so the pending count is always the
  *  correct next nonce. */
-/** The chain's own price word (eth_gasPrice) per tx — GIWA quotes ~0.001 gwei.
- *  The old fixed pin guarded against wallet-stack fee ESTIMATION (which once
+/** The old fixed pin guarded against wallet-stack fee ESTIMATION (which once
  *  overpaid ~1500x); asking the node directly is not estimation, and a fixed
  *  pin goes stale the day the sequencer moves its floor. */
 async function chainGasPrice(connection: Connection): Promise<bigint> {
@@ -370,7 +372,7 @@ async function submit(
     // type statically, hence the one cast.
     args: [a, b, c, pub, kemCiphertext as `0x${string}`] as never,
     account: connection.address as Address,
-    chain: giwaSepolia,
+    chain: liveChain,
     nonce: await nextNonce(connection),
     gasPrice: await chainGasPrice(connection),
   });
@@ -444,7 +446,7 @@ export async function approveToken(
     functionName: "approve",
     args: [spender as Address, amount],
     account: connection.address as Address,
-    chain: giwaSepolia,
+    chain: liveChain,
     gasPrice: await chainGasPrice(connection),
     nonce: await nextNonce(connection),
   });
@@ -456,7 +458,7 @@ export async function approveToken(
  * DEV FAUCET: mint `amount` raw units of the mock kKRW ERC-20 at `tokenAddr` to `to`,
  * from the connected wallet. The deployed token is MockERC20 whose `mint` is
  * permissionless (no onlyOwner/cap), so the user self-funds test kKRW and pays their
- * OWN GIWA gas — there is no backend faucet service or operator key. Same submit shape
+ * OWN gas — there is no backend faucet service or operator key. Same submit shape
  * as approveToken/submit (chain-quoted gas, explicit nonce, receipt wait); returns the tx hash +
  * explorer link so the Deposit screen can surface it. A production token has no mint.
  */
@@ -472,7 +474,7 @@ export async function mintTestToken(
     functionName: "mint",
     args: [to as Address, amount],
     account: connection.address as Address,
-    chain: giwaSepolia,
+    chain: liveChain,
     gasPrice: await chainGasPrice(connection),
     nonce: await nextNonce(connection),
   });

@@ -1,7 +1,7 @@
 // TESTNET-ONLY mint dialog (render behind DEFAULTS.testnet): self-mint test kKRW from
 // the connected wallet. The deployed kKRW is MockERC20 whose `mint` is permissionless
-// (no backend faucet service or operator key) — the user pays their own GIWA gas, so a
-// zero-gas account is pre-checked and told plainly (with the GIWA faucet link) instead
+// (no backend faucet service or operator key) — the user pays their own gas, so a
+// zero-gas account is pre-checked and told plainly (with the faucet link) instead
 // of failing inside the wallet with an opaque object. The amount starts EMPTY (U-W9: a
 // prefilled million read as a fixed faucet ration rather than a field to fill in); on a
 // confirmed mint the caller refreshes its token state and the dialog switches to its
@@ -11,6 +11,7 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { DEFAULTS } from "../../config.js";
+import { GAS_TOKEN_PHRASE } from "@bongtu/core/network";
 import {
   mintTestToken,
   readGasBalance,
@@ -83,8 +84,11 @@ export function MintModal({
       // The mint is permissionless but still a tx: an account with ZERO gas ETH
       // fails inside the wallet with an opaque object — say it plainly instead.
       if ((await readGasBalance(connection)) === 0n) {
+        // The phrase carries GAS_TOKEN_PHRASE so ErrorBanner recognises this as a
+        // gas-shortfall message and offers the faucet link.
         throw new Error(
-          "This account has no GIWA Sepolia ETH to pay gas. Get a little ETH onto GIWA Sepolia first, then mint.",
+          `This account has no ${GAS_TOKEN_PHRASE} to pay gas. ` +
+            `Get a little ETH onto ${DEFAULTS.chainName} first, then mint.`,
         );
       }
       const res = await mintTestToken(connection, DEFAULTS.token, connection.address, parsed.wei);

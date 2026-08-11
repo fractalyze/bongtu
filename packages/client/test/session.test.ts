@@ -11,9 +11,13 @@
 //   (5) TRANSPORT — which way the login came in, so the silent restore reopens the
 //       same one; records written before WalletConnect existed still restore.
 //   (6) BINDINGS — per account, outliving the session, forgotten on sign-out.
+//   (7) DEPLOYMENT SCOPE — both storage keys carry (chainId, pool), so records
+//       written under a DIFFERENT deployment are not found rather than believed.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+
+import { CHAIN_ID, DEPLOYMENT_TAG, POOL_ADDRESS } from "@bongtu/core/network";
 
 import {
   KEY_BINDING_KEY,
@@ -165,4 +169,49 @@ test("the binding record holds nothing secret", () => {
   saveKeyBinding(SESSION.eoaAddress, SESSION.compressedPubkey, st);
   const raw = st.map.get(KEY_BINDING_KEY) ?? "";
   assert.ok(!/privateKey|keypair|formatted/i.test(raw), "public key and address only");
+});
+
+// --- (7) deployment scope ----------------------------------------------------------
+// Both records describe a bjj key, and the KDF domain is (chainId, pool) — so both
+// are only meaningful for ONE deployment. The keys therefore carry the pair.
+
+test("both storage keys are the deployment's, so moving chain or pool moves the key", () => {
+  assert.equal(DEPLOYMENT_TAG, `${CHAIN_ID}:${POOL_ADDRESS.toLowerCase()}`);
+  assert.equal(SESSION_KEY, `bongtu.session.${DEPLOYMENT_TAG}`);
+  assert.equal(KEY_BINDING_KEY, `bongtu.keybinding.${DEPLOYMENT_TAG}`);
+
+  // Change EITHER half of the KDF domain and both storage keys change with it —
+  // the pre-move deployment (chain 91342, its own pool) is the concrete case.
+  for (const other of [
+    `91342:${POOL_ADDRESS.toLowerCase()}`,
+    `${CHAIN_ID}:0x22a2f38a24a2647e430dc28a5154d390f93ccf7b`,
+  ]) {
+    assert.notEqual(other, DEPLOYMENT_TAG);
+    assert.notEqual(`bongtu.session.${other}`, SESSION_KEY);
+    assert.notEqual(`bongtu.keybinding.${other}`, KEY_BINDING_KEY);
+  }
+});
+
+test("another deployment's records read as ABSENT, not as this deployment's", () => {
+  // A device that logged in before the move still holds both records under the old
+  // tag. Restoring the session would show a receive address whose notes this build
+  // cannot derive a key for; believing the binding would refuse the login outright.
+  const st = memStorage();
+  const oldTag = `91342:0x22a2f38a24a2647e430dc28a5154d390f93ccf7b`;
+  const oldPubkey = "0x" + "99".repeat(32);
+  st.map.set(`bongtu.session.${oldTag}`, JSON.stringify({ ...SESSION, compressedPubkey: oldPubkey }));
+  st.map.set(`bongtu.keybinding.${oldTag}`, JSON.stringify({ [SESSION.eoaAddress]: oldPubkey }));
+
+  assert.equal(loadSession(1_000, st), null, "a pre-move session must not restore here");
+  assert.equal(loadKeyBinding(SESSION.eoaAddress, st), null, "and its binding must not be believed");
+
+  // Deliberately not migrated: the old entries are left where they are, and this
+  // deployment writes its own alongside them.
+  saveKeyBinding(SESSION.eoaAddress, SESSION.compressedPubkey, st);
+  assert.equal(loadKeyBinding(SESSION.eoaAddress, st), SESSION.compressedPubkey);
+  assert.equal(
+    JSON.parse(st.map.get(`bongtu.keybinding.${oldTag}`) ?? "{}")[SESSION.eoaAddress],
+    oldPubkey,
+    "the old record is untouched — nothing carries it forward",
+  );
 });

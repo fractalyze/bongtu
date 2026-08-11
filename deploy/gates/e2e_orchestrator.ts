@@ -61,7 +61,7 @@ import {
 import { proofArgs } from "../live/lib/viem_client.js";
 
 // ok() / step() and the failure count are the toolbox's (deploy/live/lib/proof_toolbox.ts),
-// shared with the GIWA driver.
+// shared with the live driver (deploy/live/payroll_e2e.ts).
 //
 // verbose: the human-watched DoD gate keeps its per-circuit timing log (the
 // scenario sibling runs the same harness prove() silent).

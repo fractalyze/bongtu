@@ -28,8 +28,8 @@ export interface RunLoginDeps {
    *  WalletConnect wallet this browser has never derived under pays the double
    *  signature. */
   openConnection: () => Promise<Connection>;
-  /** Prompt the wallet onto GIWA BEFORE anything signs: the derivation's typed
-   *  data pins domain.chainId to GIWA, and wallets reject a v4 request whose
+  /** Prompt the wallet onto the live chain BEFORE anything signs: the derivation's
+   *  typed data pins domain.chainId to it, and wallets reject a v4 request whose
    *  domain chain differs from the active one — a wallet on another network
    *  must get the add/switch prompt, not raw provider text. */
   ensureChain: (connection: Connection) => Promise<void>;

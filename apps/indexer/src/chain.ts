@@ -75,7 +75,7 @@ export function staleOpAbiError(abi: Abi): string | null {
 
 /**
  * Resolve the pool address + RPC + start block from env / addresses.<chainId>.json.
- * - RPC:        env RPC or GIWA_RPC or E2E_RPC, else the anvil default.
+ * - RPC:        env RPC or LIVE_RPC or E2E_RPC, else the anvil default.
  * - POOL:       env POOL, else deploy/addresses.<chainId>.json `pool`.
  * - START_BLOCK env (default 0) — where the log replay begins.
  */
@@ -117,7 +117,7 @@ export function parseScalar(s: string): bigint {
 }
 
 export function resolveConfig(): ChainConfig {
-  const rpc = process.env.RPC || process.env.GIWA_RPC || process.env.E2E_RPC || "http://127.0.0.1:8545";
+  const rpc = process.env.RPC || process.env.LIVE_RPC || process.env.E2E_RPC || "http://127.0.0.1:8545";
   const startBlock = process.env.START_BLOCK ? Number(process.env.START_BLOCK) : 0;
   let pool = process.env.POOL || "";
   if (!pool) {

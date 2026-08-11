@@ -1,14 +1,14 @@
-// The viem plumbing the deploy/ drivers share: a chain object, the pinned GIWA
+// The viem plumbing the deploy/ drivers share: a chain object, the pinned live
 // gas price, and a thin contract "rig" that mirrors the small slice of ethers the
 // drivers used (deploy a contract, read a view, send a tx and wait for the
-// receipt). It exists so the ONE load-bearing invariant — every GIWA tx pins
-// gasPrice to the floor instead of letting the client estimate (auto-estimate
-// once overpaid ~1500x and drained the faucet grant) — lives in exactly one
-// place: a rig built with `gasPrice` bakes it into every write and deploy.
+// receipt). It exists so the ONE load-bearing invariant — every live tx pins
+// gasPrice instead of letting the client estimate (auto-estimate once overpaid
+// ~1500x and drained the faucet grant) — lives in exactly one place: a rig built
+// with `gasPrice` bakes it into every write and deploy.
 //
 // TEST/OPS INFRASTRUCTURE, reached by relative import; not an npm package
 // export. Chain-agnostic: the caller passes the chain + rpc + key (+ gasPrice on
-// GIWA, omitted on the free anvil gate).
+// the live chain, omitted on the free anvil gate).
 //
 // A rig's `at()` handle carries TWO surfaces so both harness consumers keep one
 // API: the viem-first `read(fn,args)` / `write(fn,args)` the migrated deploy
@@ -35,26 +35,31 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import {
   CHAIN_ID,
+  CHAIN_NAME,
   EXPLORER_BASE,
-  GIWA_GAS_FLOOR_GWEI,
+  GAS_PRICE_PIN_GWEI,
+  NATIVE_CURRENCY,
   RPC_URL,
 } from "@bongtu/core/network";
 
-/** GIWA Sepolia as a viem chain, derived field-for-field from @bongtu/core/network
- *  (the ONE home of the chain facts) — identical to the apps' giwaSepolia so a
- *  chain move cannot fork a driver's idea of the network from the sdk's. */
-export const giwaChain: Chain = defineChain({
+/** The live chain as a viem object, derived field-for-field from
+ *  @bongtu/core/network (the ONE home of the chain facts) — identical to the
+ *  apps' liveChain so a chain move cannot fork a driver's idea of the network
+ *  from the sdk's. */
+export const liveChain: Chain = defineChain({
   id: CHAIN_ID,
-  name: "GIWA Sepolia (Testnet)",
-  nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
+  name: CHAIN_NAME,
+  nativeCurrency: NATIVE_CURRENCY,
   rpcUrls: { default: { http: [RPC_URL] } },
-  blockExplorers: { default: { name: "GIWA Sepolia Blockscout", url: EXPLORER_BASE } },
+  blockExplorers: { default: { name: `${CHAIN_NAME} Explorer`, url: EXPLORER_BASE } },
   testnet: true,
 });
 
-/** The pinned per-tx gas price (wei). GIWA wants ~0.001 gwei; client-side
- *  auto-estimation once overpaid ~1500x. EVERY live write pins this. */
-export const GIWA_GAS_PRICE = parseGwei(GIWA_GAS_FLOOR_GWEI);
+/** The pinned per-tx gas price (wei) — a HARD pin, never an estimate: client-side
+ *  auto-estimation once overpaid ~1500x. EVERY live write pins this, so it is set
+ *  well above the chain's quote (see @bongtu/core GAS_PRICE_PIN_GWEI for the number
+ *  and the too-low/too-high asymmetry). */
+export const GAS_PRICE = parseGwei(GAS_PRICE_PIN_GWEI);
 
 /** A local anvil chain for the heavy gates (id 31337, the anvil default). The rpc
  *  transport overrides the chain's placeholder url with the gate's actual E2E_RPC. */
@@ -139,7 +144,7 @@ export interface Rig {
 const CONTROL = new Set(["address", "abi", "read", "write", "then"]);
 
 /** Build a rig on `chain` at `rpc`, sending from `privateKey`. When `gasPrice` is
- *  given (the GIWA drivers), every write and deploy pins it — never estimated. */
+ *  given (the live drivers), every write and deploy pins it — never estimated. */
 export function makeRig(opts: {
   chain: Chain;
   rpc: string;

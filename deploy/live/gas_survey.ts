@@ -1,4 +1,4 @@
-// Live per-action gas survey against the CURRENT GIWA pool (V4 impl, PQ epoch 1).
+// Live per-action gas survey against the CURRENT live pool (V4 impl, PQ epoch 1).
 // deposit -> transfer(2x2) -> withdraw, one fresh chain with survey-only identities,
 // each tx's gasUsed printed for docs/performance.md. Built on @bongtu/core + the
 // proof toolbox only — deliberately no wallet-lib imports, so the survey stays
@@ -6,7 +6,7 @@
 // the V4 entrypoint is deprecated (transfer10x2 replaced it in every wallet route),
 // and its measurement stays in docs/performance.md.
 //
-//   GIWA_RPC + DEPLOYER_KEY (env) required.  Run: npx tsx deploy/live/giwa_gas_survey.ts
+//   LIVE_RPC + DEPLOYER_KEY (env) required.  Run: npx tsx deploy/live/gas_survey.ts
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,17 +18,18 @@ import {
   ARBITER_KEM_PK,
   ARBITER_PUBKEY_X,
   ARBITER_PUBKEY_Y,
+  CHAIN_ID,
   H,
   RPC_URL,
   explorerTxUrl,
 } from "@bongtu/core/network";
 import { maxUint256, parseAbi } from "viem";
 import { artifact, prove, ok, step, failureCount } from "./lib/proof_toolbox.js";
-// The viem rig centralizes the GIWA gas-price pin (auto-estimate once overpaid ~1500x).
-import { giwaChain, GIWA_GAS_PRICE, makeRig, proofArgs } from "./lib/viem_client.js";
+// The viem rig centralizes the live gas-price pin (auto-estimate once overpaid ~1500x).
+import { liveChain, GAS_PRICE, makeRig, proofArgs } from "./lib/viem_client.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const ADDR = JSON.parse(readFileSync(join(HERE, "..", "addresses.91342.json"), "utf8"));
+const ADDR = JSON.parse(readFileSync(join(HERE, "..", `addresses.${CHAIN_ID}.json`), "utf8"));
 
 const C = deriveKeypair(770000000000000000000077n);
 const D = deriveKeypair(880000000000000000000088n);
@@ -71,12 +72,12 @@ async function liveHeadCaughtUp(wantLeaf: number): Promise<bigint> {
 }
 
 async function main(): Promise<void> {
-  // The viem rig pins gasPrice to the GIWA floor on every write.
+  // The viem rig pins gasPrice on every write — never estimated.
   const rig = makeRig({
-    chain: giwaChain,
-    rpc: process.env.GIWA_RPC || RPC_URL,
+    chain: liveChain,
+    rpc: process.env.LIVE_RPC || RPC_URL,
     privateKey: process.env.DEPLOYER_KEY!,
-    gasPrice: GIWA_GAS_PRICE,
+    gasPrice: GAS_PRICE,
   });
   const pool = rig.at(
     ADDR.pool,

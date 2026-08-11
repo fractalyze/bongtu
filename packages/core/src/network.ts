@@ -1,8 +1,14 @@
-// The ONE home for the deployment-coupled chain facts of the LIVE GIWA Sepolia
-// BongtuPool. Everything here is PUBLIC (the arbiter key below is the pool's
-// stored authority PUBLIC key; no private key ever lives in this module).
+// The ONE home for the deployment-coupled chain facts of the LIVE BongtuPool.
+// Everything here is PUBLIC (the arbiter key below is the pool's stored
+// authority PUBLIC key; no private key ever lives in this module).
 //
-// Canonical record: deploy/addresses.91342.json (CLAUDE.md "live pool is
+// The CHAIN IS SWAPPABLE and has moved before, so nothing here is named after
+// it: every export is a role ("the chain id", "the gas price pin"), the chain's own
+// name is the single CHAIN_NAME string below, and downstream code says
+// `ensureChain` / `CHAIN_HEX` / `GAS_PRICE_PIN_GWEI` rather than embedding a brand.
+// A future move is then this file plus the deploy record, not a repo sweep.
+//
+// Canonical record: deploy/addresses.84532.json (CLAUDE.md "live pool is
 // canonical" — the deployed pool is reused, no redeploys for new work).
 // test/network.test.ts asserts these values equal that JSON field-for-field
 // and byte-pins the facts the JSON does not carry, so a transcription slip
@@ -10,26 +16,65 @@
 // or arbiter epoch rotation, edit THIS file (the test convicts stale fields);
 // app config.ts files import from here and keep only app-specific knobs.
 //
+// NEVER transcribe an address by pattern-matching the old value: the Base
+// deployment replayed the SAME deployer CREATE nonces the previous chain used,
+// so several addresses collide ACROSS chains while naming DIFFERENT contracts
+// (0x93365980… was the old pool and is this chain's token). Copy every address
+// from the record BY FIELD NAME.
+//
 // DATA-ONLY by design: no chain-library import — this stays a plain-data
-// boundary. Consumers turn GIWA_GAS_FLOOR_GWEI into a wei gas price with their
-// own client (viem `parseGwei(GIWA_GAS_FLOOR_GWEI)`).
+// boundary. Consumers turn GAS_PRICE_PIN_GWEI into a wei gas price with their
+// own client (viem `parseGwei(GAS_PRICE_PIN_GWEI)`).
 
-/** GIWA Sepolia chain id (also the EIP-712 KDF domain chainId, SPEC §6). */
-export const CHAIN_ID = 91342;
+/** The live chain's id (also the EIP-712 KDF domain chainId, SPEC §6). */
+export const CHAIN_ID = 84532;
 
-/** GIWA Sepolia public RPC. */
-export const RPC_URL = "https://sepolia-rpc.giwa.io";
+/** The live chain's display name — the ONE place a screen, an error message or
+ *  a wallet_addEthereumChain payload gets the chain's name from. */
+export const CHAIN_NAME = "Base Sepolia";
 
-/** GIWA Sepolia Blockscout explorer base (no trailing slash). */
-export const EXPLORER_BASE = "https://sepolia-explorer.giwa.io";
+/** The live chain's gas token, in the shape both viem `defineChain` and an
+ *  EIP-3085 `wallet_addEthereumChain` payload want. One home like every other
+ *  chain fact: it was the last field still transcribed per client. */
+export const NATIVE_CURRENCY = { name: "Sepolia Ether", symbol: "ETH", decimals: 18 };
 
-/** The live BongtuPool UUPS proxy (deploy/addresses.91342.json `pool`). */
-export const POOL_ADDRESS = "0x93365980784ef504613EF5822ce1289CF858Fc10";
+/** The live chain's public RPC. */
+export const RPC_URL = "https://sepolia.base.org";
+
+/** The live chain's block-explorer base (no trailing slash). */
+export const EXPLORER_BASE = "https://sepolia.basescan.org";
+
+/** Where a user with no gas ETH on this chain gets some. Surfaced from the
+ *  zero-gas errors in both apps, so it lives with the other chain facts. */
+export const GAS_FAUCET_URL = "https://portal.cdp.coinbase.com/products/faucet";
+
+/** The phrase every "this account cannot pay gas" message contains. The error
+ *  banner decides whether to hang the faucet link off a message by looking for
+ *  it, so message and matcher must not drift — before, both hardcoded the chain
+ *  name and a rename would have silently dropped the link. */
+export const GAS_TOKEN_PHRASE = `${CHAIN_NAME} ETH`;
+
+/** The live BongtuPool UUPS proxy (deploy/addresses.84532.json `pool`). */
+export const POOL_ADDRESS = "0x2a72fea8e97fF79069B3D0165A5DB1Fef7F9322C";
 
 /** The wrapped mock kKRW ERC-20 the pool escrows (`token`). */
-export const TOKEN_ADDRESS = "0x17A89cC5FF3395Bb01464c9E422749CcDbFa8C3f";
+export const TOKEN_ADDRESS = "0x93365980784ef504613EF5822ce1289CF858Fc10";
 
-// The pool's stored arbiter PUBLIC key (addresses.91342.json arbiterKeyX/Y).
+/**
+ * The (chainId, pool) pair as ONE opaque string — the identity of this
+ * deployment.
+ *
+ * WHY IT EXISTS: the EIP-712 KDF domain is exactly (chainId, verifyingContract)
+ * (SPEC §6), so the bjj spending key an account derives is a function of THIS
+ * pair. Move either half and every user legitimately derives a different key.
+ * Anything persisted under a derived identity — a browser session record, the
+ * account→key binding — is therefore meaningful only for one pair, and must be
+ * stored under a key that carries it: a record from another deployment has to
+ * read as ABSENT, not as a contradiction (packages/client/src/session.ts).
+ */
+export const DEPLOYMENT_TAG = `${CHAIN_ID}:${POOL_ADDRESS.toLowerCase()}`;
+
+// The pool's stored arbiter PUBLIC key (addresses.84532.json arbiterKeyX/Y).
 // Every op's circuit encrypts its authority envelope to this key and the
 // contract injects the SAME key from storage before verifying — a stale copy
 // here means a wasted proof rejected on-chain. Decimal strings (bjj field
@@ -44,8 +89,10 @@ export const ARBITER_PUBKEY_Y =
 // the PQ half of the hybrid authority envelope (.dev/pq-envelope-design.md §2).
 // Clients encapsulate every op's kemCiphertext against THIS key; the chain
 // stores only its keccak256 (arbiterKemPkHash per epoch, §4), so the full key
-// is a deployment fact distributed here + deploy/addresses.91342.json (both
-// equality-tested against deploy/arbiter-kem-pk.91342.hex's material). PUBLIC:
+// is a deployment fact distributed here + deploy/addresses.84532.json (both
+// equality-tested against deploy/arbiter-kem-pk.84532.hex's material). The
+// arbiter did NOT rotate when the chain moved — same institutional key, same
+// hash, so every previously-issued envelope stays decryptable. PUBLIC:
 // the decapsulation key exists only in the arbiter's env (AUTHORITY_KEM_KEY).
 export const ARBITER_KEM_PK = "0x" +
   "1206b1b3894761e20bbdf5679ed1cec2e91d1839ab74146f469c142ac50f5548bb7cc6ae9cf3b0113b925c49" +
@@ -116,10 +163,32 @@ export const H = 32;
 /** Production disburse batch size (`batchSize`) — the live pool is a B=256 stack. */
 export const B = 256;
 
-// GIWA wants ~0.001 gwei; ethers' auto-estimate overpays ~1500x (drains the
-// faucet grant). 0.005 gwei is a safe 5x floor. Kept as the parseUnits ARG
-// (a decimal-gwei string) so this module stays ethers-free.
-export const GIWA_GAS_FLOOR_GWEI = "0.005";
+// WHAT IT IS: a HARD PIN, not a floor anything raises from. The deploy/live
+// drivers build their viem rig with `gasPrice: parseGwei(GAS_PRICE_PIN_GWEI)`, which
+// bakes this exact price into EVERY write and deploy they send, with no
+// estimation anywhere in the path. (The browser apps stopped using it: their
+// submits ask the node for eth_gasPrice and take 3x. Only the live drivers pin.)
+//
+// WHY A PIN AT ALL: client-side fee estimation once overpaid ~1500x on a
+// cheap L2 and drained a whole faucet grant, so the drivers name the price.
+//
+// WHAT GOES WRONG IF IT IS WRONG, and it is asymmetric:
+//   too LOW  — the tx is under the block base fee, the node rejects it
+//              ("max fee per gas less than block base fee") or it sits pending
+//              forever. A live e2e run just stops.
+//   too HIGH — the run overpays testnet ETH. On a 2.5M-gas op, 0.05 gwei is
+//              ~0.000125 ETH.
+// So this is set high, deliberately.
+//
+// THE NUMBER: Base Sepolia measured 0.006 gwei (`cast gas-price`) over a
+// 0.005 gwei base fee on 2026-08-11. 0.05 gwei is ~8x that quote — headroom for
+// a congestion spike between reading this constant and the tx landing, which a
+// pinned price cannot otherwise absorb. Re-measure on a chain move; a value at
+// or just above the base fee is the failure mode, not the safe choice.
+//
+// Kept as the parseGwei ARG (a decimal-gwei string) so this module stays
+// chain-library-free.
+export const GAS_PRICE_PIN_GWEI = "0.05";
 
 // Minimal hand-written BongtuPool ABI fragments (avoids importing the Foundry
 // artifact JSON into browser bundles) — ONE string per function, shared by
@@ -163,11 +232,11 @@ export const ERC20_ABI_FRAGMENTS = {
   balanceOf: "function balanceOf(address owner) view returns (uint256)",
   // Mock-token dev faucet: the deployed kKRW is MockERC20, whose mint(to, amount) is
   // FULLY permissionless (no onlyOwner, no cap) — so a user self-mints test kKRW from
-  // their own MetaMask and pays their own GIWA gas. NOT present on a production token.
+  // their own MetaMask and pays their own gas. NOT present on a production token.
   mint: "function mint(address to, uint256 amount)",
 } as const;
 
-/** Explorer link for a tx hash; `base` defaults to the live GIWA explorer. */
+/** Explorer link for a tx hash; `base` defaults to the live chain's explorer. */
 export function explorerTxUrl(txHash: string, base: string = EXPLORER_BASE): string {
   return `${base.replace(/\/$/, "")}/tx/${txHash}`;
 }

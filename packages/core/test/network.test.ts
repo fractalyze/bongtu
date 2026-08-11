@@ -1,19 +1,24 @@
 // Equality gate for the deployment-coupled chain facts (src/network.ts).
 //
-// Every constant in the network module describes the LIVE GIWA pool — a
+// Every constant in the network module describes the LIVE pool — a
 // transcription slip breaks both apps against the live deployment and surfaces
 // only at on-chain proof rejection. This suite convicts any slip in
 // milliseconds instead:
 //
-//   1. Facts the deploy artifact carries (deploy/addresses.91342.json — the
+//   1. Facts the deploy artifact carries (deploy/addresses.84532.json — the
 //      canonical record, CLAUDE.md "live pool is canonical") are asserted
 //      EQUAL to it field-for-field, so a redeploy that edits the JSON turns
-//      this suite red until the module follows.
-//   2. Facts the artifact does NOT carry (H, the gas floor, RPC/explorer
+//      this suite red until the module follows. This is ALSO the belt against
+//      the address collision the Base move introduced: the same deployer
+//      replayed the same CREATE nonces on both chains, so an address copied by
+//      pattern rather than BY FIELD NAME can still be a real, checksummed
+//      address naming the WRONG contract. Only field-for-field equality with
+//      the record catches that; reading the file cannot.
+//   2. Facts the artifact does NOT carry (H, the gas pin, RPC/explorer
 //      bases, the POOL_ABI_FRAGMENTS fragment strings) are pinned byte-for-byte to the
 //      values previously hand-copied across apps/payroll-web/src/lib/chain.ts,
 //      apps/wallet-web/src/lib/metamask.ts, both app config.ts files, and
-//      the live GIWA disburse runner — the copies this module replaced.
+//      the live disburse runner — the copies this module replaced.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -24,12 +29,14 @@ import { fileURLToPath } from "node:url";
 import {
   ARBITER_KEM_PK,
   ARBITER_KEM_PK_HASH,
+  CHAIN_NAME,
+  GAS_FAUCET_URL,
   ARBITER_PUBKEY_X,
   ARBITER_PUBKEY_Y,
   B,
   CHAIN_ID,
   EXPLORER_BASE,
-  GIWA_GAS_FLOOR_GWEI,
+  GAS_PRICE_PIN_GWEI,
   H,
   POOL_ABI_FRAGMENTS,
   POOL_ADDRESS,
@@ -57,12 +64,12 @@ interface Addresses {
   token: string;
 }
 const addr = JSON.parse(
-  readFileSync(join(REPO_ROOT, "deploy", "addresses.91342.json"), "utf8"),
+  readFileSync(join(REPO_ROOT, "deploy", "addresses.84532.json"), "utf8"),
 ) as Addresses;
 
-test("module facts equal deploy/addresses.91342.json field-for-field", () => {
+test("module facts equal deploy/addresses.84532.json field-for-field", () => {
   // JSON key -> module value, one row per fact the module owns. A redeploy
-  // (new addresses.91342.json) fails here naming the exact stale field.
+  // (new addresses.84532.json) fails here naming the exact stale field.
   const owned: Record<keyof Addresses, string | number> = {
     pool: POOL_ADDRESS,
     token: TOKEN_ADDRESS,
@@ -77,7 +84,7 @@ test("module facts equal deploy/addresses.91342.json field-for-field", () => {
     assert.deepEqual(
       moduleValue,
       addr[key as keyof Addresses],
-      `network.ts disagrees with addresses.91342.json on "${key}"`,
+      `network.ts disagrees with addresses.84532.json on "${key}"`,
     );
   }
   // The tuple form both app configs consume is the same two scalars.
@@ -87,12 +94,17 @@ test("module facts equal deploy/addresses.91342.json field-for-field", () => {
 test("facts outside the deploy artifact are pinned to the pre-module copies", () => {
   // SPEC §4 IMT height — was re-declared per app config.
   assert.equal(H, 32);
-  // GIWA wants ~0.001 gwei; ethers' auto-estimate overpays ~1500x. 0.005 gwei
-  // safe floor — was copied in chain.ts / metamask.ts / the live GIWA runner.
-  assert.equal(GIWA_GAS_FLOOR_GWEI, "0.005");
-  // Chain endpoints — were copied in both app config.ts files.
-  assert.equal(RPC_URL, "https://sepolia-rpc.giwa.io");
-  assert.equal(EXPLORER_BASE, "https://sepolia-explorer.giwa.io");
+  // The live drivers' HARD gas pin (never estimated — estimation once overpaid
+  // ~1500x). This chain quoted 0.006 gwei over a 0.005 gwei base fee, so 0.05
+  // gwei is ~8x headroom: pinning at or under the base fee is what strands a
+  // run, and overpaying testnet ETH is the cheap side of that trade. Lowering
+  // this toward the quote is the failure mode, not the saving.
+  assert.equal(GAS_PRICE_PIN_GWEI, "0.05");
+  // Chain endpoints, name and faucet — were copied in both app config.ts files.
+  assert.equal(CHAIN_NAME, "Base Sepolia");
+  assert.equal(RPC_URL, "https://sepolia.base.org");
+  assert.equal(EXPLORER_BASE, "https://sepolia.basescan.org");
+  assert.equal(GAS_FAUCET_URL, "https://portal.cdp.coinbase.com/products/faucet");
 });
 
 test("POOL_ABI_FRAGMENTS fragments match the hybrid (V2) BongtuPool signatures", () => {
@@ -131,13 +143,13 @@ test("POOL_ABI_FRAGMENTS fragments match the hybrid (V2) BongtuPool signatures",
 });
 
 test("ARBITER_KEM_PK is the deploy artifact's 1184-byte key and hashes to ARBITER_KEM_PK_HASH", () => {
-  // Also equality-tested field-for-field against addresses.91342.json above;
+  // Also equality-tested field-for-field against addresses.84532.json above;
   // this pins the internal consistency: length, the deploy/arbiter-kem-pk
   // artifact file, keccak256(pk) == the stored hash, and that the bytes ARE a
   // usable ML-KEM-768 encapsulation key (noble accepts them).
   const bytes = kemHexToBytes(ARBITER_KEM_PK);
   assert.equal(bytes.length, KEM_PUBLIC_KEY_BYTES);
-  const artifact = readFileSync(join(REPO_ROOT, "deploy", "arbiter-kem-pk.91342.hex"), "utf8").trim();
+  const artifact = readFileSync(join(REPO_ROOT, "deploy", "arbiter-kem-pk.84532.hex"), "utf8").trim();
   assert.equal(ARBITER_KEM_PK, artifact.startsWith("0x") ? artifact : `0x${artifact}`);
   // noble keccak, NOT loadEthers: the extern loader resolves via the dev-box
   // BONGTU_NODE_MODULES fallback, which hosted CI runners do not have.
@@ -148,7 +160,7 @@ test("ARBITER_KEM_PK is the deploy artifact's 1184-byte key and hashes to ARBITE
 });
 
 test("explorerTxUrl builds the live explorer link (trailing slash tolerated)", () => {
-  assert.equal(explorerTxUrl("0xabc"), "https://sepolia-explorer.giwa.io/tx/0xabc");
+  assert.equal(explorerTxUrl("0xabc"), "https://sepolia.basescan.org/tx/0xabc");
   // metamask.ts trimmed a trailing slash off the base; behavior preserved.
   assert.equal(explorerTxUrl("0xabc", "https://x.example/"), "https://x.example/tx/0xabc");
   assert.equal(explorerTxUrl("0xabc", "https://x.example"), "https://x.example/tx/0xabc");

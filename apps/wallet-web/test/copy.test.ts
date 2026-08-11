@@ -21,11 +21,14 @@ import { MintModal, MintSuccess } from "../src/ui/components/MintModal.js";
 import { SyncDot, syncState } from "../src/ui/components/SyncDot.js";
 import { activeStep, chainSteps, StagedProgress, SPEND_STEPS, withUnlock } from "../src/ui/components/StagedProgress.js";
 import { SuccessPanel } from "../src/ui/components/SuccessPanel.js";
+import { EXPLORER_BASE } from "@bongtu/core/network";
 import { NEUTRAL_WALLET_NAME } from "../src/lib/walletBrand.js";
 
 const h = createElement;
 const TX_HASH = `0x${"ab".repeat(32)}`;
-const TX_URL = `https://sepolia-explorer.giwa.io/tx/${TX_HASH}`;
+// Any explorer base would do here — taken from the sdk rather than typed out, so a
+// chain move stays confined to network.ts plus the deploy record.
+const TX_URL = `${EXPLORER_BASE}/tx/${TX_HASH}`;
 
 // The rendered SVG carries no readable name, so the icon is identified by its path
 // data — the one thing that differs between Remix glyphs.
@@ -282,7 +285,7 @@ test("an activity amount names the token, and the sign keeps its direction", () 
     h(ActivityList, {
       history: [HISTORY_ROW, { ...HISTORY_ROW, seq: 8, kind: "received" as const }],
       loading: false,
-      explorerBase: "https://sepolia-explorer.giwa.io",
+      explorerBase: EXPLORER_BASE,
     }),
   );
   assert.match(html, /-100<span[^>]*>kKRW<\/span>/, "outgoing reads -100 kKRW");
@@ -296,7 +299,7 @@ test("the row list is ruled at BOTH edges, so its gaps read evenly", () => {
     h(ActivityList, {
       history: [HISTORY_ROW],
       loading: false,
-      explorerBase: "https://sepolia-explorer.giwa.io",
+      explorerBase: EXPLORER_BASE,
     }),
   );
   // a closing rule under the last row ...

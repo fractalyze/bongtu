@@ -7,7 +7,7 @@
 //
 // The mint follows the WALLET's grammar (wallet-web MintModal): the deployed kKRW
 // is MockERC20 whose `mint` is permissionless, so the operator self-mints and pays
-// their own GIWA gas — no faucet service, no operator key. A zero-gas account is
+// their own gas — no faucet service, no operator key. A zero-gas account is
 // pre-checked and told plainly (with the faucet link) instead of failing inside
 // the wallet with an opaque provider object. The mint is its OWN popup over the
 // deposit dialog — an empty amount the operator fills, a Mint press, a completion
@@ -18,13 +18,14 @@ import type { Connection, SubmitResult } from "@bongtu/client/connection";
 import { mintTestToken, readGasBalance, readTokenState } from "@bongtu/client/connection";
 import type { DepositStage } from "@bongtu/client/depositFlow";
 import { formatKkrw } from "@bongtu/client/money";
+import { GAS_TOKEN_PHRASE } from "@bongtu/core/network";
 import { parseDepositAmount } from "./errors.js";
 
 /** What the dialog says when the connected account cannot pay for either tx. The
  *  faucet link is rendered next to it (config gasFaucet), so the next step is one
  *  click away rather than a search. */
 export const NO_GAS_MESSAGE =
-  "This account has no GIWA Sepolia ETH to pay gas. Get a little ETH first, then continue.";
+  `This account has no ${GAS_TOKEN_PHRASE} to pay gas. Get a little ETH first, then continue.`;
 
 /** The gas verdict. `unknown` is a read that has not landed (or failed) — it never
  *  blocks: guessing "none" would lock a funded operator out of their own deposit. */

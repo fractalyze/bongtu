@@ -99,7 +99,7 @@ export function Settings(): ReactNode {
           Deployment
         </h2>
         <div className="bg-surface border border-border rounded-xl px-3.5 py-1">
-          <Row label="Network" value={`GIWA · chain ${DEFAULTS.chainId}`} />
+          <Row label="Network" value={`${DEFAULTS.chainName} · chain ${DEFAULTS.chainId}`} />
           <Row label="Pool" full={DEFAULTS.pool} href={`${EXPLORER}/address/${DEFAULTS.pool}`} mono />
           <Row
             label="Token (kKRW)"

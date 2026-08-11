@@ -1,9 +1,10 @@
 // Runnable bongtu indexer service (SPEC §6b): ingest -> mirror -> serve.
 //
 // Env:
-//   RPC / GIWA_RPC / E2E_RPC   RPC endpoint (default anvil 127.0.0.1:8545)
+//   RPC / LIVE_RPC / E2E_RPC   RPC endpoint (default anvil 127.0.0.1:8545)
 //   POOL                       pool address (else deploy/addresses.<CHAIN_ID>.json)
-//   CHAIN_ID                   chain id for the addresses file (default 91342)
+//   CHAIN_ID                   chain id for the addresses file (default: the sdk
+//                              CHAIN_ID — @bongtu/core/network, the one home)
 //   START_BLOCK                first block to replay (default 0)
 //   PORT                       HTTP port (default 8600)
 //   POLL_MS                    incremental re-ingest interval (default 3000; 0 = off)

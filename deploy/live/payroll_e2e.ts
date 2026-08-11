@@ -1,4 +1,4 @@
-// LIVE GIWA payroll e2e — the pay console's production flow, end to end, through
+// LIVE payroll e2e — the pay console's production flow, end to end, through
 // the REAL running services: faucet mint -> deposit -> (merge legs if the balance
 // is fragmented) -> 3-recipient disburse, every proof from the resident GPU prover
 // service, every result read back off the arbiter indexer.
@@ -19,7 +19,7 @@
 //      wallet path makes on the signature it gets back, so only the signature's
 //      provenance differs. The KeyCache around it is the real one (session check,
 //      account check, idle wipe), wired to `derive: () => that identity`.
-//   2. The EIP-1193 provider is a shim over the GIWA http RPC standing in for the
+//   2. The EIP-1193 provider is a shim over the chain's http RPC standing in for the
 //      browser extension: it answers wallet_switchEthereumChain / eth_accounts,
 //      SIGNS eth_sendTransaction with the deployer key (the app submits with an
 //      address — a JSON-RPC account — exactly as it does against MetaMask), and
@@ -34,8 +34,8 @@
 // notes. The employer identity is fixed on purpose — reruns accumulate notes for it,
 // which is exactly what exercises the merge legs.
 //
-//   Run:  npx tsx deploy/live/giwa_payroll_e2e.ts
-//   Env:  DEPLOYER_KEY (required, from .env), GIWA_RPC, INDEXER_URL (default
+//   Run:  npx tsx deploy/live/payroll_e2e.ts
+//   Env:  DEPLOYER_KEY (required, from .env), LIVE_RPC, INDEXER_URL (default
 //         http://localhost:8600), PROVER_URL (default http://127.0.0.1:8700),
 //         PROVER_ORIGIN (default http://localhost:5173).
 
@@ -46,10 +46,10 @@ import { fileURLToPath } from "node:url";
 import { createPublicClient, createWalletClient, custom, decodeEventLog, http, parseAbi, type Address, type PublicClient } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-import { B, EXPLORER_BASE, RPC_URL, explorerTxUrl } from "@bongtu/core/network";
+import { B, CHAIN_ID, EXPLORER_BASE, RPC_URL, explorerTxUrl } from "@bongtu/core/network";
 import { deriveKeypair } from "@bongtu/core/note";
 import { packPubkey } from "@bongtu/core/pubkey";
-import { giwaSepolia } from "@bongtu/client/chain";
+import { liveChain } from "@bongtu/client/chain";
 import type { Connection } from "@bongtu/client/connection";
 import { mintTestToken, readTokenState } from "@bongtu/client/connection";
 import { deriveIdentityFromSignature } from "@bongtu/client/derive";
@@ -64,7 +64,7 @@ import { proveViaService } from "../../apps/payroll-web/src/lib/proverClient.js"
 import { runPayRun } from "../../apps/payroll-web/src/lib/payRun.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const ADDR = JSON.parse(readFileSync(join(HERE, "..", "addresses.91342.json"), "utf8"));
+const ADDR = JSON.parse(readFileSync(join(HERE, "..", `addresses.${CHAIN_ID}.json`), "utf8"));
 
 const IDX = (process.env.INDEXER_URL || "http://localhost:8600").replace(/\/$/, "");
 const PROVER = (process.env.PROVER_URL || "http://127.0.0.1:8700").replace(/\/$/, "");
@@ -126,7 +126,7 @@ const POOL_ABI = parseAbi([
 
 /** The leaf movement a receipt actually caused, read off the pool's own events —
  *  the honest source, because a `nextLeafIndex()` read right after a receipt can
- *  still be served by a GIWA RPC node that is a block behind. */
+ *  still be served by an RPC node that is a block behind. */
 function leafEvents(logs: { address: string; data: `0x${string}`; topics: string[] }[], pool: string) {
   const single: number[] = [];
   let batchStart: number | null = null;
@@ -167,16 +167,16 @@ async function pollUntil<T>(read: () => Promise<T>, done: (v: T) => boolean): Pr
 }
 
 async function main(): Promise<void> {
-  const rpc = process.env.GIWA_RPC || RPC_URL;
+  const rpc = process.env.LIVE_RPC || RPC_URL;
   const key = process.env.DEPLOYER_KEY;
   if (!key) throw new Error("DEPLOYER_KEY required (set -a; source .env; set +a)");
 
   const account = privateKeyToAccount(("0x" + key.replace(/^0x/, "")) as `0x${string}`);
-  const publicClient: PublicClient = createPublicClient({ chain: giwaSepolia, transport: http(rpc) });
+  const publicClient: PublicClient = createPublicClient({ chain: liveChain, transport: http(rpc) });
   // The local signer behind the shim — the app's submits arrive as
   // eth_sendTransaction (connection.ts passes an ADDRESS, i.e. a JSON-RPC account,
   // which is what a browser wallet is), so the shim must sign them itself.
-  const signer = createWalletClient({ account, chain: giwaSepolia, transport: http(rpc) });
+  const signer = createWalletClient({ account, chain: liveChain, transport: http(rpc) });
   // The EIP-1193 shim (see header note 2).
   const provider = {
     request: async (args: { method: string; params?: unknown[] }): Promise<unknown> => {
@@ -199,7 +199,7 @@ async function main(): Promise<void> {
   };
   const connection: Connection = {
     address: account.address,
-    walletClient: createWalletClient({ account, chain: giwaSepolia, transport: custom(provider) }),
+    walletClient: createWalletClient({ account, chain: liveChain, transport: custom(provider) }),
     publicClient,
     injected: provider,
     transport: "injected",

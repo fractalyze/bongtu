@@ -12,8 +12,8 @@
 //                                               recorded from the GENUINE function
 //                                               output — decrypted ciphertext tail)
 //   p1.B  deploy/gates/e2e_orchestrator.ts           (its inline actor material, B=16)
-//   p1.C  the live GIWA 256-disburse run       (its inline actor material +
-//                                               deploy/addresses.91342.json arbiter, B=256)
+//   p1.C  the live 256-disburse run            (its inline actor material +
+//                                               the deploy record's arbiter, B=256)
 //   p1.D  apps/indexer/test/scenario.ts        (honest disburse leg == p1.B material,
 //                                               plus the disburse#3 authority-tampered
 //                                               leg's DISTINCT input shape, B=16)
@@ -36,6 +36,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { CHAIN_ID } from "../src/network.js";
 import {
   deriveKeypair,
   commitment,
@@ -134,7 +135,7 @@ test("p1.A: sdk builder reproduces the admin buildDisburseRequest envelope bytes
   const ARBITER_PUB: Point = [
     3913862942419584217034784582196041949017644467033355253711012199317627839810n,
     9603702957807229873011073182281683387900303214140383090738501285426490726765n,
-  ]; // deploy/addresses.91342.json arbiterKeyX/Y (== admin config DEFAULTS.arbiterPubKey)
+  ]; // the deploy record's arbiterKeyX/Y (== admin config DEFAULTS.arbiterPubKey)
   const ecdh = 900000000000000000007n;
   const nonce = 424242424243n;
 
@@ -197,12 +198,14 @@ test("p1.B: sdk builder reproduces the e2e_orchestrator envelope bytes", () => {
 });
 
 // =============================================================================
-// p1.C — the giwa_disburse256 material (B=256, live arbiter key)
+// p1.C — the live 256-disburse material (B=256, live arbiter key)
 // =============================================================================
 
-test("p1.C: sdk builder reproduces the giwa_disburse256 envelope bytes", () => {
+test("p1.C: sdk builder reproduces the live 256-disburse envelope bytes", () => {
   const B = 256;
-  const addr = JSON.parse(readFileSync(join(ROOT, "deploy", "addresses.91342.json"), "utf8")) as {
+  // The arbiter did NOT rotate when the deployment moved chains, so the recorded
+  // bytes stay valid read from the CURRENT record — a rotation would not.
+  const addr = JSON.parse(readFileSync(join(ROOT, "deploy", `addresses.${CHAIN_ID}.json`), "utf8")) as {
     arbiterKeyX: string;
     arbiterKeyY: string;
   };

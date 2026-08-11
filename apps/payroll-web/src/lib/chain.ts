@@ -9,7 +9,7 @@
 import { parseAbi, type Address } from "viem";
 import type { Calldata } from "@bongtu/core/proving";
 import { POOL_ABI_FRAGMENTS, explorerTxUrl } from "@bongtu/core/network";
-import { giwaSepolia } from "@bongtu/client/chain";
+import { liveChain } from "@bongtu/client/chain";
 import type { Connection } from "@bongtu/client/connection";
 
 const POOL_ABI = parseAbi([POOL_ABI_FRAGMENTS.disburseWithCiphertexts]);
@@ -51,7 +51,7 @@ export async function submitDisburse(
       kemCiphertext as `0x${string}`,
     ],
     account: connection.address as Address,
-    chain: giwaSepolia,
+    chain: liveChain,
     // Pinned, never estimated: wallet-stack auto-estimation once overpaid ~1500x.
     // 3x headroom over the floor quote — same rationale as the client submits.
     gasPrice: (await connection.publicClient.getGasPrice()) * 3n,

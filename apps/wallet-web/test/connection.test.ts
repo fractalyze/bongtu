@@ -35,8 +35,14 @@ import {
   UserRejectedRequestError,
   type PublicClient,
 } from "viem";
-import { ARBITER_KEM_PK_HASH, POOL_ABI_FRAGMENTS } from "@bongtu/core/network";
-import { giwaSepolia } from "@bongtu/client/chain";
+import {
+  ARBITER_KEM_PK_HASH,
+  CHAIN_NAME,
+  EXPLORER_BASE,
+  GAS_TOKEN_PHRASE,
+  POOL_ABI_FRAGMENTS,
+} from "@bongtu/core/network";
+import { liveChain } from "@bongtu/client/chain";
 import { buildConnectors } from "../src/lib/wagmi.js";
 import {
   assertPoolKemEpoch,
@@ -54,7 +60,7 @@ const ACCOUNT = "0x00000000000000000000000000000000000000a1";
 const POOL = "0x0000000000000000000000000000000000000b0b";
 const TX_HASH = ("0x" + "ab".repeat(32)) as `0x${string}`;
 const KEM_CT = ("0x" + "cd".repeat(1088)) as `0x${string}`;
-const GIWA_HEX = "0x" + giwaSepolia.id.toString(16);
+const CHAIN_HEX = "0x" + liveChain.id.toString(16);
 
 interface RpcCall {
   method: string;
@@ -88,7 +94,7 @@ function fakeRpc(overrides: Record<string, (params?: unknown[]) => unknown> = {}
       if (overrides[method]) return overrides[method](params);
       switch (method) {
         case "eth_chainId":
-          return GIWA_HEX;
+          return CHAIN_HEX;
         case "eth_sendTransaction":
           return TX_HASH;
         case "eth_blockNumber":
@@ -115,11 +121,11 @@ function connectionOver(
     address: ACCOUNT,
     walletClient: createWalletClient({
       account: ACCOUNT as `0x${string}`,
-      chain: giwaSepolia,
+      chain: liveChain,
       transport: custom(provider),
     }),
     publicClient: createPublicClient({
-      chain: giwaSepolia,
+      chain: liveChain,
       transport: custom(provider),
     }) as PublicClient,
     injected: provider,
@@ -147,7 +153,7 @@ test("submitTransfer sends the pinned gas price and byte-exact calldata, then wa
     POOL,
     TRANSFER_CALLDATA,
     KEM_CT,
-    "https://sepolia-explorer.giwa.io",
+    EXPLORER_BASE,
   );
 
   const sent = calls.find((c) => c.method === "eth_sendTransaction");
@@ -187,7 +193,7 @@ test("submitTransfer sends the pinned gas price and byte-exact calldata, then wa
     "resolution waits on the receipt",
   );
   assert.equal(res.txHash, TX_HASH);
-  assert.equal(res.explorerUrl, `https://sepolia-explorer.giwa.io/tx/${TX_HASH}`);
+  assert.equal(res.explorerUrl, `${EXPLORER_BASE}/tx/${TX_HASH}`);
 });
 
 test("a malformed KEM ciphertext is refused before ANY RPC goes out", async () => {
@@ -269,7 +275,7 @@ test("a wrong on-chain hash is refused (never encapsulate to an unverified key)"
 
 // ========================== (3) CHAIN GUARD =================================
 
-test("ensureChain switches, and registers GIWA first when the wallet answers 4902", async () => {
+test("ensureChain switches, and registers the chain first when the wallet answers 4902", async () => {
   // Already known: one switch, no add.
   const known = fakeRpc({ wallet_switchEthereumChain: () => null });
   await ensureChain(connectionOver(known.provider));
@@ -296,10 +302,11 @@ test("ensureChain switches, and registers GIWA first when the wallet answers 490
     "wallet_switchEthereumChain",
   ]);
   const added = unknown.calls[1].params as [Record<string, unknown>];
-  assert.equal(added[0].chainId, GIWA_HEX, "the registered chain is GIWA, from the one network module");
+  assert.equal(added[0].chainId, CHAIN_HEX, "the registered chain is the live one, from the one network module");
+  assert.equal(added[0].chainName, CHAIN_NAME, "and it is named from that same module");
 });
 
-test("a wallet that will not move to GIWA says so in words, over WalletConnect only", async () => {
+test("a wallet that will not move to the live chain says so in words, over WalletConnect only", async () => {
   const refused = { code: 4001 };
   assert.match(chainSwitchMessage(refused), /You declined the network switch/);
   assert.match(chainSwitchMessage(new Error("relay timeout")), /Add or select that network/);
@@ -334,7 +341,7 @@ test("walletErrorMessage classifies viem's layered errors like the plain provide
     name: "InsufficientFundsError",
     details: "insufficient funds for gas * price + value",
   };
-  assert.match(walletErrorMessage(outOfGas), /GIWA Sepolia ETH/);
+  assert.ok(walletErrorMessage(outOfGas).includes(GAS_TOKEN_PHRASE));
 
   // A viem error's shortMessage wins over its multi-line .message dump.
   const reverted = {

@@ -100,16 +100,16 @@ directly, point `DATABASE_URL` at any reachable Postgres:
 
 ```sh
 DATABASE_URL=postgres://… npm start                        # defaults: local anvil RPC, port 8600
-DATABASE_URL=postgres://… RPC=https://sepolia-rpc.giwa.io npm start   # live GIWA pool (read-only)
+DATABASE_URL=postgres://… RPC=https://sepolia.base.org npm start   # the live pool (read-only)
 ```
 
 Env knobs (`src/index.ts`):
 
 | env | default | meaning |
 |---|---|---|
-| `RPC` / `GIWA_RPC` / `E2E_RPC` | anvil `127.0.0.1:8545` | RPC endpoint |
+| `RPC` / `LIVE_RPC` / `E2E_RPC` | anvil `127.0.0.1:8545` | RPC endpoint |
 | `POOL` | from `deploy/addresses.<CHAIN_ID>.json` | pool address |
-| `CHAIN_ID` | `91342` | chain id for the addresses file |
+| `CHAIN_ID` | the sdk `CHAIN_ID` | chain id for the addresses file |
 | `START_BLOCK` | `0` | first block to replay |
 | `PORT` | `8600` | HTTP port |
 | `POLL_MS` | `3000` | incremental re-ingest interval (`0` = off) |
@@ -142,7 +142,7 @@ Compose starts postgres first (gated on `pg_isready`), then the indexer, which s
 ingests. The named `pgdata` volume persists across `up`/`down`, so a restart **RESUMES**
 from the block cursor. Knobs are interpolated from the shell / `--env-file` with sane
 defaults (`.env.compose.example`); leave `POOL` empty to fall back to the baked-in
-`deploy/addresses.<CHAIN_ID>.json` (91342 = the live GIWA pool). The indexer serves
+`deploy/addresses.<CHAIN_ID>.json` (the sdk `CHAIN_ID` = the live pool). The indexer serves
 `GET /health` on **8600**, and the container's `HEALTHCHECK` reports healthy once
 `/health` returns `ok:true`. `AUTHORITY_KEY` flips the container to arbiter mode
 (institution-internal — see [`CLAUDE.md`](../../CLAUDE.md)).

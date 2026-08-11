@@ -201,8 +201,8 @@ test("runDeposit refuses when the pool's KEM epoch rejects this build's key", as
 // ============================ (4) TESTNET POSTURE ===========================
 // Every testnet-only affordance (this faucet's UI, Testnet chips, mint onboarding
 // copy) gates on DEFAULTS.testnet, which comes from ENV via testnetFromEnv —
-// never a copy check. Locked rule: default TRUE (every current deployment is
-// GIWA Sepolia); ONLY the literal "false" turns it off.
+// never a copy check. Locked rule: default TRUE (every current deployment is a
+// testnet); ONLY the literal "false" turns it off.
 
 test("testnetFromEnv: default-true, only literal 'false' disables", () => {
   assert.equal(testnetFromEnv(undefined), true); // unset env (and the node runner)

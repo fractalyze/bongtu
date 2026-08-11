@@ -4,7 +4,7 @@
 // KEY_DERIVATION constant, itself built from the sdk deployment facts — and this
 // test pins the construction: the constant equals the deployment facts, and the
 // typed data it produces is the domain-separated struct the KDF has always
-// signed (chainId 91342, the live pool, version "1").
+// signed (the live chain id, the live pool, version "1").
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -23,7 +23,7 @@ test("the console signs the same struct the wallet signs, so the same key falls 
     KEY_DERIVATION.pool,
     KEY_DERIVATION.keyVersion,
   );
-  assert.equal(typed.domain.chainId, 91342);
+  assert.equal(typed.domain.chainId, CHAIN_ID);
   assert.equal(typed.domain.verifyingContract, POOL_ADDRESS);
   assert.equal(typed.domain.version, "1");
   assert.equal(typed.primaryType, "BongtuSpendingKey");

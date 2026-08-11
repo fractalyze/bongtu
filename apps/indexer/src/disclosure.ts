@@ -45,10 +45,10 @@ export interface DisclosureResult {
 // publishes nothing). On-chain conventions:
 //   - receiver ++ authority (length > B*4): the whole chain recomputes, so an
 //     exact match passes and any other value is a proven tamper;
-//   - receiver only (length == B*4): the authority envelope was not published
-//     and the chain cannot be completed (this is what the live GIWA disburse
-//     emits) — "unverifiable";
-//   - nothing at all (plain disburse) — "withheld".
+//   - receiver only (length == B*4): disburseWithCiphertexts withheld the
+//     authority tail, so the chain cannot be completed and NO verdict is
+//     reachable — "unverifiable", never "mismatch" (absence is not tamper);
+//   - nothing at all: plain disburse() emits no ciphertext event — "withheld".
 // A nonzero length below the receiver run is a structurally broken feed → tamper.
 export function verifyDisclosure(
   emitted: bigint[],

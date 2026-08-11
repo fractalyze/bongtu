@@ -77,9 +77,13 @@ COPY apps/indexer/src apps/indexer/src
 # (identical bytes every build). Regenerate: apps/indexer/abi/README.md.
 COPY apps/indexer/abi/BongtuPool.abi.json contracts/out/BongtuPool.sol/BongtuPool.json
 
-# POOL defaults to deploy/addresses.<CHAIN_ID>.json when the POOL env is unset
-# (the live GIWA pool is chainId 91342).
-COPY deploy/addresses.91342.json deploy/
+# POOL defaults to deploy/addresses.<CHAIN_ID>.json when the POOL env is unset, so
+# the file the container needs is picked at RUNTIME by CHAIN_ID. A glob bakes in
+# every recorded deployment: the image then serves any CHAIN_ID the compose file or
+# the operator names, and a future chain move touches the deploy record only — a
+# single-file COPY silently ships an image that dies at boot with ENOENT the moment
+# CHAIN_ID points anywhere else.
+COPY deploy/addresses.*.json deploy/
 
 # Drop privileges to the image's built-in non-root user (uid 1000). The service
 # only reads /app and opens sockets; it never writes to the image filesystem.

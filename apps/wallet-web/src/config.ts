@@ -1,7 +1,7 @@
 // App-specific knobs only. The deployment-coupled chain facts (pool, token,
 // chainId, RPC/explorer, arbiter public key, H/B, gas floor, ABI fragments)
-// live in @bongtu/core/network — ONE home, equality-tested against
-// deploy/addresses.91342.json — and are re-exposed here in the DEFAULTS shape
+// live in @bongtu/core/network — ONE home, equality-tested against the deploy
+// record — and are re-exposed here in the DEFAULTS shape
 // the views consume. Everything is PUBLIC. The arbiter *public* key is the
 // pool's stored authority pubkey — the wallet encrypts every transfer/withdraw
 // authority envelope to it (non-repudiation on every op, SPEC §2 Q2), so it
@@ -14,7 +14,9 @@ import {
   ARBITER_PUBKEY_Y,
   B,
   CHAIN_ID,
+  CHAIN_NAME,
   EXPLORER_BASE,
+  GAS_FAUCET_URL,
   POOL_ADDRESS,
   RPC_URL,
   TOKEN_ADDRESS,
@@ -23,8 +25,8 @@ import {
 /**
  * Deployment posture from ENV, never copy checks: `VITE_TESTNET=false` at build time
  * flips every testnet-only affordance (faucet/mint UI, Testnet chips, mint onboarding
- * copy) off in one place. Default TRUE because every current deployment is GIWA
- * Sepolia. Pure so the default-true rule is testable under the node runner.
+ * copy) off in one place. Default TRUE because every current deployment is a
+ * testnet. Pure so the default-true rule is testable under the node runner.
  */
 export function testnetFromEnv(value: string | undefined): boolean {
   return (value ?? "true") !== "false";
@@ -33,17 +35,19 @@ export function testnetFromEnv(value: string | undefined): boolean {
 export const DEFAULTS = {
   chainId: CHAIN_ID,
   // Testnet posture from ENV, never copy checks (see testnetFromEnv); default true
-  // because every current deployment is GIWA Sepolia.
+  // because every current deployment is a testnet.
   testnet: testnetFromEnv(import.meta.env?.VITE_TESTNET),
   rpc: RPC_URL,
   explorer: EXPLORER_BASE,
-  // The official GIWA testnet-ETH faucet (docs.giwa.io/en/get-started/faucets) —
+  // The chain's official testnet-ETH faucet (@bongtu/core/network, one home) —
   // linked from the zero-gas error so a stuck first-timer has a next step.
-  gasFaucet: "https://faucet.giwa.io",
+  gasFaucet: GAS_FAUCET_URL,
+  // The chain's display name, for the screens that show which network this is.
+  chainName: CHAIN_NAME,
   pool: POOL_ADDRESS,
   token: TOKEN_ADDRESS,
   batchSize: B,
-  // The pool's stored arbiter PUBLIC key (addresses.91342.json arbiterKeyX/Y). The
+  // The pool's stored arbiter PUBLIC key (the record's arbiterKeyX/Y). The
   // transfer/withdraw circuits encrypt an authority envelope to this key; the
   // contract injects the SAME key from storage before verifying, so a mismatch fails.
   arbiterPubKey: [ARBITER_PUBKEY_X, ARBITER_PUBKEY_Y] as [string, string],

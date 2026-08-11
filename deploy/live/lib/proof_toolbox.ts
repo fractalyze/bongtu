@@ -5,12 +5,12 @@
 // all — that is the point. Three drivers had transcribed some subset of it:
 //
 //   deploy/gates/e2e_orchestrator.ts  M0 cross-circuit e2e on a fresh anvil
-//   deploy/live/giwa_payroll_e2e.ts   the LIVE GIWA payroll pay run
+//   deploy/live/payroll_e2e.ts        the LIVE payroll pay run
 //   apps/indexer/test/scenario.ts     the indexer conformance scenario
 //
 // The anvil-specific half — connecting, deploying the stack, the shared actor
 // and salt fixtures — stays in e2e_harness.ts, which the two anvil drivers use
-// and the GIWA driver deliberately does not (it drives the canonical live pool,
+// and the live driver deliberately does not (it drives the canonical live pool,
 // not a stack it just deployed).
 //
 // TEST/OPS INFRASTRUCTURE, reached by relative import; not an npm package

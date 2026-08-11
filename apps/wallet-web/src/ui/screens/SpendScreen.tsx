@@ -172,7 +172,7 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
         )}
         <dt className="text-muted text-sm">Network</dt>
         <dd className="text-right text-[0.9rem] [overflow-wrap:anywhere]">
-          GIWA · chain {DEFAULTS.chainId}
+          {DEFAULTS.chainName} · chain {DEFAULTS.chainId}
         </dd>
       </ConfirmPanel>
     );

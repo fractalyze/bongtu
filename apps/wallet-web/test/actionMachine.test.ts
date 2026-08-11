@@ -12,12 +12,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+import { EXPLORER_BASE } from "@bongtu/core/network";
 import { ActionMachine, stepsForRun, type ActionResult } from "../src/ui/actionMachine.js";
 import { SPEND_STEPS, DEPOSIT_STEPS } from "../src/ui/components/StagedProgress.js";
 
+// Arbitrary fixture — the machine passes explorerUrl through without parsing it.
+// Sourced from the sdk so a chain move needs no edit here.
 const OUTCOME: ActionResult = {
   txHash: `0x${"ab".repeat(32)}`,
-  explorerUrl: `https://sepolia-explorer.giwa.io/tx/0x${"ab".repeat(32)}`,
+  explorerUrl: `${EXPLORER_BASE}/tx/0x${"ab".repeat(32)}`,
 };
 
 /** A flow that reports `stages` in order, then succeeds. */

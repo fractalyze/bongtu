@@ -1,23 +1,25 @@
-// GIWA Sepolia as a viem chain, plus the pinned gas price every tx sends with.
+// The live deployment's chain as a viem object, plus the parsed gas pin.
 // Derived field-for-field from @bongtu/core/network (the ONE home of the chain
-// facts, equality-tested against deploy/addresses.91342.json) so a chain move
-// cannot fork the wallet's idea of the network from the sdk's.
+// facts, equality-tested against the deploy record) so a chain move cannot fork
+// the wallet's idea of the network from the sdk's — including the chain's NAME,
+// which is a single string there rather than a literal repeated per screen.
 
-import { defineChain, parseGwei } from "viem";
-import { CHAIN_ID, EXPLORER_BASE, GIWA_GAS_FLOOR_GWEI, RPC_URL } from "@bongtu/core/network";
+import { defineChain } from "viem";
+import {
+  CHAIN_ID,
+  CHAIN_NAME,
+  EXPLORER_BASE,
+  NATIVE_CURRENCY,
+  RPC_URL,
+} from "@bongtu/core/network";
 
 /** The chain object viem/wagmi consume — also what wallet_addEthereumChain
- *  registers when a wallet has never seen GIWA (connection.ts ensureChain). */
-export const giwaSepolia = defineChain({
+ *  registers when a wallet has never seen this chain (connection.ts ensureChain). */
+export const liveChain = defineChain({
   id: CHAIN_ID,
-  name: "GIWA Sepolia (Testnet)",
-  nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
+  name: CHAIN_NAME,
+  nativeCurrency: NATIVE_CURRENCY,
   rpcUrls: { default: { http: [RPC_URL] } },
-  blockExplorers: { default: { name: "GIWA Sepolia Blockscout", url: EXPLORER_BASE } },
+  blockExplorers: { default: { name: `${CHAIN_NAME} Explorer`, url: EXPLORER_BASE } },
   testnet: true,
 });
-
-/** The pinned per-tx gas price (wei). GIWA wants ~0.001 gwei and wallet-stack
- *  auto-estimation historically overpaid ~1500x (drained the faucet grant), so
- *  EVERY write pins this instead of estimating (@bongtu/core GIWA_GAS_FLOOR_GWEI). */
-export const GAS_PRICE = parseGwei(GIWA_GAS_FLOOR_GWEI);

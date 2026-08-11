@@ -55,7 +55,7 @@ import {
 import { recipientError } from "../src/ui/format.js";
 import { CIRCUITS_VERSION, DEFAULTS, H, B } from "../src/config.js";
 import { ml_kem768, kemSsToLimbs, kemHexToBytes, kemBytesToHex } from "@bongtu/core/kem";
-import { ARBITER_KEM_PK } from "@bongtu/core/network";
+import { ARBITER_KEM_PK, CHAIN_ID, GAS_TOKEN_PHRASE } from "@bongtu/core/network";
 import type { KemMaterial } from "@bongtu/client/spend";
 import { resolveWalletProxy } from "../vite.config.js";
 
@@ -139,7 +139,7 @@ test("the key-derivation struct is domain-separated (chainId, pool, version)", (
   assert.equal(KEY_DERIVATION.pool, DEFAULTS.pool);
   assert.equal(KEY_DERIVATION.keyVersion, "1");
   const t = keyDerivationTypedData(KEY_DERIVATION.chainId, KEY_DERIVATION.pool, KEY_DERIVATION.keyVersion);
-  assert.equal(t.domain.chainId, 91342);
+  assert.equal(t.domain.chainId, CHAIN_ID);
   assert.equal(t.domain.verifyingContract, DEFAULTS.pool);
   assert.equal(t.domain.version, "1");
   assert.equal(t.primaryType, "BongtuSpendingKey");
@@ -545,7 +545,7 @@ test("walletErrorMessage: provider error objects render as words, never [object 
   assert.equal(walletErrorMessage({ code: "ACTION_REJECTED", message: "user rejected transaction" }),
     "Transaction rejected in your wallet.");
   assert.match(walletErrorMessage({ code: -32603, message: "insufficient funds for gas * price + value" }),
-    /GIWA Sepolia ETH/);
+    new RegExp(GAS_TOKEN_PHRASE));
   assert.equal(walletErrorMessage({ reason: "execution reverted: InvalidProof" }),
     "execution reverted: InvalidProof");
   assert.equal(walletErrorMessage({ data: { message: "nested node error" } }), "nested node error");

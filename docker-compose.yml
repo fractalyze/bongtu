@@ -57,10 +57,13 @@ services:
       # Read-side knobs — override via --env-file .env.compose or the shell.
       RPC: ${RPC:-http://host.docker.internal:8545}
       # Empty POOL => the indexer falls back to deploy/addresses.<CHAIN_ID>.json
-      # (baked into the image; 91342 = the live GIWA pool).
+      # (every record is baked into the image; 84532 = the live Base Sepolia pool).
       POOL: ${POOL:-}
-      CHAIN_ID: ${CHAIN_ID:-91342}
-      START_BLOCK: ${START_BLOCK:-0}
+      CHAIN_ID: ${CHAIN_ID:-84532}
+      # The live pool's deploy block. NOT 0: this chain's genesis is tens of
+      # millions of blocks back, so a from-genesis default would replay the whole
+      # chain in LOG_CHUNK-sized getLogs windows against a rate-limited public RPC.
+      START_BLOCK: ${START_BLOCK:-45342038}
       POLL_MS: ${POLL_MS:-5000}
       LOG_CHUNK: ${LOG_CHUNK:-50000}
       # AUTHORITY_KEY set => ARBITER MODE (institution-internal; holds every

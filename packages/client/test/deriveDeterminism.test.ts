@@ -1,8 +1,7 @@
 // THE migration belt for the bjj key derivation (SPEC §6). The spending key is a pure
 // function of the EIP-712 payload the wallet signs: if a wallet-stack migration (ethers
 // -> viem, hand-rolled connect -> wagmi) changes ONE byte of that payload, every user's
-// key silently rotates and their balance view is gone. So this file pins, as constants
-// captured from the PRE-migration (ethers v5) code and never regenerated since:
+// key silently rotates and their balance view is gone. So this file pins:
 //
 //   (1) the EIP-712 digest of keyDerivationTypedData(chainId, pool, keyVersion) — the
 //       32 bytes every wallet actually signs (eth_signTypedData_v4 hashes the payload;
@@ -12,24 +11,51 @@
 // A mock EIP-1193 provider returns the fixed signature; the test asserts the REAL
 // signing path (signKeyDerivation over a viem wallet client) both (a) sends an
 // eth_signTypedData_v4 payload hashing to the pinned digest and (b) turns the returned
-// signature into the pinned key. These constants must NEVER be regenerated from
-// current code — they ARE the compatibility contract with pre-migration deployments.
+// signature into the pinned key.
+//
+// ── HOW TO READ A FAILURE HERE ──────────────────────────────────────────────────
+// PIN_DIGEST is NOT a snapshot to refresh when it goes red. Two DIFFERENT things
+// make it move, and only one of them is legitimate:
+//
+//   (a) A CODE change — the struct, its field names, the statement text, the
+//       hashing path. This is the bug the pin exists to catch. Every user on the
+//       SAME deployment would silently derive a different key and lose sight of
+//       their notes. Revert the change; do not touch the pin.
+//
+//   (b) A DEPLOYMENT change — chainId or the pool address, both of which sit
+//       inside the EIP-712 domain. The digest MUST move, because the domain
+//       separation is the point: a signature harvested for one chain/pool cannot
+//       derive the key for another. This is not a rebaseline to wave through
+//       either — it is a USER-VISIBLE IDENTITY BREAK. Every account derives a
+//       NEW bjj key on the new deployment and cannot see notes it owned on the
+//       old one; recovering them means pointing a client back at the old
+//       chainId + pool. Only re-pin together with that decision.
+//
+// Case (b) is what happened on the move to the current chain: BOTH domain fields
+// changed (new chain, new pool), so the digest was recomputed by running the repo's own
+// keyDerivationTypedData through the same viem hashTypedData path this file uses.
+// The old inputs still reproduce the old digest through that path, which is what
+// makes the new value a computation rather than a plausible-looking hex string.
+// PIN_SCALAR/PIN_COMPRESSED did NOT move and must not: the KDF is
+// keccak256(signature) mod L, which never sees the typed data.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { createWalletClient, custom, hashTypedData } from "viem";
 import { CHAIN_ID, POOL_ADDRESS } from "@bongtu/core/network";
-import { giwaSepolia } from "../src/chain.js";
+import { liveChain } from "../src/chain.js";
 import { keyDerivationTypedData, deriveIdentityFromSignature } from "../src/derive.js";
 import { signKeyDerivation, type Connection } from "../src/connection.js";
 import { deriveLoginIdentity } from "../src/identity.js";
 
-// --- pinned pre-migration facts (captured 2026-07-28 from the ethers v5 code) -------
+// --- pinned derivation facts ------------------------------------------------------
 
-/** ethers.utils._TypedDataEncoder.hash(domain, types, message) over
- *  keyDerivationTypedData(91342, <live pool>, "1") — what the wallet signs. */
-const PIN_DIGEST = "0xbcd5b9b0aff8503b5e576e8b430743428a29a97354e57052d7e7c450f73676b9";
+/** The EIP-712 digest of keyDerivationTypedData(CHAIN_ID, POOL_ADDRESS, "1") — what
+ *  the wallet signs — for the CURRENT deployment (chain 84532, the Base pool).
+ *  Recomputed 2026-08-11 for the chain move; see the identity-break note above
+ *  before ever changing it. */
+const PIN_DIGEST = "0x64f5a878ad8289d299c1b4b2f1a75d7be70b40c1e5f98373c1791a9de5e95f36";
 
 /** The live deployment's KDF domain facts — what wallet-web's config.ts
  *  KEY_DERIVATION threads into the engine (same one home: @bongtu/core/network). */
@@ -38,7 +64,10 @@ const KDF = { chainId: CHAIN_ID, pool: POOL_ADDRESS, keyVersion: "1" };
 /** A fixed stand-in for the wallet's deterministic 65-byte signature. */
 const FIXED_SIG = ("0x" + "a1".repeat(32) + "b2".repeat(32) + "1c") as `0x${string}`;
 
-/** deriveIdentityFromSignature(FIXED_SIG) under the pre-migration code. */
+/** deriveIdentityFromSignature(FIXED_SIG), captured from the PRE-migration (ethers
+ *  v5) code and never regenerated since. Unlike PIN_DIGEST these do NOT move on a
+ *  deployment change — the KDF hashes the SIGNATURE, not the typed data — so a
+ *  failure here is always a real KDF regression. */
 const PIN_SCALAR = 2232542207878167874305209947598685605095785653266525372150719396610432433903n;
 const PIN_COMPRESSED = "0x05c818db6e4feb82639a2170ec769abcdbfc9077833153ed2266a52b653c1f96";
 
@@ -54,13 +83,13 @@ function mockConnection(signedPayloads: string[]): Connection {
         signedPayloads.push((params as [string, string])[1]);
         return FIXED_SIG;
       }
-      if (method === "eth_chainId") return "0x" + giwaSepolia.id.toString(16);
+      if (method === "eth_chainId") return "0x" + liveChain.id.toString(16);
       throw new Error(`unexpected RPC ${method}`);
     },
   };
   const walletClient = createWalletClient({
     account: ACCOUNT,
-    chain: giwaSepolia,
+    chain: liveChain,
     transport: custom(provider),
   });
   return {
@@ -74,7 +103,7 @@ function mockConnection(signedPayloads: string[]): Connection {
 
 // ------------------------------------------------------------------------------------
 
-test("the typed-data struct still hashes to the pre-migration EIP-712 digest", () => {
+test("the typed-data struct still hashes to the pinned EIP-712 digest", () => {
   const typed = keyDerivationTypedData(KDF.chainId, KDF.pool, KDF.keyVersion);
   const digest = hashTypedData({
     domain: {
@@ -106,7 +135,7 @@ test("signKeyDerivation sends a payload hashing to the pinned digest, and the fi
   assert.equal(
     hashTypedData(asked),
     PIN_DIGEST,
-    "the payload handed to the wallet is not the pre-migration one",
+    "the payload handed to the wallet is not the pinned one",
   );
 
   const identity = deriveIdentityFromSignature(sig);
@@ -124,6 +153,6 @@ test("the full login derivation path reproduces the pinned identity from the moc
   assert.equal(
     hashTypedData(JSON.parse(signedPayloads[0]) as Parameters<typeof hashTypedData>[0]),
     PIN_DIGEST,
-    "the login signs the pre-migration payload, byte-for-byte",
+    "the login signs the pinned payload, byte-for-byte",
   );
 });

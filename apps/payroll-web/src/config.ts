@@ -1,7 +1,7 @@
 // App-specific knobs only. The deployment-coupled chain facts (pool, token,
 // chainId, RPC/explorer, arbiter public key, H/B, gas floor, ABI fragments)
-// live in @bongtu/core/network — ONE home, equality-tested against
-// deploy/addresses.91342.json — and the KDF domain facts in
+// live in @bongtu/core/network — ONE home, equality-tested against the deploy
+// record — and the KDF domain facts in
 // @bongtu/client/identity KEY_DERIVATION (shared with wallet-web, so both apps
 // derive the same key for the same account by construction). Everything here is
 // PUBLIC: the arbiter *public* key is the pool's stored authority pubkey — the
@@ -15,6 +15,7 @@ import {
   B,
   CHAIN_ID,
   EXPLORER_BASE,
+  GAS_FAUCET_URL,
   POOL_ADDRESS,
   RPC_URL,
   TOKEN_ADDRESS,
@@ -41,14 +42,14 @@ export const DEFAULTS = {
   chainId: CHAIN_ID,
   rpc: RPC_URL,
   explorer: EXPLORER_BASE,
-  // The official GIWA testnet-ETH faucet (docs.giwa.io/en/get-started/faucets) —
+  // The chain's official testnet-ETH faucet (@bongtu/core/network, one home) —
   // linked from the deposit dialog's zero-gas notice, same as the wallet, so an
   // operator whose account cannot pay for its own mint has a next step.
-  gasFaucet: "https://faucet.giwa.io",
+  gasFaucet: GAS_FAUCET_URL,
   pool: POOL_ADDRESS,
   token: TOKEN_ADDRESS,
   batchSize: B,
-  // The pool's stored arbiter PUBLIC key (addresses.91342.json arbiterKeyX/Y):
+  // The pool's stored arbiter PUBLIC key (the record's arbiterKeyX/Y):
   // the disburse builder's authority-envelope target. The contract injects the
   // SAME key from storage before verifying, so a mismatch fails the proof.
   arbiterPubKey: [ARBITER_PUBKEY_X, ARBITER_PUBKEY_Y] as [string, string],
@@ -64,7 +65,7 @@ export const DEFAULTS = {
 
 // Build-time env, typed by assertion instead of the vite/client ImportMeta
 // augmentation: this module is ALSO type-checked by the ROOT cross-tree
-// tsconfig (deploy/live/giwa_payroll_e2e.ts imports the console's own modules),
+// tsconfig (deploy/live/payroll_e2e.ts imports the console's own modules),
 // which has no Vite types — `import.meta.env?.` would not compile there. The
 // optional access still survives Vite's static replacement and the plain node
 // test runtime.

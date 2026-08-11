@@ -20,7 +20,7 @@ Connect MetaMask → the wallet asks the account to sign a **domain-separated EI
 struct** via `eth_signTypedData_v4`, then derives the bjj key from that signature:
 
 ```
-domain  = { name: "bongtu", version, chainId: 91342, verifyingContract: <pool> }
+domain  = { name: "bongtu", version, chainId: <live chain id>, verifyingContract: <pool> }
 types   = { BongtuSpendingKey: [ {statement}, {warning} ] }
 message = { statement: "Derive my bongtu … spending key …", warning: "… only sign in the official wallet" }
 
@@ -136,19 +136,23 @@ The PoC takes option **(a): accept GPL for the public app.** `snarkjs` is dynami
 so it loads only when the user actually proves. A non-GPL WASM prover (b) or a local
 helper (c) are the documented alternatives.
 
-## Defaults (live GIWA Sepolia — `deploy/addresses.91342.json`)
+## Defaults (the live deployment — `deploy/addresses.84532.json`)
 
-`src/config.ts` ships the live pool `0x93365980784ef504613EF5822ce1289CF858Fc10`, chain
-91342, the pool's **public** arbiter key (the authority-envelope target — public, safe
-to ship), and `keyVersion` (part of the EIP-712 domain; bumping it rotates every derived
-key). No private key ever lives in the wallet — the spending key is derived at runtime
-and never persisted.
+`src/config.ts` ships the live deployment's facts — the pool address, the chain id, the
+pool's **public** arbiter key (the authority-envelope target — public, safe to ship) — plus
+`keyVersion` (part of the EIP-712 domain; bumping it rotates every derived key). It
+transcribes none of them: `deploy/addresses.<chainId>.json` is the record and
+`packages/core/src/network.ts` is the one place the app reads them from. Quoting an
+address in prose is precisely how the cross-chain CREATE-nonce collision bites — the same
+deployer replayed the same nonces on both chains, so an address that named the pool on one
+names a *different* contract on the other. No private key ever lives in the wallet — the
+spending key is derived at runtime and never persisted.
 
 ## Layout
 
 ```
 src/
-  config.ts            live GIWA defaults (public data only) + keyVersion + circuitBaseUrl
+  config.ts            live deployment defaults (public data only) + keyVersion + circuitBaseUrl
   main.ts              the wallet UI (identity → balance → transfer/withdraw)
   snarkjs.d.ts         minimal ambient decl for the dynamically-imported GPL prover
   lib/
@@ -156,7 +160,7 @@ src/
     balance.ts         PURE: sumUnspent + /events trial-decrypt; signed /notes orchestration
     spend.ts           PURE: input notes + recipient + membership -> transfer/withdraw ProvingRequest
     indexerClient.ts   /head /path /events /nullifiers + signed /notes URL (@bongtu/core/eddsa)
-    chain.ts           GIWA Sepolia as a viem chain + the pinned gas price
+    chain.ts           the live chain as a viem object + the parsed gas pin
     wagmi.ts           the one wagmi config (EIP-6963 discovery + flag-guarded WalletConnect)
     connection.ts      Connection + eth_signTypedData_v4 + pool submits (wagmi + viem)
     prove.ts           browser snarkjs.groth16.fullProve over fetched wasm/zkey

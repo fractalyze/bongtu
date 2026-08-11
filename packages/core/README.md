@@ -37,7 +37,7 @@ import `@bongtu/core/<module>` and tsc (NodeNext), tsx, and Vite all resolve the
   `indexerApi` client, `pubkey` + `eddsa` for the signed `/notes` read.
 - `circuits/` generators and `contracts/test/fixtures/` generators — witness inputs and
   the differential/real-proof oracles.
-- `deploy/` — the M0 e2e orchestrator and the live GIWA 256-disburse runner.
+- `deploy/` — the M0 e2e orchestrator and the live 256-disburse runner.
 - `prover/` — mirrors `proving.ts` as `prover_service/schema.py` (kept in sync by hand;
   the TS side is the source of truth).
 

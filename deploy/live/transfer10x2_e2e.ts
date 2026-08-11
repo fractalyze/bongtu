@@ -1,4 +1,4 @@
-// LIVE GIWA transfer10x2 e2e — the U-Z3 DoD gate. It succeeded the transfer10
+// LIVE transfer10x2 e2e — the U-Z3 DoD gate. It succeeded the transfer10
 // (V4) live driver, which was retired with that entrypoint (user decision
 // 2026-07-28: the wallet routes every >2-input spend and every merge leg to
 // transfer10x2, 10-in / 2-out).
@@ -17,12 +17,12 @@
 // Both go through the WALLET'S OWN production path (selection, planning, witness
 // assembly), so what this proves is the code users run, not a parallel
 // re-implementation. Proof is CPU snarkjs against circuits/out; submit pins
-// gasPrice to the GIWA floor (ethers' auto-estimate once overpaid ~1500x), and
+// gasPrice (auto-estimate once overpaid ~1500x), and
 // per-tx gasUsed is printed for the gas table.
 //
-//   GIWA_RPC (default: the sdk network RPC_URL) + DEPLOYER_KEY (env) required.
-//   Run:       npx tsx deploy/live/giwa_transfer10x2_e2e.ts
-//   Dry check: npx tsx deploy/live/giwa_transfer10x2_e2e.ts --dry
+//   LIVE_RPC (default: the sdk network RPC_URL) + DEPLOYER_KEY (env) required.
+//   Run:       npx tsx deploy/live/transfer10x2_e2e.ts
+//   Dry check: npx tsx deploy/live/transfer10x2_e2e.ts --dry
 //     --dry touches NO network and needs NO keys: it runs the same wallet path
 //     against an in-memory tree, proves both transfer10x2 witnesses on CPU and
 //     snarkjs-verifies them against circuits/out/transfer10x2.vkey.json.
@@ -30,11 +30,11 @@
 import { commitment } from "@bongtu/core/note";
 import { ImtTree } from "@bongtu/core/imt";
 import { loadSnarkjs } from "@bongtu/core/extern";
-import { RPC_URL, H, explorerTxUrl } from "@bongtu/core/network";
+import { CHAIN_ID, RPC_URL, H, explorerTxUrl } from "@bongtu/core/network";
 import { maxUint256, parseAbi, zeroAddress } from "viem";
 import { artifact, prove, ok, step, failureCount } from "./lib/proof_toolbox.js";
-// The viem rig centralizes the GIWA gas-price pin (auto-estimate once overpaid ~1500x).
-import { giwaChain, GIWA_GAS_PRICE, makeRig, proofArgs } from "./lib/viem_client.js";
+// The viem rig centralizes the live gas-price pin (auto-estimate once overpaid ~1500x).
+import { liveChain, GAS_PRICE, makeRig, proofArgs } from "./lib/viem_client.js";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,7 +56,7 @@ import { deriveIdentityFromSignature } from "@bongtu/client/derive";
 import { toWire } from "@bongtu/core/proving";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const ADDR = JSON.parse(readFileSync(join(HERE, "..", "addresses.91342.json"), "utf8"));
+const ADDR = JSON.parse(readFileSync(join(HERE, "..", `addresses.${CHAIN_ID}.json`), "utf8"));
 const DRY = process.argv.includes("--dry");
 
 // Deterministic throwaway e2e identities (funds are testnet kKRW; the bjj keys
@@ -150,7 +150,7 @@ async function dryRun(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------------
-// live run against GIWA
+// live run against the live chain
 // ---------------------------------------------------------------------------------
 
 async function main(): Promise<void> {
@@ -165,11 +165,11 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  const rpc = process.env.GIWA_RPC || RPC_URL;
+  const rpc = process.env.LIVE_RPC || RPC_URL;
   const key = process.env.DEPLOYER_KEY;
   if (!key) throw new Error("DEPLOYER_KEY required");
-  // The viem rig pins gasPrice to the GIWA floor on every write.
-  const rig = makeRig({ chain: giwaChain, rpc, privateKey: key, gasPrice: GIWA_GAS_PRICE });
+  // The viem rig pins gasPrice on every write — never estimated.
+  const rig = makeRig({ chain: liveChain, rpc, privateKey: key, gasPrice: GAS_PRICE });
 
   step(`owners: A=${A.compressedPubkey.slice(0, 14)}… merges 3 notes then pays B=${B.compressedPubkey.slice(0, 14)}… from >2 notes`);
 
@@ -329,7 +329,7 @@ async function main(): Promise<void> {
     console.error(`\nTRANSFER10X2 LIVE E2E: ${failureCount()} FAILURE(S)`);
     process.exit(1);
   }
-  console.log("\nTRANSFER10X2 LIVE E2E: PASS — merge (zero change) + >2-note payment (nonzero change) through the wallet's own path, 2 leaves per tx, on GIWA");
+  console.log("\nTRANSFER10X2 LIVE E2E: PASS — merge (zero change) + >2-note payment (nonzero change) through the wallet's own path, 2 leaves per tx, on the live chain");
   // snarkjs' curve workers keep the event loop alive after fullProve; exit explicitly.
   process.exit(0);
 }
