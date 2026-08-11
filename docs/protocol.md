@@ -170,10 +170,9 @@ Exact index layouts are in [circuits.md](circuits.md#public-surfaces).
 
 Arbiter epochs carry the KEM boundary. An epoch is `{keyX, keyY, activatedBlock}` in
 `arbiterEpochs` plus `arbiterKemPkHash[epoch]`, the keccak256 of that epoch's 1184-byte ML-KEM-768
-encapsulation key. A **zero** hash marks a pre-KEM epoch: epoch 0 on the live pool, whose ops are
-ECDH-only and carry no KEM fields at all. Epoch 1 (the 2026-07-27 upgrade) is the first hybrid
-epoch. Because the boundary is an epoch boundary, and pre-upgrade events do not even decode under
-the current event ABI, no reader needs epoch arithmetic to tell the two regimes apart. Clients read
+encapsulation key. Every epoch the pool mints carries a real hash — `initialize` and `rotateArbiter`
+both revert `ZeroKemPkHash` — so a **zero** hash means exactly one thing to a reader: that epoch
+index was never minted. There is no second, KEM-less regime to distinguish. Clients read
 `arbiterKemPkHash(currentEpoch())` and verify their bundled encapsulation key against it before
 encapsulating.
 

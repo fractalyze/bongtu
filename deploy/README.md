@@ -115,11 +115,10 @@ Canonical data stays at the top; everything else is grouped by what runs it.
 
 `forge/` — the Solidity scripts, run through `forge script` from `contracts/`:
 
-- `Deploy.s.sol` — the stack deploy (impl + ERC-1967 proxy) + `addresses.<chainid>.json` writer.
+- `Deploy.s.sol` — the whole stack in one broadcast (Poseidon + the six verifiers + impl + ERC-1967
+  proxy running `initialize`) + the `addresses.<chainid>.json` writer.
 - `Smoke.s.sol` — real-deposit smoke tx against the deployed pool.
 - `AddressBook.sol` — the one declaration of the addresses-file field list, plus its read + merge-write.
-- `upgrades/UpgradePq.s.sol`, `upgrades/UpgradeSelfSend.s.sol`, `upgrades/UpgradeTransfer10.s.sol`,
-  `upgrades/UpgradeTransfer10x2.s.sol` — the UUPS migrations, in ladder order (V2 → V5).
 
 `live/` — TypeScript drivers against the canonical LIVE GIWA pool. Each needs
 `DEPLOYER_KEY` and pins `gasPrice` from `GIWA_GAS_FLOOR_GWEI`:
@@ -134,7 +133,8 @@ Canonical data stays at the top; everything else is grouped by what runs it.
 
 - `deploy_local.sh` — anvil + Deploy + getter reads + Smoke, the U6 gate (also the CI `forge` job's deploy gate).
 - `e2e_m0.sh` / `e2e_orchestrator.ts` — the M0 full spend-cycle e2e on a fresh anvil.
-- `test_upgrade_ladder_v5.sh` — scratch-anvil drill of the full V1 → V5 ladder + the negative pre-flight.
+- `test_one_shot_deploy.sh` — scratch-anvil drill of the deploy: B=256, all six verifier getters
+  wired and matching the record, Initializable version 1, `currentEpoch() == 0`.
 - `upload_circuits.sh` — publishes the wallet's proving assets to the Vercel Blob store.
 
 ## License

@@ -4,26 +4,40 @@ pragma solidity ^0.8.20;
 import {Base} from "./Base.sol";
 import {stdStorage, StdStorage} from "forge-std/Test.sol";
 import {IPoseidon2} from "../src/interfaces/IPoseidon2.sol";
-import {IDepositVerifier, IWithdrawVerifier, IDisburseVerifier, ITransferVerifier} from "../src/interfaces/IVerifiers.sol";
+import {
+    IDepositVerifier,
+    IWithdrawVerifier,
+    IDisburseVerifier,
+    ITransferVerifier,
+    ITransfer10Verifier,
+    ITransfer10x2Verifier
+} from "../src/interfaces/IVerifiers.sol";
 import {IERC20} from "../src/utils/IERC20.sol";
 import {BongtuPool} from "../src/BongtuPool.sol";
 import {Ownable2StepUpgradeable} from "../src/utils/Ownable2StepUpgradeable.sol";
 import {Initializable} from "../src/utils/proxy/Initializable.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
-import {BongtuPoolV2} from "./mocks/BongtuPoolV2.sol";
 import {
     StubDepositVerifier,
     StubWithdrawVerifier,
     StubDisburseVerifier,
-    StubTransferVerifier
+    StubTransferVerifier,
+    StubTransfer10Verifier,
+    StubTransfer10x2Verifier
 } from "./mocks/StubVerifiers.sol";
 
 /// @notice UUPS upgrade gate (SPEC §5.2, `docs/zeto-derivation.md`
-///         "Upgradeability"): a `upgradeToAndCall` through the ERC-1967 proxy
-///         swaps the implementation while PRESERVING the pool address + the whole
-///         tree/nullifier/arbiter state — the property that makes the Unit-0
-///         redeploy the LAST forced one. Also pins the access control: only the
-///         owner may upgrade, and the pool cannot be re-initialized.
+///         "Upgradeability"): an `upgradeToAndCall` through the ERC-1967 proxy
+///         swaps the implementation while PRESERVING the pool address and the
+///         whole tree/nullifier/arbiter state — the property that lets a circuit
+///         change ship without a redeploy. Also pins the access control: only
+///         the owner may upgrade, and the pool cannot be re-initialized.
+///
+/// Each test upgrades to a FRESHLY DEPLOYED, byte-identical implementation and
+/// reads the ERC-1967 implementation slot to prove the swap happened. Identical
+/// code is the sharpest instrument available here: any difference the tests then
+/// observe comes from the storage moving, not from the new logic behaving
+/// differently.
 ///
 /// State is built with always-accept stub verifiers (the upgrade mechanics are
 /// independent of proof validity): a deposit advances the tree + custodies
@@ -38,6 +52,12 @@ contract UpgradeTest is Base {
     IWithdrawVerifier wv;
     IDisburseVerifier dsv;
     ITransferVerifier tv;
+    ITransfer10Verifier tv10;
+    ITransfer10x2Verifier tv10x2;
+
+    /// ERC-1967 implementation slot — the only witness that a swap to an
+    /// identical implementation actually landed.
+    bytes32 constant IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
 
     uint256 constant ARB_X = 101;
     uint256 constant ARB_Y = 202;
@@ -51,7 +71,9 @@ contract UpgradeTest is Base {
         wv = new StubWithdrawVerifier();
         dsv = new StubDisburseVerifier();
         tv = new StubTransferVerifier();
-        pool = deployPool(poseidon, dv, wv, dsv, tv, IERC20(address(token)), [ARB_X, ARB_Y]);
+        tv10 = new StubTransfer10Verifier();
+        tv10x2 = new StubTransfer10x2Verifier();
+        pool = deployPoolWith10(poseidon, dv, wv, dsv, tv, tv10, tv10x2, IERC20(address(token)), [ARB_X, ARB_Y]);
         token.mint(address(this), 1_000_000);
         token.approve(address(pool), type(uint256).max);
     }
@@ -86,12 +108,14 @@ contract UpgradeTest is Base {
         assertEq(nliBefore, 4, "precondition: deposit(2) + transfer(2) => nextLeafIndex 4");
         assertTrue(pool.nullifierUsed(SPENT_NF), "precondition: nullifier spent");
 
-        BongtuPoolV2 v2 = new BongtuPoolV2();
-        pool.upgradeToAndCall(address(v2), ""); // as owner (this contract), no reinit
+        address newImpl = address(new BongtuPool());
+        pool.upgradeToAndCall(newImpl, ""); // as owner (this contract), no payload
 
-        // the new logic is live behind the SAME address ...
-        assertEq(BongtuPoolV2(address(pool)).version(), 2, "upgrade did not take");
+        // the new implementation is live behind the SAME address ...
+        assertEq(_implementation(), newImpl, "upgrade did not take");
         // ... and every preserved slot survived the impl swap.
+        assertEq(address(pool.transfer10Verifier()), address(tv10), "transfer10 verifier not preserved");
+        assertEq(address(pool.transfer10x2Verifier()), address(tv10x2), "transfer10x2 verifier not preserved");
         assertEq(pool.root(), rootBefore, "root not preserved");
         assertEq(pool.nextLeafIndex(), nliBefore, "nextLeafIndex not preserved");
         assertTrue(pool.knownRoots(rootBefore), "root history not preserved");
@@ -104,154 +128,76 @@ contract UpgradeTest is Base {
     }
 
     /// The design-doc §4 storage rule under an actual impl swap: arbiterKemPkHash
-    /// lives in the FIRST slot the V1 __gap reserved (gap 50 -> 49), after every
-    /// V1 slot. If any slot had shifted, the epoch-keyed mapping (or a neighbor
-    /// like disburseAllowed / the epochs array) would read garbage after the
-    /// upgrade — so we pin BOTH the kem hashes and their neighbors across the
-    /// swap, on a pool carrying real tree + epoch state.
+    /// is the first of the tail slots, after every slot declared above it. If any
+    /// slot had shifted, the epoch-keyed mapping (or a neighbor like
+    /// disburseAllowed / the epochs array / the two arity-10 verifier slots that
+    /// follow it) would read garbage after the upgrade — so we pin the kem hashes
+    /// AND their neighbors across the swap, on a pool carrying real tree + epoch
+    /// state.
     function testUpgradePreservesKemPkHashAndGapNeighbors() public {
         _buildState();
         pool.rotateArbiter([uint256(303), uint256(404)], KEM_HASH_1); // epoch 1, both keys
-        // neighbor slot before the V2 mapping (the retired allowlist mapping —
-        // written via stdstore since its setter is gone with the gate)
+        // neighbor slot before the kem-hash mapping (the retired allowlist
+        // mapping — written via stdstore since its setter is gone with the gate)
         stdstore.target(address(pool)).sig("disburseAllowed(address)").with_key(address(0xB0B)).checked_write(true);
 
         bytes32 h0Before = pool.arbiterKemPkHash(0); // epoch 0: Base's placeholder hash
         assertTrue(h0Before != bytes32(0), "precondition: epoch 0 carries a nonzero hash");
 
-        BongtuPoolV2 v2 = new BongtuPoolV2();
-        pool.upgradeToAndCall(address(v2), "");
+        address newImpl = address(new BongtuPool());
+        pool.upgradeToAndCall(newImpl, "");
 
-        assertEq(BongtuPoolV2(address(pool)).version(), 2, "upgrade did not take");
+        assertEq(_implementation(), newImpl, "upgrade did not take");
         assertEq(pool.arbiterKemPkHash(0), h0Before, "epoch 0 kem pk hash not preserved");
         assertEq(pool.arbiterKemPkHash(1), KEM_HASH_1, "epoch 1 kem pk hash not preserved");
-        assertEq(pool.arbiterKemPkHash(2), bytes32(0), "unminted epoch must still read the pre-KEM marker 0");
+        assertEq(pool.arbiterKemPkHash(2), bytes32(0), "unminted epoch must still read 0");
         (uint256 kx, uint256 ky) = pool.currentArbiterKey();
         assertEq(kx, 303, "rotated arbiter key x not preserved");
         assertEq(ky, 404, "rotated arbiter key y not preserved");
         assertTrue(pool.disburseAllowed(address(0xB0B)), "disburseAllowed neighbor slot not preserved");
+        assertEq(address(pool.transfer10Verifier()), address(tv10), "transfer10 verifier slot not preserved");
+        assertEq(address(pool.transfer10x2Verifier()), address(tv10x2), "transfer10x2 verifier slot not preserved");
         assertTrue(pool.nullifierUsed(SPENT_NF), "spent nullifier not preserved");
     }
 
-    /// The migration payload the live pool's PQ upgrade uses (UpgradePq.s.sol):
-    /// upgradeToAndCall(impl, initializeV2(...)) must, in ONE tx, swap the four
-    /// verifier addresses AND mint a fresh epoch carrying both keys — atomicity
-    /// is what closes the partial-deploy window (old proofs vs new verifiers
-    /// fail on public count). reinitializer(2) then burns the payload: a second
-    /// call must revert.
-    function testInitializeV2RejectsZeroVerifier() public {
-        _buildState();
-        IWithdrawVerifier nwv = new StubWithdrawVerifier();
-        IDisburseVerifier ndsv = new StubDisburseVerifier();
-        ITransferVerifier ntv = new StubTransferVerifier();
-        BongtuPoolV2 v2 = new BongtuPoolV2();
-        vm.expectRevert(BongtuPool.ZeroVerifier.selector);
-        pool.upgradeToAndCall(
-            address(v2),
-            abi.encodeCall(
-                BongtuPool.initializeV2,
-                (IDepositVerifier(address(0)), nwv, ndsv, ntv, [ARB_X, ARB_Y], KEM_HASH_1)
-            )
-        );
-    }
-
-    function testUpgradeToAndCallInitializeV2SwapsVerifiersAndMintsEpoch() public {
-        _buildState();
-        IDepositVerifier ndv = new StubDepositVerifier();
-        IWithdrawVerifier nwv = new StubWithdrawVerifier();
-        IDisburseVerifier ndsv = new StubDisburseVerifier();
-        ITransferVerifier ntv = new StubTransferVerifier();
-
-        BongtuPoolV2 v2 = new BongtuPoolV2();
-        pool.upgradeToAndCall(
-            address(v2),
-            abi.encodeCall(BongtuPool.initializeV2, (ndv, nwv, ndsv, ntv, [ARB_X, ARB_Y], KEM_HASH_1))
-        );
-
-        assertEq(address(pool.depositVerifier()), address(ndv), "deposit verifier not swapped");
-        assertEq(address(pool.withdrawVerifier()), address(nwv), "withdraw verifier not swapped");
-        assertEq(address(pool.disburseVerifier()), address(ndsv), "disburse verifier not swapped");
-        assertEq(address(pool.transferVerifier()), address(ntv), "transfer verifier not swapped");
-        assertEq(pool.currentEpoch(), 1, "migration epoch not minted");
-        assertEq(pool.arbiterKemPkHash(1), KEM_HASH_1, "migration epoch kem pk hash not stored");
-        (uint256 kx, uint256 ky) = pool.currentArbiterKey();
-        assertEq(kx, ARB_X, "same-key rotation keyX");
-        assertEq(ky, ARB_Y, "same-key rotation keyY");
-        assertTrue(pool.nullifierUsed(SPENT_NF), "pre-upgrade state lost across initializeV2");
-
-        // run-once: reinitializer(2) is consumed
-        vm.expectRevert(Initializable.InvalidInitialization.selector);
-        pool.initializeV2(ndv, nwv, ndsv, ntv, [ARB_X, ARB_Y], KEM_HASH_1);
-    }
-
-    /// The self-send migration payload (UpgradeSelfSend.s.sol, U-X3): after the
-    /// PQ upgrade (initializeV2), upgradeToAndCall(impl, initializeV3(tv)) must
-    /// swap ONLY the transfer verifier — deposit/withdraw/disburse verifiers,
-    /// the arbiter key and the epoch all stay (the circuit change touches no key
-    /// material, so no epoch may be minted). reinitializer(3) burns the payload.
-    function testInitializeV3SwapsOnlyTransferVerifierAndMintsNoEpoch() public {
-        _buildState();
-        // reach the live pool's actual pre-V3 state: PQ migration first
-        IDepositVerifier ndv = new StubDepositVerifier();
-        IWithdrawVerifier nwv = new StubWithdrawVerifier();
-        IDisburseVerifier ndsv = new StubDisburseVerifier();
-        ITransferVerifier ntv = new StubTransferVerifier();
-        pool.upgradeToAndCall(
-            address(new BongtuPoolV2()),
-            abi.encodeCall(BongtuPool.initializeV2, (ndv, nwv, ndsv, ntv, [ARB_X, ARB_Y], KEM_HASH_1))
-        );
-        uint256 epochBefore = pool.currentEpoch();
-        bytes32 kemHashBefore = pool.arbiterKemPkHash(epochBefore);
-        (uint256 kxBefore, uint256 kyBefore) = pool.currentArbiterKey();
-
-        ITransferVerifier v3tv = new StubTransferVerifier();
-        BongtuPoolV2 v3 = new BongtuPoolV2();
-        pool.upgradeToAndCall(address(v3), abi.encodeCall(BongtuPool.initializeV3, (v3tv)));
-
-        assertEq(address(pool.transferVerifier()), address(v3tv), "transfer verifier not swapped");
-        assertEq(address(pool.depositVerifier()), address(ndv), "deposit verifier must not change");
-        assertEq(address(pool.withdrawVerifier()), address(nwv), "withdraw verifier must not change");
-        assertEq(address(pool.disburseVerifier()), address(ndsv), "disburse verifier must not change");
-        assertEq(pool.currentEpoch(), epochBefore, "initializeV3 must mint NO epoch");
-        assertEq(pool.arbiterKemPkHash(epochBefore), kemHashBefore, "kem pk hash must not change");
-        (uint256 kx, uint256 ky) = pool.currentArbiterKey();
-        assertEq(kx, kxBefore, "arbiter key x must not change");
-        assertEq(ky, kyBefore, "arbiter key y must not change");
-        assertTrue(pool.nullifierUsed(SPENT_NF), "pre-upgrade state lost across initializeV3");
-
-        // run-once: reinitializer(3) is consumed
-        vm.expectRevert(Initializable.InvalidInitialization.selector);
-        pool.initializeV3(v3tv);
-    }
-
-    function testInitializeV3RejectsZeroVerifier() public {
-        _buildState();
-        BongtuPoolV2 v3 = new BongtuPoolV2();
-        vm.expectRevert(BongtuPool.ZeroVerifier.selector);
-        pool.upgradeToAndCall(
-            address(v3), abi.encodeCall(BongtuPool.initializeV3, (ITransferVerifier(address(0))))
-        );
-    }
-
     function testNonOwnerUpgradeReverts() public {
-        BongtuPoolV2 v2 = new BongtuPoolV2();
+        address newImpl = address(new BongtuPool());
+        address implBefore = _implementation();
         address stranger = address(0xBEEF);
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(Ownable2StepUpgradeable.OwnableUnauthorized.selector, stranger));
-        pool.upgradeToAndCall(address(v2), "");
+        pool.upgradeToAndCall(newImpl, "");
+        assertEq(_implementation(), implBefore, "a refused upgrade must leave the implementation alone");
     }
 
-    function testReinitializeReverts() public {
+    function _implementation() internal view returns (address) {
+        return address(uint160(uint256(vm.load(address(pool), IMPL_SLOT))));
+    }
+
+    /// The pool has ONE initializer and no follow-on payloads. Reading the
+    /// ERC-7201 version slot is what pins that from the outside: it must be
+    /// exactly 1, so no `reinitializer(n)` ran during deployment and a future
+    /// implementation's payload — which must declare n >= 2 — is still available.
+    /// A payload that quietly shipped alongside `initialize` would show up here
+    /// as a version above 1, whatever it was named.
+    ///
+    /// Re-running `initialize` must fail on the proxy and on a bare impl alike.
+    function testInitializerVersionIsOneAndCannotRerun() public {
+        bytes32 slot = 0xf0c57e16840df040f15088dc2f81fe391c3923bec73e23a9662efc9c229c6a00;
+        // low 8 bytes of the ERC-7201 word = uint64 _initialized
+        assertEq(uint64(uint256(vm.load(address(pool), slot))), 1, "initializer version must be 1");
+
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        pool.initialize(poseidon, dv, wv, dsv, tv, IERC20(address(token)), B, [ARB_X, ARB_Y], DUMMY_KEM_PK_HASH);
-    }
+        pool.initialize(
+            poseidon, dv, wv, dsv, tv, tv10, tv10x2, IERC20(address(token)), B, [ARB_X, ARB_Y], DUMMY_KEM_PK_HASH
+        );
 
-    /// @dev The bare implementation is locked (`_disableInitializers` in the
-    ///      constructor): it can never be initialized directly, closing the
-    ///      classic UUPS implementation-takeover footgun.
-    function testImplementationIsLocked() public {
+        // the bare implementation is locked by `_disableInitializers()` — the
+        // classic UUPS implementation-takeover footgun.
         BongtuPool impl = new BongtuPool();
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        impl.initialize(poseidon, dv, wv, dsv, tv, IERC20(address(token)), B, [ARB_X, ARB_Y], DUMMY_KEM_PK_HASH);
+        impl.initialize(
+            poseidon, dv, wv, dsv, tv, tv10, tv10x2, IERC20(address(token)), B, [ARB_X, ARB_Y], DUMMY_KEM_PK_HASH
+        );
     }
 }

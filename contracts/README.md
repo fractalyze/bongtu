@@ -2,7 +2,7 @@
 
 The Foundry half of bongtu: `BongtuPool` — one UUPS-upgradeable contract owning the
 unified single-frontier IMT, the nullifier set, arbiter epochs, ERC-20 custody, and
-the five Groth16 verifier calls (with `enabled` derived on-contract from the
+the six Groth16 verifier calls (with `enabled` derived on-contract from the
 nullifiers) — plus the generated verifiers and the Poseidon-v1 parity plumbing. Why
 the pool is shaped this way (IMT design, enabled/nullifier soundness, disclosure
 enforcement) is owned by [`.dev/spec-decisions.md`](../.dev/spec-decisions.md) §5; this README covers the
@@ -14,7 +14,8 @@ folder's layout, tests, and fixtures.
 src/
   BongtuPool.sol       the pool (Initializable + Ownable2StepUpgradeable + UUPSUpgradeable)
   verifiers/           snarkjs-generated Groth16 verifiers, contract-renamed only:
-                       Deposit, Transfer, Transfer10, Withdraw, Disburse (1x16 dev), Disburse256 (prod)
+                       Deposit, Transfer, Transfer10, Transfer10x2, Withdraw,
+                       Disburse (1x16 dev), Disburse256 (prod)
                        (byte-identical otherwise to the committed circuits/verifiers/*.sol —
                         test/VerifierDrift.t.sol gates that)
   interfaces/          IPoseidon2, IVerifiers
@@ -25,21 +26,22 @@ test/
   Poseidon.t.sol       Poseidon-v1 parity gate (circomlibjs bytecode == reference hash)
   Differential.t.sol   THE differential gate: contract root == SDK ImtTree oracle at every insert
   RealProof.t.sol      committed real Groth16 proofs vs the real verifiers: accepts + soundness reverts
-  Transfer10.t.sol     the 10-in/10-out entry point: both real proofs, in-tx double spend, initializeV4
+  Transfer10.t.sol     the 10-in/10-out entry point: both real proofs, in-tx double spend, verifier wiring
+  Transfer10x2.t.sol   the 10-in/2-out entry point: both real proofs, the merge leg, verifier wiring
   VerifierDrift.t.sol  src/verifiers/*.sol == circuits/verifiers/*.sol modulo the contract rename
   Arbiter.t.sol        arbiter epoch lifecycle (initialize, rotateArbiter)
   Enforcement.t.sol    disclosure enforcement (ciphertext-length rule, self-burn defense)
   Disburse256.t.sol    the real GPU 1x256 disburse proof on-chain at production arity
-  Upgrade.t.sol        UUPS upgrade gate (state survives an implementation swap)
+  Upgrade.t.sol        UUPS upgrade gate (state survives an implementation swap; initializer runs once)
   GasReport.t.sol      per-operation gas via gasleft() deltas
-  mocks/               MockERC20, StubVerifiers, BongtuPoolV2 (upgrade target)
+  mocks/               MockERC20, StubVerifiers
   fixtures/            committed test fixtures + their generators (below)
 ```
 
 ## Test
 
 ```sh
-forge test    # 87 tests, all committed-fixture-driven — no network, no GPU
+forge test    # 77 tests, all committed-fixture-driven — no network, no GPU
 ```
 
 `foundry.toml`: solc 0.8.24, `ffi = true`, and `fs_permissions` granting read on

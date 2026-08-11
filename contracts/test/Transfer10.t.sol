@@ -9,20 +9,19 @@ import {
     IWithdrawVerifier,
     IDisburseVerifier,
     ITransferVerifier,
-    ITransfer10Verifier
+    ITransfer10Verifier,
+    ITransfer10x2Verifier
 } from "../src/interfaces/IVerifiers.sol";
 import {BongtuPool} from "../src/BongtuPool.sol";
-import {Initializable} from "../src/utils/proxy/Initializable.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {
     StubDepositVerifier,
     StubWithdrawVerifier,
     StubDisburseVerifier,
     StubTransferVerifier,
-    StubTransfer10Verifier
+    StubTransfer10Verifier,
+    StubTransfer10x2Verifier
 } from "./mocks/StubVerifiers.sol";
-import {BongtuPoolV2} from "./mocks/BongtuPoolV2.sol";
-import {DepositVerifier} from "../src/verifiers/DepositVerifier.sol";
 import {WithdrawVerifier} from "../src/verifiers/WithdrawVerifier.sol";
 import {DisburseVerifier} from "../src/verifiers/DisburseVerifier.sol";
 import {TransferVerifier} from "../src/verifiers/TransferVerifier.sol";
@@ -39,8 +38,8 @@ import {Transfer10Verifier} from "../src/verifiers/Transfer10Verifier.sol";
 ///   - in-tx double spend: the circuit never checked nullifier distinctness, so
 ///     spending all ten slots sequentially is the whole defense;
 ///   - the KEM ciphertext length rule on this path;
-///   - `initializeV4` — an ADD-only, run-once verifier payload — and the fact
-///     that transfer10 is unreachable until it has run.
+///   - that `initialize` wires this verifier like every other one, and refuses a
+///     zero address for it, so the entry point is never live-but-unbacked.
 contract Transfer10Test is Base {
     MockERC20 token;
     IPoseidon2 poseidon;
@@ -67,26 +66,23 @@ contract Transfer10Test is Base {
         arbiterKey = [k[0], k[1]];
     }
 
-    // A fresh pool whose transfer10 verifier is wired by initializeV4 — the same
-    // payload the live pool takes, run here directly on a freshly-initialized
-    // pool (reinitializer(4) only requires version < 4). `real` picks the real
-    // Groth16 transfer10 verifier vs an always-accept stub; deposit is always
-    // stubbed so the tree can be seeded with arbitrary commitments.
+    // `real` picks the real Groth16 transfer10 verifier vs an always-accept
+    // stub; deposit is always stubbed so the tree can be seeded with arbitrary
+    // commitments.
     function _pool(bool real) internal returns (BongtuPool pool) {
         token = new MockERC20();
-        pool = deployPool(
+        pool = deployPoolWith10(
             poseidon,
             IDepositVerifier(address(new StubDepositVerifier())),
             IWithdrawVerifier(address(new WithdrawVerifier())),
             IDisburseVerifier(address(new DisburseVerifier())),
             ITransferVerifier(address(new TransferVerifier())),
-            IERC20(address(token)),
-            arbiterKey
-        );
-        pool.initializeV4(
             real
                 ? ITransfer10Verifier(address(new Transfer10Verifier()))
-                : ITransfer10Verifier(address(new StubTransfer10Verifier()))
+                : ITransfer10Verifier(address(new StubTransfer10Verifier())),
+            ITransfer10x2Verifier(address(new StubTransfer10x2Verifier())),
+            IERC20(address(token)),
+            arbiterKey
         );
         token.mint(address(pool), 1_000_000);
         token.mint(address(this), 1_000_000);
@@ -369,126 +365,41 @@ contract Transfer10Test is Base {
         pool.transfer10(a, b, c, pub, kemCt);
     }
 
-    // ======================= initializeV4 ====================================
+    // ======================= initialize wiring ==============================
 
-    /// The migration payload on a pool that has taken V2 then V3 — the live
-    /// pool's actual state. It must ADD the transfer10 verifier and touch
-    /// nothing else: the four existing verifiers, the arbiter key and the epoch
-    /// all stay, and the pre-upgrade tree/nullifier state survives.
-    function testInitializeV4OnV3PoolAddsOnlyTransfer10Verifier() public {
-        (BongtuPool pool, uint256 spentNf) = _v3Pool();
-
-        address dvBefore = address(pool.depositVerifier());
-        address wvBefore = address(pool.withdrawVerifier());
-        address dsvBefore = address(pool.disburseVerifier());
-        address tvBefore = address(pool.transferVerifier());
-        uint256 epochBefore = pool.currentEpoch();
-        (uint256 kxBefore, uint256 kyBefore) = pool.currentArbiterKey();
-        uint256 rootBefore = pool.root();
-        assertEq(address(pool.transfer10Verifier()), address(0), "precondition: no transfer10 verifier yet");
-
-        ITransfer10Verifier t10 = ITransfer10Verifier(address(new StubTransfer10Verifier()));
-        pool.upgradeToAndCall(address(new BongtuPoolV2()), abi.encodeCall(BongtuPool.initializeV4, (t10)));
-
-        assertEq(address(pool.transfer10Verifier()), address(t10), "transfer10 verifier not wired");
-        assertEq(address(pool.depositVerifier()), dvBefore, "deposit verifier must not change");
-        assertEq(address(pool.withdrawVerifier()), wvBefore, "withdraw verifier must not change");
-        assertEq(address(pool.disburseVerifier()), dsvBefore, "disburse verifier must not change");
-        assertEq(address(pool.transferVerifier()), tvBefore, "the 2-in transfer verifier must not change");
-        assertEq(pool.currentEpoch(), epochBefore, "initializeV4 must mint NO epoch");
-        (uint256 kx, uint256 ky) = pool.currentArbiterKey();
-        assertEq(kx, kxBefore, "arbiter key x must not change");
-        assertEq(ky, kyBefore, "arbiter key y must not change");
-        assertEq(pool.root(), rootBefore, "tree state lost across initializeV4");
-        assertTrue(pool.nullifierUsed(spentNf), "spent nullifier lost across initializeV4");
-    }
-
-    /// run-once: reinitializer(4) is consumed by the payload above.
-    function testInitializeV4IsBurnedAfterUse() public {
-        (BongtuPool pool,) = _v3Pool();
-        ITransfer10Verifier t10 = ITransfer10Verifier(address(new StubTransfer10Verifier()));
-        pool.upgradeToAndCall(address(new BongtuPoolV2()), abi.encodeCall(BongtuPool.initializeV4, (t10)));
-
-        // The deploy is hoisted out of the expectRevert: a CREATE counts as the
-        // "next call" and would swallow the expectation.
-        ITransfer10Verifier again = ITransfer10Verifier(address(new StubTransfer10Verifier()));
-        vm.expectRevert(Initializable.InvalidInitialization.selector);
-        pool.initializeV4(again);
-    }
-
-    function testInitializeV4RejectsZeroVerifier() public {
-        (BongtuPool pool,) = _v3Pool();
-        BongtuPoolV2 v4 = new BongtuPoolV2();
-        vm.expectRevert(BongtuPool.ZeroVerifier.selector);
-        pool.upgradeToAndCall(
-            address(v4), abi.encodeCall(BongtuPool.initializeV4, (ITransfer10Verifier(address(0))))
-        );
-    }
-
-    /// Until the payload runs, `transfer10Verifier` is address(0) and the entry
-    /// point is simply unreachable — a pool that skipped the upgrade cannot be
-    /// tricked into accepting an arity-10 spend.
-    function testTransfer10UnreachableBeforeInitializeV4() public {
-        (BongtuPool pool,) = _v3Pool();
-        (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = dummyABC();
-        uint[141] memory pub;
-        pub[P_ROOT] = pool.root();
-        for (uint256 i = 0; i < N; i++) pub[P_OC + i] = 5000 + i;
-
-        vm.expectRevert(); // staticcall into address(0) returns no data
-        pool.transfer10(a, b, c, pub, dummyKemCt());
-    }
-
-    /// A stub-verifier pool carrying real tree + nullifier state, upgraded
-    /// through the live pool's actual initializer ladder (V2 then V3) so the V4
-    /// payload is tested from the state it will really run against. Returns the
-    /// pool and the nullifier its pre-upgrade transfer spent.
-    function _v3Pool() internal returns (BongtuPool pool, uint256 spentNf) {
+    /// `initialize` refuses a zero transfer10 verifier. Without this the pool
+    /// would come up advertising {transfer10} and revert on every call to it —
+    /// a call into address(0) — with no way back short of an upgrade.
+    function testInitializeRejectsZeroTransfer10Verifier() public {
         token = new MockERC20();
-        pool = deployPool(
-            poseidon,
-            IDepositVerifier(address(new StubDepositVerifier())),
-            IWithdrawVerifier(address(new StubWithdrawVerifier())),
-            IDisburseVerifier(address(new StubDisburseVerifier())),
-            ITransferVerifier(address(new StubTransferVerifier())),
-            IERC20(address(token)),
-            arbiterKey
-        );
-        token.mint(address(this), 1_000_000);
-        token.approve(address(pool), type(uint256).max);
+        Base.InitArgs memory p = Base.InitArgs({
+            poseidon: poseidon,
+            dv: IDepositVerifier(address(new StubDepositVerifier())),
+            wv: IWithdrawVerifier(address(new StubWithdrawVerifier())),
+            dsv: IDisburseVerifier(address(new StubDisburseVerifier())),
+            tv: ITransferVerifier(address(new StubTransferVerifier())),
+            tv10: ITransfer10Verifier(address(0)),
+            tv10x2: ITransfer10x2Verifier(address(new StubTransfer10x2Verifier())),
+            token: IERC20(address(token)),
+            batchSize: B,
+            arbiterKey: arbiterKey,
+            kemPkHash: DUMMY_KEM_PK_HASH
+        });
+        BongtuPool impl = new BongtuPool();
+        vm.expectRevert(BongtuPool.ZeroVerifier.selector);
+        deployPoolOn(impl, p);
+    }
 
-        (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = dummyABC();
-        uint[19] memory dpub;
-        dpub[0] = 1000;
-        dpub[14] = 111;
-        dpub[15] = 222;
-        pool.deposit(a, b, c, dpub, dummyKemCt());
-
-        spentNf = uint256(0xBADC0FFEE);
-        uint[37] memory tpub;
-        tpub[27] = spentNf;
-        tpub[29] = pool.root();
-        tpub[32] = 333;
-        tpub[33] = 444;
-        pool.transfer(a, b, c, tpub, dummyKemCt());
-
-        pool.upgradeToAndCall(
-            address(new BongtuPoolV2()),
-            abi.encodeCall(
-                BongtuPool.initializeV2,
-                (
-                    IDepositVerifier(address(new StubDepositVerifier())),
-                    IWithdrawVerifier(address(new StubWithdrawVerifier())),
-                    IDisburseVerifier(address(new StubDisburseVerifier())),
-                    ITransferVerifier(address(new StubTransferVerifier())),
-                    arbiterKey,
-                    keccak256("kem-pk-epoch-1")
-                )
-            )
-        );
-        pool.upgradeToAndCall(
-            address(new BongtuPoolV2()),
-            abi.encodeCall(BongtuPool.initializeV3, (ITransferVerifier(address(new StubTransferVerifier()))))
-        );
+    /// The verifier is wired by the one initializer, so {transfer10} is live from
+    /// the pool's first block — and the other five verifiers are live with it.
+    function testInitializeWiresEverySixVerifier() public {
+        BongtuPool pool = _pool(false);
+        assertTrue(address(pool.depositVerifier()) != address(0), "deposit verifier not wired");
+        assertTrue(address(pool.withdrawVerifier()) != address(0), "withdraw verifier not wired");
+        assertTrue(address(pool.disburseVerifier()) != address(0), "disburse verifier not wired");
+        assertTrue(address(pool.transferVerifier()) != address(0), "transfer verifier not wired");
+        assertTrue(address(pool.transfer10Verifier()) != address(0), "transfer10 verifier not wired");
+        assertTrue(address(pool.transfer10x2Verifier()) != address(0), "transfer10x2 verifier not wired");
+        assertEq(pool.currentEpoch(), 0, "a fresh deploy carries exactly one arbiter epoch");
     }
 }

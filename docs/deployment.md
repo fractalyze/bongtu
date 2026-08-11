@@ -9,13 +9,13 @@ into `packages/core/src/network.ts` so both web apps read one set of constants.
 | role | address |
 |---|---|
 | BongtuPool — ERC-1967 proxy, the canonical pool | `0x93365980784ef504613EF5822ce1289CF858Fc10` |
-| BongtuPool implementation (V5) | `0xcc7e6c6FAae7D32Fc8f54F25e5714e7AEC0159dA` |
+| BongtuPool implementation | `0xcc7e6c6FAae7D32Fc8f54F25e5714e7AEC0159dA` |
 | Poseidon-v1 hasher | `0xaA7778c778C83cE5655d5F217bDfE7782e01Bc50` |
 | DepositVerifier | `0x71F42727670Ad93685665b437711531156E57624` |
 | WithdrawVerifier | `0xBA13CB6c005291aa33b7f68A3ABC26002562A9A7` |
 | Disburse256Verifier (`disburseVerifier`) | `0x378439670AbD2C497443D21113727fa4827b47ea` |
 | TransferVerifier | `0x36B39D3d7ED00EC892a448F7C1a230D35C28B21f` |
-| Transfer10Verifier (historical txs only) | `0xbe07606a6cA99C1cE73Fba1AF6322E6f16bD96C9` |
+| Transfer10Verifier | `0xbe07606a6cA99C1cE73Fba1AF6322E6f16bD96C9` |
 | Transfer10x2Verifier | `0x339673F61b4FBDfCBBD896E6c39E73d15cB06d41` |
 | mock kKRW (ERC-20) | `0x17A89cC5FF3395Bb01464c9E422749CcDbFa8C3f` |
 | owner / deployer | `0xe92a97e645351268F3d60d5a27EB842A5b293058` |
@@ -26,141 +26,96 @@ constructor args were recovered from its creation transaction). Poseidon is depl
 circomlibjs *creation bytecode* (`contracts/test/fixtures/poseidon2.hex`) — it has no Solidity
 source, so explorer verification does not apply to it.
 
-Every **historical implementation** is source-verified too — the proxy's `Upgraded` events
-enumerate five generations (initial `0x459f80A4…`, hybrid `0xc975D289…`, self-send `0x91fb94B6…`,
-V4 `0x7c1193E5…`, V5 `0xcc7e6c6F…`), each verified from a worktree of the commit that deployed it —
-so any past transaction can be audited against the exact source it executed. Externally, call the
-proxy address simply "the pool contract"; "proxy" is plumbing vocabulary.
+Every implementation the proxy's `Upgraded` events name is source-verified, each from a worktree of
+the commit that deployed it, so any past transaction can be audited against the exact source it
+executed. Externally, call the proxy address simply "the pool contract"; "proxy" is plumbing
+vocabulary.
 
 `deploy/addresses.91342.json` is canonical — the table above is a convenience copy of it, and
 `packages/core/test/network.test.ts` holds the module constants to the file field-for-field. When
 the two disagree, the JSON is right.
 
-`batchSize` is 256. The **proxy** is the address to integrate against; the implementation and the
-four verifiers changed in the 2026-07-27 hybrid upgrade below (and the implementation plus
-`TransferVerifier` again in the self-send upgrade after it) and will change again on the next
-circuit edit. The live pool is canonical and is not redeployed for new work — a circuit change ships
-as a UUPS `upgradeToAndCall` ([contracts.md](contracts.md#proxy-and-wiring)).
+`batchSize` is 256. The **proxy** is the address to integrate against: the implementation and the
+verifier addresses change on a circuit edit, the proxy address does not. The live pool is canonical
+and is not redeployed for new work — a circuit change ships as a UUPS `upgradeToAndCall`
+([contracts.md](contracts.md#proxy-and-wiring)).
 
 `deploy/addresses.31337.json` is the equivalent record for the local anvil stack.
 
-## The hybrid PQ upgrade, 2026-07-27
+## Deploying
 
-The live pool was migrated to the hybrid ML-KEM-768 authority envelope in **one atomic
-`upgradeToAndCall`** — new implementation, all four regenerated `+1`-public verifiers, and the
-`initializeV2` payload minting a fresh arbiter epoch, in a single transaction. Atomicity is
-load-bearing: old proofs fail the new verifiers on public count and vice versa, so a two-step
-migration would have left a window in which every op reverted.
+One script, one transaction sequence, one shape. `deploy/forge/Deploy.s.sol` deploys Poseidon-v1, the
+six Groth16 verifiers, optionally a mock kKRW, the pool implementation, and an `ERC1967Proxy` whose
+constructor runs `initialize` — which wires all six verifiers, derives the tree parameters and mints
+arbiter epoch 0 carrying both halves of the authority key. There is no second step: the pool serves
+every entry point from its first block, and `currentEpoch()` is 0 on a chain that has never rotated.
 
-| after the upgrade | value |
+`deploy/gates/test_one_shot_deploy.sh` drills exactly that against a scratch anvil and cast-verifies
+the result — `B() == 256`, all six verifier getters non-zero and matching the recorded addresses,
+the Initializable version slot reading 1, `currentEpoch() == 0`.
+
+Config is env-driven so the same script targets anvil or a testnet:
+
+| variable | default |
 |---|---|
-| `currentEpoch()` | **1** (was 0) |
-| `arbiterKemPkHash(1)` | `0x0403c92bcdb56d0369c0981754a6f4af6719395d59eef32370dcfad9bb332314` |
-| `arbiterKemPkHash(0)` | `0x00…00` — the pre-KEM marker for every epoch-0 op |
-| arbiter bjj key | **unchanged** across the epoch |
+| `DEPLOYER_KEY` | anvil account 0 |
+| `BATCH_SIZE` | 256 |
+| `ARBITER_KEY_X` / `ARBITER_KEY_Y` | the fixture arbiter bjj key (see the coupling section below) |
+| `ARBITER_KEM_PK_HASH` | `keccak256` of the fixture ML-KEM-768 encapsulation key |
+| `ARBITER_KEM_PK` | the full encapsulation key to record next to the hash; must hash to `ARBITER_KEM_PK_HASH` |
+| `TOKEN_ADDRESS` | unset — deploys a mock kKRW; set it to an existing non-fee-on-transfer ERC-20 |
+
+## Upgrading
+
+The proxy address is permanent; the implementation behind it is not. A circuit or verifier change
+ships as an owner-only `upgradeToAndCall` that carries the new implementation and its regenerated
+verifiers **in one transaction**. Atomicity is load-bearing whenever the public-signal count moves:
+old proofs fail new verifiers and vice versa, so a two-step swap would leave a window in which every
+affected op reverts.
+
+Whatever storage the change needs is moved by a fresh `reinitializer(2)` payload written against
+that change — the pool ships with the version slot at 1 and nothing reserved in advance. Two rules
+the payload must respect, both pinned by `contracts/test/Upgrade.t.sol`:
+
+| rule | why |
+|---|---|
+| new state is APPENDED at the tail, off `uint256[47] __gap` | inserting a slot beside a logically-related one re-strides everything below it; a mis-declared layout does not announce itself, it moves the IMT root |
+| a new verifier slot is filled in the SAME transaction as the implementation swap | the slot is zero until the payload runs, and the entry point calls it directly, so a bare `upgradeTo` would leave a pool that advertises the op and reverts on every call to it |
+
+An upgrade should re-read the live proxy afterwards and require that everything it did not intend to
+touch — the other verifiers, the arbiter key material, the epoch, and the IMT root plus
+`nextLeafIndex` — is unchanged from the values pinned before broadcasting. The tree pair is the
+check that catches a layout mistake.
+
+## The hybrid PQ authority envelope
+
+Epoch 0 carries an ML-KEM-768 encapsulation-key hash alongside the bjj arbiter key, so every
+envelope is hybrid from the pool's first operation.
+
+| on a fresh deploy | value |
+|---|---|
+| `currentEpoch()` | **0** |
+| `arbiterKemPkHash(0)` | `keccak256` of the institutional 1184-byte encapsulation key |
 | `KEM_CIPHERTEXT_LEN()` | 1088 |
 
-The hash is `keccak256` of the institutional 1184-byte ML-KEM-768 encapsulation key. The key itself
-is a **public** value distributed off-chain in three places that are equality-tested against each
-other: `deploy/arbiter-kem-pk.91342.hex` (the committed material), the `arbiterKemPk` field of
-`deploy/addresses.91342.json`, and `ARBITER_KEM_PK` in `packages/core/src/network.ts`, which ships
-it to both web apps. The addresses file also records `arbiterKemPkHash` alongside `arbiterKeyX` /
-`arbiterKeyY`.
+The key itself is a **public** value distributed off-chain in three places that are equality-tested
+against each other: `deploy/arbiter-kem-pk.91342.hex` (the committed material), the `arbiterKemPk`
+field of `deploy/addresses.91342.json`, and `ARBITER_KEM_PK` in `packages/core/src/network.ts`,
+which ships it to both web apps. The addresses file also records `arbiterKemPkHash` alongside
+`arbiterKeyX` / `arbiterKeyY`.
 
 Clients never trust their bundled copy. Before drawing KEM material they read
 `arbiterKemPkHash(currentEpoch())` from the pool and refuse to proceed unless it equals
-`keccak256(ARBITER_KEM_PK)` — and refuse just as loudly against a pre-KEM pool, since a hybrid build
-cannot produce a proof such a pool would accept. So a stale bundle produces a readable error, never
-a wasted proof or a silently mis-keyed envelope.
+`keccak256(ARBITER_KEM_PK)`. So a stale bundle produces a readable error, never a wasted proof or a
+silently mis-keyed envelope.
 
-`deploy/forge/upgrades/UpgradePq.s.sol` is the reusable form of this migration for a local or testnet pool. It
-defaults to rotating the *same* bjj key (the epoch boundary exists to be the KEM boundary, not to
-churn identities) and must land together with the hybrid clients and the dual-ABI indexer.
-
-**`AUTHORITY_KEM_KEY` is now an operational requirement for arbiter mode.** An arbiter-mode indexer
-against a KEM-epoch pool needs the ML-KEM-768 *decapsulation* key in that env var alongside
-`AUTHORITY_KEY`, or it refuses to boot — as it also does if the key's embedded encapsulation key
-hashes to something other than the on-chain value. Both refusals are deliberate: serving without the
-key would under-record every envelope, and serving with the wrong one would stamp every honest
-operation as tampered ([indexer.md](indexer.md#the-kem-boot-guard)). `docker-compose.yml` forwards
-the variable; like `AUTHORITY_KEY` it is never logged and never serialized.
-
-## The self-send upgrade
-
-A second UUPS upgrade followed the PQ migration, for the U-X3 transfer circuit (§11-8 v1.1: receiver
-ciphertext `i` is encrypted under `encryptionNonce + i`, which makes a transfer to yourself
-provable). Its payload is `initializeV3` — a **verifier-only** swap: the new `TransferVerifier`
-plus the new implementation, and **no epoch**, because no arbiter key material changed. `deposit`,
-`withdraw` and `disburse` keep the verifiers the PQ upgrade installed.
-
-`deploy/forge/upgrades/UpgradeSelfSend.s.sol` is the reusable form. It refuses to run on a pool that has not taken
-`initializeV2` first: `reinitializer(3)` would accept a never-V2 pool and burn the version past 2,
-stranding it on its pre-PQ verifiers with no way back.
-
-## The transfer10 upgrade
-
-The third UUPS upgrade adds the 10-in/10-out `transfer10` entry point (U-Z1). Its payload is
-`initializeV4`, which installs a **new** `Transfer10Verifier` and changes nothing else — the 2-in
-`transfer` keeps its own verifier and its own verifying key, `deposit` / `withdraw` / `disburse` are
-untouched, and no epoch is minted. Unlike the two upgrades before it this one is purely additive:
-every proof that verified before the transaction still verifies after it, so a lagging wallet is not
-stranded, it simply cannot reach the new entry point yet.
-
-Atomicity still matters, for the mirror-image reason. `transfer10Verifier` is a **new storage slot**,
-appended after every earlier one (the same discipline `arbiterKemPkHash` followed in V2, and for the
-same reason: inserting it beside the other four verifier slots would re-stride the IMT root and
-nullifier state below it). It is zero until the payload runs, and `transfer10` calls it directly — so
-a bare `upgradeTo` would leave a pool that advertises the entry point and reverts on every call to
-it.
-
-`deploy/forge/upgrades/UpgradeTransfer10.s.sol` is the reusable form. Two pre-flight requires, both read from the
-Initializable version slot before anything is broadcast:
-
-| require | why |
-|---|---|
-| version ≥ 3 | `reinitializer(4)` would accept a never-V2/V3 pool and burn the version past both, stranding it on its pre-PQ verifiers or its pre-self-send transfer key. `BongtuPool.initializeV4`'s natspec names this script as where the ordering is enforced. |
-| version < 4 | a pre-V4 pool runs an implementation that predates the `transfer10Verifier` getter, so *reading* the verifier to ask "already upgraded?" reverts on exactly the pools that need the answer. The version slot answers it without a call. |
-
-After the swap the script re-reads the live proxy and requires that the other four verifiers, the
-arbiter bjj key, the KEM pk hash, the epoch, **and the IMT root + `nextLeafIndex`** are all unchanged
-from the values it pinned before broadcasting. The tree pair is there specifically for the new slot:
-a mis-declared storage layout does not announce itself, it moves the root.
-
-`transfer10Verifier` is an optional field of `addresses.<chainid>.json` — absent until this script
-runs, rather than recorded as a zero, so the field's presence is itself the marker that the pool took
-the V4 payload. Read it there rather than from the live-address table above: while
-`deploy/addresses.91342.json` carries no such entry, GIWA is still pre-V4 and `transfer10` reverts
-there.
-
-## The transfer10x2 upgrade
-
-The fourth UUPS upgrade adds the 10-in/2-out `transfer10x2` entry point (U-Z3). Its payload is
-`initializeV5`, which installs a **new** `Transfer10x2Verifier` and changes nothing else — `transfer`
-and `transfer10` keep their own verifiers and verifying keys, `deposit` / `withdraw` / `disburse` are
-untouched, and no epoch is minted. Like V4 it is purely additive, and like V4 the new verifier lives
-in a **new storage slot appended after every earlier one**, zero until the payload runs — so a bare
-`upgradeTo` would advertise the entry point and revert on every call to it, which is why the swap and
-the payload travel in one `upgradeToAndCall`.
-
-`deploy/forge/upgrades/UpgradeTransfer10x2.s.sol` is the reusable form. Two pre-flight requires, both read from the
-Initializable version slot before anything is broadcast (`BongtuPool.initializeV5`'s natspec names
-this script as where the ordering is enforced):
-
-| require | why |
-|---|---|
-| version ≥ 4 | `reinitializer(5)` would accept a never-V2..V4 pool and burn the version past all three payloads, stranding it on pre-PQ verifiers or without a `transfer10` verifier. |
-| version < 5 | already-upgraded pools are refused with a sentence instead of a reinitializer revert deep inside `upgradeToAndCall`, after paying for two deploys. |
-
-One shape difference from the V4 script: the version requires run **before** the before-values are
-pinned, because those values now include `transfer10Verifier()` — a getter that only exists on a
-≥ V4 implementation, so reading it first would raw-revert on exactly the pools the pre-flight exists
-to refuse. The post-check then requires the five earlier verifiers, arbiter key material, epoch, and
-the IMT root + `nextLeafIndex` all unchanged (the tree pair again guards the appended slot).
-
-`transfer10x2Verifier` is an optional field of `addresses.<chainid>.json` — absent until this script
-runs, same marker convention as `transfer10Verifier`. `deploy/gates/test_upgrade_ladder_v5.sh` drills the
-full V1→V5 ladder on a scratch anvil, cast-verifies the end state (B=256, verifier set, version slot
-5), and asserts the negative: the V5 script against a fresh V1-only pool must die in pre-flight.
+**`AUTHORITY_KEM_KEY` is an operational requirement for arbiter mode.** An arbiter-mode indexer
+needs the ML-KEM-768 *decapsulation* key in that env var alongside `AUTHORITY_KEY`, or it refuses to
+boot — as it also does if the key's embedded encapsulation key hashes to something other than the
+on-chain value. Both refusals are deliberate: serving without the key would under-record every
+envelope, and serving with the wrong one would stamp every honest operation as tampered
+([indexer.md](indexer.md#the-kem-boot-guard)). `docker-compose.yml` forwards the variable; like
+`AUTHORITY_KEY` it is never logged and never serialized.
 
 ## Chain facts
 
@@ -183,15 +138,11 @@ the faucet grant. `packages/core/src/network.ts` exports
 
 | file | does |
 |---|---|
-| `deploy/forge/Deploy.s.sol` | deploys Poseidon + 4 verifiers + (optionally) a mock kKRW + the pool implementation + an `ERC1967Proxy` whose constructor runs `initialize` atomically; writes `addresses.<chainid>.json` |
-| `deploy/forge/upgrades/UpgradePq.s.sol` | the UUPS migration of an already-deployed pool to the hybrid PQ implementation: deploys the four regenerated verifiers + the new impl, then one `upgradeToAndCall` whose `initializeV2` payload swaps the verifier addresses and mints the epoch carrying both keys; rewrites the verifier/impl entries in `addresses.<chainid>.json` |
-| `deploy/forge/upgrades/UpgradeSelfSend.s.sol` | the UUPS migration to the self-send transfer circuit: deploys the regenerated `TransferVerifier` + the new impl, then one `upgradeToAndCall` whose `initializeV3` payload swaps only that verifier and mints no epoch; pre-flight asserts the pool is already V2 |
-| `deploy/forge/upgrades/UpgradeTransfer10.s.sol` | the UUPS migration that adds the `transfer10` entry point: deploys `Transfer10Verifier` + the new impl, then one `upgradeToAndCall` whose `initializeV4` payload installs only that verifier and mints no epoch; pre-flight asserts the pool is V3 and not already V4, and the post-check asserts the IMT root did not move |
-| `deploy/forge/upgrades/UpgradeTransfer10x2.s.sol` | the UUPS migration that adds the `transfer10x2` entry point: deploys `Transfer10x2Verifier` + the new impl, then one `upgradeToAndCall` whose `initializeV5` payload installs only that verifier and mints no epoch; pre-flight asserts the pool is V4 and not already V5 (version requires first — see the section above), and the post-check asserts the IMT root did not move |
-| `deploy/forge/AddressBook.sol` | the field list of `addresses.<chainid>.json`, declared once, with a read + merge-write the scripts above share (each names only the fields it changes) |
+| `deploy/forge/Deploy.s.sol` | deploys Poseidon + the 6 verifiers + (optionally) a mock kKRW + the pool implementation + an `ERC1967Proxy` whose constructor runs `initialize` atomically; writes `addresses.<chainid>.json` |
+| `deploy/forge/AddressBook.sol` | the field list of `addresses.<chainid>.json`, declared once, with a read + merge-write a script uses to name only the fields it changes |
 | `deploy/forge/Smoke.s.sol` | a real `deposit` against the deployed pool using the committed proof fixture |
 | `deploy/gates/deploy_local.sh` | anvil + Deploy + getter read-back + Smoke — the local gate |
-| `deploy/gates/test_upgrade_ladder_v5.sh` | scratch-anvil drill of the full live-pool ladder (Deploy → PQ → self-send → transfer10 → transfer10x2) + cast end-state checks + the V5-vs-V1 negative pre-flight |
+| `deploy/gates/test_one_shot_deploy.sh` | scratch-anvil drill of the deploy: B=256, all six verifier getters wired and matching the record, Initializable version 1, `currentEpoch() == 0` |
 | `deploy/live/giwa_payroll_e2e.ts` | the payroll console's whole pay run against live GIWA, driving the console's own modules (mint → deposit → forced merge leg → 3-recipient disburse → signed `/notes` checks), every proof via the prover service |
 | `deploy/live/giwa_transfer10x2_e2e.ts` | the live 10-in / 2-out spend gate against GIWA (merge leg + padded spend); `--dry` runs the structural checks with no network |
 | `deploy/live/giwa_gas_survey.ts` | per-action gas measurement against the live pool, feeding the table in [performance.md](performance.md) |
@@ -227,9 +178,9 @@ proof the contract tests accept — was produced against that one key. Overridin
 them, and the smoke deposit reverts `InvalidProof`. Rotate the key **and** the fixtures together, or
 neither.
 
-Since the hybrid upgrade the coupling is a **pair**: the fixtures are bound to (arbiter bjj key,
-arbiter ML-KEM-768 pk), and the fixture encapsulation key travels as `realproofs.kemPublicKey`
-the same way `realproofs.arbiterKey` does. `ARBITER_KEM_PK_HASH` is the matching deploy/upgrade knob.
+The coupling is a **pair**, because the envelope is hybrid: the fixtures are bound to (arbiter bjj
+key, arbiter ML-KEM-768 pk), and the fixture encapsulation key travels as `realproofs.kemPublicKey`
+the same way `realproofs.arbiterKey` does. `ARBITER_KEM_PK_HASH` is the matching deploy knob.
 
 The live pool's stored key is recorded as `arbiterKeyX` / `arbiterKeyY` in
 `deploy/addresses.91342.json` and re-exported as `ARBITER_PUBKEY_X` / `ARBITER_PUBKEY_Y` from
@@ -243,7 +194,7 @@ alone; see [security-model.md](security-model.md).
 Through the proxy: `B() == 256`, `initialized() == true`, `disburseCiphertextLen() == 2054`,
 `KEM_CIPHERTEXT_LEN() == 1088`, the ERC-1967 implementation slot pointing at `poolImpl`,
 `currentArbiterKey()` equal to the recorded key, and `arbiterKemPkHash(currentEpoch())` equal to
-`keccak256` of the recorded `arbiterKemPk` (nonzero — a zero here means the pool is still pre-KEM
-and every hybrid client will refuse it). `Deploy.s.sol` asserts the stored arbiter key itself before
-writing the addresses file, and `deploy_local.sh` reads `B()` back over `cast` before running the
-smoke deposit.
+`keccak256` of the recorded `arbiterKemPk`. All six verifier getters must be non-zero and equal to
+the recorded addresses. `Deploy.s.sol` asserts every one of those before writing the addresses file,
+`deploy_local.sh` reads `B()` back over `cast` before running the smoke deposit, and
+`test_one_shot_deploy.sh` re-checks the whole set from outside the script.

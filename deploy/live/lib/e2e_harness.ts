@@ -15,9 +15,9 @@
 //   - the deploy helpers deploy() / deployPoolProxy() — the ONE TS restatement
 //     of Deploy.s.sol's UUPS + initialize wiring, so a pool-initializer change
 //     is Deploy.s.sol plus one TS site, not three,
-//   - deployStack(): the whole stack on a live anvil, at the initializer version
-//     the live pool has reached — a gate stack that lagged it would reject
-//     proofs the live pool accepts, and read as a circuit bug,
+//   - deployStack(): the whole stack on a live anvil, in the same production
+//     shape Deploy.s.sol produces — a gate stack wired differently would reject
+//     proofs the deployed pool accepts, and read as a circuit bug,
 //   - the shared actor / salt / amount fixture material both drivers assume.
 //
 // The chain-agnostic half — artifact(), the CPU snarkjs prove() wrapper, dec(),
@@ -89,8 +89,8 @@ export async function deploy(rig: Rig, sol: string, contract: string, args: unkn
 }
 
 // Deploy BongtuPool behind a UUPS ERC-1967 proxy (SPEC §5.2), initialized in the
-// proxy constructor with the 9-arg initializer. Returns a contract bound to the
-// BongtuPool ABI at the PROXY address (the canonical, upgrade-stable pool).
+// proxy constructor. Returns a contract bound to the BongtuPool ABI at the PROXY
+// address (the canonical, upgrade-stable pool).
 export async function deployPoolProxy(rig: Rig, initArgs: unknown[]): Promise<Contract> {
   const impl = await deploy(rig, "BongtuPool", "BongtuPool");
   const { abi: poolAbi } = artifact("BongtuPool", "BongtuPool");
@@ -117,27 +117,22 @@ export interface DeployedStack {
   wv: Contract; // WithdrawVerifier
   dsv: Contract; // DisburseVerifier
   tv: Contract; // TransferVerifier
-  tv10: Contract; // Transfer10Verifier (installed by the initializeV4 payload)
+  tv10: Contract; // Transfer10Verifier
+  tv10x2: Contract; // Transfer10x2Verifier
   token: Contract; // mock kKRW
   pool: Contract; // BongtuPool bound at the PROXY address
 }
 
 /** Deploy the full anvil stack both heavy gates start from: Poseidon-v1, the
- *  5 Groth16 verifiers, mock kKRW, and BongtuPool behind its UUPS proxy —
+ *  6 Groth16 verifiers, mock kKRW, and BongtuPool behind its UUPS proxy —
  *  then fund + approve the driver wallet (deposit pulls from msg.sender via
  *  SafeERC20). The tx sequence is fixed, so contract addresses stay
  *  nonce-deterministic across both drivers. Epoch 0 carries the AUTHORITY_KEM
  *  pk hash by default (initialize rejects the zero pre-KEM marker).
  *
- *  The stack lands at initializer version 4, matching the live pool: the
- *  8-arg `initialize` wires the four verifiers it has always taken, and
- *  `initializeV4` then installs the transfer10 verifier — the same payload
- *  deploy/forge/upgrades/UpgradeTransfer10.s.sol sends, since `transfer10Verifier` is
- *  reachable no other way (it is not an `initialize` argument, so a stack that
- *  skipped this step would revert every `transfer10` on a call to address(0)).
- *  The V2/V3 payloads are deliberately NOT replayed here — they exist to move
- *  an older pool's verifiers onto the current ones, and a fresh stack deploys
- *  the current ones outright. */
+ *  One `initialize` brings the pool up in its complete production shape — every
+ *  entry point backed by a real verifier from the first block — which is what
+ *  lets a gate drive `transfer10` / `transfer10x2` straight after deployment. */
 export async function deployStack(
   rig: Rig,
   opts: { batchSize: number; authorityPublicKey: PointInput; mintAmount: bigint; kemPkHash?: string },
@@ -150,16 +145,17 @@ export async function deployStack(
   const dsv = await deploy(rig, "DisburseVerifier", "DisburseVerifier");
   const tv = await deploy(rig, "TransferVerifier", "TransferVerifier");
   const tv10 = await deploy(rig, "Transfer10Verifier", "Transfer10Verifier");
+  const tv10x2 = await deploy(rig, "Transfer10x2Verifier", "Transfer10x2Verifier");
   const token = await deploy(rig, "MockERC20", "MockERC20");
   const pool = await deployPoolProxy(rig, [
-    poseidon.address, dv.address, wv.address, dsv.address, tv.address, token.address, BigInt(opts.batchSize),
+    poseidon.address, dv.address, wv.address, dsv.address, tv.address, tv10.address, tv10x2.address,
+    token.address, BigInt(opts.batchSize),
     [BigInt(dec(opts.authorityPublicKey[0])), BigInt(dec(opts.authorityPublicKey[1]))],
     (opts.kemPkHash ?? keccak256(AUTHORITY_KEM.publicKey)) as `0x${string}`,
   ]);
-  await pool.write("initializeV4", [tv10.address]);
   await token.write("mint", [rig.address, opts.mintAmount]);
   await token.write("approve", [pool.address, maxUint256]);
-  return { poseidon, dv, wv, dsv, tv, tv10, token, pool };
+  return { poseidon, dv, wv, dsv, tv, tv10, tv10x2, token, pool };
 }
 
 // ---------------------------------------------------------------------------

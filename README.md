@@ -109,7 +109,7 @@ Every surface below runs today, end to end, against the live pool:
 | [**Employer Payroll Test Console**](https://payroll.fractalyze.io) | The mass-payout console (testnet tool, access-gated): deposit public kKRW into the pool, generate a 255-recipient worksheet, and settle it as **one** private disburse, proof served by the GPU prover in seconds. |
 | **GPU prover service** | The employer-side proving box: three circuits resident on one GPU, in-process witness workers, ~0.5 s warm proof for the 256-batch. Auth- and origin-gated; only the employer's own console reaches it. |
 | **Indexer (arbiter mode)** | Mirrors the on-chain tree, decrypts every authority envelope, serves per-owner `/notes` + `/history` behind signature read-auth, and raises disclosure alarms when a batch's ciphertext disagrees with the chain. |
-| **BongtuPool on GIWA Sepolia** | The UUPS-proxied pool in [Status](#status): four Groth16 verifiers, the IMT, the kKRW escrow, and the enforced 2054-element disclosure on every disburse. |
+| **BongtuPool on GIWA Sepolia** | The UUPS-proxied pool in [Status](#status): six Groth16 verifiers, the IMT, the kKRW escrow, and the enforced 2054-element disclosure on every disburse. |
 
 The two web apps are static; the only server-side pieces are the employer's own prover and the
 institution's arbiter indexer — exactly the two parties that hold those roles in the design.
@@ -122,7 +122,7 @@ enforced four-op auditor disclosure.
 | | address |
 |---|---|
 | BongtuPool (proxy, B=256) | [`0x93365980784ef504613EF5822ce1289CF858Fc10`](https://sepolia-explorer.giwa.io/address/0x93365980784ef504613EF5822ce1289CF858Fc10) |
-| BongtuPool impl (V5: hybrid PQ + transfer10x2) | [`0xcc7e6c6FAae7D32Fc8f54F25e5714e7AEC0159dA`](https://sepolia-explorer.giwa.io/address/0xcc7e6c6FAae7D32Fc8f54F25e5714e7AEC0159dA) |
+| BongtuPool implementation | [`0xcc7e6c6FAae7D32Fc8f54F25e5714e7AEC0159dA`](https://sepolia-explorer.giwa.io/address/0xcc7e6c6FAae7D32Fc8f54F25e5714e7AEC0159dA) |
 
 Pool proxy, implementation, all six Groth16 verifiers, and the kKRW token are
 **source-verified on the GIWA explorer** (the Poseidon contract is circomlibjs creation

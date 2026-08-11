@@ -62,6 +62,8 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     uint256 public nextLeafIndex;
 
     // --- verifiers (fixed per impl; a circuit change ships via a UUPS upgrade) -
+    // All six are wired by {initialize}; the two transfer10* slots sit at the
+    // tail of storage (see the tail-slots block at the bottom of the contract).
     IDepositVerifier public depositVerifier;
     IWithdrawVerifier public withdrawVerifier;
     IDisburseVerifier public disburseVerifier;
@@ -283,24 +285,38 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         _disableInitializers();
     }
 
-    /// @notice One-shot initializer, run through the ERC-1967 proxy (SPEC §5.2).
-    ///         Folds the OLD constructor (Poseidon/verifier/token wiring, the IMT
-    ///         zeros ladder + frontier + empty-tree root, B / LOG_B / the enforced
-    ///         disburse ciphertext length) AND the OLD `initialize(arbiterKey)`
-    ///         (non-zero arbiter key check + arbiter epoch 0) into a single
-    ///         run-once call. The `initializer` modifier (ERC-7201 storage)
-    ///         enforces run-once; the caller (the deployer, via the proxy) becomes
-    ///         owner. REQUIRES a non-zero arbiter key (§5.3, Q9) — kills the (0,0)
-    ///         footgun — and, post-PQ, a non-zero KEM pk hash: on a FRESH deploy
-    ///         every epoch carries both keys (a zero hash is the PRE-KEM marker,
-    ///         reserved for epochs minted before the live pool's upgrade).
-    ///         Not `onlyOwner`: there is no owner until this call sets one.
+    /// @notice The pool's ONLY initializer, run through the ERC-1967 proxy
+    ///         (SPEC §5.2). It brings the pool up in its complete production
+    ///         shape in a single run-once call: Poseidon / token wiring, ALL SIX
+    ///         verifiers, the IMT parameters (B, LOG_B, the enforced disburse
+    ///         ciphertext length, the zeros ladder, the frontier, the empty-tree
+    ///         root), the reentrancy latch, the owner, and arbiter epoch 0
+    ///         carrying both halves of the hybrid authority key.
+    ///
+    ///         There is deliberately no second entry point. A pool is deployed
+    ///         with every op it will ever serve already wired, so no operation is
+    ///         ever reachable-but-unbacked and no deploy needs sequencing. A
+    ///         later circuit change ships as `upgradeToAndCall` carrying its own
+    ///         one-shot migration payload, written then against the state it
+    ///         actually has to move; nothing is reserved for it here.
+    ///
+    ///         The `initializer` modifier (ERC-7201 storage) enforces run-once;
+    ///         the caller (the deployer, via the proxy) becomes owner — this is
+    ///         not `onlyOwner` because there is no owner until it runs. Rejects a
+    ///         zero address for any verifier (a zeroed one bricks its op until an
+    ///         upgrade), a non-power-of-two batch size, a (0,0) arbiter key
+    ///         (§5.3 Q9) and a zero KEM pk hash: a zero in `arbiterKemPkHash`
+    ///         must mean "epoch never minted" and nothing else, so every epoch
+    ///         this pool mints — epoch 0 included — carries a real hash (design
+    ///         doc §4).
     function initialize(
         IPoseidon2 _poseidon,
         IDepositVerifier _depositVerifier,
         IWithdrawVerifier _withdrawVerifier,
         IDisburseVerifier _disburseVerifier,
         ITransferVerifier _transferVerifier,
+        ITransfer10Verifier _transfer10Verifier,
+        ITransfer10x2Verifier _transfer10x2Verifier,
         IERC20 _token,
         uint256 _batchSize,
         uint256[2] calldata arbiterKey,
@@ -318,20 +334,23 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         // (NOT_ENTERED == 1) or the first nonReentrant op would revert Reentrancy.
         _locked = 1;
 
+        // The verifier wiring and the tree/param derivation are split into
+        // helpers to keep this function under the stack-depth limit.
+        _initVerifiers(
+            _depositVerifier,
+            _withdrawVerifier,
+            _disburseVerifier,
+            _transferVerifier,
+            _transfer10Verifier,
+            _transfer10x2Verifier
+        );
         poseidon = _poseidon;
-        depositVerifier = _depositVerifier;
-        withdrawVerifier = _withdrawVerifier;
-        disburseVerifier = _disburseVerifier;
-        transferVerifier = _transferVerifier;
         token = _token;
         B = _batchSize;
-
-        // Split out to keep the 8-arg initializer under the stack-depth limit
-        // (all former-constructor tree/param derivation lives here).
         _initTreeAndParams(_batchSize);
 
-        // §5.3 Q9; on a fresh deploy epoch 0 carries the KEM hash too (a zero
-        // hash must stay unambiguously "pre-upgrade epoch", design doc §4).
+        // §5.3 Q9. Epoch 0 carries the KEM hash too — a zero would be
+        // indistinguishable from an index that was never minted (design doc §4).
         initialized = true;
         arbiterEpochs.push(ArbiterEpoch({keyX: arbiterKey[0], keyY: arbiterKey[1], activatedBlock: block.number}));
         arbiterKemPkHash[0] = arbiterKemPkHash_;
@@ -339,9 +358,35 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         emit ArbiterKemPkHashSet(0, arbiterKemPkHash_);
     }
 
-    /// @dev The former-constructor tree + param derivation: LOG_B, the enforced
-    ///      disburse ciphertext length, the zeros ladder, the frontier and the
-    ///      empty-tree root. Reads the just-wired `poseidon` storage.
+    /// @dev Wire every verifier the pool will ever call, rejecting the zero
+    ///      address on each: a zeroed verifier turns its entry point into a call
+    ///      into nothing — reachable, always reverting, and unfixable short of an
+    ///      upgrade. The deploy script constructs all six inline, so a zero here
+    ///      is always a misconfiguration rather than an intended "not yet".
+    function _initVerifiers(
+        IDepositVerifier _depositVerifier,
+        IWithdrawVerifier _withdrawVerifier,
+        IDisburseVerifier _disburseVerifier,
+        ITransferVerifier _transferVerifier,
+        ITransfer10Verifier _transfer10Verifier,
+        ITransfer10x2Verifier _transfer10x2Verifier
+    ) private {
+        if (
+            address(_depositVerifier) == address(0) || address(_withdrawVerifier) == address(0)
+                || address(_disburseVerifier) == address(0) || address(_transferVerifier) == address(0)
+                || address(_transfer10Verifier) == address(0) || address(_transfer10x2Verifier) == address(0)
+        ) revert ZeroVerifier();
+        depositVerifier = _depositVerifier;
+        withdrawVerifier = _withdrawVerifier;
+        disburseVerifier = _disburseVerifier;
+        transferVerifier = _transferVerifier;
+        transfer10Verifier = _transfer10Verifier;
+        transfer10x2Verifier = _transfer10x2Verifier;
+    }
+
+    /// @dev The tree + param derivation: LOG_B, the enforced disburse ciphertext
+    ///      length, the zeros ladder, the frontier and the empty-tree root.
+    ///      Reads the just-wired `poseidon` storage.
     function _initTreeAndParams(uint256 _batchSize) private {
         uint256 logB = 0;
         while ((uint256(1) << logB) < _batchSize) logB++;
@@ -371,100 +416,20 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     ///      On mainnet the owner is a multisig/timelock (docs/zeto-derivation.md).
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 
-    /// @notice The PQ-migration payload for the live pool's `upgradeToAndCall`
-    ///         (design doc §4/§7): the +1-public hybrid circuits need NEW
-    ///         verifier addresses in the same tx as the impl swap (old proofs vs
-    ///         new verifiers fail on public count — there must be no window),
-    ///         and a FRESH arbiter epoch carrying BOTH keys, so the epoch
-    ///         boundary IS the KEM boundary. `reinitializer(2)` makes it
-    ///         run-once; `onlyOwner` holds because upgradeToAndCall
-    ///         delegatecalls with the owner's msg.sender.
-    function initializeV2(
-        IDepositVerifier _depositVerifier,
-        IWithdrawVerifier _withdrawVerifier,
-        IDisburseVerifier _disburseVerifier,
-        ITransferVerifier _transferVerifier,
-        uint256[2] calldata arbiterKey,
-        bytes32 kemPkHash
-    ) external onlyOwner reinitializer(2) {
-        // A zeroed verifier bricks every op until yet another upgrade; the
-        // upgrade script deploys them inline, so zero here is always a bug.
-        if (
-            address(_depositVerifier) == address(0) || address(_withdrawVerifier) == address(0)
-                || address(_disburseVerifier) == address(0) || address(_transferVerifier) == address(0)
-        ) revert ZeroVerifier();
-        depositVerifier = _depositVerifier;
-        withdrawVerifier = _withdrawVerifier;
-        disburseVerifier = _disburseVerifier;
-        transferVerifier = _transferVerifier;
-        _rotateArbiter(arbiterKey, kemPkHash);
-    }
-
-    /// @notice The self-send migration payload (U-X3, §11-8 v1.1): the transfer
-    ///         circuit moved to a per-output receiver nonce (encryptionNonce + i),
-    ///         which changes ONLY the transfer verifying key — same witness shape,
-    ///         same 37 publics, same arbiter key material. So this swaps ONLY the
-    ///         transfer verifier and mints NO epoch (an epoch boundary signals a
-    ///         key change to the indexer/wallets; there is none here). Atomic with
-    ///         the impl swap via upgradeToAndCall, same as initializeV2. Note
-    ///         reinitializer(3) only requires version < 3, so this payload would
-    ///         also run on a never-V2 pool; the V2-then-V3 ordering is pinned by
-    ///         the deploy scripts (the payload itself reads no V2 state).
-    function initializeV3(ITransferVerifier _transferVerifier) external onlyOwner reinitializer(3) {
-        if (address(_transferVerifier) == address(0)) revert ZeroVerifier();
-        transferVerifier = _transferVerifier;
-    }
-
-    /// @notice The transfer10 migration payload (U-Z1): {transfer10} is a NEW
-    ///         entry point behind a NEW verifier, so this ADDS `transfer10Verifier`
-    ///         and touches nothing else — the 2-in {transfer} path keeps its own
-    ///         verifier and keeps working through and after the upgrade, and no
-    ///         epoch is minted (no arbiter key material changes; an epoch boundary
-    ///         means a key change to the indexer and the wallets).
-    ///
-    ///         `reinitializer(4)` requires version < 4, so — exactly as noted on
-    ///         {initializeV3} — the payload would also run on a pool that never
-    ///         took V2/V3 and would then put those payloads permanently out of
-    ///         reach. Ordering is pinned OUTSIDE the contract, by the deploy
-    ///         script's pre-flight: it reads the Initializable version out of the
-    ///         ERC-7201 slot and refuses anything below 3, the same require
-    ///         `deploy/forge/upgrades/UpgradeSelfSend.s.sol` uses for the V2-then-V3 step.
-    function initializeV4(ITransfer10Verifier _transfer10Verifier) external onlyOwner reinitializer(4) {
-        if (address(_transfer10Verifier) == address(0)) revert ZeroVerifier();
-        transfer10Verifier = _transfer10Verifier;
-    }
-
-    /// @notice The transfer10x2 migration payload (U-Z3): ADDS
-    ///         `transfer10x2Verifier` behind the NEW {transfer10x2} entry point
-    ///         and touches nothing else — every existing path (including
-    ///         {transfer10}) keeps its verifier, and no epoch is minted (no
-    ///         arbiter key material changes).
-    ///
-    ///         `reinitializer(5)` requires version < 5, so — exactly as noted on
-    ///         {initializeV4} — the payload would also run on a pool that never
-    ///         took V2..V4 and would then put those payloads permanently out of
-    ///         reach. Ordering is pinned OUTSIDE the contract, by the
-    ///         Initializable-slot pre-flight in `deploy/forge/upgrades/UpgradeTransfer10x2.s.sol`
-    ///         (the V2-then-V3-then-V4 pattern), which refuses anything below 4.
-    function initializeV5(ITransfer10x2Verifier _transfer10x2Verifier) external onlyOwner reinitializer(5) {
-        if (address(_transfer10x2Verifier) == address(0)) revert ZeroVerifier();
-        transfer10x2Verifier = _transfer10x2Verifier;
-    }
-
     /// @notice Append an epoch and emit its index; the arbiter pubkey is read
     ///         from storage at execution (never calldata) so a sender cannot
     ///         encrypt to their own key and silently kill non-repudiation.
-    ///         The bjj-only overload is REMOVED (not kept alongside): every
-    ///         post-upgrade epoch must carry a KEM pk hash, or a rotation could
-    ///         mint a zero-hash epoch that is indistinguishable from the
-    ///         pre-KEM marker (design doc §4).
+    ///         There is no bjj-only overload: every epoch must carry a KEM pk
+    ///         hash, or a rotation could mint a zero-hash epoch a client could
+    ///         not tell from an index that was never minted (design doc §4).
     function rotateArbiter(uint256[2] calldata newKey, bytes32 newKemPkHash) external onlyOwner whenInitialized {
         _rotateArbiter(newKey, newKemPkHash);
     }
 
-    /// @dev Shared by {rotateArbiter} and {initializeV2} (the latter mints the
-    ///      migration epoch inside upgradeToAndCall, where the external rotate
-    ///      is unreachable without changing msg.sender).
+    /// @dev The epoch append itself, private so a future `upgradeToAndCall`
+    ///      payload can mint a rotation epoch in the same transaction as an
+    ///      implementation swap — the external {rotateArbiter} is unreachable
+    ///      from there without changing msg.sender.
     function _rotateArbiter(uint256[2] calldata newKey, bytes32 newKemPkHash) private {
         if (newKey[0] == 0 || newKey[1] == 0) revert ZeroArbiterKey();
         if (newKemPkHash == bytes32(0)) revert ZeroKemPkHash();
@@ -974,36 +939,31 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         nextLeafIndex += stride;
     }
 
-    // --- V2 (PQ hybrid envelope) state ----------------------------------------
-    // Appended AFTER every V1 slot, consuming the FIRST slot of the original
-    // uint256[50] __gap (design doc §4): the frozen 3-word ArbiterEpoch struct
-    // cannot grow a field (appending would re-stride the dynamic array and
-    // corrupt live epochs on upgrade), so the per-epoch KEM pk hash lives in a
-    // sibling mapping. keccak256 of the epoch's 1184-byte ML-KEM-768
-    // encapsulation key; epochs minted pre-upgrade read 0 — the pre-KEM marker.
+    // --- tail slots -----------------------------------------------------------
+    // Everything below sits AFTER every slot declared above, taking words off the
+    // trailing __gap. That is the pool's standing storage rule under the UUPS
+    // proxy: state is only ever APPENDED at the tail, never inserted next to a
+    // logically-related slot, because an insert re-strides every slot below it
+    // and would silently move a live pool's IMT root, nullifier set and arbiter
+    // epochs when the implementation is swapped. Read the grouping as chronology,
+    // not as topic — {transfer10Verifier} belongs with the other verifiers in
+    // meaning and lives here in layout, and both facts are load-bearing.
+
+    // Per-epoch ML-KEM-768 encapsulation-key hash. The 3-word ArbiterEpoch struct
+    // is frozen — growing a field would re-stride the dynamic array — so the hash
+    // lives in a sibling mapping keyed by epoch (design doc §4). keccak256 of the
+    // epoch's 1184-byte encapsulation key; {initialize} and {rotateArbiter} both
+    // refuse a zero, so a zero here can only mean "epoch never minted".
     mapping(uint256 => bytes32) public arbiterKemPkHash;
 
-    // --- V4 (transfer10) state -------------------------------------------------
-    // Appended AFTER every earlier slot, consuming the next word of __gap, for
-    // the same reason arbiterKemPkHash did: inserting it next to the other four
-    // verifier slots would re-stride everything below and corrupt the live pool's
-    // roots/nullifiers/epochs on upgrade. Zero until {initializeV4} runs, which is
-    // why {transfer10} is unreachable (a call to address(0) reverts) rather than
-    // silently accepting on a pool that has not taken the payload.
+    // The 10-in/10-out {transfer10} verifier, wired by {initialize}.
     ITransfer10Verifier public transfer10Verifier;
 
-    // --- V5 (transfer10x2) state -----------------------------------------------
-    // Appended AFTER transfer10Verifier, consuming the next word of __gap, for
-    // the same reason every post-V1 slot did: inserting it next to the other
-    // verifier slots would re-stride everything below and corrupt the live
-    // pool's roots/nullifiers/epochs on upgrade. Zero until {initializeV5} runs,
-    // which is why {transfer10x2} is unreachable (a call to address(0) reverts)
-    // rather than silently accepting on a pool that has not taken the payload.
+    // The 10-in/2-out {transfer10x2} verifier, wired by {initialize}.
     ITransfer10x2Verifier public transfer10x2Verifier;
 
     /// @dev Reserved trailing storage so a future implementation can add state
     ///      without colliding with any slot introduced here (upgrade-safety).
-    ///      Was 50 in V1; V2's arbiterKemPkHash, V4's transfer10Verifier and
-    ///      V5's transfer10x2Verifier each consumed one slot.
+    ///      Shrink it by exactly one word for each word appended above.
     uint256[47] private __gap;
 }

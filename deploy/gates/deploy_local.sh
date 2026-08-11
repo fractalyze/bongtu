@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # bongtu M1 Unit U6 — deployment pipeline on a local Foundry node (.dev/milestone-m1.md Done#2).
 #
-# Deploys the FULL production B=256 stack (Poseidon-v1 + the 4 real Groth16
+# Deploys the FULL production B=256 stack (Poseidon-v1 + the 6 real Groth16
 # verifiers incl. Disburse256 + BongtuPool(B=256) + mock kKRW) to a fresh local
 # anvil via `forge script Deploy --broadcast`, records the addresses, then runs a
 # SMOKE step (`forge script Smoke --broadcast`) that does a REAL deposit against

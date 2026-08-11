@@ -3,7 +3,14 @@ pragma solidity ^0.8.20;
 
 import {Base} from "./Base.sol";
 import {IPoseidon2} from "../src/interfaces/IPoseidon2.sol";
-import {IDepositVerifier, IWithdrawVerifier, IDisburseVerifier, ITransferVerifier} from "../src/interfaces/IVerifiers.sol";
+import {
+    IDepositVerifier,
+    IWithdrawVerifier,
+    IDisburseVerifier,
+    ITransferVerifier,
+    ITransfer10Verifier,
+    ITransfer10x2Verifier
+} from "../src/interfaces/IVerifiers.sol";
 import {IERC20} from "../src/utils/IERC20.sol";
 import {BongtuPool} from "../src/BongtuPool.sol";
 import {Ownable2StepUpgradeable} from "../src/utils/Ownable2StepUpgradeable.sol";
@@ -12,7 +19,9 @@ import {
     StubDepositVerifier,
     StubWithdrawVerifier,
     StubDisburseVerifier,
-    StubTransferVerifier
+    StubTransferVerifier,
+    StubTransfer10Verifier,
+    StubTransfer10x2Verifier
 } from "./mocks/StubVerifiers.sol";
 
 /// @notice M0 Done#3-(vi): arbiter epochs (§5.3, Q9). initialize REQUIRES a
@@ -31,6 +40,8 @@ contract ArbiterTest is Base {
     IWithdrawVerifier _wv;
     IDisburseVerifier _dsv;
     ITransferVerifier _tv;
+    ITransfer10Verifier _tv10;
+    ITransfer10x2Verifier _tv10x2;
     IERC20 _token;
 
     event ArbiterRotated(uint256 indexed epoch, uint256 keyX, uint256 keyY, uint256 activatedBlock);
@@ -46,12 +57,17 @@ contract ArbiterTest is Base {
         _wv = new StubWithdrawVerifier();
         _dsv = new StubDisburseVerifier();
         _tv = new StubTransferVerifier();
+        _tv10 = new StubTransfer10Verifier();
+        _tv10x2 = new StubTransfer10x2Verifier();
         return deployUninitializedPool();
     }
 
-    /// @dev Drive the 9-arg initializer with the captured deps + a given key pair.
     function _init(uint256[2] memory key) internal {
-        pool.initialize(_poseidon, _dv, _wv, _dsv, _tv, _token, B, key, KEM_HASH_0);
+        _initWith(key, KEM_HASH_0);
+    }
+
+    function _initWith(uint256[2] memory key, bytes32 kemPkHash) internal {
+        pool.initialize(_poseidon, _dv, _wv, _dsv, _tv, _tv10, _tv10x2, _token, B, key, kemPkHash);
     }
 
     function testInitializeRejectsZeroKey() public {
@@ -63,10 +79,10 @@ contract ArbiterTest is Base {
         vm.expectRevert(BongtuPool.ZeroArbiterKey.selector);
         _init([uint256(0), uint256(7)]);
 
-        // a zero KEM pk hash is rejected: bytes32(0) is the reserved pre-KEM
-        // marker (design doc §4) and a fresh deploy must never mint one.
+        // a zero KEM pk hash is rejected: bytes32(0) has to keep meaning "this
+        // epoch was never minted", so no epoch may ever be minted carrying one.
         vm.expectRevert(BongtuPool.ZeroKemPkHash.selector);
-        pool.initialize(_poseidon, _dv, _wv, _dsv, _tv, _token, B, [uint256(101), uint256(202)], bytes32(0));
+        _initWith([uint256(101), uint256(202)], bytes32(0));
 
         assertTrue(!pool.initialized(), "must not be initialized after a rejected key");
     }
@@ -106,21 +122,22 @@ contract ArbiterTest is Base {
         assertEq(pool.arbiterKemPkHash(0), KEM_HASH_0, "rotation must not touch prior epochs' hashes");
 
         // rotation also rejects a zero key / a zero KEM pk hash (the latter
-        // would mint a post-KEM epoch indistinguishable from the pre-KEM marker)
+        // would mint an epoch indistinguishable from one that was never minted)
         vm.expectRevert(BongtuPool.ZeroArbiterKey.selector);
         pool.rotateArbiter([uint256(5), uint256(0)], KEM_HASH_1);
         vm.expectRevert(BongtuPool.ZeroKemPkHash.selector);
         pool.rotateArbiter([uint256(5), uint256(6)], bytes32(0));
     }
 
-    /// The pre-KEM marker semantics (design doc §4): an epoch index the V2 code
-    /// never wrote reads bytes32(0) — exactly what the live pool's pre-upgrade
-    /// epochs return after the UUPS swap (mapping slots default to zero; only
-    /// rotateArbiter/initialize ever write nonzero, both zero-hash-guarded).
+    /// The other half of the zero-hash rule: minting is guarded so a written
+    /// epoch is never zero, and here, that an index nobody wrote reads zero.
+    /// Together they make bytes32(0) mean "never minted" and nothing else
+    /// (mapping slots default to zero; only rotateArbiter/initialize ever write
+    /// nonzero, both zero-hash-guarded).
     function testUnwrittenEpochsReadZeroKemPkHash() public {
         pool = _newPool();
         _init([uint256(101), uint256(202)]);
-        assertEq(pool.arbiterKemPkHash(1), bytes32(0), "an unminted epoch must read the pre-KEM marker 0");
+        assertEq(pool.arbiterKemPkHash(1), bytes32(0), "an unminted epoch must read 0");
         assertEq(pool.arbiterKemPkHash(42), bytes32(0), "any unwritten epoch index must read 0");
     }
 

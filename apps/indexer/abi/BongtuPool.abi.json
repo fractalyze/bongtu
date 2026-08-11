@@ -347,6 +347,16 @@
           "internalType": "contract ITransferVerifier"
         },
         {
+          "name": "_transfer10Verifier",
+          "type": "address",
+          "internalType": "contract ITransfer10Verifier"
+        },
+        {
+          "name": "_transfer10x2Verifier",
+          "type": "address",
+          "internalType": "contract ITransfer10x2Verifier"
+        },
+        {
           "name": "_token",
           "type": "address",
           "internalType": "contract IERC20"
@@ -365,83 +375,6 @@
           "name": "arbiterKemPkHash_",
           "type": "bytes32",
           "internalType": "bytes32"
-        }
-      ],
-      "outputs": [],
-      "stateMutability": "nonpayable"
-    },
-    {
-      "type": "function",
-      "name": "initializeV2",
-      "inputs": [
-        {
-          "name": "_depositVerifier",
-          "type": "address",
-          "internalType": "contract IDepositVerifier"
-        },
-        {
-          "name": "_withdrawVerifier",
-          "type": "address",
-          "internalType": "contract IWithdrawVerifier"
-        },
-        {
-          "name": "_disburseVerifier",
-          "type": "address",
-          "internalType": "contract IDisburseVerifier"
-        },
-        {
-          "name": "_transferVerifier",
-          "type": "address",
-          "internalType": "contract ITransferVerifier"
-        },
-        {
-          "name": "arbiterKey",
-          "type": "uint256[2]",
-          "internalType": "uint256[2]"
-        },
-        {
-          "name": "kemPkHash",
-          "type": "bytes32",
-          "internalType": "bytes32"
-        }
-      ],
-      "outputs": [],
-      "stateMutability": "nonpayable"
-    },
-    {
-      "type": "function",
-      "name": "initializeV3",
-      "inputs": [
-        {
-          "name": "_transferVerifier",
-          "type": "address",
-          "internalType": "contract ITransferVerifier"
-        }
-      ],
-      "outputs": [],
-      "stateMutability": "nonpayable"
-    },
-    {
-      "type": "function",
-      "name": "initializeV4",
-      "inputs": [
-        {
-          "name": "_transfer10Verifier",
-          "type": "address",
-          "internalType": "contract ITransfer10Verifier"
-        }
-      ],
-      "outputs": [],
-      "stateMutability": "nonpayable"
-    },
-    {
-      "type": "function",
-      "name": "initializeV5",
-      "inputs": [
-        {
-          "name": "_transfer10x2Verifier",
-          "type": "address",
-          "internalType": "contract ITransfer10x2Verifier"
         }
       ],
       "outputs": [],

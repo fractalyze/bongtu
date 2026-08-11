@@ -128,52 +128,48 @@ generations to see the full history ([indexer.md](indexer.md#dual-abi-ingest)).
 ## Arbiter epochs
 
 `arbiterEpochs` is an append-only array of `{keyX, keyY, activatedBlock}`. `initialize` seeds epoch
-0 and **requires** a non-zero key (`ZeroArbiterKey`), killing the `(0,0)` foot-gun. In-flight proofs
-built against the previous key become invalid at rotation — there is no grace window.
+0 — the only epoch a fresh pool has — and every later one comes from an explicit `rotateArbiter`.
+In-flight proofs built against the previous key become invalid at rotation; there is no grace
+window.
 
 The struct is **frozen**: appending a field would re-stride the dynamic array and corrupt live
 epochs across an upgrade. So the per-epoch ML-KEM-768 encapsulation-key hash lives in a sibling
-`mapping(uint256 => bytes32) public arbiterKemPkHash`, added in V2 out of the first slot of the
-original `uint256[50] __gap` (now `uint256[47]`, after V4 and V5 each took another word).
+`mapping(uint256 => bytes32) public arbiterKemPkHash`, in the tail block of storage that ends in
+`uint256[47] __gap`.
 
-`rotateArbiter(newKey, newKemPkHash)` writes both and emits both events. The bjj-only overload was
-**removed**, not kept alongside: a rotation that skipped the hash would mint a zero-hash epoch
-indistinguishable from the pre-KEM marker. `arbiterKemPkHash[epoch] == 0` means exactly one thing —
-that epoch predates the hybrid envelope. The full 1184-byte key is distributed off-chain and
-verified by clients against this hash ([deployment.md](deployment.md#the-hybrid-pq-upgrade-2026-07-27)).
+`rotateArbiter(newKey, newKemPkHash)` writes both and emits both events. There is no bjj-only
+overload, and neither it nor `initialize` accepts a zero hash — so `arbiterKemPkHash[epoch] == 0`
+means exactly one thing to a reader: that epoch was never minted. A client that read a zero for a
+live epoch would have no way to tell an un-keyed epoch from an unallocated index, and would draw KEM
+material against nothing. The full 1184-byte key is distributed off-chain and verified by clients
+against this hash ([deployment.md](deployment.md#the-arbiter-key-is-fixed-at-deploy-and-the-fixtures-are-bound-to-it)).
 
-`initializeV2` is the one-shot (`reinitializer(2)`) migration payload for `upgradeToAndCall`: it
-swaps the four verifier addresses and mints the first hybrid epoch in the same transaction as the
-implementation swap, because old proofs and new verifiers disagree on public count and no window may
-exist between them.
+## One initializer
 
-`initializeV3` (`reinitializer(3)`) is the self-send migration payload (U-X3): a **verifier-only**
-swap of `transferVerifier` and nothing else. The witness shape and the 37 publics are unchanged —
-only the transfer verifying key moves — so no epoch is minted, since an epoch boundary tells the
-indexer and the wallets that arbiter key material changed, and none did. `reinitializer(3)` only
-requires version < 3, so the payload would also run on a pool that never took V2 and would then put
-`initializeV2` permanently out of reach; the V2-then-V3 ordering is enforced by
-`deploy/forge/upgrades/UpgradeSelfSend.s.sol`, whose pre-flight reads the initializer version from storage and
-refuses anything below 2.
+`initialize` is the pool's only initializer, and it brings the pool up in its complete production
+shape: Poseidon and the token, **all six verifiers**, the IMT parameters, the reentrancy latch, the
+owner, and arbiter epoch 0 carrying both halves of the hybrid authority key. A deployed pool has
+every entry point it will ever serve already backed by a real verifier, so no operation is ever
+reachable-but-unbacked and a deploy is one transaction with no sequencing to get wrong.
 
-`initializeV4` (`reinitializer(4)`) is the transfer10 migration payload (U-Z1) and is **add-only**:
-it sets `transfer10Verifier`, which was previously `address(0)` — so before it runs, `transfer10`
-is simply unreachable — and touches nothing else. The 2-in `transfer` path keeps its own verifier
-and keeps working across the upgrade, and no epoch is minted because no arbiter key material moves.
-Ordering is pinned the same way as V3, by the deploy script's storage pre-flight.
+Two rules make that shape enforceable rather than merely intended:
 
-`initializeV5` (`reinitializer(5)`) is the transfer10x2 migration payload (U-Z3), shaped exactly
-like V4: add-only (`transfer10x2Verifier`, previously `address(0)`, so `transfer10x2` is
-unreachable until it runs), no epoch, ordering pinned by the deploy script's storage pre-flight.
+| rule | why |
+|---|---|
+| every verifier argument must be non-zero (`ZeroVerifier`) | a zeroed verifier turns its entry point into a call into `address(0)`: live, always reverting, unfixable short of an upgrade |
+| the arbiter key must be non-zero and the KEM pk hash must be non-zero | `(0,0)` is the key foot-gun (§5.3 Q9); a zero hash is the reserved pre-KEM marker, so minting one would make epoch 0 unreadable to hybrid clients |
+
+The `initializer` modifier leaves the ERC-7201 version slot at **1**. A future circuit change ships
+as `upgradeToAndCall` carrying its own `reinitializer(2)` payload, written at that time against the
+state it actually needs to move; nothing is reserved for it in advance.
 
 ## Proxy and wiring
 
 The pool is deployed behind a **UUPS (ERC-1967) proxy**. The implementation constructor only calls
 `_disableInitializers()`, so a bare implementation can never be initialized or hijacked. All wiring
-and tree parameters are set once in `initialize` through the proxy: Poseidon, the four v1 verifiers,
-the token, `B`, `LOG_B`, `disburseCiphertextLen`, the zeros ladder, the frontier, the empty-tree
-root, arbiter epoch 0, the reentrancy latch, and the owner. No `immutable` or constructor state
-carries consensus meaning.
+and tree parameters are set once in `initialize` through the proxy (see [One
+initializer](#one-initializer) above). No `immutable` or constructor state carries consensus
+meaning.
 
 ```
         deploy/addresses.91342.json
@@ -195,12 +191,14 @@ carries consensus meaning.
   one permitted substitution to each `circuits/verifiers/*.sol` and requires byte identity, so a
   regenerated circuit with a stale shipped verifier cannot pass `forge test`. They are fixed per implementation; a circuit change ships as
   `upgradeToAndCall`, which preserves the pool address and the entire tree/nullifier state.
-- An `nPublic`-changing circuit edit is breaking: new verifier, new `IVerifiers` arity, new impl.
-  The hybrid-envelope upgrade was exactly that — `kemBinding` took each vector to 19/37/26/11 — and
-  it shipped as one atomic `upgradeToAndCall` carrying impl and verifiers together.
-- `uint256[47] __gap` reserves trailing storage for a future implementation.
-  `contracts/test/Upgrade.t.sol` pins state preservation, owner-only upgrade, re-init rejection and
-  implementation locking.
+- An `nPublic`-changing circuit edit is breaking: new verifier, new `IVerifiers` arity, new impl. It
+  must ship as ONE atomic `upgradeToAndCall` carrying the implementation and the regenerated
+  verifiers together — old proofs and new verifiers disagree on public count, so a two-step
+  migration would leave a window in which every affected op reverts.
+- New state goes at the **tail**, taking words off `uint256[47] __gap`, never inserted beside a
+  logically-related slot: an insert re-strides every slot below it and would silently move the IMT
+  root, the nullifier set and the arbiter epochs. `contracts/test/Upgrade.t.sol` pins state
+  preservation across a swap, owner-only upgrade, and the initializer running exactly once.
 
 The proxy owner is a single key on testnet. See [deployment.md](deployment.md) for the live
 addresses and the arbiter-key-at-deploy coupling.
