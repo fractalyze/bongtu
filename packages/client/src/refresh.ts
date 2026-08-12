@@ -49,6 +49,24 @@ export async function loadOwnerSnapshot(
   }
 }
 
+/**
+ * The baseline a refresh is allowed to skip against, which is NOTHING until a
+ * snapshot has actually reached the screen.
+ *
+ * The skip exists so an unchanged read does not reset activity paging. But
+ * "unchanged" is judged by comparing values, and a caller's EMPTY starting state
+ * — no notes, no history, no cursor — is byte-identical to the snapshot an owner
+ * with no notes reads back. So an account with nothing in it would compare equal
+ * on its very first load, skip the apply, and never receive a balance at all:
+ * the screen holds the null it started with and renders a dash forever, while
+ * an account with a single note works perfectly. Passing the baseline only once
+ * something has been applied removes the coincidence — before that, every read
+ * is new by definition, whatever it contains.
+ */
+export function skipBaseline(applied: boolean, snapshot: OwnerSnapshot): OwnerSnapshot | undefined {
+  return applied ? snapshot : undefined;
+}
+
 // --- refresh policy (what a refresh may do, and what a failed read means) ---------
 
 /** What the app is allowed to do for a refresh right now. */

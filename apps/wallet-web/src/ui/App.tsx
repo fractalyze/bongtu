@@ -52,6 +52,7 @@ import {
   loadOwnerSnapshot,
   pollForAction,
   refreshPlan,
+  skipBaseline,
   runRefresh,
   AUTO_REFRESH_MS,
   RECONNECT_NOTICE,
@@ -238,14 +239,16 @@ export function App(): ReactNode {
           manual,
           indexerUrl: INDEXER_URL,
           // An unchanged read never touches the screen: applying wholesale resets
-          // activity paging, a pure loss when the data is identical.
-          skipUnchangedFrom: { notes, history, historyNextBefore },
+          // activity paging, a pure loss when the data is identical. `balance` is
+          // null until a snapshot has actually landed, which is what tells the
+          // baseline apart from an empty account reading back its empty self.
+          skipUnchangedFrom: skipBaseline(balance !== null, { notes, history, historyNextBefore }),
         });
       } finally {
         if (!quiet) setLoading(false);
       }
     },
-    [session, loadFirstPage, applySnapshot, endSession, notes, history, historyNextBefore],
+    [session, loadFirstPage, applySnapshot, endSession, balance, notes, history, historyNextBefore],
   );
 
   // Auto-load whenever the session changes (after a connect or a silent restore).

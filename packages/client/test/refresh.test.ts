@@ -23,6 +23,7 @@ import {
   pollForAction,
   refreshPlan,
   runRefresh,
+  skipBaseline,
   snapshotChanged,
   EXPIRED_MESSAGE,
   RECONNECT_NOTICE,
@@ -245,4 +246,43 @@ test("runRefresh with skipUnchangedFrom: unchanged read clears the banner but ne
   );
   assert.equal(applied.length, 0, "identical snapshot skipped — paging survives the tick");
   assert.equal(banner, null, "a successful quiet read still clears the degraded banner");
+});
+
+// --- an empty account must still receive its balance ------------------------------
+// Regression: the skip compares VALUES, and a caller's pre-load state (no notes, no
+// history, no cursor) is identical to what an owner with NO NOTES reads back. Skipping
+// on that comparison meant such an account was never handed a snapshot at all, so the
+// balance stayed null — a dash where a zero belongs, and the "nothing here yet,
+// deposit" screen never shown. An account holding one note was unaffected, which is
+// exactly what hid it.
+
+test("skipBaseline withholds the baseline until a snapshot has actually been applied", () => {
+  const empty: OwnerSnapshot = { notes: [], history: [], historyNextBefore: null };
+  assert.equal(skipBaseline(false, empty), undefined, "nothing applied yet -> never skip");
+  assert.deepEqual(skipBaseline(true, empty), empty, "once applied, the baseline stands");
+});
+
+test("a first read of an EMPTY feed reaches the screen, so the balance can be 0 and not null", async () => {
+  const empty: OwnerSnapshot = { notes: [], history: [], historyNextBefore: null };
+  const applied: OwnerSnapshot[] = [];
+  const sinks = {
+    applySnapshot: (s: OwnerSnapshot) => { applied.push(s); },
+    setBanner: () => {},
+    toast: () => {},
+    signOut: () => {},
+    setNotice: () => {},
+  };
+  const session = { token: "t", compressedPubkey: "p" };
+
+  await runRefresh(session, async () => empty, sinks, {
+    indexerUrl: "http://x",
+    skipUnchangedFrom: skipBaseline(false, empty),
+  });
+  assert.equal(applied.length, 1, "the first read must be applied even when it is empty");
+
+  await runRefresh(session, async () => empty, sinks, {
+    indexerUrl: "http://x",
+    skipUnchangedFrom: skipBaseline(true, empty),
+  });
+  assert.equal(applied.length, 1, "an unchanged re-read must still not reset activity paging");
 });
