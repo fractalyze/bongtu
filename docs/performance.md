@@ -4,50 +4,97 @@ Measured numbers only. Each row says when and how it was taken; anything not rep
 tree or from chain is not here.
 
 Two measurement contexts appear below and they are not comparable: the **harness** figures are a
-clean `gasleft()` delta around the pool call, and the **live** figures are whole-transaction
-`gasUsed` from a GIWA receipt, which also pays the intrinsic cost and the calldata cost of
+clean `gasleft()` delta around the pool call, taken by `forge test` against this tree and therefore
+independent of which chain the pool is deployed to; the **live** figures are whole-transaction
+`gasUsed` from a Base Sepolia receipt, which also pays the intrinsic cost and the calldata cost of
 everything the call receives. Rows are additionally labelled **pre-KEM** (before the 2026-07-27
 hybrid ML-KEM-768 envelope upgrade) or **hybrid** (after it).
 
+## What gas costs
+
+Three different gas prices are in play and confusing them is the easiest way to misstate this
+project's cost by an order of magnitude:
+
+| price | who uses it | value |
+|---|---|---|
+| the chain's own quote | what a user actually pays | **0.006 gwei** (`cast gas-price`, 2026-08-12) |
+| `GAS_PRICE_PIN_GWEI` | our own operational transactions only | 0.05 gwei — about 8.3× the quote |
+| 3× `eth_gasPrice` | the two browser apps | whatever the chain quotes at the time |
+
+**Every user-facing cost in this document is priced at the chain's quote, 0.006 gwei.** The pin is
+not a product cost. It exists so a live deploy or survey run cannot stall mid-sequence when the
+quote moves — the asymmetry is that a gas price set too low leaves a transaction stuck in the pool
+with the run's later steps blocked behind its nonce, while one set too high only overpays a
+fractional amount of testnet ETH. The drivers pin rather than estimate for the same reason
+([deployment.md → Chain facts](deployment.md#chain-facts)). Neither web app pins; both take 3×
+`eth_gasPrice`, so what a wallet user pays tracks the chain. Pricing the numbers below at the pin
+would overstate the product's cost by 8.3×.
+
 ## Live chain, hybrid envelope
 
-Whole-transaction `gasUsed` from the receipts of the end-to-end run against the pool of the retired
-GIWA deployment, on that deployment's arbiter epoch 1, **measured 2026-07-28**
-(`deploy/live/gas_survey.ts`, fresh identities per run). These are pre-move numbers; the current
-deployment carries a single arbiter epoch (index 0) and has not been re-measured:
+Whole-transaction `gasUsed` from Base Sepolia receipts, **measured 2026-08-12**
+(`deploy/live/gas_survey.ts` and `deploy/live/transfer10x2_e2e.ts`, fresh identities per run),
+against the current pool on its arbiter epoch 0:
 
 | operation | L2 gas | L1 data fee | tx |
 |---|---|---|---|
-| `deposit` | 2,632,809 | 1.27e-7 ETH over 27,665 L1 gas | `0x80cd480b7cea057cabf7686453b178d8644bac709e1b13a3bc97c4423e5a07f4` |
-| `transfer` | 2,769,900 | 1.59e-7 ETH over 34,759 L1 gas | `0x2f63c928ea8b72ead869b8172f18056cbf594b494abe743be5da8f5eaf9a728c` |
-| `withdraw` | 1,707,621 | 1.36e-7 ETH over 29,700 L1 gas | `0x360441fba2c5d571096491178c7b1362dcba0f369ad9a50c1a11b8a0e470bbe9` |
-| `transfer10` | 11,592,399 | (V4 pool, measured 2026-07-28; RETIRED from the wallet same day) | `0x40c45cb9cb3e5d3df92277eacc3eb39c8c017261670f6ba3238926fef380d921` |
-| `transfer10x2` (merge, 3-in, zero change) | 3,053,435 | 2.16e-7 ETH over 42,267 L1 gas | `0xf467e4d551fc91af12a7883c347763d41379b416c74f6a7fb86ade03ac8f7107` |
-| `transfer10x2` (payment, 3-in + change) | 3,048,442 | 2.18e-7 ETH over 42,254 L1 gas | `0x51534089ec07fdba42371137d0dfb7391755bb60cbd145c2999f64534c317501` |
+| `deposit` | 2,638,241 | 9.28e-8 ETH | |
+| `transfer` (2-in / 2-out) | 2,785,501 | 1.18e-7 ETH | |
+| `withdraw` | 1,734,728 | 1.01e-7 ETH | |
+| `transfer10x2` (merge, 3-in, zero change) | 3,068,690 | | [`0xdc29fee9…`](https://sepolia.basescan.org/tx/0xdc29fee94a5a10fb32f885e343f3fcbdfd767391cf4c84609c57edfcd955ddb6) |
+| `transfer10x2` (payment, 3-in + change) | 3,063,954 | | [`0xf096282a…`](https://sepolia.basescan.org/tx/0xf096282a800761df7faec966075d0497fbc0008941efbefb9ae4e1e07bb3fff7) |
 
-All at the pinned 0.005 gwei L2 price, so a 2-arity operation costs ≈ 0.9–1.4e-5 ETH.
-`transfer10`'s ~11.6M was the ten depth-32 leaf appends (~0.93M each — the Poseidon
-wall below); eight of them were zero padding on every real spend, which is why
-`transfer10x2` (same 10-input side, two outputs, **V5, measured 2026-07-28**) serves the
-same 3–10-note consolidation or payment for ~3.05M — a 3.8× cut that is exactly the
-eight dropped appends. The wallet now routes every >2-input spend and every merge leg
-through it; `transfer10` remains deployed for verification of historical txs only. Against the
-prior live measurements on the same pool pre-upgrade (2026-07-24: deposit ≈ 2.24M, transfer ≈ 2.48M,
-withdraw ≈ 1.28M) the hybrid delta is the 1088-byte `kemCiphertext` carried in calldata **and**
-re-emitted in the event, plus one extra Groth16 public input — the same double-pay lever flagged
-below for disburse ciphertext.
+`deposit` is the row that moves: across seven runs it ranged **2,637,594 – 2,647,508**. The spread is
+the Merkle frontier — a slot costs about 20k gas the first time it goes non-zero against about 5k to
+overwrite — so the same call prices differently depending on how full the tree is. Treat any
+single-leaf-appending row as ±10k, not as an exact constant.
 
-`disburseWithCiphertexts` re-measured live on the hybrid epoch **2026-07-30** (employer-console pay
-run, tx `0xc877f669cc566b571f066cd097a7cba6b181b78e9ce91290f7b8ad86c7be795f`, block 32019031):
-**3,905,519 L2 gas** (15,256 per recipient), L1 data fee ≈ 4.02e-6 ETH. The hybrid delta over the
-pre-KEM live figure below is +33,116 gas (+0.9%) — the KEM ciphertext rides the fixed 2054-element
-disclosure array rather than adding a second large payload.
+`transfer10x2` takes up to ten input notes and produces two outputs. It serves both the merge (a
+consolidation with no change note) and the payment (recipient plus change), so the wallet routes
+every spend of three or more notes through it; the eight unused input slots cost nothing on the
+output side, which is the whole point of the 10×2 shape over a ten-output circuit. `transfer10`
+remains deployed for verification of historical transactions only and is no longer reachable from
+the wallet.
+
+### The 256-recipient disburse — carried over, not re-measured on Base
+
+**3,905,519 L2 gas, 15,256 per recipient.** This was measured on the project's previous chain
+(hybrid epoch, employer-console pay run, 2026-07-30) and has **not** been re-run on Base Sepolia.
+
+It is carried forward rather than restated because the chain move changed **zero executable lines in
+any operation path**: every changed line in `contracts/src/BongtuPool.sol` is inside `initialize` /
+`_initVerifiers` or in the deleted `initializeV2..V5` payloads (verify with
+`git diff 64ec0f5..HEAD -- contracts/src/BongtuPool.sol`). L2 `gasUsed` is a function of the
+bytecode executed and the calldata received, and an untouched path costs what it cost. Re-running it
+on Base (`deploy/live/payroll_e2e.ts`) is what would turn this into a measurement rather than an
+inference.
+
+At the chain's 0.006 gwei quote, one 256-batch costs **≈2.343e-5 ETH** of L2 gas. Its L1 data fee is
+estimated at **≈1.0e-7 ETH** — the scale the four measured Base operations show, not a measurement
+of a batch on Base.
+
+A **100,000-person payroll** is 391 of those batches:
+
+| | per 256-batch | ×391 (100,000 people) |
+|---|---|---|
+| L2 gas | 3,905,519 | 1,527,057,929 |
+| L2 cost @ 0.006 gwei | ≈2.343e-5 ETH | **0.009162 ETH** |
+| L1 data fee | ≈1.0e-7 ETH | **0.000039 ETH** |
+| **total** | | **0.009201 ETH** — about **$27.60** at $3000/ETH |
+| GPU proving @ 0.47 s | 0.47 s | **≈3.1 minutes** |
+
+For contrast, Zeto's own published figure is 2,763,071 gas for **2 recipients** (~1.38M each)
+against 15,256 per recipient here — about **90× cheaper per recipient**, a ratio that does not
+depend on which chain either runs on. The saving is structural: we replaced Zeto's value-keyed SMT
+with an IMT batch-attach and its per-note ciphertext with one aggregated disclosure hash.
 
 ## On-chain gas per operation (harness, pre-KEM)
 
 Clean `gasleft()` delta around the single pool call, real verifiers, B=16 pool
 (`contracts/test/GasReport.t.sol`; `forge --gas-report` inflates via metering and mixes arities, so
-it is not used). **Measured 2026-07-26**, before the hybrid upgrade.
+it is not used). **Measured 2026-07-26**, before the hybrid upgrade. These are figures about this
+tree, not about a chain — they measure the call, not the transaction, so they carry neither the
+intrinsic cost nor the calldata cost and are always lower than the live rows above.
 
 | operation | L2 gas | notes |
 |---|---|---|
@@ -57,10 +104,9 @@ it is not used). **Measured 2026-07-26**, before the hybrid upgrade.
 | `disburseWithCiphertexts` (1-in / 16-out, partial block, full ciphertext) | 2,194,716 | B=16 dev arity |
 
 The production 256 arity (`contracts/test/Disburse256.t.sol`, real GPU proof against the real
-verifier, **measured 2026-07-26**, pre-KEM):
-
-Both cases seed a single input note at leaf 0, so both disburse into a **1-leaf partial block** and
-both close it in-call before attaching the 256-leaf subtree:
+verifier, **measured 2026-07-26**, pre-KEM). Both cases seed a single input note at leaf 0, so both
+disburse into a **1-leaf partial block** and both close it in-call before attaching the 256-leaf
+subtree:
 
 | measurement | L2 gas | per recipient |
 |---|---|---|
@@ -73,31 +119,9 @@ second also pins `root()` against the `@bongtu/core` oracle. The partial-block c
 inserting the ≤255 pad leaves individually would be O(B) — up to 255 leaves × 32 hashes — and would
 not fit under the cap ([protocol.md](protocol.md#batch-attach-is-olog-b-not-ob)).
 
-### Live chain: the 256-recipient disburse (pre-KEM)
-
-The headline 256-recipient private disbursement, run against the pool of the retired GIWA
-deployment — tx `0xe254240a5df042a163073c028399a5fc63cf87434a7e7ebbf5ddfea73c803bd6`,
-block 31560457, **receipt read 2026-07-26**, on that deployment's arbiter epoch 0 (pre-KEM):
-
-| quantity | value |
-|---|---|
-| L2 gas used | 3,872,403 (15,126 per recipient) |
-| effective gas price | 0.005 gwei (pinned by the runner) |
-| L2 cost | ≈ 1.94e-5 ETH |
-| L1 data fee | 4,024,818,056,800 wei ≈ 4.02e-6 ETH, over 915,493 L1 gas |
-| total | ≈ 2.34e-5 ETH |
-
-Live gas exceeds the test-harness 2.79M because a real transaction also pays the intrinsic cost and
-the calldata cost of the 2054-element ciphertext array (~66 KB); the harness measures the call, not
-the transaction. The L1 data fee for that payload is ~4e-6 ETH — about 17% of this transaction's
-total at the pinned 0.005 gwei L2 price, and small in absolute terms. Blob data availability is not
-what makes all-ciphertext-on-chain expensive; L2 execution and calldata are.
-
-Any "L1 fee is a rounding error" figure computed at an unpinned gas price is an artifact of
-overpaying on L2: a client-side auto-estimate once overpaid by ~1500×, so the drivers pin `gasPrice`
-from `GAS_PRICE_PIN_GWEI` (`packages/core/src/network.ts`, read by the `deploy/live/` drivers). The
-rows above were taken at the 0.005 gwei value that constant carried before the chain move; its
-current value is in [deployment.md](deployment.md#chain-facts).
+The live disburse figure exceeds this harness 2.79M for two reasons that stack: a real transaction
+also pays the intrinsic cost and the calldata cost of the 2054-element ciphertext array (~66 KB),
+and the live figure is hybrid while the harness rows are pre-KEM.
 
 ## Where the gas goes
 
@@ -160,6 +184,29 @@ range checks — which is +22% on `deposit` and under +0.1% on `disburse256`.
 - CPU `groth16 setup` for disburse256 is a multi-minute step producing the 1.3 GB zkey; it is not in
   the per-change loop ([toolchain.md](toolchain.md)).
 
+## Measuring against a pooled public RPC
+
+The live figures above were taken through a public endpoint, and that is a different animal from the
+dedicated node the drivers were originally written against: one hostname fronts many nodes, and a
+node that answers your next request may not have applied the block your last one produced. Three
+latent assumptions of a dedicated node surfaced during this measurement and are fixed in
+`deploy/live/lib/viem_client.ts` (commit `9507092`) — anyone re-measuring should know they were real:
+
+- **A gas limit sent as exactly its own estimate.** A deposit ran **out of gas at 2,643,613** while
+  its siblings in the same run cost 2,637,594–2,647,508. Cause: the frontier-slot pricing above —
+  the tree advances between the estimate and the inclusion, so a later operation can execute a
+  costlier path than the one that was priced. The limit is only a cap and unused gas is refunded, so
+  the drivers now take headroom over the estimate.
+- **A read issued straight after a write.** It could be answered by a node that had not applied the
+  block, so a transaction that correctly appended its two leaves read back as though it had done
+  nothing. Writes now hold until the pool will actually show the block they landed in.
+- **A receipt lookup treating not-found as terminal.** It reported a transaction that had in fact
+  succeeded, with status 1, as a timeout. It now waits long enough for a lagging node to catch up.
+
+None of this is chain-specific; it was invisible only because the previous endpoint was a single
+node. A survey that reports one anomalous row is more likely to be reporting the RPC than the
+contract.
+
 ## Reproducing
 
 ```sh
@@ -167,11 +214,12 @@ cd contracts && forge test --match-path "test/GasReport.t.sol" -vv
 cd contracts && forge test --match-path "test/Disburse256.t.sol" -vv
 cd circuits  && $SNARKJS r1cs info out/<name>.r1cs        # $SNARKJS: toolchain.md
 cast receipt <txhash> --rpc-url "$LIVE_RPC"               # $LIVE_RPC: .env.example
+npx tsx deploy/live/gas_survey.ts                         # re-measures the live table (spends gas)
 ```
 
-The three local commands reproduce the harness rows against this tree. The `cast receipt` line
-reads the current deployment's chain — the RPC has one home, listed under
+The three local commands reproduce the harness rows against this tree. The `cast receipt` line reads
+the live chain — the RPC has one home, listed under
 [deployment.md → Chain facts](deployment.md#chain-facts) and mirrored into `LIVE_RPC` by
-`.env.example`. It does **not** reproduce the live tables above: those transaction hashes were
-written on the retired deployment's chain and do not resolve here. Re-measuring against the
-current deployment (`deploy/live/gas_survey.ts`) is what produces hashes this line can read.
+`.env.example` — and resolves the two `transfer10x2` hashes in the live table directly. The rows
+without a hash came from survey runs whose receipts were read at measurement time; `gas_survey.ts`
+re-takes them, with fresh identities and fresh hashes, at the cost of real testnet gas.

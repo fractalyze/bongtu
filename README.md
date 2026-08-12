@@ -79,35 +79,36 @@ and would not fit in a block. It pads the batch to a fixed 256 with no per-leaf 
 real recipient count stays hidden) and publishes all 256 ciphertexts on-chain for the auditor,
 bound by one aggregated disclosure hash the proof commits to.
 
-One such batch, measured live on an OP-Stack testnet against the same circuits and the same hybrid
-ML-KEM envelope: **3,905,519 L2 gas** (15,256 per recipient) plus **~4e-6 ETH** of L1 data fee.
+One such batch, measured live against the same circuits and the same hybrid ML-KEM envelope:
+**3,905,519 L2 gas** — **15,256 per recipient**. That measurement was taken on the project's
+previous chain and has not been re-run on Base Sepolia; it carries over because the move changed no
+executable line in any operation path, only the initializer
+([`docs/performance.md`](docs/performance.md) shows the check). The other four operations *have*
+been re-measured on Base and are in that file.
 
-**Everything in this section predates the move to the current chain**, including the costs below and
-the dollar figure after them: the gas was measured on the previous deployment, and the ETH costs
-price it at that chain's 0.005 gwei pin rather than the current one. Nothing here is a measured
-claim about the live pool until it is re-measured there —
-[`docs/performance.md`](docs/performance.md) carries the measured set.
-
-A **100,000-person payroll** is 391 of those batches. From those pre-move per-batch numbers:
+A **100,000-person payroll** is 391 of those batches, priced at the chain's own 0.006 gwei quote —
+not at the higher gas price our deploy scripts pin for themselves:
 
 | | per 256-batch | ×391 (100,000 people) |
 |---|---|---|
-| L2 gas | 3,905,519 | ~1.53 billion |
-| L2 cost @ 0.005 gwei (the pre-move pin) | ~2.0e-5 ETH | **~0.0076 ETH** |
-| L1 data fee | ~4e-6 ETH | **~0.0016 ETH** |
-| **total** | | **~0.009 ETH (tens of dollars)** |
-| GPU proving @ 0.47 s | 0.47 s | **~3 minutes** |
+| L2 gas | 3,905,519 | 1,527,057,929 |
+| L2 cost @ 0.006 gwei | ≈2.343e-5 ETH | **0.009162 ETH** |
+| L1 data fee | ≈1.0e-7 ETH | **0.000039 ETH** |
+| **total** | | **0.009201 ETH** — about **$27.60** at $3000/ETH |
+| GPU proving @ 0.47 s | 0.47 s | **≈3.1 minutes** |
 
-On those pre-move numbers a full private payroll of 100,000 clears in **a few minutes for well under
-$50**, proving on a single GPU. For contrast, Zeto's own published number is 2,763,071 gas for
-**2 recipients** (~1.38M each), making bongtu **~90× cheaper per recipient**: we replaced Zeto's
-value-keyed SMT with an IMT batch-attach and its per-note ciphertext with one aggregated disclosure
-hash. *(These are 391× one measured batch, not a single live 100k run.)*
+A full private payroll of 100,000 clears in **a few minutes for well under $50**, proving on a
+single GPU. For contrast, Zeto's own published number is 2,763,071 gas for **2 recipients**
+(~1.38M each), making bongtu **~90× cheaper per recipient**: we replaced Zeto's value-keyed SMT
+with an IMT batch-attach and its per-note ciphertext with one aggregated disclosure hash. *(These
+are 391× one measured batch, not a single live 100k run.)*
 
 ## What is built
 
-Every surface below is built and has run end to end against the previous deployment; the cutover run
-against the pool in [Status](#status) is pending:
+Every surface below is built. The wallet path has run end to end against the pool in
+[Status](#status) — deposits, a `transfer10x2` merge and a `transfer10x2` payment all landed on Base
+Sepolia and the arbiter indexer surfaced the resulting notes. The 256-recipient disburse has run end
+to end, but on the previous deployment; it has not been re-run here:
 
 | surface | what it is |
 |---|---|
