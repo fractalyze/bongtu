@@ -113,8 +113,8 @@ to end, but on the previous deployment; it has not been re-run here:
 | surface | what it is |
 |---|---|
 | [**Bongtu Wallet**](https://bongtu.fractalyze.io) | Self-custody private wallet: spending key derived from a MetaMask signature, proofs generated in the browser, private balance / send / withdraw, per-user activity feed. Desktop-only. |
-| [**Employer Payroll Test Console**](https://payroll.fractalyze.io) | The mass-payout console (testnet tool, access-gated): deposit public kKRW into the pool, generate a 255-recipient worksheet, and settle it as **one** private disburse, proof served by the GPU prover in seconds. |
-| **GPU prover service** | The employer-side proving box: three circuits resident on one GPU, in-process witness workers, ~0.5 s warm proof for the 256-batch. Auth- and origin-gated; only the employer's own console reaches it. |
+| [**Employer Payroll Test Console**](https://payroll.fractalyze.io) | The mass-payout console (testnet tool, access-gated): deposit public kKRW into the pool, generate a 255-recipient worksheet, and settle it as **one** private disburse, whose proof the GPU prover below returns in seconds when that service is up. |
+| **GPU prover service** | The employer-side proving box: three circuits held resident on one GPU, in-process witness workers, ~0.5 s warm proof for the 256-batch. Auth- and origin-gated, so only the employer's own console can reach it. Run on demand rather than kept up: it holds ~25 GB of GPU while resident, and the payroll console is the only surface that needs it — the wallet proves in the browser. |
 | **Indexer (arbiter mode)** | Mirrors the on-chain tree, decrypts every authority envelope, serves per-owner `/notes` + `/history` behind signature read-auth, and raises disclosure alarms when a batch's ciphertext disagrees with the chain. |
 | **BongtuPool on Base Sepolia** | The UUPS-proxied pool in [Status](#status): six Groth16 verifiers, the IMT, the kKRW escrow, and the enforced 2054-element disclosure on every disburse. |
 
