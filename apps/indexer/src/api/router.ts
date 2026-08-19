@@ -14,7 +14,8 @@
 //   GET /health              -> { ok (tree exists AND tail not persistently
 //                                failing), lastBlock, nextLeafIndex, batchSize,
 //                                alarms (disclosure+envelope count), lastSuccessAt,
-//                                lastError, lastErrorAt, consecutiveFailures }
+//                                lastError, lastErrorAt, consecutiveFailures,
+//                                transientHeadRaces, lastTransientAt }
 //   GET /nullifiers          -> string[]  (spent nullifier set; PUBLIC, key-free)
 //   GET /announcements       -> [WithdrawAnnouncementRecord]  (PUBLIC cursor
 //                               feed; with ?owner= — ARBITER MODE, /notes

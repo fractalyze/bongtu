@@ -990,6 +990,47 @@ async function main(): Promise<void> {
     ok(b3.ok === true && b3.lastSuccessAt !== null, "recovered → /health ok:true");
   }
 
+  step("POLL: replica head-races are transient — retried, never counted toward the failure streak");
+  {
+    const tix = makeIndexer(false);
+    // The eth_getLogs shape: getBlockNumber() answered by a fresher replica than
+    // the getLogs that followed (the live failure this classification exists for).
+    tix.ingest = async () => {
+      throw new Error(
+        "Invalid parameters were provided to the RPC method.\n" +
+          "Details: block range extends beyond current head block: requested 45665994, head 45665990",
+      );
+    };
+    await tix.pollOnce();
+    await tix.pollOnce();
+    await tix.pollOnce();
+    await tix.pollOnce();
+    ok(
+      tix.consecutiveFailures === 0 && tix.lastError === null && tix.transientHeadRaces === 4 && tix.lastTransientAt !== null,
+      "4 head-races in a row: transient counter moves, streak + lastError stay untouched",
+    );
+    const hT = await health.handle({ ix: tix, tokens: TOKENS, params: [], query: new URLSearchParams() });
+    const bT = hT.body as { ok: boolean; transientHeadRaces: number; lastTransientAt: number | null };
+    ok(
+      bT.ok === true && bT.transientHeadRaces === 4 && bT.lastTransientAt !== null,
+      "/health stays ok past the persistent streak and projects the transient count",
+    );
+
+    // The pinned eth_call shape ("block not found") classifies the same way.
+    tix.ingest = async () => {
+      throw new Error("Requested resource not found.\nDetails: block not found: 0x2b8ced1");
+    };
+    await tix.pollOnce();
+    ok(tix.transientHeadRaces === 5 && tix.consecutiveFailures === 0, "'block not found' on a lagging replica is the same transient class");
+
+    // A genuine failure (mirror divergence) still counts toward the streak.
+    tix.ingest = async () => {
+      throw new Error("ingest: mirror root 1 != contract root 2 @block 9");
+    };
+    await tix.pollOnce();
+    ok(tix.consecutiveFailures === 1 && tix.lastError !== null, "a non-head-race error still bumps the streak + lastError");
+  }
+
   // --- block-timestamp retry -------------------------------------------------
   // A rate-limited getBlock used to fold to timestamp 0, and because history
   // rows are stamped once at ingest and persisted, those rows claimed

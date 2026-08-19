@@ -29,6 +29,10 @@ export const health: Route = {
         lastError: ix.lastError,
         lastErrorAt: ix.lastErrorAt,
         consecutiveFailures: ix.consecutiveFailures,
+        // Replica head-races (retried, never part of the streak): a caller can
+        // tell "noisy RPC but progressing" from "wedged" without the logs.
+        transientHeadRaces: ix.transientHeadRaces,
+        lastTransientAt: ix.lastTransientAt,
       },
     };
   },

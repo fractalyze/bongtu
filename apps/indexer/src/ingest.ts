@@ -68,6 +68,30 @@ function isViemPreKemProbeError(e: unknown): boolean {
   );
 }
 
+/**
+ * A tail poll racing the RPC's replicas, not a real failure: `getBlockNumber()`
+ * was answered by a fresher replica than the `eth_getLogs` / pinned `eth_call`
+ * that follows, so the pinned block is "beyond head" (or not yet visible) on the
+ * laggier node — observed on the load-balanced public sepolia.base.org, whose
+ * reported head regresses several blocks between consecutive requests. The
+ * cursor stays unadvanced and the next poll re-derives a fresh head, so these
+ * self-heal; counting them toward the /health failure streak would flip
+ * ok:false during ordinary replica skew (2,175 hits in one 48h window).
+ */
+function isTransientHeadRaceError(e: unknown): boolean {
+  const matches = (s: string) =>
+    s.includes("block range extends beyond current head block") || s.includes("block not found");
+  if (e instanceof BaseError) {
+    return (
+      e.walk((err) => {
+        const details = (err as { details?: unknown }).details;
+        return (typeof details === "string" && matches(details)) || (err instanceof Error && matches(err.message));
+      }) !== null
+    );
+  }
+  return e instanceof Error && matches(e.message);
+}
+
 const H = 32; // IMT height — a system-wide constant (SPEC §4)
 
 // A parsed pool log with its chain position, ordered globally by (block, logIndex).
@@ -170,6 +194,11 @@ export class Indexer {
   lastErrorAt: number | null = null; // ms epoch
   consecutiveFailures = 0;
   lastSuccessAt: number | null = null; // ms epoch
+  // Head-race retries (see isTransientHeadRace) — observability only, never part
+  // of the failure streak. lastSuccessAt is NOT stamped on a transient, so a
+  // tail that only ever head-races still shows a stale lastSuccessAt to callers.
+  transientHeadRaces = 0;
+  lastTransientAt: number | null = null; // ms epoch
   private polling = false; // one in-flight tail attempt at a time
 
   constructor(cfg: ChainConfig) {
@@ -492,7 +521,9 @@ export class Indexer {
    * failure state for GET /health. Never throws — a failing RPC or a genuine
    * mirror-root divergence lands in `lastError` + `consecutiveFailures` instead
    * of only a log line, and the cursor stays unadvanced so the next attempt
-   * retries the same range. Concurrent calls coalesce (one in-flight attempt).
+   * retries the same range. Replica head-races are the one exception: they land
+   * in `transientHeadRaces` and never touch the failure streak. Concurrent
+   * calls coalesce (one in-flight attempt).
    */
   async pollOnce(): Promise<void> {
     if (this.polling) return;
@@ -502,10 +533,19 @@ export class Indexer {
       this.consecutiveFailures = 0;
       this.lastSuccessAt = Date.now();
     } catch (e) {
-      this.consecutiveFailures++;
-      this.lastError = (e as Error).message;
-      this.lastErrorAt = Date.now();
-      console.error("tail ingest error:", this.lastError);
+      if (isTransientHeadRaceError(e)) {
+        // Replica head-race: retried from the same cursor next poll. One short
+        // line (not viem's multi-line dump), and no streak bump — see
+        // isTransientHeadRaceError for why this must not reach /health's ok.
+        this.transientHeadRaces++;
+        this.lastTransientAt = Date.now();
+        console.warn(`tail ingest head-race #${this.transientHeadRaces} (retrying next poll): ${(e as Error).message.split("\n", 1)[0]}`);
+      } else {
+        this.consecutiveFailures++;
+        this.lastError = (e as Error).message;
+        this.lastErrorAt = Date.now();
+        console.error("tail ingest error:", this.lastError);
+      }
     } finally {
       this.polling = false;
     }
