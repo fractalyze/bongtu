@@ -31,11 +31,20 @@ export interface KeyDerivationConfig {
   chainId: number;
   pool: string;
   keyVersion: string;
+  /** Stealth KDF domain version (stealthKeys.ts): part of the BongtuStealthKey
+   *  EIP-712 domain. Rotating it rotates every stealth meta key — and orphans
+   *  announced-but-unswept one-time addresses — so it is pinned here beside
+   *  keyVersion: the deployment's KDF domain facts have ONE home. */
+  stealthKeyVersion: string;
 }
 
 /** KDF domain version (SPEC §6): part of the EIP-712 domain, so bumping it
  *  rotates every derived key. Pinned per deployment; never silently changed. */
 const KEY_VERSION = "1";
+
+/** Stealth KDF domain version — same pinning rule as KEY_VERSION, for the
+ *  stealth struct (stealthKeys.stealthKeyTypedData consumes it via KEY_DERIVATION). */
+const STEALTH_KEY_VERSION = "1";
 
 /**
  * THIS deployment's KDF domain facts — the ONE home both apps derive under.
@@ -48,6 +57,7 @@ export const KEY_DERIVATION: KeyDerivationConfig = {
   chainId: CHAIN_ID,
   pool: POOL_ADDRESS,
   keyVersion: KEY_VERSION,
+  stealthKeyVersion: STEALTH_KEY_VERSION,
 };
 
 /**

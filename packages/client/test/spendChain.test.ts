@@ -228,6 +228,10 @@ function chainWorld(values: bigint[]) {
   // run already paid a signature for.
   const keyCache = new KeyCache({
     derive: async () => deriveIdentityFromSignature(SIG),
+    // The stealth destination reaches these runs pre-derived; the seam is unused.
+    deriveStealth: async () => {
+      throw new Error("stealth derive must not be reached here");
+    },
     currentAccount: async () => "0x1",
     arm: () => () => {},
   });

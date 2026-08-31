@@ -214,6 +214,10 @@ async function main(): Promise<void> {
   // The real lock, wired to the fixed-signature derivation (header note 1).
   const keyCache = new KeyCache({
     derive: async () => employer,
+    // The e2e never takes a stealth action; the lock's seam is mandatory wiring.
+    deriveStealth: async () => {
+      throw new Error("stealth derive must not be reached in the payroll e2e");
+    },
     currentAccount: async () => account.address.toLowerCase(),
   });
 

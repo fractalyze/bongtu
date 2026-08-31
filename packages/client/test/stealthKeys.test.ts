@@ -15,6 +15,7 @@ import {
   stealthKeyTypedData,
 } from "../src/stealthKeys.js";
 import { discoverStealthFunds, exportStealthFundKey } from "../src/stealthFunds.js";
+import { KEY_DERIVATION } from "../src/identity.js";
 import type { WithdrawAnnouncementRecord } from "@bongtu/core/indexerApi";
 
 // A syntactically valid 65-byte signature hex (deterministic test input).
@@ -40,6 +41,13 @@ test("the stealth struct is a distinct EIP-712 primary type", () => {
   const typed = stealthKeyTypedData(84532, "0x" + "11".repeat(20), "1");
   assert.equal(typed.primaryType, "BongtuStealthKey");
   assert.ok(typed.types.BongtuStealthKey);
+});
+
+test("the stealth KDF version lives in the deployment KDF config, pinned at 1", () => {
+  // ONE home for the domain facts (identity.ts KEY_DERIVATION): rotating this
+  // value orphans announced-but-unswept addresses, so it is pinned beside
+  // keyVersion, never carried by the stealth module itself.
+  assert.equal(KEY_DERIVATION.stealthKeyVersion, "1");
 });
 
 function record(partial: Partial<WithdrawAnnouncementRecord>): WithdrawAnnouncementRecord {
@@ -102,6 +110,24 @@ test("prepareStealthDestination: the paid address IS what the view key rediscove
   // THE invariant, headless: re-derive the view key from the SAME signature and
   // reproduce the destination from nothing but the announcement half.
   const keys = stealthKeysFromKdfSignature(SIG);
+  const rescanned = scanStealthAnnouncement(keys.viewPriv, keys.meta.spendPub, d.ephemeralPub);
+  assert.equal(rescanned.address, d.address);
+  assert.equal(rescanned.viewTag, d.viewTag);
+});
+
+test("prepareStealthDestination: keys supplied through getKeys (the lock's path) sign nothing", async () => {
+  // The wallet hands the meta keys in from its lock (keyCache.unlockStealth):
+  // the derivation-with-popup default must then never run — same invariant,
+  // different supply.
+  const keys = stealthKeysFromKdfSignature(SIG);
+  const sign = async (): Promise<string> => {
+    throw new Error("an unlocked wallet must not be asked to sign");
+  };
+  const d = await prepareStealthDestination(CONNECTION, {
+    sign,
+    getKeys: async () => keys,
+    drawEphemeral: () => 555555555n,
+  });
   const rescanned = scanStealthAnnouncement(keys.viewPriv, keys.meta.spendPub, d.ephemeralPub);
   assert.equal(rescanned.address, d.address);
   assert.equal(rescanned.viewTag, d.viewTag);

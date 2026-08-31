@@ -375,6 +375,10 @@ function flowDeps(f: ReturnType<typeof fixture>, trace: { circuit: string | null
     assertPoolKemEpoch: async () => {},
     keyCache: new KeyCache({
       derive: async () => deriveIdentityFromSignature(SIG),
+      // Routing, not stealth, is under test; the seam must stay unreached.
+      deriveStealth: async () => {
+        throw new Error("stealth derive must not be reached here");
+      },
       currentAccount: async () => "0x1",
       arm: () => () => {},
     }),

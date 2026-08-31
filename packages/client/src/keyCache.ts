@@ -1,10 +1,16 @@
-// The wallet's LOCK: where the spending key lives between actions.
+// The wallet's LOCK: where the spending key — and the stealth identity derived
+// beside it — lives between actions.
 //
 // KEY-CUSTODY RULE (user-mandated): the bjj private key may live in memory only.
 // This module is the one place that holds it across calls — a module-level object
 // reference, never localStorage / sessionStorage / IndexedDB / cookies / a URL, and
 // never anything a page reload survives. Every path that ends the hold (logout, an
 // account switch, the idle wipe) drops the reference outright.
+//
+// The stealth meta keys (stealthKeys.ts) are custody-equivalent — whoever holds
+// them controls the user's one-time addresses — so they live under the SAME rules,
+// as a second derived value INSIDE the same hold: one state machine, one idle
+// deadline, one lock() — never a parallel cache that could drift out of step.
 //
 // Why hold it at all: deriving is one MetaMask signature popup, and asking for it on
 // every send/withdraw/deposit was rejected UX. Logging in already spends that popup —
@@ -34,6 +40,7 @@
 // account no longer matches is refused, without a popup, because that cached key
 // already passed the session check and no other account can reproduce it.
 
+import type { StealthKeys } from "@bongtu/core/stealth";
 import type { WalletIdentity } from "./derive.js";
 import { ACCOUNT_MISMATCH_MESSAGE, assertSessionIdentity } from "./identity.js";
 import type { Connection } from "./connection.js";
@@ -45,6 +52,9 @@ export const IDLE_WIPE_MS = 10 * 60 * 1000;
  *  including both idle-wipe layers — gates headlessly (test/keyCache.test.ts). */
 export interface KeyCacheDeps {
   derive: (connection: Connection) => Promise<WalletIdentity>;
+  /** The stealth meta-key derivation (its own EIP-712 popup — deriveStealthKeys
+   *  partially applied by the app), unlocked lazily on the first stealth action. */
+  deriveStealth: (connection: Connection) => Promise<StealthKeys>;
   currentAccount: () => Promise<string | null>;
   now: () => number;
   idleMs: number;
@@ -54,12 +64,15 @@ export interface KeyCacheDeps {
 }
 
 /** What a KeyCache must be handed to exist: `derive` (the identity derivation,
- *  carrying the app's KDF config — deriveTransientIdentity partially applied) and
- *  `currentAccount` (the wallet edge's live-account read — wagmi in wallet-web).
- *  Clock/timer deps default to the real ones. */
-export type KeyCacheWiring = Pick<KeyCacheDeps, "derive" | "currentAccount"> & Partial<KeyCacheDeps>;
+ *  carrying the app's KDF config — deriveTransientIdentity partially applied),
+ *  `deriveStealth` (the stealth meta-key derivation — required so no app can hold
+ *  stealth keys outside the lock for lack of a seam), and `currentAccount` (the
+ *  wallet edge's live-account read — wagmi in wallet-web). Clock/timer deps
+ *  default to the real ones. */
+export type KeyCacheWiring = Pick<KeyCacheDeps, "derive" | "deriveStealth" | "currentAccount"> &
+  Partial<KeyCacheDeps>;
 
-const DEFAULT_DEPS: Omit<KeyCacheDeps, "derive" | "currentAccount"> = {
+const DEFAULT_DEPS: Omit<KeyCacheDeps, "derive" | "deriveStealth" | "currentAccount"> = {
   now: () => Date.now(),
   idleMs: IDLE_WIPE_MS,
   arm: (fn, ms) => {
@@ -70,6 +83,10 @@ const DEFAULT_DEPS: Omit<KeyCacheDeps, "derive" | "currentAccount"> = {
 
 interface HeldKey {
   identity: WalletIdentity;
+  /** The stealth identity, once its first action derived it — a FIELD of this
+   *  hold, so every path that drops the hold (lock, wipe, switch) drops it too.
+   *  null until unlockStealth pays its one popup. */
+  stealth: StealthKeys | null;
   /** lowercased eth account the identity was derived under. */
   account: string;
   /** compressed bjj pubkey of the session it was checked against. */
@@ -145,6 +162,7 @@ export class KeyCache {
     assertSessionIdentity(identity.compressedPubkey, sessionPubkey);
     this.held = {
       identity,
+      stealth: null,
       account: account.toLowerCase(),
       sessionPubkey,
       lastUsedAt: this.deps.now(),
@@ -190,6 +208,7 @@ export class KeyCache {
     assertSessionIdentity(identity.compressedPubkey, sessionPubkey);
     this.held = {
       identity,
+      stealth: null,
       account: account ?? connection.address.toLowerCase(),
       sessionPubkey,
       lastUsedAt: this.deps.now(),
@@ -197,6 +216,51 @@ export class KeyCache {
     this.rearm();
     this.notify();
     return identity;
+  }
+
+  /**
+   * The stealth meta keys for `sessionPubkey`, derived on the first stealth action
+   * and reused from the hold after that.
+   *
+   * The gate is LITERALLY unlock(): a stealth unlock first takes (or derives) the
+   * spending key under the very same account / session / idle-expiry checks, so a
+   * stealth action under a switched account refuses with the same
+   * ACCOUNT_MISMATCH_MESSAGE — before any stealth popup — and an idle-expired or
+   * signed-out hold has already dropped the stealth keys along with the spending
+   * key. Making stealth subordinate to the spending session (rather than a peer
+   * hold with its own bookkeeping) is what keeps this ONE state machine.
+   *
+   * The stealth popup can sit open across an account switch, and unlike the
+   * spending key the derived value cannot be checked against the session pubkey —
+   * so after deriving, the account is read AGAIN and the keys are refused outright
+   * if the hold moved or the account no longer matches: a mid-popup switch must
+   * never cache (or hand out) the new account's stealth identity under the old
+   * session.
+   */
+  async unlockStealth(
+    connection: Connection,
+    sessionPubkey: string,
+    onDerive?: () => void,
+  ): Promise<StealthKeys> {
+    await this.unlock(connection, sessionPubkey, onDerive);
+    const held = this.held;
+    if (!held) throw new Error(ACCOUNT_MISMATCH_MESSAGE); // hold vanished mid-flight
+    if (held.stealth) {
+      held.lastUsedAt = this.deps.now();
+      this.rearm();
+      return held.stealth;
+    }
+    onDerive?.();
+    const stealth = await this.deps.deriveStealth(connection);
+    const account = await this.deps.currentAccount();
+    if (this.held !== held || account === null || account !== held.account) {
+      this.lock();
+      throw new Error(ACCOUNT_MISMATCH_MESSAGE);
+    }
+    held.stealth = stealth;
+    held.lastUsedAt = this.deps.now();
+    this.rearm();
+    return stealth;
   }
 
   private expired(held: HeldKey): boolean {

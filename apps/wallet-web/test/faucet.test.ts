@@ -59,6 +59,10 @@ function fakeKeyCache(onDerive: () => void = () => {}): KeyCache {
       onDerive();
       return deriveIdentityFromSignature(SIG);
     },
+    // A deposit never touches the stealth seam; reaching it here would be a bug.
+    deriveStealth: async () => {
+      throw new Error("stealth derive must not be reached here");
+    },
     currentAccount: async () => ACCOUNT,
     arm: () => () => {},
   });

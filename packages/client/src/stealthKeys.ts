@@ -15,7 +15,8 @@
 // handed to that flow; nothing persists them and no module caches them.
 // The exact struct bytes are consensus for which EOAs hold the user's funds:
 // changing the statement/version orphans every previously announced address,
-// so STEALTH_KEY_VERSION is pinned per deployment like keyVersion.
+// so the stealth KDF version is pinned per deployment beside keyVersion, in
+// the ONE KDF-config home (identity.ts KEY_DERIVATION.stealthKeyVersion).
 
 import { keccak256 } from "viem";
 import { SUBGROUP_ORDER } from "@bongtu/core/babyjub";
@@ -30,10 +31,6 @@ import {
 import type { KeyDerivationTypedData } from "./derive.js";
 import { KEY_DERIVATION } from "./identity.js";
 import { signKeyDerivation, type Connection } from "./connection.js";
-
-/** Stealth KDF domain version — rotating it rotates every stealth meta key
- *  (and orphans announced-but-unswept addresses). Pinned per deployment. */
-export const STEALTH_KEY_VERSION = "1";
 
 /** The EIP-712 struct the stealth popup signs. Distinct primary type from
  *  BongtuSpendingKey — see the module header. */
@@ -89,7 +86,7 @@ export async function deriveStealthKeys(
   const typed = stealthKeyTypedData(
     KEY_DERIVATION.chainId,
     KEY_DERIVATION.pool,
-    STEALTH_KEY_VERSION,
+    KEY_DERIVATION.stealthKeyVersion,
   );
   const signature = await sign(connection, typed);
   return stealthKeysFromKdfSignature(signature);
@@ -97,11 +94,16 @@ export async function deriveStealthKeys(
 
 /** prepareStealthDestination's injectable edges — the same seam style
  *  deriveLoginIdentity has (identity.ts), so the whole derivation gates
- *  headlessly: tests pass a deterministic sign + a pinned ephemeral, the
- *  wallet passes nothing and gets the real popup + the WebCrypto draw. */
+ *  headlessly: tests pass a deterministic sign + a pinned ephemeral; the
+ *  default is the real popup + the WebCrypto draw. `getKeys` is how the
+ *  wallet supplies the meta keys from its LOCK (keyCache.unlockStealth):
+ *  an unlocked wallet then pays no popup at all, and the custody rules —
+ *  idle wipe, account binding — stay the lock's, not this module's. */
 export interface StealthDestinationDeps {
   sign?: typeof signKeyDerivation;
   drawEphemeral?: typeof randomEphemeralScalar;
+  /** Where the meta keys come from; defaults to deriving via `sign` (one popup). */
+  getKeys?: () => Promise<StealthKeys>;
 }
 
 /**
@@ -119,6 +121,8 @@ export async function prepareStealthDestination(
   connection: Connection,
   deps: StealthDestinationDeps = {},
 ): Promise<StealthDerivation> {
-  const keys = await deriveStealthKeys(connection, deps.sign ?? signKeyDerivation);
+  const keys = await (deps.getKeys
+    ? deps.getKeys()
+    : deriveStealthKeys(connection, deps.sign ?? signKeyDerivation));
   return deriveStealthAddress(keys.meta, (deps.drawEphemeral ?? randomEphemeralScalar)());
 }

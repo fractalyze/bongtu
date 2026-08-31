@@ -59,7 +59,7 @@ const PIN_DIGEST = "0x64f5a878ad8289d299c1b4b2f1a75d7be70b40c1e5f98373c1791a9de5
 
 /** The live deployment's KDF domain facts — what wallet-web's config.ts
  *  KEY_DERIVATION threads into the engine (same one home: @bongtu/core/network). */
-const KDF = { chainId: CHAIN_ID, pool: POOL_ADDRESS, keyVersion: "1" };
+const KDF = { chainId: CHAIN_ID, pool: POOL_ADDRESS, keyVersion: "1", stealthKeyVersion: "1" };
 
 /** A fixed stand-in for the wallet's deterministic 65-byte signature. */
 const FIXED_SIG = ("0x" + "a1".repeat(32) + "b2".repeat(32) + "1c") as `0x${string}`;

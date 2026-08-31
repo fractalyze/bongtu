@@ -90,11 +90,17 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
     void action.submit(
       async (onStage) => {
         // The stealth destination is derived JUST before the run: meta keys from
-        // one extra popup, then a fresh ephemeral — nothing is reused or stored.
+        // the wallet's ONE lock (unlockStealth — the first stealth action pays a
+        // popup, later ones ride the hold under the lock's idle/account rules),
+        // then a fresh ephemeral — this screen stores nothing.
         // prepareStealthDestination owns the derivation whole (address +
         // announcement as one value); this screen only decides WHETHER.
         const stealth =
-          !isTransfer && stealthMode ? await prepareStealthDestination(connection) : undefined;
+          !isTransfer && stealthMode
+            ? await prepareStealthDestination(connection, {
+                getKeys: () => keyCache.unlockStealth(connection, session.compressedPubkey),
+              })
+            : undefined;
         return runSpendChain(
           kind,
           {
@@ -227,7 +233,8 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
                 <button type="button" className="underline" onClick={() => navigate("stealth")}>
                   Stealth funds
                 </button>
-                . One extra signature at submit.
+                . Your first stealth action asks for one extra signature; after that your
+                unlocked wallet reuses it.
               </span>
             </span>
           </label>
