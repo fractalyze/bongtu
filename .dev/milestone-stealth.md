@@ -41,7 +41,7 @@ instead, submitted by anyone (relayer), announced via (R, viewTag) on the event.
       new table); `GET /announcements`
       (public, cursor) + arbiter-mode `?owner=` behind the `/notes` read-auth
       (owner attribution from the envelope the ledger already decrypts).
-- [x] E. client (engine half — wallet UI toggle still open): withdraw request/ABI fragment carries recipient + announcement;
+- [x] E. client + wallet UI (toggle, stealth-funds screen, key export): withdraw request/ABI fragment carries recipient + announcement;
       self-stealth destination derived via `stealth.ts`; wallet UI toggle.
 - [x] F. gates: core tests + tsc → forge test → prove_all withdraw leg →
       indexer unit + conformance (scenario drives the new signature) → e2e_m0.

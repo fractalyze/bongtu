@@ -25,7 +25,10 @@ import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { decodeAddress, encodeAddress } from "@bongtu/core/pubkey";
 import { DEFAULTS } from "../../config.js";
-import { runSpendChain, type SpendOutcome } from "@bongtu/client/spendFlow";
+import { runSpendChain, type SpendOutcome, type StealthWithdrawTarget } from "@bongtu/client/spendFlow";
+import { deriveStealthKeys } from "@bongtu/client/stealthKeys";
+import { deriveStealthAddress, randomEphemeralScalar } from "@bongtu/core/stealth";
+import { navigate } from "../hooks.js";
 import { previewSpend } from "@bongtu/client/spend";
 import { keyCache } from "../../lib/keyCache.js";
 import { proveInBrowser } from "../../lib/prove.js";
@@ -52,6 +55,9 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
 
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
+  // Withdraw-only: pay a freshly derived one-time (stealth) address instead of
+  // the connected account. Costs one extra signature popup at submit.
+  const [stealthMode, setStealthMode] = useState(false);
 
   // The raw-wei amount the protocol layer receives; 0n while the input is invalid.
   const amountWei = useMemo(() => {
@@ -83,8 +89,16 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
     // component never holds it. The session pubkey rides along so the flow can refuse
     // a key that isn't this session's, and is the payee of every merge leg.
     void action.submit(
-      (onStage) =>
-        runSpendChain(
+      async (onStage) => {
+        // The stealth destination is derived JUST before the run: meta keys from
+        // one extra popup, then a fresh ephemeral — nothing is reused or stored.
+        let stealth: StealthWithdrawTarget | undefined;
+        if (!isTransfer && stealthMode) {
+          const keys = await deriveStealthKeys(connection);
+          const d = deriveStealthAddress(keys.meta, randomEphemeralScalar());
+          stealth = { address: d.address, ephemeralPub: d.ephemeralPub, viewTag: d.viewTag };
+        }
+        return runSpendChain(
           kind,
           {
             connection,
@@ -100,12 +114,14 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
           {
             to: isTransfer ? decodeAddress(recipient.trim()) : undefined,
             amount: amountWei.toString(),
+            stealth,
           },
           onStage,
           // The engine takes the app's lock + prover through its deps seam: proving
           // is in-browser snarkjs over the same-origin circuit assets.
           { keyCache, prove: (request) => proveInBrowser(request, DEFAULTS.circuitBaseUrl) },
-        ),
+        );
+      },
       refreshAfterAction,
     );
   }
@@ -170,6 +186,12 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
             </dd>
           </>
         )}
+        {!isTransfer && stealthMode && (
+          <>
+            <dt className="text-muted text-sm">To</dt>
+            <dd className="text-right text-[0.9rem]">new stealth address (derived at submit)</dd>
+          </>
+        )}
         <dt className="text-muted text-sm">Network</dt>
         <dd className="text-right text-[0.9rem] [overflow-wrap:anywhere]">
           {DEFAULTS.chainName} · chain {DEFAULTS.chainId}
@@ -192,6 +214,27 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
     <div className="flex flex-col gap-4.5 px-4.5 pt-4.5 pb-6.5">
       <ScreenHeader title={title} />
       <div className="flex flex-col gap-4">
+        {!isTransfer && (
+          <label className="flex items-start gap-2.5 bg-surface border border-border rounded-xl p-3 cursor-pointer">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={stealthMode}
+              onChange={(e) => setStealthMode(e.target.checked)}
+            />
+            <span className="flex flex-col gap-0.5">
+              <span className="text-sm font-semibold">Anonymous withdrawal (stealth address)</span>
+              <span className="text-[11.5px] text-muted">
+                Pays a fresh one-time address only you can spend from — your wallet address never
+                appears on-chain. Find the funds later under{" "}
+                <button type="button" className="underline" onClick={() => navigate("stealth")}>
+                  Stealth funds
+                </button>
+                . One extra signature at submit.
+              </span>
+            </span>
+          </label>
+        )}
         {isTransfer && (
           <Field label="Recipient address" error={recipient.trim() ? rcptErr : null}>
             <TextInput

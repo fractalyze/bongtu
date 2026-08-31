@@ -159,6 +159,7 @@ function buildRequest(
   crypto: SpendCrypto,
   withdrawRecipient: string,
 ) {
+  // (withdrawRecipient is ignored by the transfer builders.)
   const { circuit, inputs, to, amount } = action;
   if (circuit === "withdraw") return buildWithdrawRequest(identity, inputs, memberships, amount, crypto, withdrawRecipient);
   if (circuit === "transfer10x2") {
@@ -206,13 +207,17 @@ async function runLeg(
   action: SpendAction,
   onStage: OnSpendStage,
   leg: LegProgress,
+  stealth?: StealthWithdrawTarget,
 ): Promise<{ outcome: SpendOutcome; payeeSalt: string }> {
   const memberships = await fetchMemberships(io, ctx.indexerUrl, identity, action.inputs);
   const crypto = freshSpendCrypto(randField);
-  // Withdraw pays the CONNECTED account by default — byte-for-byte the old money
-  // movement, now proof-bound instead of msg.sender-implied. A stealth
-  // destination is a caller-supplied recipient (wallet UI slice).
-  const built = buildRequest(action, identity, memberships, crypto, ctx.connection.address);
+  // Withdraw pays the CONNECTED account by default — byte-for-byte the old
+  // money movement, now proof-bound instead of msg.sender-implied. A stealth
+  // run substitutes its freshly derived one-time address.
+  const built = buildRequest(
+    action, identity, memberships, crypto,
+    stealth?.address ?? ctx.connection.address,
+  );
   if (!built.meta.membershipOk) {
     throw new Error("Your balance just changed. Go back and try again.");
   }
@@ -224,18 +229,15 @@ async function runLeg(
   // The tx carries the SAME encapsulation the proof's kemBinding committed to
   // (crypto.kemCiphertext) — a different ct would decapsulate to mismatching
   // limbs at the arbiter and burn the envelope into an alarm.
-  const submitFor = {
-    transfer: io.submitTransfer,
-    transfer10x2: io.submitTransfer10x2,
-    withdraw: io.submitWithdraw,
-  }[action.circuit];
-  const res = await submitFor(
-    ctx.connection,
-    ctx.pool,
-    calldata,
-    crypto.kemCiphertext,
-    ctx.explorer,
-  );
+  const res =
+    action.circuit === "withdraw"
+      ? await io.submitWithdraw(
+          ctx.connection, ctx.pool, calldata, crypto.kemCiphertext, ctx.explorer,
+          stealth ? { ephemeralPub: stealth.ephemeralPub, viewTag: stealth.viewTag } : undefined,
+        )
+      : await (action.circuit === "transfer" ? io.submitTransfer : io.submitTransfer10x2)(
+          ctx.connection, ctx.pool, calldata, crypto.kemCiphertext, ctx.explorer,
+        );
   return {
     outcome: { txHash: res.txHash, explorerUrl: res.explorerUrl },
     payeeSalt: crypto.payeeSalt ?? "",
@@ -314,10 +316,19 @@ export const CHAIN_FAILURE_REASSURANCE =
  * fails partway also carries the reassurance above, because "your send failed" reads
  * very differently when two transactions already went through.
  */
+/** A stealth withdraw's freshly derived destination + the announcement it
+ *  publishes (SpendScreen derives it via @bongtu/client/stealthKeys just
+ *  before submitting). Only the terminal withdraw leg uses it. */
+export interface StealthWithdrawTarget {
+  address: string;
+  ephemeralPub: string;
+  viewTag: number;
+}
+
 export async function runSpendChain(
   kind: SpendKind,
   ctx: SpendContext,
-  args: { to?: string; amount: string },
+  args: { to?: string; amount: string; stealth?: StealthWithdrawTarget },
   onStage: OnSpendStage,
   deps: SpendIo,
 ): Promise<SpendOutcome> {
@@ -334,7 +345,12 @@ export async function runSpendChain(
     const step = plan[index];
     try {
       const identity = await openSpendSession(io, ctx, onStage, leg);
-      const run = await runLeg(io, ctx, identity, legAction(step, ctx, args, merged), onStage, leg);
+      // Only the terminal leg is the withdraw the stealth destination is for;
+      // a merge pays the wallet itself and must never consume it.
+      const run = await runLeg(
+        io, ctx, identity, legAction(step, ctx, args, merged), onStage, leg,
+        step.leg === "merge" ? undefined : args.stealth,
+      );
       last = run.outcome;
       if (step.leg === "merge") {
         onStage("waiting", leg);

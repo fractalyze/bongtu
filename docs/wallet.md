@@ -404,3 +404,22 @@ the wallet encrypts every authority envelope under a key folded from the two —
 against the chain before use: the bjj key by the contract's own injection before verifying, the KEM
 key by the pre-encapsulation hash guard above. A stale copy of either costs a wasted proof, not a
 silent mis-encryption. No private key ever lives in the wallet.
+
+## Stealth withdrawals
+
+The Withdraw screen's "Anonymous withdrawal" toggle pays a freshly derived
+one-time address instead of the connected account. The stealth meta keys come
+from a SECOND domain-separated EIP-712 struct (`BongtuStealthKey`,
+`@bongtu/client/stealthKeys`) — one popup, two scalars (bjj view half /
+secp256k1 spend half), same custody rule as the spending key: memory only,
+derived at the moment of use. The submit carries the announcement pair
+(`ephemeralPub`, `viewTag`) the recipient-side discovery scans for.
+
+"Stealth funds" (`#stealth`, linked from the toggle) lists this identity's
+one-time addresses: the per-owner announcement slice is fetched under the
+spending key's read-auth, every record is re-derived locally before it is
+believed (`@bongtu/client/stealthFunds` — a tampering indexer can hide funds,
+never inject an address), and balances are plain per-address `balanceOf` chain
+reads. Spending FROM a one-time address needs gas there, so v1 exports the
+address's private key for import into any wallet; sweeping/gas-sponsoring is
+the portal-stage follow-up (.dev/milestone-stealth.md).

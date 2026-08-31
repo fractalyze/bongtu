@@ -360,6 +360,7 @@ async function submit(
   calldata: Calldata,
   kemCiphertext: string,
   explorerBase: string,
+  stealthAnnouncement?: StealthAnnouncementArgs,
 ): Promise<SubmitResult> {
   assertKemCiphertext(kemCiphertext);
   const { a, b, c, pub } = asProofArgs(calldata);
@@ -367,7 +368,11 @@ async function submit(
   // (zeros = "no announcement"; the payout target rides inside pub[26]).
   const args =
     fn === "withdraw"
-      ? [a, b, c, pub, kemCiphertext, ("0x" + "00".repeat(32)) as `0x${string}`, 0]
+      ? [
+          a, b, c, pub, kemCiphertext,
+          (stealthAnnouncement?.ephemeralPub ?? "0x" + "00".repeat(32)) as `0x${string}`,
+          stealthAnnouncement?.viewTag ?? 0,
+        ]
       : [a, b, c, pub, kemCiphertext];
   const hash = await connection.walletClient.writeContract({
     address: poolAddr as Address,
@@ -409,15 +414,25 @@ export function submitTransfer10x2(
   return submit(connection, poolAddr, "transfer10x2", calldata, kemCiphertext, explorerBase);
 }
 
-/** Submit a proven withdraw. */
+/** The (R, viewTag) pair a stealth withdraw rides in calldata so the recipient
+ *  can discover the payout (announcements feed). Omitted = plain withdraw,
+ *  zeros on the wire. */
+export interface StealthAnnouncementArgs {
+  /** compressed bjj ephemeral pubkey R ("0x" + 32-byte hex, packPubkey form). */
+  ephemeralPub: string;
+  viewTag: number;
+}
+
+/** Submit a proven withdraw (announcement present only for a stealth payout). */
 export function submitWithdraw(
   connection: Connection,
   poolAddr: string,
   calldata: Calldata,
   kemCiphertext: string,
   explorerBase: string,
+  stealthAnnouncement?: StealthAnnouncementArgs,
 ): Promise<SubmitResult> {
-  return submit(connection, poolAddr, "withdraw", calldata, kemCiphertext, explorerBase);
+  return submit(connection, poolAddr, "withdraw", calldata, kemCiphertext, explorerBase, stealthAnnouncement);
 }
 
 /** Submit a proven deposit/shield: the 0-in/2-out mint `(a, b, c, pub, kemCiphertext)`

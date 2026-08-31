@@ -76,6 +76,9 @@ const PIN_COMPRESSED = "0x05c818db6e4feb82639a2170ec769abcdbfc9077833153ed2266a5
 
 // ============================ (1) DERIVATION =================================
 
+// The proof-bound withdraw payout address (uint160-ranged; spend.ts guards it).
+const TEST_RECIPIENT = "0x" + "22".repeat(20);
+
 test("derivation is deterministic: a fixed signature yields a stable keypair", () => {
   const a = deriveIdentityFromSignature(SIG);
   const b = deriveIdentityFromSignature(SIG);
@@ -393,7 +396,7 @@ test("transfer: accepts a self-pay (per-output nonce, §11-8 v1.1) and rejects a
 
 test("withdraw: out == amount, change conserved, single output to self", () => {
   const f = fixture([1000n, 500n]); // total 1500
-  const { request, meta } = buildWithdrawRequest(f.wallet, f.inputs, f.memberships, "1200", f.crypto);
+  const { request, meta } = buildWithdrawRequest(f.wallet, f.inputs, f.memberships, "1200", f.crypto, TEST_RECIPIENT);
   assert.equal(request.circuit, "withdraw");
   const inp = request.input;
   assert.equal(inp.outputCommitments.length, 1);
@@ -413,7 +416,7 @@ test("withdraw: out == amount, change conserved, single output to self", () => {
 
 test("withdraw: full withdrawal leaves a value-0 (non-zero commitment) change note", () => {
   const f = fixture([1000n]);
-  const { request } = buildWithdrawRequest(f.wallet, f.inputs, f.memberships, "1000", f.crypto);
+  const { request } = buildWithdrawRequest(f.wallet, f.inputs, f.memberships, "1000", f.crypto, TEST_RECIPIENT);
   const inp = request.input;
   assert.equal(inp.outputValues[0], "0"); // full withdrawal
   assert.notEqual(inp.outputCommitments[0], "0"); // commitment(0,salt,self) != 0 -> contract accepts
@@ -515,7 +518,7 @@ test("freshSpendCrypto: kem draw — deterministic injection, fresh by default, 
   const t = buildTransferRequest(f.wallet, f.inputs, f.memberships, f.recipient, "100", injected);
   assert.deepEqual(t.request.input.kemSs, [FIXED_KEM.kemSs[0], FIXED_KEM.kemSs[1]]);
   assert.equal("kemCiphertext" in t.request.input, false);
-  const w = buildWithdrawRequest(f.wallet, f.inputs, f.memberships, "100", injected);
+  const w = buildWithdrawRequest(f.wallet, f.inputs, f.memberships, "100", injected, TEST_RECIPIENT);
   assert.deepEqual(w.request.input.kemSs, [FIXED_KEM.kemSs[0], FIXED_KEM.kemSs[1]]);
 
   // default draw: a real fresh encapsulation against ARBITER_KEM_PK per call.
