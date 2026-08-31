@@ -43,6 +43,7 @@ import { poolAbi, abiKnowsKem, kemBootGuardError, staleOpAbiError, type ChainCon
 import { InMemoryStore, type StorePort, type Slice } from "./store.js";
 import { verifyDisclosure } from "./disclosure.js";
 import { connect, PostgresStore, PostgresLedger } from "./postgres.js";
+import { NameRegistry } from "./names.js";
 
 // A block pin for readContract: viem takes a bigint blockNumber or a named
 // blockTag, where ethers took a single `{ blockTag }` override.
@@ -153,6 +154,9 @@ export class Indexer {
   readonly arbiterPriv: bigint | null;
   readonly arbiterMode: boolean;
   ledger: PostgresLedger | null = null;
+  // The name directory (names.ts) — always present so /names serves in every
+  // mode; bootPostgres swaps in the pool-backed one (pre-boot: memory-only).
+  names: NameRegistry = new NameRegistry(null);
   // The shared Postgres pool (set by bootPostgres; null only before first ingest).
   // Store and ledger are built on this ONE pool, so `persist` can acquire a single
   // client and commit the store rows, ledger rows, and cursor in ONE transaction.
@@ -452,6 +456,9 @@ export class Indexer {
       await ledger.boot();
       this.ledger = ledger;
     }
+    const names = new NameRegistry(pool);
+    await names.boot();
+    this.names = names;
     const cursor = this.store.lastBlock;
     if (cursor >= 0) {
       // A rebuild bug must fail the boot loudly, not serve a wrong root/path: the

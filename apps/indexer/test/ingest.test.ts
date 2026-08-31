@@ -76,6 +76,7 @@ function encodeEventLog(
 // THE fixture arbiter's bjj scalar, declared once for the whole repo.
 import { FIXTURE_ARBITER_SCALAR } from "../../../circuits/fixtures/fixture_lib.js";
 import { health } from "../src/api/routes/health.js";
+import type { RouteResult } from "../src/api/router.js";
 import { ViewTokenService } from "../src/api/viewtoken.js";
 
 // Route contexts need a token service since the /auth dual-auth round; health
@@ -907,7 +908,7 @@ async function main(): Promise<void> {
   step("POLL: pollOnce records failure/success state; /health projects it");
   {
     const bare = new Indexer({ rpc: DUMMY_RPC, pool: DUMMY_POOL, startBlock: 0, authorityKey: null });
-    const h0 = health.handle({ ix: bare, tokens: TOKENS, params: [], query: new URLSearchParams() });
+    const h0 = health.handle({ ix: bare, tokens: TOKENS, params: [], query: new URLSearchParams() }) as RouteResult
     ok((h0.body as { ok: boolean }).ok === false, "no mirror yet → /health ok:false");
 
     const pix = makeIndexer(false);
@@ -916,18 +917,18 @@ async function main(): Promise<void> {
     };
     await pix.pollOnce();
     await pix.pollOnce();
-    const h1 = health.handle({ ix: pix, tokens: TOKENS, params: [], query: new URLSearchParams() });
+    const h1 = health.handle({ ix: pix, tokens: TOKENS, params: [], query: new URLSearchParams() }) as RouteResult
     ok((h1.body as { ok: boolean }).ok === true, "2 consecutive failures is below the persistent streak → still ok");
     await pix.pollOnce();
     ok(pix.consecutiveFailures === 3 && pix.lastError === "rpc down" && pix.lastErrorAt !== null, "pollOnce recorded the failure streak");
-    const h2 = health.handle({ ix: pix, tokens: TOKENS, params: [], query: new URLSearchParams() });
+    const h2 = health.handle({ ix: pix, tokens: TOKENS, params: [], query: new URLSearchParams() }) as RouteResult
     const b2 = h2.body as { ok: boolean; consecutiveFailures: number; lastError: string | null };
     ok(b2.ok === false && b2.consecutiveFailures === 3 && b2.lastError === "rpc down", "persistent failure streak → /health ok:false with the wedge details");
 
     pix.ingest = async () => {};
     await pix.pollOnce();
     ok(pix.consecutiveFailures === 0 && pix.lastSuccessAt !== null, "a successful poll clears the streak + stamps lastSuccessAt");
-    const h3 = health.handle({ ix: pix, tokens: TOKENS, params: [], query: new URLSearchParams() });
+    const h3 = health.handle({ ix: pix, tokens: TOKENS, params: [], query: new URLSearchParams() }) as RouteResult
     const b3 = h3.body as { ok: boolean; lastSuccessAt: number | null };
     ok(b3.ok === true && b3.lastSuccessAt !== null, "recovered → /health ok:true");
   }

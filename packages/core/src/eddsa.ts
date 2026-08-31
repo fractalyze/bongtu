@@ -217,3 +217,48 @@ export function parseSignature(hex: string): Signature {
   if (S >= SUBGROUP_ORDER) throw new Error("parseSignature: S not reduced mod L");
   return { R8: [R8x, R8y], S };
 }
+
+// ---- name-directory registration auth (indexer /names) ----------------------
+//
+// Same EdDSA-Poseidon primitive as the reads above, domain-separated so a name
+// registration can never be redeemed as a /notes query or a view-token
+// challenge (and vice versa). The binding digests the FULL payload, so one
+// signature authorises exactly one (name -> stealth meta) mapping.
+
+/** How many digest bytes fold into the binding field element — 31 bytes is
+ *  < 2^248, always a valid bn254 field element. */
+const NAME_BINDING_BYTES = 31;
+
+// Fixed tag: sha256("bongtu/name-auth-v1") folded the same way as the binding.
+const NAME_DOMAIN_TAG: bigint = (() => {
+  const digest = sha256(new TextEncoder().encode("bongtu/name-auth-v1"));
+  let x = 0n;
+  for (const b of digest.slice(0, NAME_BINDING_BYTES)) x = (x << 8n) | BigInt(b);
+  return x;
+})();
+
+/** Field element binding a registration payload: name + both stealth meta keys
+ *  (case-normalised hex, so client and server digest identical bytes). */
+export function nameBindingField(name: string, viewPub: string, spendPub: string): bigint {
+  const digest = sha256(
+    new TextEncoder().encode(`${name}|${viewPub.toLowerCase()}|${spendPub.toLowerCase()}`),
+  );
+  let x = 0n;
+  for (const b of digest.slice(0, NAME_BINDING_BYTES)) x = (x << 8n) | BigInt(b);
+  return x;
+}
+
+/** The message an owner signs to (re)register a name (routes/names.ts). */
+export function nameAuthMessage(
+  ownerPub: PointInput,
+  binding: FieldInput,
+  timestamp: FieldInput,
+): bigint {
+  return poseidonN([
+    BigInt(ownerPub[0]),
+    BigInt(ownerPub[1]),
+    BigInt(binding),
+    BigInt(timestamp),
+    NAME_DOMAIN_TAG,
+  ]);
+}

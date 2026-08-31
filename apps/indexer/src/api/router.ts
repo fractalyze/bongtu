@@ -16,6 +16,10 @@
 //                                alarms (disclosure+envelope count), lastSuccessAt,
 //                                lastError, lastErrorAt, consecutiveFailures }
 //   GET /nullifiers          -> string[]  (spent nullifier set; PUBLIC, key-free)
+//   GET  /names/:name        -> NameRecord  (PUBLIC name directory: owner bjj
+//                               pubkey + stealth meta-address; names.ts)
+//   POST /names {name,owner,viewPub,spendPub,ts,sig} -> NameRecord  (PUBLIC;
+//                               owner-signed, payload-bound — routes/names.ts)
 //   GET /notes?owner=x,y     -> [{ value, salt, leafIndex, commitment, txHash,
 //                               spent }]  (ARBITER MODE ONLY — registered only when
 //                               the indexer holds the arbiter key; else 404)
@@ -55,6 +59,7 @@ import { path } from "./routes/path.js";
 import { alarms } from "./routes/alarms.js";
 import { health } from "./routes/health.js";
 import { nullifiers } from "./routes/nullifiers.js";
+import { nameRegister, nameResolve } from "./routes/names.js";
 import { notes } from "./routes/notes.js";
 import { history } from "./routes/history.js";
 import { authChallenge, authRedeem } from "./routes/auth.js";
@@ -81,7 +86,7 @@ export interface RouteResult {
 export interface Route {
   method: string;
   pattern: string | RegExp; // exact pathname (string) or a capture regex
-  handle(ctx: RouteContext): RouteResult;
+  handle(ctx: RouteContext): RouteResult | Promise<RouteResult>;
 }
 
 // Ordered match table. The patterns are disjoint, so order is not correctness-
@@ -89,7 +94,7 @@ export interface Route {
 // is public (always on); `/notes` + `/history` are ARBITER-ONLY and composed in
 // per-indexer by makeHandler, so public mode returns 404 for them (the endpoints
 // do not exist).
-export const routes: Route[] = [head, events, path, alarms, health, nullifiers];
+export const routes: Route[] = [head, events, path, alarms, health, nullifiers, nameResolve, nameRegister];
 
 function writeJson(res: ServerResponse, status: number, body: unknown, headers?: Record<string, string>): void {
   const s = JSON.stringify(body, null, 2);
@@ -148,7 +153,7 @@ export function makeHandler(ix: Indexer, tokens: ViewTokenService | null) {
             return writeJson(res, 400, { error: `bad request body: ${(e as Error).message}` });
           }
         }
-        const { status, body: resBody, headers } = route.handle({ ix, tokens, params, query: url.searchParams, body });
+        const { status, body: resBody, headers } = await route.handle({ ix, tokens, params, query: url.searchParams, body });
         return writeJson(res, status, resBody, headers);
       }
       return writeJson(res, 404, { error: "not found", path: pathname });

@@ -163,7 +163,7 @@ test("pushHistory keeps each owner's list ascending by seq, even out of order", 
 function call(ledger: PostgresLedger | null, query: string): RouteResult {
   const ix = { arbiterMode: true, ledger } as unknown as Indexer;
   const ctx: RouteContext = { ix, tokens: TOKENS, params: [], query: new URLSearchParams(query) };
-  return history.handle(ctx);
+  return history.handle(ctx) as RouteResult; // history is a sync route
 }
 
 /** The signed-query auth the route already had — reused verbatim so these tests

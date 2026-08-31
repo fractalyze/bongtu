@@ -83,3 +83,14 @@ CREATE TABLE IF NOT EXISTS applied_ops (
   log_index INTEGER NOT NULL,
   PRIMARY KEY (tx_hash, log_index)
 );
+
+-- The name directory (src/names.ts): the ONE indexer-owned mutable table — not
+-- chain-derived, populated by signed POST /names registrations.
+CREATE TABLE IF NOT EXISTS names (
+  name       TEXT   PRIMARY KEY,
+  owner      TEXT   NOT NULL,  -- compressed bjj pubkey hex
+  view_pub   TEXT   NOT NULL,  -- compressed bjj stealth view pubkey hex
+  spend_pub  TEXT   NOT NULL,  -- compressed secp256k1 stealth spend pubkey hex
+  updated_at BIGINT NOT NULL   -- unix seconds, server clock at acceptance
+);
+CREATE INDEX IF NOT EXISTS names_owner_idx ON names (owner);

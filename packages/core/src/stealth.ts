@@ -240,3 +240,21 @@ export function randomEphemeralScalar(): bigint {
     if (candidate > 0n && candidate < SUBGROUP_ORDER) return candidate;
   }
 }
+
+/**
+ * Validate a meta-address as received over a wire (the indexer name registry):
+ * both keys must decode to valid curve points. Throws with the offending half
+ * named, so a 400 can say which field to fix.
+ */
+export function validateStealthMetaAddress(meta: StealthMetaAddress): void {
+  try {
+    unpackPubkey(meta.viewPub);
+  } catch (e) {
+    throw new Error(`viewPub: ${(e as Error).message}`);
+  }
+  try {
+    parseSpendPub(meta.spendPub);
+  } catch (e) {
+    throw new Error(`spendPub: ${(e as Error).message}`);
+  }
+}

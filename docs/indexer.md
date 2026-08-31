@@ -214,3 +214,19 @@ unadvanced cursor hitting the same op forever, turning one bad op into a permane
 The one case that does throw is an op carrying KEM material with no key configured, which is a
 misconfiguration the boot guard already refuses; failing loudly there is better than recording a
 false tamper verdict.
+
+## Name directory
+
+`/names` is the one indexer-owned **mutable** surface — every other table mirrors chain
+events; a name registration has no on-chain footprint. `name → { owner bjj pubkey,
+stealth meta-address }` records are accepted only under the owner's bjj EdDSA-Poseidon
+signature over the full payload (`nameAuthMessage`, domain-separated from the read-auth
+and view-token tuples, `|now − ts| ≤ 300s`), so the registry is **availability-trusted
+only**: a hostile indexer can withhold a name, never forge or splice one. Ownership
+rule: first-come per name; the same owner may update (stealth-meta rotation); transfer
+does not exist. Served identically in public and arbiter mode — the records are public
+identity material. Names are DNS-label-shaped (3–32 lowercase alnum, interior hyphens)
+so a later ENS/CCIP-read gateway can serve the same records without migration. Wire
+shapes + the client half (`buildNameRegistration`, `registerName`, `resolveName`):
+`@bongtu/core/indexerApi`; server half: `apps/indexer/src/names.ts` +
+`api/routes/names.ts`; stealth meta-address semantics: `packages/core/src/stealth.ts`.

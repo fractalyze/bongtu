@@ -430,3 +430,83 @@ export function fetchHistoryPage(
 ): Promise<HistoryPage> {
   return getJson<HistoryPage>(buildHistoryPageUrl(indexerUrl, ownerCompressed, token, page), fetchFn);
 }
+
+// --- name directory (public /names endpoints) ------------------------------------
+//
+// The stealth/payment directory: a human name resolving to the owner's bjj
+// pubkey (the in-pool receive identity) and stealth meta-address (the pool-edge
+// one). Server half: apps/indexer src/names.ts + api/routes/names.ts.
+
+import { nameAuthMessage, nameBindingField } from "./eddsa.js";
+import type { StealthMetaAddress } from "./stealth.js";
+
+/** One directory record, as served by GET /names/:name. */
+export interface NameRecord {
+  name: string;
+  /** compressed bjj pubkey — the owner's in-pool receive address. */
+  owner: string;
+  /** compressed bjj stealth VIEW pubkey (see stealth.ts). */
+  viewPub: string;
+  /** compressed secp256k1 stealth SPEND pubkey (see stealth.ts). */
+  spendPub: string;
+  /** unix seconds of the last accepted registration (server clock). */
+  updatedAt: number;
+}
+
+/** The signed POST /names body. */
+export interface NameRegistration {
+  name: string;
+  owner: string;
+  viewPub: string;
+  spendPub: string;
+  ts: number;
+  sig: string;
+}
+
+/**
+ * Build a registration the indexer will accept: the owner key signs the
+ * payload-binding tuple (eddsa.ts nameAuthMessage), so the signature authorises
+ * exactly this (name -> meta) mapping and nothing else. `nowSeconds` is
+ * injectable for deterministic tests; the server allows |now - ts| <= 300s.
+ */
+export function buildNameRegistration(
+  name: string,
+  ownerCompressed: string,
+  ownerPrivateKey: FieldInput,
+  meta: StealthMetaAddress,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): NameRegistration {
+  const owner = ownerCompressed.trim();
+  const pub = unpackPubkey(owner); // validates the compressed pubkey
+  const msg = nameAuthMessage(pub, nameBindingField(name, meta.viewPub, meta.spendPub), nowSeconds);
+  return {
+    name,
+    owner,
+    viewPub: meta.viewPub,
+    spendPub: meta.spendPub,
+    ts: nowSeconds,
+    sig: packSignature(signNotesAuth(ownerPrivateKey, msg)),
+  };
+}
+
+/** POST a registration; resolves to the accepted record, throws on any error
+ *  status (the server's error body text is included). */
+export async function registerName(indexerUrl: string, reg: NameRegistration): Promise<NameRecord> {
+  const res = await fetch(`${indexerUrl.replace(/\/$/, "")}/names`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(reg),
+  });
+  const body = await res.text();
+  if (!res.ok) throw new Error(`registerName: HTTP ${res.status}: ${body}`);
+  return JSON.parse(body) as NameRecord;
+}
+
+/** Resolve a name to its directory record; null when it is not registered. */
+export async function resolveName(indexerUrl: string, name: string): Promise<NameRecord | null> {
+  const res = await fetch(`${indexerUrl.replace(/\/$/, "")}/names/${encodeURIComponent(name)}`);
+  if (res.status === 404) return null;
+  const body = await res.text();
+  if (!res.ok) throw new Error(`resolveName: HTTP ${res.status}: ${body}`);
+  return JSON.parse(body) as NameRecord;
+}
