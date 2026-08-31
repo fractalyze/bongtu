@@ -27,7 +27,7 @@ import {
   viewTokenHostBinding,
 } from "./eddsa.js";
 import { unpackPubkey } from "./pubkey.js";
-import type { FieldInput } from "./babyjub.js";
+import type { FieldInput, Point } from "./babyjub.js";
 
 // The view-token signing contract (challenge width + validity, host binding) lives
 // with the signature primitives in eddsa.ts, because the SERVER needs it too and
@@ -298,15 +298,33 @@ export function signedReadUrl(
   return `${trim(indexerUrl)}/${route}?${signedAuthQuery(ownerCompressed, ownerPrivateKey)}`;
 }
 
+/**
+ * The ONE "draw ts, build message, sign, pack" step behind every owner-signed
+ * proof this client emits — the query-shaped reads (signedAuthQuery) and the
+ * payload-bound name registration (buildNameRegistration) differ ONLY in the
+ * message the owner signs, so `messageOf` is the whole difference. Mirrors the
+ * server's readAuth split (authorizeOwner / authorizeSignedPayload) primitive
+ * for primitive, and keeps the wire bytes what they always were: same trim,
+ * same unpack-validation, same unix-seconds ts, same packSignature encoding.
+ */
+function signedOwnerProof(
+  ownerCompressed: string,
+  ownerPrivateKey: FieldInput,
+  messageOf: (ownerPub: Point, ts: number) => bigint,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): { owner: string; ts: number; sig: string } {
+  const owner = ownerCompressed.trim();
+  const pub = unpackPubkey(owner); // validates the compressed pubkey
+  const ts = nowSeconds; // unix seconds; server allows |now-ts| <= 300
+  const sig = signNotesAuth(ownerPrivateKey, messageOf(pub, ts));
+  return { owner, ts, sig: packSignature(sig) };
+}
+
 /** The `owner=&ts=&sig=` auth triple every signed read carries (SPEC §6b v2) —
  *  one implementation, shared by the owner feeds and the gated /path read. */
 function signedAuthQuery(ownerCompressed: string, ownerPrivateKey: FieldInput): string {
-  const owner = ownerCompressed.trim();
-  const pub = unpackPubkey(owner); // validates the compressed pubkey
-  const ts = Math.floor(Date.now() / 1000); // unix seconds; server allows |now-ts| <= 300
-  const msg = notesAuthMessage(pub, ts);
-  const sig = signNotesAuth(ownerPrivateKey, msg);
-  return `owner=${encodeURIComponent(owner)}&ts=${ts}&sig=${packSignature(sig)}`;
+  const { owner, ts, sig } = signedOwnerProof(ownerCompressed, ownerPrivateKey, notesAuthMessage);
+  return `owner=${encodeURIComponent(owner)}&ts=${ts}&sig=${sig}`;
 }
 
 /** The signed `GET /notes` URL — the owner's decrypted note list. */
@@ -516,17 +534,13 @@ export function buildNameRegistration(
   meta: StealthMetaAddress,
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): NameRegistration {
-  const owner = ownerCompressed.trim();
-  const pub = unpackPubkey(owner); // validates the compressed pubkey
-  const msg = nameAuthMessage(pub, nameBindingField(name, meta.viewPub, meta.spendPub), nowSeconds);
-  return {
-    name,
-    owner,
-    viewPub: meta.viewPub,
-    spendPub: meta.spendPub,
-    ts: nowSeconds,
-    sig: packSignature(signNotesAuth(ownerPrivateKey, msg)),
-  };
+  const { owner, ts, sig } = signedOwnerProof(
+    ownerCompressed,
+    ownerPrivateKey,
+    (pub, at) => nameAuthMessage(pub, nameBindingField(name, meta.viewPub, meta.spendPub), at),
+    nowSeconds,
+  );
+  return { name, owner, viewPub: meta.viewPub, spendPub: meta.spendPub, ts, sig };
 }
 
 /** POST a registration; resolves to the accepted record, throws on any error

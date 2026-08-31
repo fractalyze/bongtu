@@ -15,7 +15,7 @@ import { packPubkey } from "@bongtu/core/pubkey";
 import { buildNameRegistration } from "@bongtu/core/indexerApi";
 import { stealthKeysFromScalars } from "@bongtu/core/stealth";
 import { NameRegistry, normalizeName } from "../src/names.js";
-import { nameRegister, nameResolve } from "../src/api/routes/names.js";
+import { handleNameRegister, nameRegister, nameResolve } from "../src/api/routes/names.js";
 import type { Indexer } from "../src/ingest.js";
 import type { RouteContext, RouteResult } from "../src/api/router.js";
 
@@ -112,6 +112,29 @@ test("ts outside the replay window is rejected either direction", async () => {
     const reg = buildNameRegistration("alice", ownerCompressed, OWNER.formattedPrivateKey, META, ts);
     assert.equal((await call(nameRegister, ix, reg)).status, 401);
   }
+});
+
+test("replay-window boundary is exact under an injected clock: now-300 in, now-301 out", async () => {
+  // The wall-clock window test above can only probe far outside the window (a
+  // slow runner drifts seconds between build and check); the injectable
+  // nowSeconds pins the clock so the EXACT boundary second is assertable.
+  const { ix } = freshIx();
+  const now = 1_700_000_000;
+  const post = (ts: number) =>
+    handleNameRegister(
+      {
+        ix,
+        tokens: null,
+        params: [],
+        query: new URLSearchParams(),
+        body: buildNameRegistration("alice", ownerCompressed, OWNER.formattedPrivateKey, META, ts),
+      },
+      now,
+    );
+  assert.equal((await post(now - 300)).status, 200, "the boundary second in the past must pass");
+  assert.equal((await post(now + 300)).status, 200, "the boundary second in the future must pass");
+  assert.equal((await post(now - 301)).status, 401, "one second beyond the window must fail");
+  assert.equal((await post(now + 301)).status, 401, "one second beyond the window must fail (future)");
 });
 
 test("malformed inputs are the caller's 400, not a 500", async () => {
