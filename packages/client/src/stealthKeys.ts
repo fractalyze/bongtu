@@ -21,7 +21,10 @@ import { keccak256 } from "viem";
 import { SUBGROUP_ORDER } from "@bongtu/core/babyjub";
 import {
   SECP256K1_ORDER,
+  deriveStealthAddress,
+  randomEphemeralScalar,
   stealthKeysFromScalars,
+  type StealthDerivation,
   type StealthKeys,
 } from "@bongtu/core/stealth";
 import type { KeyDerivationTypedData } from "./derive.js";
@@ -79,12 +82,43 @@ export function stealthKeysFromKdfSignature(signature: string): StealthKeys {
  * per (account, pool, version): a wiped browser re-derives the SAME meta keys,
  * which is what makes announced addresses recoverable with no seed.
  */
-export async function deriveStealthKeys(connection: Connection): Promise<StealthKeys> {
+export async function deriveStealthKeys(
+  connection: Connection,
+  sign: typeof signKeyDerivation = signKeyDerivation,
+): Promise<StealthKeys> {
   const typed = stealthKeyTypedData(
     KEY_DERIVATION.chainId,
     KEY_DERIVATION.pool,
     STEALTH_KEY_VERSION,
   );
-  const signature = await signKeyDerivation(connection, typed);
+  const signature = await sign(connection, typed);
   return stealthKeysFromKdfSignature(signature);
+}
+
+/** prepareStealthDestination's injectable edges — the same seam style
+ *  deriveLoginIdentity has (identity.ts), so the whole derivation gates
+ *  headlessly: tests pass a deterministic sign + a pinned ephemeral, the
+ *  wallet passes nothing and gets the real popup + the WebCrypto draw. */
+export interface StealthDestinationDeps {
+  sign?: typeof signKeyDerivation;
+  drawEphemeral?: typeof randomEphemeralScalar;
+}
+
+/**
+ * The ONE owner of "pay a one-time address and announce it so I can rediscover
+ * it": meta keys from the stealth popup, a fresh ephemeral, and the core
+ * StealthDerivation back WHOLE. The address the withdraw proof pays and the
+ * (ephemeralPub, viewTag) pair the calldata announces are born as one value
+ * here, so the load-bearing invariant — the address the proof pays IS the
+ * address the view key rediscovers from the announced R — can never be broken
+ * by a caller re-assembling the halves from different derivations. Nothing is
+ * stored: each call draws a fresh ephemeral, and discovery re-derives the
+ * address from the announcement alone (stealthFunds.ts).
+ */
+export async function prepareStealthDestination(
+  connection: Connection,
+  deps: StealthDestinationDeps = {},
+): Promise<StealthDerivation> {
+  const keys = await deriveStealthKeys(connection, deps.sign ?? signKeyDerivation);
+  return deriveStealthAddress(keys.meta, (deps.drawEphemeral ?? randomEphemeralScalar)());
 }

@@ -25,9 +25,8 @@ import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { decodeAddress, encodeAddress } from "@bongtu/core/pubkey";
 import { DEFAULTS } from "../../config.js";
-import { runSpendChain, type SpendOutcome, type StealthWithdrawTarget } from "@bongtu/client/spendFlow";
-import { deriveStealthKeys } from "@bongtu/client/stealthKeys";
-import { deriveStealthAddress, randomEphemeralScalar } from "@bongtu/core/stealth";
+import { runSpendChain, type SpendOutcome } from "@bongtu/client/spendFlow";
+import { prepareStealthDestination } from "@bongtu/client/stealthKeys";
 import { navigate } from "../hooks.js";
 import { previewSpend } from "@bongtu/client/spend";
 import { keyCache } from "../../lib/keyCache.js";
@@ -92,14 +91,10 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
       async (onStage) => {
         // The stealth destination is derived JUST before the run: meta keys from
         // one extra popup, then a fresh ephemeral — nothing is reused or stored.
-        const stealth: StealthWithdrawTarget | undefined =
-          !isTransfer && stealthMode
-            ? await (async () => {
-                const keys = await deriveStealthKeys(connection);
-                const d = deriveStealthAddress(keys.meta, randomEphemeralScalar());
-                return { address: d.address, ephemeralPub: d.ephemeralPub, viewTag: d.viewTag };
-              })()
-            : undefined;
+        // prepareStealthDestination owns the derivation whole (address +
+        // announcement as one value); this screen only decides WHETHER.
+        const stealth =
+          !isTransfer && stealthMode ? await prepareStealthDestination(connection) : undefined;
         return runSpendChain(
           kind,
           {

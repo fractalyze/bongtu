@@ -26,8 +26,11 @@ import { ImtTree } from "@bongtu/core/imt";
 import { packPubkey } from "@bongtu/core/pubkey";
 import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
 
+import { scanStealthAnnouncement, type StealthDerivation } from "@bongtu/core/stealth";
+
 import { deriveIdentityFromSignature } from "../src/derive.js";
 import { KeyCache } from "../src/keyCache.js";
+import { prepareStealthDestination, stealthKeysFromKdfSignature } from "../src/stealthKeys.js";
 import {
   runSpendChain,
   CHAIN_FAILURE_REASSURANCE,
@@ -379,6 +382,57 @@ test("a chain the indexer never catches up with stops rather than proving a note
     new RegExp(MERGE_NOT_INDEXED_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
   );
   assert.deepEqual(w.submitted, ["transfer10x2"], "and it does not blindly submit the next leg");
+});
+
+test("a stealth withdraw pays the address its announcement rediscovers, and a merge never consumes it", async () => {
+  // Three 100s withdrawing 250: a merge leg then the withdraw — the one chain
+  // shape where handing the derivation to the wrong leg is possible at all.
+  const w = chainWorld([100n, 100n, 100n]);
+  const base = w.deps();
+  // The derivation comes through the real owner function, headless: the seam
+  // signs deterministically and the ephemeral is pinned.
+  const STEALTH_SIG = "0x" + "e5".repeat(64) + "1c";
+  const stealth = await prepareStealthDestination(w.ctx().connection, {
+    sign: async () => STEALTH_SIG,
+    drawEphemeral: () => 31337n,
+  });
+
+  // Record the two seams the invariant spans: the recipient the withdraw PROOF
+  // binds (prove) and the derivation the submit ANNOUNCES (submitWithdraw).
+  // The witness rides the request in wire form (decimal strings), so record
+  // through BigInt: what is compared is the VALUE, not the serialization.
+  const provedRecipients: bigint[] = [];
+  const announced: (StealthDerivation | undefined)[] = [];
+  const deps = w.deps({
+    prove: async (request) => {
+      if (request.circuit === "withdraw") {
+        provedRecipients.push(BigInt((request.input as unknown as { recipient: string }).recipient));
+      }
+      return base.prove(request);
+    },
+    submitWithdraw: async (conn, pool, calldata, kem, explorer, s) => {
+      announced.push(s);
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      return base.submitWithdraw!(conn, pool, calldata, kem, explorer, s);
+    },
+  });
+
+  await runSpendChain("withdraw", w.ctx(), { amount: "250", stealth }, () => {}, deps);
+
+  assert.deepEqual(w.submitted, ["transfer10x2", "withdraw"], "one merge, then the payment");
+  // Only the terminal withdraw announced, and it carried the derivation WHOLE —
+  // the merge leg (a self-send with no announcement seam) never touched it.
+  assert.deepEqual(announced, [stealth]);
+  // THE invariant: the address the proof paid is the address the view key
+  // rediscovers from nothing but the announced R (re-derived from the same
+  // signature, as a wiped browser would).
+  const keys = stealthKeysFromKdfSignature(STEALTH_SIG);
+  const rediscovered = scanStealthAnnouncement(
+    keys.viewPriv,
+    keys.meta.spendPub,
+    (announced[0] as StealthDerivation).ephemeralPub,
+  );
+  assert.deepEqual(provedRecipients, [BigInt(rediscovered.address)]);
 });
 
 // ============================ (3) FAILURE ====================================

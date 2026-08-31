@@ -34,7 +34,7 @@ import {
   isPreKemProbeError,
 } from "@bongtu/core/network";
 import { liveChain } from "./chain.js";
-import { ZERO_EPHEMERAL } from "@bongtu/core/stealth";
+import { ZERO_EPHEMERAL, type StealthDerivation } from "@bongtu/core/stealth";
 
 // The shared per-function ABI fragments (@bongtu/core/network) — only the pool
 // functions the wallet touches, parsed once for viem. deposit is the 0-in/2-out
@@ -362,18 +362,21 @@ async function submit(
   calldata: Calldata,
   kemCiphertext: string,
   explorerBase: string,
-  stealthAnnouncement?: StealthAnnouncementArgs,
+  stealth?: StealthDerivation,
 ): Promise<SubmitResult> {
   assertKemCiphertext(kemCiphertext);
   const { a, b, c, pub } = asProofArgs(calldata);
   // withdraw alone carries the stealth announcement pair after the KEM ct
-  // (zeros = "no announcement"; the payout target rides inside pub[26]).
+  // (zeros = "no announcement"). Only the derivation's announcement half goes
+  // to calldata: its `address` is deliberately NOT read here — the payout
+  // target already rides proof-bound inside pub[26], which is what makes the
+  // announced R rediscover exactly the address the proof paid.
   const args =
     fn === "withdraw"
       ? [
           a, b, c, pub, kemCiphertext,
-          (stealthAnnouncement?.ephemeralPub ?? ZERO_EPHEMERAL) as `0x${string}`,
-          stealthAnnouncement?.viewTag ?? 0,
+          (stealth?.ephemeralPub ?? ZERO_EPHEMERAL) as `0x${string}`,
+          stealth?.viewTag ?? 0,
         ]
       : [a, b, c, pub, kemCiphertext];
   const hash = await connection.walletClient.writeContract({
@@ -416,25 +419,19 @@ export function submitTransfer10x2(
   return submit(connection, poolAddr, "transfer10x2", calldata, kemCiphertext, explorerBase);
 }
 
-/** The (R, viewTag) pair a stealth withdraw rides in calldata so the recipient
- *  can discover the payout (announcements feed). Omitted = plain withdraw,
- *  zeros on the wire. */
-export interface StealthAnnouncementArgs {
-  /** compressed bjj ephemeral pubkey R ("0x" + 32-byte hex, packPubkey form). */
-  ephemeralPub: string;
-  viewTag: number;
-}
-
-/** Submit a proven withdraw (announcement present only for a stealth payout). */
+/** Submit a proven withdraw. A stealth payout hands the WHOLE core derivation
+ *  (@bongtu/core/stealth StealthDerivation); submit maps its (ephemeralPub,
+ *  viewTag) half to the calldata announcement pair the recipient discovers the
+ *  funds by. Omitted = plain withdraw, zeros on the wire. */
 export function submitWithdraw(
   connection: Connection,
   poolAddr: string,
   calldata: Calldata,
   kemCiphertext: string,
   explorerBase: string,
-  stealthAnnouncement?: StealthAnnouncementArgs,
+  stealth?: StealthDerivation,
 ): Promise<SubmitResult> {
-  return submit(connection, poolAddr, "withdraw", calldata, kemCiphertext, explorerBase, stealthAnnouncement);
+  return submit(connection, poolAddr, "withdraw", calldata, kemCiphertext, explorerBase, stealth);
 }
 
 /** Submit a proven deposit/shield: the 0-in/2-out mint `(a, b, c, pub, kemCiphertext)`

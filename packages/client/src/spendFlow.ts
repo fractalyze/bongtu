@@ -20,6 +20,7 @@
 // own ("waiting"), so the screen can say what it is waiting for.
 
 import { commitment } from "@bongtu/core/note";
+import type { StealthDerivation } from "@bongtu/core/stealth";
 import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
 import type { Connection } from "./connection.js";
 import {
@@ -207,7 +208,7 @@ async function runLeg(
   action: SpendAction,
   onStage: OnSpendStage,
   leg: LegProgress,
-  stealth?: StealthWithdrawTarget,
+  stealth?: StealthDerivation,
 ): Promise<{ outcome: SpendOutcome; payeeSalt: string }> {
   const memberships = await fetchMemberships(io, ctx.indexerUrl, identity, action.inputs);
   const crypto = freshSpendCrypto(randField);
@@ -232,8 +233,10 @@ async function runLeg(
   const res =
     action.circuit === "withdraw"
       ? await io.submitWithdraw(
-          ctx.connection, ctx.pool, calldata, crypto.kemCiphertext, ctx.explorer,
-          stealth ? { ephemeralPub: stealth.ephemeralPub, viewTag: stealth.viewTag } : undefined,
+          // The derivation travels WHOLE: connection.ts maps its announcement
+          // half to calldata, and splitting it here is exactly the seam where
+          // the pays-what-it-announces invariant could silently break.
+          ctx.connection, ctx.pool, calldata, crypto.kemCiphertext, ctx.explorer, stealth,
         )
       : await (action.circuit === "transfer" ? io.submitTransfer : io.submitTransfer10x2)(
           ctx.connection, ctx.pool, calldata, crypto.kemCiphertext, ctx.explorer,
@@ -316,19 +319,12 @@ export const CHAIN_FAILURE_REASSURANCE =
  * fails partway also carries the reassurance above, because "your send failed" reads
  * very differently when two transactions already went through.
  */
-/** A stealth withdraw's freshly derived destination + the announcement it
- *  publishes (SpendScreen derives it via @bongtu/client/stealthKeys just
- *  before submitting). Only the terminal withdraw leg uses it. */
-export interface StealthWithdrawTarget {
-  address: string;
-  ephemeralPub: string;
-  viewTag: number;
-}
-
 export async function runSpendChain(
   kind: SpendKind,
   ctx: SpendContext,
-  args: { to?: string; amount: string; stealth?: StealthWithdrawTarget },
+  // `stealth` is the core derivation from prepareStealthDestination
+  // (stealthKeys.ts), consumed only by the terminal withdraw leg.
+  args: { to?: string; amount: string; stealth?: StealthDerivation },
   onStage: OnSpendStage,
   deps: SpendIo,
 ): Promise<SpendOutcome> {

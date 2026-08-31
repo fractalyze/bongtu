@@ -5,9 +5,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { SUBGROUP_ORDER } from "@bongtu/core/babyjub";
-import { SECP256K1_ORDER, deriveStealthAddress } from "@bongtu/core/stealth";
+import { SECP256K1_ORDER, deriveStealthAddress, scanStealthAnnouncement } from "@bongtu/core/stealth";
 import { scalarFromSignature } from "../src/derive.js";
-import { stealthKeysFromKdfSignature, stealthKeyTypedData } from "../src/stealthKeys.js";
+import type { KeyDerivationTypedData } from "../src/derive.js";
+import type { Connection } from "../src/connection.js";
+import {
+  prepareStealthDestination,
+  stealthKeysFromKdfSignature,
+  stealthKeyTypedData,
+} from "../src/stealthKeys.js";
 import { discoverStealthFunds, exportStealthFundKey } from "../src/stealthFunds.js";
 import type { WithdrawAnnouncementRecord } from "@bongtu/core/indexerApi";
 
@@ -76,4 +82,40 @@ test("the exported key controls exactly the discovered address", () => {
   const rec = exportStealthFundKey(keys, sent.ephemeralPub);
   assert.equal(rec.address, sent.address);
   assert.match(rec.privateKey, /^0x[0-9a-f]{64}$/);
+});
+
+// prepareStealthDestination only ever hands the connection to the injected
+// sign, so a bare cast is the entire fake wallet.
+const CONNECTION = {} as Connection;
+
+test("prepareStealthDestination: the paid address IS what the view key rediscovers from the announced R", async () => {
+  const signed: KeyDerivationTypedData[] = [];
+  const sign = async (_c: Connection, typed: KeyDerivationTypedData): Promise<string> => {
+    signed.push(typed);
+    return SIG;
+  };
+  const d = await prepareStealthDestination(CONNECTION, { sign });
+  // The seam signed the STEALTH struct — a spending-key signature here would
+  // derive addresses no later scan could ever reproduce.
+  assert.equal(signed.length, 1);
+  assert.equal(signed[0].primaryType, "BongtuStealthKey");
+  // THE invariant, headless: re-derive the view key from the SAME signature and
+  // reproduce the destination from nothing but the announcement half.
+  const keys = stealthKeysFromKdfSignature(SIG);
+  const rescanned = scanStealthAnnouncement(keys.viewPriv, keys.meta.spendPub, d.ephemeralPub);
+  assert.equal(rescanned.address, d.address);
+  assert.equal(rescanned.viewTag, d.viewTag);
+});
+
+test("prepareStealthDestination: a pinned ephemeral is used verbatim; the default draw is fresh per call", async () => {
+  const sign = async (): Promise<string> => SIG;
+  const keys = stealthKeysFromKdfSignature(SIG);
+  const pinned = await prepareStealthDestination(CONNECTION, { sign, drawEphemeral: () => 777777777n });
+  assert.deepEqual(pinned, deriveStealthAddress(keys.meta, 777777777n));
+  // No draw seam: WebCrypto entropy — two runs must never announce (or pay)
+  // the same one-time place.
+  const a = await prepareStealthDestination(CONNECTION, { sign });
+  const b = await prepareStealthDestination(CONNECTION, { sign });
+  assert.notEqual(a.ephemeralPub, b.ephemeralPub);
+  assert.notEqual(a.address, b.address);
 });
