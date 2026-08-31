@@ -35,6 +35,9 @@ not re-derive what those files own.
   **Never transcribe an address by pattern-matching an older value** — the deployer replayed the
   same CREATE nonces on the previous chain, so several addresses collide across the two while
   naming *different* contracts. Copy from the record BY FIELD NAME.
+- **Gate runs in background**: never pipe a gate through `| tail` when backgrounding —
+  the pipeline rc becomes tail's and a FAILED gate reports exit 0 (this shipped a
+  false-green once). Redirect to a log file and `exit $RC`, then read the file.
 - **Heavy gates**: iterate on `packages/core` tests + `tsc`; run `deploy/gates/e2e_m0.sh` and the indexer
   conformance test (`cd apps/indexer && npm test`) as the final gate, not per iteration (each spins
   an anvil + CPU proofs).
