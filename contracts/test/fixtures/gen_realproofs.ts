@@ -28,7 +28,9 @@ const snarkjs = loadSnarkjs();
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CIRC = join(HERE, "..", "..", "..", "circuits");
 const OUT = join(CIRC, "out");
-const INPUTS = join(CIRC, "inputs");
+// The generators write circuits/fixtures/inputs (fixture_lib OUT_DIR); the old
+// bare circuits/inputs only existed as a stale dir on the original dev box.
+const INPUTS = join(CIRC, "fixtures", "inputs");
 const H = 32;
 const B = 16;
 
