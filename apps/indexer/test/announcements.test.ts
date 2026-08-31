@@ -1,16 +1,32 @@
-// Headless gate for the /announcements feed: the public cursor path, the
-// arbiter per-owner slice behind the shared read-auth, and the mode fences.
-// Store entries are built through the REAL InMemoryStore (same seq/dedup path
-// ingest uses); the ledger is a stub — attribution, not decryption, is under
-// test here (the ingest attach itself is exercised by the conformance gate).
+// Headless gate for the /announcements feed, at the three seams the route now
+// only composes:
+//
+//   1. STORE PROJECTION — InMemoryStore.announcements (the same read model
+//      PostgresStore wraps): announcement-carrying withdraws only, cursor
+//      paging, projection fields.
+//   2. LEDGER ATTRIBUTION — PostgresLedger.withdrawTxHashesOf, driven through
+//      the ledger's OWN apply()/deriveOp path with REAL encrypted authority
+//      envelopes (the ingest.test.ts recipe: poseidonEncrypt to the arbiter,
+//      no SQL — apply/reads never touch the pool).
+//   3. ROUTE — the public cursor path, the arbiter per-owner slice behind the
+//      shared read-auth, and the mode fences. Store entries are built through
+//      the REAL InMemoryStore; the ledger is a stub of withdrawTxHashesOf —
+//      composition, not attribution, is under test here (the ingest attach
+//      itself is exercised by the conformance gate).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import type { Pool } from "pg";
 
-import { deriveKeypair } from "@bongtu/core/note";
+import { deriveKeypair, commitment, poseidonEncrypt, ecdhSharedSecret } from "@bongtu/core/note";
+import type { Keypair } from "@bongtu/core/note";
 import { packPubkey } from "@bongtu/core/pubkey";
+import { buildAuthorityPlaintext, type EnvNote } from "@bongtu/core/envelope";
 import { notesAuthMessage, signNotesAuth, packSignature } from "@bongtu/core/eddsa";
 import { InMemoryStore } from "../src/store.js";
+import { MirrorTree } from "../src/tree.js";
+import { PostgresLedger } from "../src/postgres.js";
+import type { OpEnvelope } from "../src/ledger.js";
 import { announcements } from "../src/api/routes/announcements.js";
 import type { Indexer } from "../src/ingest.js";
 import type { RouteContext, RouteResult } from "../src/api/router.js";
@@ -49,16 +65,124 @@ function seededStore(): InMemoryStore {
   return store;
 }
 
+// ============================ (1) STORE PROJECTION ===========================
+
+test("store.announcements serves only announcement-carrying withdraws, fully projected", () => {
+  const store = seededStore();
+  const all = store.announcements();
+  assert.equal(all.length, 3, "0xold (no announcement) and 0xdep (non-withdraw) excluded");
+  assert.deepEqual(all.map((a) => a.txHash), ["0xw0", "0xw1", "0xw2"]);
+  // The projection carries the feed identity AND the whole announcement — a
+  // dropped field here silently breaks the wallet's stealth scan.
+  assert.deepEqual(all[1], {
+    seq: all[1].seq,
+    txHash: "0xw1",
+    blockNumber: 101,
+    recipient: "0x" + "1".repeat(40),
+    ephemeralPub: "0x" + "1".repeat(64),
+    viewTag: 1,
+  });
+});
+
+test("store.announcements pages by seq cursor and caps by limit", () => {
+  const store = seededStore();
+  const all = store.announcements();
+  assert.deepEqual(store.announcements(all[0].seq, 1).map((a) => a.txHash), ["0xw1"]);
+  assert.deepEqual(store.announcements(all[0].seq).map((a) => a.txHash), ["0xw1", "0xw2"]);
+  assert.deepEqual(store.announcements(all[2].seq), [], "cursor at the head leaves nothing");
+  assert.equal(store.announcements(-1, 500).length, 3, "an oversized limit returns what exists");
+});
+
+// ============================ (2) LEDGER ATTRIBUTION =========================
+
+// A real arbiter-mode ledger seeded through its own apply()/deriveOp path: the
+// envelopes below are genuine poseidonEncrypt bytes keyed to ARB, and the
+// outputLeaves carry the matching commitments so every cross-check passes.
+// apply/notesOf/historyOf/withdrawTxHashesOf never touch SQL, so a never-used
+// dummy pool is safe (the ingest.test.ts convention).
+const ARB = deriveKeypair(424242424242424242424242n);
+const DUMMY_PG_POOL = null as unknown as Pool;
+const H = 8;
+const B = 4;
+
+const envNote = (owner: Keypair, value: bigint, salt: bigint): EnvNote => ({ owner: owner.publicKey, value, salt });
+const pub2 = (k: Keypair): [bigint, bigint] => [k.publicKey[0], k.publicKey[1]];
+
+function sealed(
+  kind: "withdraw" | "deposit",
+  txHash: string,
+  env: { inputs: EnvNote[]; outputs: EnvNote[] },
+  eph: bigint,
+  nonce: bigint,
+  firstLeaf: number,
+): OpEnvelope {
+  const plain = buildAuthorityPlaintext(kind, env);
+  return {
+    kind, txHash, logIndex: 0, blockTimestamp: 1_700_000_000,
+    ecdhPublicKey: pub2(deriveKeypair(eph)),
+    nonce,
+    authorityCt: poseidonEncrypt(plain, ecdhSharedSecret(eph, ARB.publicKey), nonce),
+    kem: null,
+    outputLeaves: env.outputs.map((o, i) => ({
+      leafIndex: firstLeaf + i,
+      commitment: commitment(o.value, o.salt, o.owner),
+    })),
+  };
+}
+
+function appliedLedger(): PostgresLedger {
+  const ledger = new PostgresLedger(DUMMY_PG_POOL, ARB.formattedPrivateKey, null, B, new MirrorTree(H, B));
+  // OWNER: a deposit (non-withdraw history), then a real withdraw (40 in, 2 change).
+  ledger.apply(sealed("deposit", "0xdep",
+    { inputs: [], outputs: [envNote(OWNER, 40n, 1001n), envNote(OWNER, 0n, 1002n)] },
+    510000000000000000001n, 11n, 0));
+  ledger.apply(sealed("withdraw", "0xwd-owner",
+    { inputs: [envNote(OWNER, 40n, 1001n), envNote(OWNER, 0n, 1002n)], outputs: [envNote(OWNER, 2n, 1003n)] },
+    520000000000000000001n, 22n, 2));
+  // OTHER's withdraw must never attribute to OWNER.
+  ledger.apply(sealed("withdraw", "0xwd-other",
+    { inputs: [envNote(OTHER, 7n, 2001n), envNote(OTHER, 0n, 2002n)], outputs: [envNote(OTHER, 0n, 2003n)] },
+    530000000000000000001n, 33n, 3));
+  // A withdraw that unshields NOTHING (change == inputs) derives no history row,
+  // so it must not attribute either — the set follows the history rows, not the
+  // op kind.
+  ledger.apply(sealed("withdraw", "0xwd-zero",
+    { inputs: [envNote(OWNER, 5n, 3001n), envNote(OWNER, 0n, 3002n)], outputs: [envNote(OWNER, 5n, 3003n)] },
+    540000000000000000001n, 44n, 4));
+  return ledger;
+}
+
+test("withdrawTxHashesOf attributes exactly the owner's unshielding withdraws", () => {
+  const ledger = appliedLedger();
+  assert.deepEqual(ledger.withdrawTxHashesOf(OWNER.publicKey[0], OWNER.publicKey[1]), new Set(["0xwd-owner"]),
+    "the deposit, the other owner's withdraw, and the zero-unshield withdraw all stay out");
+  assert.deepEqual(ledger.withdrawTxHashesOf(OTHER.publicKey[0], OTHER.publicKey[1]), new Set(["0xwd-other"]));
+  const stranger = deriveKeypair(555555555555555555n);
+  assert.deepEqual(ledger.withdrawTxHashesOf(stranger.publicKey[0], stranger.publicKey[1]), new Set());
+});
+
+test("withdrawTxHashesOf is derived from the SAME rows historyOf serves", () => {
+  const ledger = appliedLedger();
+  for (const kp of [OWNER, OTHER]) {
+    const fromHistory = new Set(
+      ledger.historyOf(kp.publicKey[0], kp.publicKey[1])
+        .filter((h) => h.kind === "withdraw")
+        .map((h) => h.txHash),
+    );
+    assert.deepEqual(ledger.withdrawTxHashesOf(kp.publicKey[0], kp.publicKey[1]), fromHistory);
+  }
+});
+
+// ============================ (3) ROUTE ======================================
+
 function makeIx(arbiter: boolean, ownerTxs: string[] = []): Indexer {
   return {
     arbiterMode: arbiter,
     store: seededStore(),
     ledger: arbiter
       ? {
-          historyOf: (x: bigint, y: bigint) =>
-            x === OWNER.publicKey[0] && y === OWNER.publicKey[1]
-              ? ownerTxs.map((txHash, i) => ({ kind: "withdraw", txHash, amount: "1", counterparty: null, blockTimestamp: 1, seq: i }))
-              : [],
+          withdrawTxHashesOf: (x: bigint, y: bigint) =>
+            x === OWNER.publicKey[0] && y === OWNER.publicKey[1] ? new Set(ownerTxs) : new Set<string>(),
         }
       : null,
   } as unknown as Indexer;

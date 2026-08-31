@@ -84,6 +84,10 @@ export class PostgresStore implements StorePort {
     return this.mem.allEvents();
   }
 
+  announcements(cursor?: number, limit?: number) {
+    return this.mem.announcements(cursor, limit);
+  }
+
   getAlarms() {
     return this.mem.getAlarms();
   }
@@ -284,6 +288,19 @@ export class PostgresLedger {
     const limit = opts.limit ?? arr.length;
     const count = Math.max(Math.min(start + 1, limit), 0);
     return Array.from({ length: count }, (_, j) => arr[start - j]);
+  }
+
+  /**
+   * The withdraw tx hashes of owner (x,y) — the owner-attribution answer behind
+   * arbiter-mode `GET /announcements?owner=`. Derived from the SAME decrypted
+   * history rows historyOf serves (a "withdraw" item exists exactly when the
+   * owner's envelope unshielded something in that tx), so attribution can never
+   * drift from the activity feed. Returned as a Set because the caller
+   * intersects it with the store's public announcement projection.
+   */
+  withdrawTxHashesOf(ownerX: bigint, ownerY: bigint): Set<string> {
+    const arr = this.historyByOwner.get(ownerKey(ownerX, ownerY)) ?? [];
+    return new Set(arr.filter((h) => h.kind === "withdraw").map((h) => h.txHash));
   }
 
   /** Envelope cross-check failures surfaced during ingest (auditor-console feed). */

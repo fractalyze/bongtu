@@ -9,13 +9,14 @@
 //       authority envelope, so serving the per-owner slice reveals nothing it
 //       does not already hold — it just spares the wallet the O(all) scan.
 //
-// Announcements are withdraw-feed metadata, not their own table: the ingest
-// attaches only REAL stealth announcements (core isStealthAnnouncement — the
-// contract pairs a WithdrawAnnouncement with every Withdrawn, zero-sentinel
-// for plain payouts) to the withdraw feed entry, so `.announcement` absence is
-// the single truth this route filters on — no zero-check here. The owner
-// attribution is the ledger's history (kind=withdraw rows carry the tx hashes
-// the owner's envelopes decrypted from).
+// The route is ONLY param validation, mode fences, auth, and assembly — the
+// house shape /notes and /history set. The two facts it serves live where they
+// are owned: WHICH feed entries are announcements is the store's projection
+// (StorePort.announcements — ingest attaches `.announcement` only for REAL
+// stealth announcements, core isStealthAnnouncement, so no zero-check anywhere
+// here), and WHICH withdraws are the caller's is the ledger's attribution
+// (PostgresLedger.withdrawTxHashesOf — the same decrypted history rows
+// historyOf serves).
 
 import type { Route, RouteResult } from "../router.js";
 import type { WithdrawAnnouncementRecord } from "@bongtu/core/indexerApi";
@@ -28,18 +29,6 @@ export const announcements: Route = {
   pattern: "/announcements",
   handle(ctx): RouteResult {
     const { ix, query } = ctx;
-    const all: WithdrawAnnouncementRecord[] = [];
-    for (const e of ix.store.allEvents()) {
-      if (e.kind !== "withdraw" || !e.announcement) continue;
-      all.push({
-        seq: e.seq,
-        txHash: e.txHash,
-        blockNumber: e.blockNumber,
-        recipient: e.announcement.recipient,
-        ephemeralPub: e.announcement.ephemeralPub,
-        viewTag: e.announcement.viewTag,
-      });
-    }
 
     const owner = query.get("owner");
     if (owner === null) {
@@ -48,7 +37,7 @@ export const announcements: Route = {
       if (!Number.isInteger(cursor) || !Number.isInteger(limit) || limit <= 0) {
         return { status: 400, body: { error: "cursor/limit must be integers (limit > 0)" } };
       }
-      return { status: 200, body: all.filter((a) => a.seq > cursor).slice(0, limit) };
+      return { status: 200, body: ix.store.announcements(cursor, limit) };
     }
 
     // Per-owner slice: arbiter-only, because only the decrypted ledger can say
@@ -62,12 +51,8 @@ export const announcements: Route = {
     if (!ix.ledger) {
       return { status: 503, body: { error: "arbiter ledger not built yet" } };
     }
-    const mine = new Set(
-      ix.ledger
-        .historyOf(auth.pub[0], auth.pub[1])
-        .filter((h) => h.kind === "withdraw")
-        .map((h) => h.txHash),
-    );
-    return { status: 200, body: all.filter((a) => mine.has(a.txHash)), headers: AUTH_HEADER };
+    const mine = ix.ledger.withdrawTxHashesOf(auth.pub[0], auth.pub[1]);
+    const body: WithdrawAnnouncementRecord[] = ix.store.announcements().filter((a) => mine.has(a.txHash));
+    return { status: 200, body, headers: AUTH_HEADER };
   },
 };
