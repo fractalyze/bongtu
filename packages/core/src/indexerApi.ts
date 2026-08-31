@@ -210,6 +210,30 @@ async function getJson<T>(url: string, fetchFn: typeof fetch = fetch): Promise<T
   return JSON.parse(text) as T;
 }
 
+/** getJson for a JSON POST — same transport and the same thrown-message shape
+ *  (`<url> -> <status>: <body-slice>`), which errors.ts classifyIndexerRead
+ *  parses for the status code, so POSTs classify identically to reads. */
+async function postJson<T>(url: string, body: unknown, fetchFn: typeof fetch = fetch): Promise<T> {
+  const res = await fetchFn(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`${url} -> ${res.status}: ${text.slice(0, 300)}`);
+  return JSON.parse(text) as T;
+}
+
+/** getJson, except a 404 resolves to null — for lookups where absence is an
+ *  answer, not a failure. Every other error keeps getJson's message shape. */
+async function getJsonOr404<T>(url: string, fetchFn: typeof fetch = fetch): Promise<T | null> {
+  const res = await fetchFn(url);
+  if (res.status === 404) return null;
+  const text = await res.text();
+  if (!res.ok) throw new Error(`${url} -> ${res.status}: ${text.slice(0, 300)}`);
+  return JSON.parse(text) as T;
+}
+
 const trim = (u: string): string => u.replace(/\/$/, "");
 
 export function getHead(indexerUrl: string): Promise<Head> {
@@ -507,24 +531,21 @@ export function buildNameRegistration(
 
 /** POST a registration; resolves to the accepted record, throws on any error
  *  status (the server's error body text is included). */
-export async function registerName(indexerUrl: string, reg: NameRegistration): Promise<NameRecord> {
-  const res = await fetch(`${indexerUrl.replace(/\/$/, "")}/names`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(reg),
-  });
-  const body = await res.text();
-  if (!res.ok) throw new Error(`registerName: HTTP ${res.status}: ${body}`);
-  return JSON.parse(body) as NameRecord;
+export function registerName(
+  indexerUrl: string,
+  reg: NameRegistration,
+  fetchFn: typeof fetch = fetch,
+): Promise<NameRecord> {
+  return postJson<NameRecord>(`${trim(indexerUrl)}/names`, reg, fetchFn);
 }
 
 /** Resolve a name to its directory record; null when it is not registered. */
-export async function resolveName(indexerUrl: string, name: string): Promise<NameRecord | null> {
-  const res = await fetch(`${indexerUrl.replace(/\/$/, "")}/names/${encodeURIComponent(name)}`);
-  if (res.status === 404) return null;
-  const body = await res.text();
-  if (!res.ok) throw new Error(`resolveName: HTTP ${res.status}: ${body}`);
-  return JSON.parse(body) as NameRecord;
+export function resolveName(
+  indexerUrl: string,
+  name: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<NameRecord | null> {
+  return getJsonOr404<NameRecord>(`${trim(indexerUrl)}/names/${encodeURIComponent(name)}`, fetchFn);
 }
 
 /** The public announcement feed (seq > cursor, capped). The trustless scan-all
@@ -533,9 +554,11 @@ export function getAnnouncements(
   indexerUrl: string,
   cursor = -1,
   limit = 5000,
+  fetchFn: typeof fetch = fetch,
 ): Promise<WithdrawAnnouncementRecord[]> {
   return getJson<WithdrawAnnouncementRecord[]>(
-    `${indexerUrl.replace(/\/$/, "")}/announcements?cursor=${cursor}&limit=${limit}`,
+    `${trim(indexerUrl)}/announcements?cursor=${cursor}&limit=${limit}`,
+    fetchFn,
   );
 }
 

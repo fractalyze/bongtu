@@ -32,6 +32,12 @@ import {
   tokenReadUrl,
   assertValidChallenge,
   viewTokenHostBinding,
+  registerName,
+  resolveName,
+  getAnnouncements,
+  type NameRecord,
+  type NameRegistration,
+  type WithdrawAnnouncementRecord,
 } from "../src/indexerApi.js";
 
 const OWNER_SCALAR = 424242424242424242424242n;
@@ -243,4 +249,91 @@ test("viewTokenAuthMessage is separated from notesAuthMessage by tag AND arity",
   const sig = signNotesAuth(kp.formattedPrivateKey, viewMsg);
   assert.ok(verifyNotesAuth(kp.publicKey, viewMsg, sig));
   assert.ok(!verifyNotesAuth(kp.publicKey, notesAuthMessage(kp.publicKey, challenge), sig));
+});
+
+// --- name directory + announcements clients (fake-fetch round-trips) -------------
+//
+// These three are plain transport wrappers (no signing), so the whole client can
+// be exercised headlessly: capture what was sent, serve a canned body, and check
+// the parse + the error shape classifyIndexerRead reads.
+
+const NAME_RECORD: NameRecord = {
+  name: "alice",
+  owner: "0x" + "11".repeat(32),
+  viewPub: "0x" + "22".repeat(32),
+  spendPub: "0x" + "33".repeat(33),
+  updatedAt: 1_700_000_000,
+};
+
+/** A fake fetch that records every (url, init) and serves one canned response. */
+function fakeFetch(status: number, body: string) {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  const fn = (async (url: string, init?: RequestInit) => {
+    calls.push({ url, init });
+    return { ok: status >= 200 && status < 300, status, text: async () => body };
+  }) as unknown as typeof fetch;
+  return { fn, calls };
+}
+
+test("registerName POSTs the registration body verbatim and parses the accepted record", async () => {
+  const reg: NameRegistration = {
+    name: NAME_RECORD.name,
+    owner: NAME_RECORD.owner,
+    viewPub: NAME_RECORD.viewPub,
+    spendPub: NAME_RECORD.spendPub,
+    ts: 1_700_000_000,
+    sig: "0x" + "44".repeat(64),
+  };
+  const { fn, calls } = fakeFetch(200, JSON.stringify(NAME_RECORD));
+  const rec = await registerName("http://localhost:8600/", reg, fn);
+  assert.deepEqual(rec, NAME_RECORD);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.url, "http://localhost:8600/names"); // trailing slash trimmed
+  assert.equal(calls[0]?.init?.method, "POST");
+  assert.deepEqual(calls[0]?.init?.headers, { "content-type": "application/json" });
+  // The signature authorises EXACTLY this payload, so the body must be the
+  // registration itself — no re-shaping between builder and wire.
+  assert.equal(calls[0]?.init?.body, JSON.stringify(reg));
+});
+
+test("registerName throws the shared error shape with the server body on any error status", async () => {
+  const reg = { name: "x", owner: "o", viewPub: "v", spendPub: "s", ts: 1, sig: "g" };
+  const { fn } = fakeFetch(409, "name is taken");
+  await assert.rejects(
+    () => registerName("http://localhost:8600", reg, fn),
+    /http:\/\/localhost:8600\/names -> 409: name is taken/,
+  );
+});
+
+test("resolveName returns the record on 200 and null on 404, and throws on 500", async () => {
+  const ok = fakeFetch(200, JSON.stringify(NAME_RECORD));
+  assert.deepEqual(await resolveName("http://localhost:8600/", "alice", ok.fn), NAME_RECORD);
+  // The name segment is URL-encoded, against a slash smuggling a different route.
+  assert.equal(ok.calls[0]?.url, "http://localhost:8600/names/alice");
+  const encoded = fakeFetch(404, "not found");
+  await resolveName("http://localhost:8600", "a/b", encoded.fn);
+  assert.equal(encoded.calls[0]?.url, "http://localhost:8600/names/a%2Fb");
+
+  // 404 is an ANSWER (unregistered), not a failure.
+  assert.equal(await resolveName("http://localhost:8600", "nobody", fakeFetch(404, "no such name").fn), null);
+
+  // …but a real failure keeps the "-> <status>" shape classifyIndexerRead parses.
+  await assert.rejects(
+    () => resolveName("http://localhost:8600", "alice", fakeFetch(500, "boom").fn),
+    /-> 500: boom/,
+  );
+});
+
+test("getAnnouncements sends cursor/limit and parses the feed", async () => {
+  const served: WithdrawAnnouncementRecord[] = [
+    { seq: 7, txHash: "0xcc", blockNumber: 12, recipient: "0x" + "55".repeat(20), ephemeralPub: "0x" + "66".repeat(32), viewTag: 3 },
+  ];
+  const paged = fakeFetch(200, JSON.stringify(served));
+  assert.deepEqual(await getAnnouncements("http://localhost:8600/", 41, 7, paged.fn), served);
+  assert.equal(paged.calls[0]?.url, "http://localhost:8600/announcements?cursor=41&limit=7");
+
+  // Defaults: cursor -1 (from the start) and the 5000 cap — the scan-all path.
+  const defaults = fakeFetch(200, "[]");
+  assert.deepEqual(await getAnnouncements("http://localhost:8600", undefined, undefined, defaults.fn), []);
+  assert.equal(defaults.calls[0]?.url, "http://localhost:8600/announcements?cursor=-1&limit=5000");
 });
