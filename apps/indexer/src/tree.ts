@@ -86,7 +86,7 @@ export class MirrorTree {
     this.LOG_B = this.tree.LOG_B;
     this.zeros = new Array(this.H + 1);
     this.zeros[0] = 0n;
-    for (let k = 1; k <= this.H; k++) this.zeros[k] = poseidon2(this.zeros[k - 1], this.zeros[k - 1]);
+    for (const k of Array.from({ length: this.H }, (_, x) => x + 1)) this.zeros[k] = poseidon2(this.zeros[k - 1], this.zeros[k - 1]);
   }
 
   /** Frontier root of the wrapped mirror (== on-chain root after every insert). */
@@ -145,7 +145,7 @@ export class MirrorTree {
       this.pendingLeaves.push({ leafIndex: startLeafIndex, commitment: null, batchRoot: subtreeRoot });
     }
     if (!this.filled.has(block)) {
-      for (let k = 0; k < this.B; k++) this.leaves[startLeafIndex + k] = undefined;
+      for (const k of Array(this.B).keys()) this.leaves[startLeafIndex + k] = undefined;
     }
     this.batchRoots[block] = subtreeRoot;
   }
@@ -171,7 +171,7 @@ export class MirrorTree {
    * is the internal backstop, so a bad fill surfaces as a 500, not a wrong path.
    */
   fillBatch(startLeafIndex: number, leaves: bigint[]): void {
-    for (let k = 0; k < leaves.length; k++) this.leaves[startLeafIndex + k] = leaves[k];
+    for (const k of Array(leaves.length).keys()) this.leaves[startLeafIndex + k] = leaves[k];
     this.filled.add(startLeafIndex / this.B);
   }
 
@@ -217,7 +217,7 @@ export class MirrorTree {
         if (start !== r.leafIndex) {
           throw new Error(`MirrorTree.rebuildFromLeaves: batch attach @${start} != row leafIndex ${r.leafIndex}`);
         }
-        for (let k = 0; k < this.B; k++) this.leaves[start + k] = undefined;
+        for (const k of Array(this.B).keys()) this.leaves[start + k] = undefined;
         this.batchRoots[start / this.B] = r.batchRoot;
       } else {
         this.tree.appendLeaf(r.commitment!);
@@ -256,45 +256,43 @@ export class MirrorTree {
     const pathIndices: number[] = new Array(this.H);
 
     // Phase A — within the leaf's own block (levels 0..LOG_B-1).
-    let level: bigint[] = new Array(B);
-    for (let i = 0; i < B; i++) level[i] = this.leafValue(block * B + i);
-    // % 2 + Math.floor, never JS bitwise: ToInt32 corrupts indices >= 2^31.
-    let idx = leafIndex % B;
-    for (let j = 0; j < LOG_B; j++) {
-      const bit = idx % 2;
-      pathIndices[j] = bit;
-      siblings[j] = level[bit === 1 ? idx - 1 : idx + 1];
-      const next: bigint[] = new Array(level.length / 2);
-      for (let m = 0; m < next.length; m++) next[m] = poseidon2(level[2 * m], level[2 * m + 1]);
-      level = next;
-      idx = Math.floor(idx / 2);
-    }
+    // % 2 + Math.floor, never JS bitwise: ToInt32 corrupts indices >= 2^31. The
+    // node's index at level j is floor((leafIndex % B) / 2^j), derived per level.
+    Array.from({ length: LOG_B }).reduce<bigint[]>(
+      (level, _, j) => {
+        const idx = Math.floor((leafIndex % B) / 2 ** j);
+        const bit = idx % 2;
+        pathIndices[j] = bit;
+        siblings[j] = level[bit === 1 ? idx - 1 : idx + 1];
+        return Array.from({ length: level.length / 2 }, (_, m) => poseidon2(level[2 * m], level[2 * m + 1]));
+      },
+      Array.from({ length: B }, (_, i) => this.leafValue(block * B + i)),
+    );
 
-    // Phase B — block-level (levels LOG_B..H-1) over the block-node array.
+    // Phase B — block-level (levels LOG_B..H-1) over the block-node array. The
+    // block's index at level LOG_B+j is floor(block / 2^j), derived per level.
     const numBlocks = Math.ceil(nli / B);
-    let arr: bigint[] = new Array(numBlocks);
-    for (let k = 0; k < numBlocks; k++) arr[k] = this.blockNode(k);
-    let bidx = block;
-    for (let j = 0; j < this.H - LOG_B; j++) {
-      const lvl = LOG_B + j;
-      const bit = bidx % 2;
-      pathIndices[lvl] = bit;
-      if (bit === 1) {
-        siblings[lvl] = arr[bidx - 1];
-      } else {
-        siblings[lvl] = bidx + 1 < arr.length ? arr[bidx + 1] : this.zeros[lvl];
-      }
-      const nx: bigint[] = new Array(Math.ceil(arr.length / 2));
-      for (let m = 0; m < nx.length; m++) {
-        const left = arr[2 * m];
-        const right = 2 * m + 1 < arr.length ? arr[2 * m + 1] : this.zeros[lvl];
-        nx[m] = poseidon2(left, right);
-      }
-      arr = nx;
-      bidx = Math.floor(bidx / 2);
-    }
+    const top = Array.from({ length: this.H - LOG_B }).reduce<bigint[]>(
+      (arr, _, j) => {
+        const lvl = LOG_B + j;
+        const bidx = Math.floor(block / 2 ** j);
+        const bit = bidx % 2;
+        pathIndices[lvl] = bit;
+        if (bit === 1) {
+          siblings[lvl] = arr[bidx - 1];
+        } else {
+          siblings[lvl] = bidx + 1 < arr.length ? arr[bidx + 1] : this.zeros[lvl];
+        }
+        return Array.from({ length: Math.ceil(arr.length / 2) }, (_, m) => {
+          const left = arr[2 * m];
+          const right = 2 * m + 1 < arr.length ? arr[2 * m + 1] : this.zeros[lvl];
+          return poseidon2(left, right);
+        });
+      },
+      Array.from({ length: numBlocks }, (_, k) => this.blockNode(k)),
+    );
 
-    const reRoot = arr[0];
+    const reRoot = top[0];
     if (reRoot !== this.root()) {
       throw new Error(`MirrorTree.path: reconstructed root diverged from mirror @leaf ${leafIndex}`);
     }
@@ -313,13 +311,10 @@ export class MirrorTree {
     // A filled batch folds from its recovered leaves (which equal the subtree
     // root by construction); an unfilled batch returns the opaque subtree root.
     if (batch !== undefined && !this.filled.has(k)) return batch;
-    let level: bigint[] = new Array(this.B);
-    for (let i = 0; i < this.B; i++) level[i] = this.leafValue(k * this.B + i);
-    for (let d = 0; d < this.LOG_B; d++) {
-      const next: bigint[] = new Array(level.length / 2);
-      for (let m = 0; m < next.length; m++) next[m] = poseidon2(level[2 * m], level[2 * m + 1]);
-      level = next;
-    }
-    return level[0];
+    const top = Array.from({ length: this.LOG_B }).reduce<bigint[]>(
+      (level) => Array.from({ length: level.length / 2 }, (_, m) => poseidon2(level[2 * m], level[2 * m + 1])),
+      Array.from({ length: this.B }, (_, i) => this.leafValue(k * this.B + i)),
+    );
+    return top[0];
   }
 }

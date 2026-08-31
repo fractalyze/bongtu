@@ -65,16 +65,13 @@ export class ImtTree {
     // zeros[0] = 0, zeros[k] = H(zeros[k-1], zeros[k-1]).
     this.zeros = new Array(this.H + 1);
     this.zeros[0] = 0n;
-    for (let k = 1; k <= this.H; k++) {
+    for (const k of Array.from({ length: this.H }, (_, x) => x + 1)) {
       this.zeros[k] = poseidon2(this.zeros[k - 1], this.zeros[k - 1]);
     }
 
     // filledSubtrees[i] = the left-sibling hash waiting at level i on the current
     // insertion path (Tornado frontier). Initially every level is empty.
-    this.filledSubtrees = new Array(this.H);
-    for (let i = 0; i < this.H; i++) {
-      this.filledSubtrees[i] = this.zeros[i];
-    }
+    this.filledSubtrees = this.zeros.slice(0, this.H);
 
     this.nextLeafIndex = 0;
     this.root = this.zeros[this.H];
@@ -129,16 +126,11 @@ export class ImtTree {
     this._padToBlockBoundary();
     const blockStart = this.nextLeafIndex; // now a multiple of B
 
-    if (leaves !== null) {
-      for (let k = 0; k < this.B; k++) {
-        this.leaves[blockStart + k] = k < leaves.length ? BigInt(leaves[k]) : this.zeros[0];
-      }
-    } else {
-      // Leaves unknown: mark the block's slots as holes so a later merklePath into
-      // the batch fails loudly instead of returning a wrong (non-verifying) path.
-      for (let k = 0; k < this.B; k++) {
-        this.leaves[blockStart + k] = undefined;
-      }
+    for (const k of Array(this.B).keys()) {
+      // Leaves unknown => holes, so a later merklePath into the batch fails
+      // loudly instead of returning a wrong (non-verifying) path.
+      this.leaves[blockStart + k] =
+        leaves === null ? undefined : k < leaves.length ? BigInt(leaves[k]) : this.zeros[0];
     }
 
     this._insertNode(rootNode, this.LOG_B);
@@ -151,18 +143,14 @@ export class ImtTree {
     if (commitments.length > this.B) {
       throw new Error(`computeSubtreeRoot: ${commitments.length} leaves exceeds batchSize ${this.B}`);
     }
-    let level: bigint[] = new Array(this.B);
-    for (let k = 0; k < this.B; k++) {
-      level[k] = k < commitments.length ? BigInt(commitments[k]) : this.zeros[0];
-    }
-    for (let depth = 0; depth < this.LOG_B; depth++) {
-      const next: bigint[] = new Array(level.length / 2);
-      for (let j = 0; j < next.length; j++) {
-        next[j] = poseidon2(level[2 * j], level[2 * j + 1]);
-      }
-      level = next;
-    }
-    return level[0];
+    const base = Array.from({ length: this.B }, (_, k) =>
+      k < commitments.length ? BigInt(commitments[k]) : this.zeros[0],
+    );
+    const top = Array.from({ length: this.LOG_B }).reduce<bigint[]>(
+      (level) => Array.from({ length: level.length / 2 }, (_, j) => poseidon2(level[2 * j], level[2 * j + 1])),
+      base,
+    );
+    return top[0];
   }
 
   // Merkle path of a previously-inserted real leaf against the CURRENT root:
@@ -173,7 +161,7 @@ export class ImtTree {
     if (!Number.isInteger(leafIndex) || leafIndex < 0 || leafIndex >= this.nextLeafIndex) {
       throw new Error(`merklePath: leafIndex ${leafIndex} out of range [0, ${this.nextLeafIndex})`);
     }
-    for (let i = 0; i < this.nextLeafIndex; i++) {
+    for (const i of Array(this.nextLeafIndex).keys()) {
       if (this.leaves[i] === undefined) {
         throw new Error(
           `merklePath: leaf ${i} not recorded (a batch was attached without its leaves); ` +
@@ -184,24 +172,21 @@ export class ImtTree {
 
     const siblings: bigint[] = new Array(this.H);
     const pathIndices: number[] = new Array(this.H);
-    // Past the undefined guard above, every entry in [0, nextLeafIndex) is a bigint.
-    let level: bigint[] = this.leaves.slice(0, this.nextLeafIndex) as bigint[];
-    let idx = leafIndex;
-    for (let j = 0; j < this.H; j++) {
+    // Past the undefined guard above, every entry in [0, nextLeafIndex) is a
+    // bigint. The fold walks one level per step; the node's index at level j is
+    // floor(leafIndex / 2^j), so no running index needs to be carried.
+    Array.from({ length: this.H }).reduce<bigint[]>((level, _, j) => {
+      const idx = Math.floor(leafIndex / 2 ** j);
       const bit = idx % 2;
       pathIndices[j] = bit;
       const siblingIndex = bit === 1 ? idx - 1 : idx + 1;
       siblings[j] = siblingIndex < level.length ? level[siblingIndex] : this.zeros[j];
-
-      const next: bigint[] = new Array(Math.ceil(level.length / 2));
-      for (let k = 0; k < next.length; k++) {
+      return Array.from({ length: Math.ceil(level.length / 2) }, (_, k) => {
         const left = level[2 * k];
         const right = 2 * k + 1 < level.length ? level[2 * k + 1] : this.zeros[j];
-        next[k] = poseidon2(left, right);
-      }
-      level = next;
-      idx = Math.floor(idx / 2);
-    }
+        return poseidon2(left, right);
+      });
+    }, this.leaves.slice(0, this.nextLeafIndex) as bigint[]);
     return { siblings, pathIndices };
   }
 
@@ -210,25 +195,23 @@ export class ImtTree {
   // with no frontier state — this is what getRoot() must equal after every insert.
   // Static so the test can call it without touching tree state.
   static naiveRoot(leaves: (FieldInput | undefined)[], height: number): bigint {
-    const zeros: bigint[] = new Array(height + 1);
-    zeros[0] = 0n;
-    for (let k = 1; k <= height; k++) {
-      zeros[k] = poseidon2(zeros[k - 1], zeros[k - 1]);
+    const zeros: bigint[] = [0n];
+    for (const k of Array(height).keys()) {
+      zeros.push(poseidon2(zeros[k], zeros[k]));
     }
     if (leaves.length === 0) {
       return zeros[height];
     }
-    let level: bigint[] = leaves.map((x) => (x === undefined ? 0n : BigInt(x)));
-    for (let j = 0; j < height; j++) {
-      const next: bigint[] = new Array(Math.ceil(level.length / 2));
-      for (let k = 0; k < next.length; k++) {
-        const left = level[2 * k];
-        const right = 2 * k + 1 < level.length ? level[2 * k + 1] : zeros[j];
-        next[k] = poseidon2(left, right);
-      }
-      level = next;
-    }
-    return level[0];
+    const top = Array.from({ length: height }).reduce<bigint[]>(
+      (level, _, j) =>
+        Array.from({ length: Math.ceil(level.length / 2) }, (_, k) => {
+          const left = level[2 * k];
+          const right = 2 * k + 1 < level.length ? level[2 * k + 1] : zeros[j];
+          return poseidon2(left, right);
+        }),
+      leaves.map((x) => (x === undefined ? 0n : BigInt(x))),
+    );
+    return top[0];
   }
 
   // --- internals ------------------------------------------------------------
@@ -246,23 +229,18 @@ export class ImtTree {
       throw new Error("_insertNode: tree is full");
     }
 
-    let currentIndex = Math.floor(this.nextLeafIndex / stride);
-    let current = node;
-    for (let i = startLevel; i < this.H; i++) {
-      let left: bigint;
-      let right: bigint;
-      if (currentIndex % 2 === 0) {
-        left = current;
-        right = this.zeros[i];
-        this.filledSubtrees[i] = current;
-      } else {
-        left = this.filledSubtrees[i];
-        right = current;
-      }
-      current = poseidon2(left, right);
-      currentIndex = Math.floor(currentIndex / 2);
-    }
-    this.root = current;
+    const folded = Array.from({ length: this.H - startLevel }).reduce<{ node: bigint; index: number }>(
+      (acc, _, off) => {
+        const i = startLevel + off;
+        const even = acc.index % 2 === 0;
+        if (even) this.filledSubtrees[i] = acc.node;
+        const left = even ? acc.node : this.filledSubtrees[i];
+        const right = even ? this.zeros[i] : acc.node;
+        return { node: poseidon2(left, right), index: Math.floor(acc.index / 2) };
+      },
+      { node, index: Math.floor(this.nextLeafIndex / stride) },
+    );
+    this.root = folded.node;
     this.nextLeafIndex += stride;
   }
 
@@ -274,7 +252,8 @@ export class ImtTree {
   // produces exactly the frontier the contract will hold. Verified against
   // naiveRoot in the interleaved differential test.
   _padToBlockBoundary(): void {
-    while (this.nextLeafIndex % this.B !== 0) {
+    const pad = (this.B - (this.nextLeafIndex % this.B)) % this.B;
+    for (const _ of Array(pad).keys()) {
       this.leaves[this.nextLeafIndex] = this.zeros[0];
       this._insertNode(this.zeros[0], 0);
     }
@@ -291,13 +270,12 @@ export class ImtTree {
 // Closure property (pinned in the sdk suite): foldToRoot(leaves[i],
 // merklePath(i).siblings, i) === getRoot() for every recorded leaf.
 export function foldToRoot(leaf: FieldInput, siblings: FieldInput[], leafIndex: number): bigint {
-  let cur = BigInt(leaf);
-  let idx = leafIndex;
-  for (let j = 0; j < siblings.length; j++) {
-    cur = idx % 2 === 1 ? poseidon2(siblings[j], cur) : poseidon2(cur, siblings[j]);
-    idx = Math.floor(idx / 2);
-  }
-  return cur;
+  // The node's index at level j is floor(leafIndex / 2^j) — derived per level,
+  // so the fold carries only the running hash.
+  return siblings.reduce<bigint>((cur, sibling, j) => {
+    const idx = Math.floor(leafIndex / 2 ** j);
+    return idx % 2 === 1 ? poseidon2(BigInt(sibling), cur) : poseidon2(cur, BigInt(sibling));
+  }, BigInt(leaf));
 }
 
 function isPowerOfTwo(n: number): boolean {

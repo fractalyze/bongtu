@@ -83,8 +83,8 @@ const signFor = (kp: typeof OWNER, challenge: string, origin: string): string =>
 
 // A movable clock so expiry is tested without sleeping.
 function clock(start: number): { now: () => number; advance: (s: number) => void } {
-  let t = start;
-  return { now: () => t, advance: (s) => (t += s) };
+  const t = { v: start };
+  return { now: () => t.v, advance: (s) => (t.v += s) };
 }
 
 // The routes only touch arbiterMode + ledger.{notesOf,historyOf}; a stub Indexer
@@ -202,8 +202,9 @@ test("resolvePublicUrls: PUBLIC_URL list wins, loopback listen address is the fa
 // ============================ (2) BINDINGS ===================================
 
 test("VIEWTOKEN_DOMAIN_TAG is the pinned ascii constant both halves compile in", () => {
-  let expected = 0n;
-  for (const b of new TextEncoder().encode("bongtu/viewtoken/v1")) expected = (expected << 8n) | BigInt(b);
+  const expected = new TextEncoder()
+    .encode("bongtu/viewtoken/v1")
+    .reduce<bigint>((acc, b) => (acc << 8n) | BigInt(b), 0n);
   assert.equal(VIEWTOKEN_DOMAIN_TAG, expected);
   assert.notEqual(VIEWTOKEN_DOMAIN_TAG, 0n);
 });

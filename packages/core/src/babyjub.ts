@@ -55,14 +55,14 @@ export function mod(x: bigint): bigint {
 }
 
 export function modpow(base: bigint, exp: bigint): bigint {
-  let r = 1n;
-  let b = mod(base);
-  let e = exp;
-  while (e > 0n) {
-    if (e & 1n) r = mod(r * b);
-    b = mod(b * b);
-    e >>= 1n;
-  }
+  if (exp <= 0n) return 1n;
+  const b = mod(base);
+  // MSB-first square-and-multiply over the exponent's bits — identical result
+  // to the LSB ladder, expressed as a fold (const-only convention).
+  const r = [...exp.toString(2)].reduce((acc, bit) => {
+    const sq = mod(acc * acc);
+    return bit === "1" ? mod(sq * b) : sq;
+  }, 1n);
   return r;
 }
 
@@ -83,18 +83,21 @@ export function addPoint([x1, y1]: Point, [x2, y2]: Point): Point {
 
 // scalar * point via double-and-add (LSB-first, matching Num2Bits LE order).
 export function mulPointEscalar(point: PointInput, scalar: FieldInput): Point {
-  let result: Point = [IDENTITY[0], IDENTITY[1]];
-  let base: Point = [BigInt(point[0]), BigInt(point[1])];
-  let e = BigInt(scalar);
+  const e = BigInt(scalar);
   if (e < 0n) {
     throw new Error(`mulPointEscalar: scalar must be non-negative, got ${e}`);
   }
-  while (e > 0n) {
-    if (e & 1n) result = addPoint(result, base);
-    base = addPoint(base, base);
-    e >>= 1n;
-  }
-  return result;
+  const start: { result: Point; base: Point } = {
+    result: [IDENTITY[0], IDENTITY[1]],
+    base: [BigInt(point[0]), BigInt(point[1])],
+  };
+  return [...e.toString(2)].reverse().reduce(
+    (acc, bit) => ({
+      result: bit === "1" ? addPoint(acc.result, acc.base) : acc.result,
+      base: addPoint(acc.base, acc.base),
+    }),
+    start,
+  ).result;
 }
 
 // a*x^2 + y^2 == 1 + d*x^2*y^2 — used by the test suite to self-check point ops.

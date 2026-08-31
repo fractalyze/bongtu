@@ -338,9 +338,9 @@ export async function runSpendChain(
   const plan = planSpendChain(kind, ctx.notes, args.amount);
   const count = plan.length;
   const merged: (WalletInputNote | undefined)[] = [];
-  let last: SpendOutcome | null = null;
+  const outcomes: SpendOutcome[] = [];
 
-  for (let index = 0; index < count; index++) {
+  for (const index of Array(count).keys()) {
     const leg: LegProgress = { index, count };
     const step = plan[index];
     try {
@@ -351,7 +351,7 @@ export async function runSpendChain(
         io, ctx, identity, legAction(step, ctx, args, merged), onStage, leg,
         step.leg === "merge" ? undefined : args.stealth,
       );
-      last = run.outcome;
+      outcomes.push(run.outcome);
       if (step.leg === "merge") {
         onStage("waiting", leg);
         merged[index] = await awaitMergedNote(io, ctx, identity, step.mergedValue, run.payeeSalt);
@@ -365,7 +365,7 @@ export async function runSpendChain(
   }
   // The terminal leg is the transaction the user asked for: it is what the success
   // screen links and what the post-action refresh polls for.
-  return last as SpendOutcome;
+  return outcomes[outcomes.length - 1] as SpendOutcome;
 }
 
 /** What runMergeChain hands back: the single note that now covers the amount —
@@ -405,7 +405,7 @@ export async function runMergeChain(
   const merged: (WalletInputNote | undefined)[] = [];
   const mergeTxs: SpendOutcome[] = [];
 
-  for (let index = 0; index < plan.merges.length; index++) {
+  for (const index of Array(plan.merges.length).keys()) {
     const leg: LegProgress = { index, count };
     const step = plan.merges[index];
     try {

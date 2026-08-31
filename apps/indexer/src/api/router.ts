@@ -112,11 +112,10 @@ const MAX_BODY_BYTES = 64 * 1024;
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
-  let size = 0;
   for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > MAX_BODY_BYTES) throw new Error(`request body exceeds ${MAX_BODY_BYTES} bytes`);
     chunks.push(chunk as Buffer);
+    const size = chunks.reduce((n, c) => n + c.length, 0);
+    if (size > MAX_BODY_BYTES) throw new Error(`request body exceeds ${MAX_BODY_BYTES} bytes`);
   }
   const text = Buffer.concat(chunks).toString("utf8").trim();
   if (text === "") return undefined;
@@ -139,24 +138,26 @@ export function makeHandler(ix: Indexer, tokens: ViewTokenService | null) {
       const pathname = url.pathname;
       for (const route of activeRoutes) {
         if (route.method !== req.method) continue;
-        let params: string[] | null = null;
-        if (typeof route.pattern === "string") {
-          if (route.pattern === pathname) params = [];
-        } else {
-          const m = route.pattern.exec(pathname);
-          if (m) params = m.slice(1);
-        }
+        const params: string[] | null =
+          typeof route.pattern === "string"
+            ? route.pattern === pathname ? [] : null
+            : (route.pattern.exec(pathname)?.slice(1) ?? null);
         if (params === null) continue;
         // Only a matched POST route pays the body read; a malformed body is the
         // CALLER's error (400), never the catch-all 500.
-        let body: unknown;
-        if (req.method === "POST") {
-          try {
-            body = await readJsonBody(req);
-          } catch (e) {
-            return writeJson(res, 400, { error: `bad request body: ${(e as Error).message}` });
-          }
+        const bodyRead: { body?: unknown; err?: Error } = req.method === "POST"
+          ? await (async () => {
+              try {
+                return { body: await readJsonBody(req) };
+              } catch (e) {
+                return { err: e as Error };
+              }
+            })()
+          : {};
+        if (bodyRead.err) {
+          return writeJson(res, 400, { error: `bad request body: ${bodyRead.err.message}` });
         }
+        const body = bodyRead.body;
         const { status, body: resBody, headers } = await route.handle({ ix, tokens, params, query: url.searchParams, body });
         return writeJson(res, status, resBody, headers);
       }
@@ -175,14 +176,14 @@ export function startApi(
   ix: Indexer,
   port: number,
 ): Promise<{ port: number; publicUrls: string[]; stop: () => Promise<void> }> {
-  let handler: ReturnType<typeof makeHandler> | null = null;
-  const server = createServer((req, res) => void handler?.(req, res));
+  const handlerRef: { current: ReturnType<typeof makeHandler> | null } = { current: null };
+  const server = createServer((req, res) => void handlerRef.current?.(req, res));
   return new Promise((resolve) => {
     server.listen(port, () => {
       const addr = server.address();
       const actual = typeof addr === "object" && addr ? addr.port : port;
       const publicUrls = resolvePublicUrls(process.env, actual);
-      handler = makeHandler(
+      handlerRef.current = makeHandler(
         ix,
         ix.arbiterMode ? new ViewTokenService(resolveTokenSecret(), { publicUrls }) : null,
       );

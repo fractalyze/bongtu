@@ -199,7 +199,7 @@ test("trial-decrypt discovers exactly the wallet's notes from the /events feed",
   ]);
 
   // unspent
-  let found = trialDecryptEvents([ev], wallet, { leafCommitments, spentNullifiers: new Set() });
+  const found = trialDecryptEvents([ev], wallet, { leafCommitments, spentNullifiers: new Set() });
   assert.equal(found.length, 1, "only the wallet's own envelope is discovered");
   assert.equal(found[0].value, "321");
   assert.equal(found[0].leafIndex, 5);
@@ -209,12 +209,12 @@ test("trial-decrypt discovers exactly the wallet's notes from the /events feed",
   assert.equal(sumUnspent(found), 321n);
 
   // once its nullifier is in the spent set, it is flagged spent -> balance 0
-  found = trialDecryptEvents([ev], wallet, {
+  const foundSpent = trialDecryptEvents([ev], wallet, {
     leafCommitments,
     spentNullifiers: new Set([myNullifier.toString()]),
   });
-  assert.equal(found[0].spent, true);
-  assert.equal(sumUnspent(found), 0n);
+  assert.equal(foundSpent[0].spent, true);
+  assert.equal(sumUnspent(foundSpent), 0n);
 });
 
 test("trial-decrypt recovers BOTH notes of a per-output-nonce self-send AND a legacy shared-nonce change note", () => {
@@ -483,12 +483,12 @@ test("selection rejects empty/all-spent wallets and malformed amounts", () => {
 });
 
 test("freshSpendCrypto draws every field from the injected randomness", () => {
-  let i = 0;
-  const rand = (): string => String(++i * 1111);
+  const draws = { i: 0 };
+  const rand = (): string => String(++draws.i * 1111);
   const c = freshSpendCrypto(rand);
   // ecdh key, nonce, change salt, 9 input-pad salts, payee salt, 8 output-pad salts —
   // one fresh draw each, drawn at the WIDEST arity so one bundle serves either circuit.
-  assert.equal(i, 21);
+  assert.equal(draws.i, 21);
   const drawn = [c.ecdhPrivateKey, c.encryptionNonce, c.changeSalt, ...c.padSalts, c.payeeSalt, ...c.outputPadSalts];
   assert.equal(new Set(drawn).size, 21, "no two fields share a draw (two-time-pad guard)");
   assert.deepEqual([...c.authorityPubKey], [...DEFAULTS.arbiterPubKey]); // pool's stored arbiter key
@@ -500,15 +500,15 @@ test("freshSpendCrypto draws every field from the injected randomness", () => {
 test("freshSpendCrypto: kem draw — deterministic injection, fresh by default, limbs reach the witness", () => {
   // deterministic injection: the injected material passes through untouched and
   // never consumes a field draw.
-  let i = 0;
-  const rand = (): string => String(++i * 2222);
-  let kemDraws = 0;
+  const draws = { i: 0 };
+  const rand = (): string => String(++draws.i * 2222);
+  const kem = { draws: 0 };
   const injected = freshSpendCrypto(rand, () => {
-    kemDraws++;
+    kem.draws++;
     return FIXED_KEM;
   });
-  assert.equal(kemDraws, 1, "exactly one KEM encapsulation per crypto bundle");
-  assert.equal(i, 21, "the kem draw does not consume field randomness");
+  assert.equal(kem.draws, 1, "exactly one KEM encapsulation per crypto bundle");
+  assert.equal(draws.i, 21, "the kem draw does not consume field randomness");
   assert.deepEqual(injected.kemSs, FIXED_KEM.kemSs);
   assert.equal(injected.kemCiphertext, FIXED_KEM.kemCiphertext);
 

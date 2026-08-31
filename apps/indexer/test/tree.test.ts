@@ -19,10 +19,10 @@ import { poseidon2 } from "@bongtu/core/poseidon";
 import { ImtTree } from "@bongtu/core/imt";
 import { MirrorTree } from "../src/tree.js";
 
-let failures = 0;
+const failures = { count: 0 };
 function ok(cond: unknown, msg: string): void {
   const pass = !!cond;
-  if (!pass) failures++;
+  if (!pass) failures.count++;
   console.log(`   ${pass ? "PASS" : "FAIL"}  ${msg}`);
   if (!pass) throw new Error(`assertion failed: ${msg}`);
 }
@@ -31,11 +31,10 @@ function step(t: string): void {
 }
 
 function foldToRoot(leaf: bigint, siblings: bigint[], pathIndices: number[]): bigint {
-  let cur = leaf;
-  for (let j = 0; j < siblings.length; j++) {
-    cur = pathIndices[j] === 1 ? poseidon2(siblings[j], cur) : poseidon2(cur, siblings[j]);
-  }
-  return cur;
+  return siblings.reduce<bigint>(
+    (cur, sibling, j) => (pathIndices[j] === 1 ? poseidon2(sibling, cur) : poseidon2(cur, sibling)),
+    leaf,
+  );
 }
 
 const H = 8;
@@ -68,7 +67,7 @@ function doBatch(leaves: bigint[], label: string): { start: number; subtreeRoot:
   while (dense.length % B !== 0) dense.push(0n); // partial-block pad: dead zero leaves
   const start = dense.length;
   const subtreeRoot = ref.computeSubtreeRoot(leaves);
-  for (let k = 0; k < B; k++) dense.push(k < leaves.length ? leaves[k] : 0n);
+  for (const k of Array(B).keys()) dense.push(k < leaves.length ? leaves[k] : 0n);
   mt.applyAttach(start, subtreeRoot, ImtTree.naiveRoot(dense, H));
   expectAgree(label);
   return { start, subtreeRoot };
@@ -129,14 +128,16 @@ step("GUARD: applyAppend with a wrong event root throws");
 {
   const neg = new MirrorTree(H, B);
   neg.applyAppend(0, 10n, ImtTree.naiveRoot([10n], H)); // honest first insert
-  let threw = false;
-  try {
-    neg.applyAppend(1, 20n, 12345n); // wrong carried root
-  } catch {
-    threw = true;
-  }
+  const threw = ((): boolean => {
+    try {
+      neg.applyAppend(1, 20n, 12345n); // wrong carried root
+      return false;
+    } catch {
+      return true;
+    }
+  })();
   ok(threw, "applyAppend rejects a diverging carried root");
 }
 
-console.log(`\n${failures === 0 ? "MIRRORTREE TEST PASS — root()==naiveRoot each step, replay idempotent, paths fold, batch sentinel" : `MIRRORTREE TEST FAIL — ${failures} assertion(s)`}`);
-process.exit(failures === 0 ? 0 : 1);
+console.log(`\n${failures.count === 0 ? "MIRRORTREE TEST PASS — root()==naiveRoot each step, replay idempotent, paths fold, batch sentinel" : `MIRRORTREE TEST FAIL — ${failures.count} assertion(s)`}`);
+process.exit(failures.count === 0 ? 0 : 1);

@@ -60,7 +60,7 @@ test("a BACKGROUND failure sets the banner and never toasts — five minutes of 
     throw new TypeError("Failed to fetch");
   };
   // Three loop ticks of an outage: the banner is (re)set each time, no toast ever.
-  for (let i = 0; i < 3; i++) {
+  for (const i of Array(3).keys()) {
     await runRefresh(SESSION, failing, sinks, { indexerUrl: INDEXER, manual: false });
   }
   assert.ok(!calls.some((c) => c.startsWith("toast:")), "background loops NEVER toast (locked rule)");

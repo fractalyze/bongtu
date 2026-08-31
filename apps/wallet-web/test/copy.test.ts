@@ -258,12 +258,11 @@ test("Home's nav is exactly three icons — sync, lock, settings — no words", 
   const home = readFileSync(`${UI_DIR}screens/Home.tsx`, "utf8");
   const nav = home.slice(home.indexOf("<header"), home.indexOf("</header>"));
   const order = ["IndexerSyncDot", "LockChip", "IconGear"];
-  let at = -1;
-  for (const mark of order) {
+  order.reduce((at, mark) => {
     const i = nav.indexOf(mark);
     assert.ok(i > at, `${mark} is missing from the nav or out of order`);
-    at = i;
-  }
+    return i;
+  }, -1);
   assert.doesNotMatch(nav, /WalletMark/, "the brand mark lives in the wallet card, not the nav");
   assert.doesNotMatch(nav, /IconRefresh/, "the standalone refresh button is retired");
   assert.doesNotMatch(nav, /wallet\.named/, "the wallet's NAME never renders in the nav");

@@ -34,38 +34,33 @@ export function sqrtMod(n: bigint): bigint | null {
   if (n === 0n) return 0n;
   if (legendre(n) !== 1n) return null;
 
-  // Factor P-1 = Q * 2^S with Q odd.
-  let Q = P - 1n;
-  let S = 0n;
-  while ((Q & 1n) === 0n) {
-    Q >>= 1n;
-    S += 1n;
-  }
+  // Factor P-1 = Q * 2^S with Q odd (recursive form of the halving loop).
+  const factor = (q: bigint, s: bigint): { q: bigint; s: bigint } =>
+    (q & 1n) === 0n ? factor(q >> 1n, s + 1n) : { q, s };
+  const { q: Q, s: S } = factor(P - 1n, 0n);
 
   // A fixed quadratic non-residue (search up from 2 — deterministic, no RNG).
-  let z = 2n;
-  while (legendre(z) !== P - 1n) z += 1n;
+  const nonResidue = (z: bigint): bigint => (legendre(z) === P - 1n ? z : nonResidue(z + 1n));
+  const z = nonResidue(2n);
 
-  let M = S;
-  let c = modpow(z, Q);
-  let t = modpow(n, Q);
-  let R = modpow(n, (Q + 1n) / 2n);
-  while (t !== 1n) {
-    // Least i in (0, M) with t^(2^i) == 1.
-    let i = 0n;
-    let tt = t;
-    while (tt !== 1n) {
-      tt = mod(tt * tt);
-      i += 1n;
-      if (i === M) return null; // not a residue (defensive; legendre already screened)
-    }
+  // Least i in (0, M) with t^(2^i) == 1 — null once i reaches M (defensive;
+  // legendre already screened non-residues out).
+  const leastOrder = (tt: bigint, i: bigint, M: bigint): bigint | null => {
+    const sq = mod(tt * tt);
+    const ni = i + 1n;
+    if (ni === M) return null;
+    return sq === 1n ? ni : leastOrder(sq, ni, M);
+  };
+  // The Tonelli-Shanks descent: M strictly decreases, so depth <= S (~28 here).
+  const descend = (M: bigint, c: bigint, t: bigint, R: bigint): bigint | null => {
+    if (t === 1n) return R;
+    const i = leastOrder(t, 0n, M);
+    if (i === null) return null;
     const b = modpow(c, 1n << (M - i - 1n));
-    M = i;
-    c = mod(b * b);
-    t = mod(t * c);
-    R = mod(R * b);
-  }
-  return R;
+    const c2 = mod(b * b);
+    return descend(i, c2, mod(t * c2), mod(R * b));
+  };
+  return descend(S, modpow(z, Q), modpow(n, Q), modpow(n, (Q + 1n) / 2n));
 }
 
 /**
@@ -74,16 +69,10 @@ export function sqrtMod(n: bigint): bigint | null {
  */
 export function packPubkey(point: PointInput): string {
   const x = BigInt(point[0]);
-  let y = BigInt(point[1]);
-  const bytes = new Uint8Array(32);
-  for (let i = 0; i < 32; i++) {
-    bytes[i] = Number(y & 0xffn);
-    y >>= 8n;
-  }
+  const y = BigInt(point[1]);
+  const bytes = Uint8Array.from({ length: 32 }, (_, i) => Number((y >> BigInt(8 * i)) & 0xffn));
   if ((x & 1n) === 1n) bytes[31] |= 0x80; // sign bit = LSB of x
-  let hex = "";
-  for (const b of bytes) hex += b.toString(16).padStart(2, "0");
-  return "0x" + hex;
+  return "0x" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /**
@@ -96,13 +85,11 @@ export function unpackPubkey(hex: string): Point {
   if (h.length !== 64 || !/^[0-9a-fA-F]{64}$/.test(h)) {
     throw new Error(`unpackPubkey: expected 32-byte hex (64 chars), got ${JSON.stringify(hex)}`);
   }
-  const bytes = new Uint8Array(32);
-  for (let i = 0; i < 32; i++) bytes[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
+  const bytes = Uint8Array.from({ length: 32 }, (_, i) => parseInt(h.slice(i * 2, i * 2 + 2), 16));
 
   const signBit = (bytes[31] & 0x80) >> 7; // parity of x
   bytes[31] &= 0x7f; // clear the sign bit before reading y
-  let y = 0n;
-  for (let i = 31; i >= 0; i--) y = (y << 8n) | BigInt(bytes[i]);
+  const y = bytes.reduceRight<bigint>((acc, b) => (acc << 8n) | BigInt(b), 0n);
   if (y >= P) throw new Error("unpackPubkey: y out of field range");
 
   // a*x^2 + y^2 = 1 + d*x^2*y^2  ->  x^2 * (a - d*y^2) = 1 - y^2
@@ -145,40 +132,25 @@ const B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz
 const B58_INDEX = new Map<string, bigint>([...B58_ALPHABET].map((c, i) => [c, BigInt(i)]));
 
 function b58encode(bytes: Uint8Array): string {
-  let n = 0n;
-  for (const b of bytes) n = (n << 8n) | BigInt(b);
-  let out = "";
-  while (n > 0n) {
-    out = B58_ALPHABET[Number(n % 58n)] + out;
-    n /= 58n;
-  }
+  const n = bytes.reduce<bigint>((acc, b) => (acc << 8n) | BigInt(b), 0n);
+  const digits = (v: bigint): string => (v === 0n ? "" : digits(v / 58n) + B58_ALPHABET[Number(v % 58n)]);
   // Leading zero bytes carry no big-integer weight — encode each as '1'.
-  for (const b of bytes) {
-    if (b !== 0) break;
-    out = "1" + out;
-  }
-  return out;
+  const firstNonZero = bytes.findIndex((b) => b !== 0);
+  const leadingOnes = firstNonZero === -1 ? bytes.length : firstNonZero;
+  return "1".repeat(leadingOnes) + digits(n);
 }
 
 function b58decode(s: string): Uint8Array {
-  let n = 0n;
-  for (const c of s) {
+  const n = [...s].reduce<bigint>((acc, c) => {
     const v = B58_INDEX.get(c);
     if (v === undefined) {
       throw new Error(`decodeAddress: invalid base58 character ${JSON.stringify(c)}`);
     }
-    n = n * 58n + v;
-  }
-  const bytes: number[] = [];
-  while (n > 0n) {
-    bytes.unshift(Number(n & 0xffn));
-    n >>= 8n;
-  }
-  for (const c of s) {
-    if (c !== "1") break;
-    bytes.unshift(0);
-  }
-  return new Uint8Array(bytes);
+    return acc * 58n + v;
+  }, 0n);
+  const toBytes = (v: bigint): number[] => (v === 0n ? [] : [...toBytes(v >> 8n), Number(v & 0xffn)]);
+  const leading = /^1*/.exec(s)?.[0].length ?? 0;
+  return new Uint8Array([...Array<number>(leading).fill(0), ...toBytes(n)]);
 }
 
 function checksum4(versionAndPayload: Uint8Array): Uint8Array {
@@ -201,7 +173,7 @@ export function encodeAddress(compressedHex: string): string {
   const h = v.startsWith("0x") || v.startsWith("0X") ? v.slice(2) : v;
   const body = new Uint8Array(33);
   body[0] = ADDRESS_VERSION;
-  for (let i = 0; i < 32; i++) body[i + 1] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
+  for (const i of Array(32).keys()) body[i + 1] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
   const full = new Uint8Array(37);
   full.set(body);
   full.set(checksum4(body), 33);
@@ -230,14 +202,13 @@ export function decodeAddress(input: string): string {
   }
   const body = bytes.slice(0, 33);
   const check = checksum4(body);
-  for (let i = 0; i < 4; i++) {
+  for (const i of Array(4).keys()) {
     if (check[i] !== bytes[33 + i]) throw new Error("decodeAddress: bad checksum");
   }
   if (body[0] !== ADDRESS_VERSION) {
     throw new Error(`decodeAddress: unknown address version 0x${body[0].toString(16).padStart(2, "0")}`);
   }
-  let hex = "";
-  for (let i = 1; i < 33; i++) hex += body[i].toString(16).padStart(2, "0");
+  const hex = Array.from(body.slice(1, 33), (b) => b.toString(16).padStart(2, "0")).join("");
   unpackPubkey(hex); // the payload must be a real compressed bjj pubkey
   return "0x" + hex;
 }

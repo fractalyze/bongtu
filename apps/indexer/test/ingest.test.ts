@@ -83,10 +83,10 @@ import { ViewTokenService } from "../src/api/viewtoken.js";
 // never reads it — a throwaway instance satisfies the contract.
 const TOKENS = new ViewTokenService(Buffer.from("ingest-test"));
 
-let failures = 0;
+const failures = { count: 0 };
 function ok(cond: unknown, msg: string): void {
   const pass = !!cond;
-  if (!pass) failures++;
+  if (!pass) failures.count++;
   console.log(`   ${pass ? "PASS" : "FAIL"}  ${msg}`);
   if (!pass) throw new Error(`assertion failed: ${msg}`);
 }
@@ -140,20 +140,19 @@ const commitOf = (n: NoteSpec): bigint => commitment(n.v, n.s, n.owner.publicKey
  */
 function makeSim() {
   const oracle = new ImtTree(H, B);
-  let blockNumber = 0;
-  let logIndex = 0;
+  const pos = { blockNumber: 0, logIndex: 0 };
   const tx = (): void => {
-    blockNumber++;
-    logIndex = 0;
+    pos.blockNumber++;
+    pos.logIndex = 0;
   };
   const log = (name: string, txHash: string, args: Record<string, unknown>): ParsedLog => ({
     name,
-    blockNumber,
-    logIndex: logIndex++,
+    blockNumber: pos.blockNumber,
+    logIndex: pos.logIndex++,
     txHash,
     // Synthetic block time: monotonic in block order (anvil/live blocks carry a
     // real one; the ingest history feed only needs a per-block unix-seconds stamp).
-    blockTimestamp: 1_700_000_000 + blockNumber,
+    blockTimestamp: 1_700_000_000 + pos.blockNumber,
     args,
   });
   const appended = (txHash: string, leaf: bigint): ParsedLog => {
@@ -330,18 +329,18 @@ function makeSim() {
     const start = Math.ceil(oracle.getNextLeafIndex() / B) * B; // attach pads to the boundary
     oracle.attachSubtree(sub, commits);
     const logs = [log("SubtreeAppended", txHash, { startLeafIndex: BigInt(start), subtreeRoot: sub, root: oracle.getRoot() })];
-    let dh = 987654321n; // committed in the proof even when nothing is published
-    let full: bigint[] | null = null;
-    if (publish === "full") {
-      const rcpt = outs.flatMap((o) => poseidonEncrypt([o.v, o.s], ecdhSharedSecret(eph, o.owner.publicKey), nonce));
-      const plain = [
-        ...pub2(input.owner), input.v, input.s,
-        ...outs.flatMap((o) => pub2(o.owner)),
-        ...outs.flatMap((o) => [o.v, o.s]),
-      ];
-      full = [...rcpt, ...poseidonEncrypt(plain, ecdhSharedSecret(eph, ARB.publicKey), nonce)];
-      dh = disclosureChain(full);
-    }
+    const full: bigint[] | null = publish === "full"
+      ? (() => {
+          const rcpt = outs.flatMap((o) => poseidonEncrypt([o.v, o.s], ecdhSharedSecret(eph, o.owner.publicKey), nonce));
+          const plain = [
+            ...pub2(input.owner), input.v, input.s,
+            ...outs.flatMap((o) => pub2(o.owner)),
+            ...outs.flatMap((o) => [o.v, o.s]),
+          ];
+          return [...rcpt, ...poseidonEncrypt(plain, ecdhSharedSecret(eph, ARB.publicKey), nonce)];
+        })()
+      : null;
+    const dh = full === null ? 987654321n : disclosureChain(full); // committed in the proof even when nothing is published
     logs.push(
       log("Disbursed", txHash, {
         subtreeRoot: sub,
@@ -698,12 +697,14 @@ async function main(): Promise<void> {
     ];
     const transferred = bad.find((l) => l.name === "Transferred")!;
     (transferred.args.outputCommitments as bigint[])[0] += 1n;
-    let msg = "";
-    try {
-      ix2.applyLogs(bad);
-    } catch (e) {
-      msg = (e as Error).message;
-    }
+    const msg = ((): string => {
+      try {
+        ix2.applyLogs(bad);
+        return "";
+      } catch (e) {
+        return (e as Error).message;
+      }
+    })();
     ok(/commitment != Appended leaf/.test(msg), `correlation cross-check threw (got: ${msg || "no throw"})`);
   }
 
@@ -893,15 +894,17 @@ async function main(): Promise<void> {
     // A V2 op reaching a ledger WITHOUT the decapsulation key is a config
     // violation the boot guard exists for — deriveOp throws, never false-alarms.
     const ixNoKey = makeIndexer(true, null);
-    let msg = "";
-    try {
-      ixNoKey.applyLogs(makeSim().deposit("0xkemnokey", gNotes[0], gNotes[1], 640000000000000000005n, 777n, {
-        limbs: good.limbs,
-        ciphertextHex: good.ciphertextHex,
-      }));
-    } catch (e) {
-      msg = (e as Error).message;
-    }
+    const msg = ((): string => {
+      try {
+        ixNoKey.applyLogs(makeSim().deposit("0xkemnokey", gNotes[0], gNotes[1], 640000000000000000005n, 777n, {
+          limbs: good.limbs,
+          ciphertextHex: good.ciphertextHex,
+        }));
+        return "";
+      } catch (e) {
+        return (e as Error).message;
+      }
+    })();
     ok(/AUTHORITY_KEM_KEY/.test(msg), `keyless ledger on a V2 op throws, not alarms (got: ${msg || "no throw"})`);
   }
 
@@ -941,41 +944,41 @@ async function main(): Promise<void> {
   {
     const noSleep = async (): Promise<void> => {};
 
-    let calls = 0;
+    const calls = { count: 0 };
     const flaky = async (n: number): Promise<number> => {
-      calls++;
-      if (calls < 3) throw new Error("429 rate limited");
+      calls.count++;
+      if (calls.count < 3) throw new Error("429 rate limited");
       return 1_700_000_000 + n;
     };
     ok(
-      (await fetchBlockTimestamp(flaky, 42, 3, noSleep)) === 1_700_000_042 && calls === 3,
+      (await fetchBlockTimestamp(flaky, 42, 3, noSleep)) === 1_700_000_042 && calls.count === 3,
       "a transient rate limit is retried, not folded to 0",
     );
 
-    let tries = 0;
+    const tries = { count: 0 };
     const dead = async (): Promise<number> => {
-      tries++;
+      tries.count++;
       throw new Error("transport down");
     };
     ok(
-      (await fetchBlockTimestamp(dead, 42, 3, noSleep)) === 0 && tries === 3,
+      (await fetchBlockTimestamp(dead, 42, 3, noSleep)) === 0 && tries.count === 3,
       "every attempt failing reports 0 after exhausting the retries",
     );
 
     // A successful call answering 0 is as unusable as a throw.
-    let zeroCalls = 0;
+    const zeroCalls = { count: 0 };
     const zero = async (): Promise<number> => {
-      zeroCalls++;
+      zeroCalls.count++;
       return 0;
     };
     ok(
-      (await fetchBlockTimestamp(zero, 42, 3, noSleep)) === 0 && zeroCalls === 3,
+      (await fetchBlockTimestamp(zero, 42, 3, noSleep)) === 0 && zeroCalls.count === 3,
       "a zero answer is retried like a failure, never accepted as a timestamp",
     );
   }
 
-  console.log(`\n${failures === 0 ? "INGEST UNIT TEST PASS — multicall correlation, self-send history, transfer10 merge/fan-out, transfer10x2 pay/merge, correlation guard, replay convergence, withheld disburse, ledger dedup, pollOnce/health" : `INGEST UNIT TEST FAIL — ${failures} assertion(s)`}`);
-  process.exit(failures === 0 ? 0 : 1);
+  console.log(`\n${failures.count === 0 ? "INGEST UNIT TEST PASS — multicall correlation, self-send history, transfer10 merge/fan-out, transfer10x2 pay/merge, correlation guard, replay convergence, withheld disburse, ledger dedup, pollOnce/health" : `INGEST UNIT TEST FAIL — ${failures.count} assertion(s)`}`);
+  process.exit(failures.count === 0 ? 0 : 1);
 }
 
 main().catch((e) => {

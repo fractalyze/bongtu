@@ -88,11 +88,11 @@ const POLL_TRIES = 40;
 // --- assertion ledger (local: this driver proves nothing on CPU, so it must not
 // pull deploy/live/lib/proof_toolbox.ts and its snarkjs load) -------------------------
 
-let failures = 0;
+const failures = { count: 0 };
 const step = (title: string): void => console.log(`\n=== ${title} ===`);
 function ok(cond: unknown, msg: string): void {
   const pass = !!cond;
-  if (!pass) failures++;
+  if (!pass) failures.count++;
   console.log(`   ${pass ? "PASS" : "FAIL"}  ${msg}`);
   if (!pass) throw new Error(`assertion failed: ${msg}`);
 }
@@ -128,19 +128,23 @@ const POOL_ABI = parseAbi([
  *  the honest source, because a `nextLeafIndex()` read right after a receipt can
  *  still be served by an RPC node that is a block behind. */
 function leafEvents(logs: { address: string; data: `0x${string}`; topics: string[] }[], pool: string) {
-  const single: number[] = [];
-  let batchStart: number | null = null;
-  for (const l of logs) {
-    if (l.address.toLowerCase() !== pool.toLowerCase()) continue;
-    let ev;
-    try {
-      ev = decodeEventLog({ abi: POOL_ABI, data: l.data, topics: l.topics as [] });
-    } catch {
-      continue;
-    }
-    if (ev.eventName === "Appended") single.push(Number((ev.args as { leafIndex: bigint }).leafIndex));
-    if (ev.eventName === "SubtreeAppended") batchStart = Number((ev.args as { startLeafIndex: bigint }).startLeafIndex);
-  }
+  const events = logs
+    .filter((l) => l.address.toLowerCase() === pool.toLowerCase())
+    .flatMap((l) => {
+      try {
+        return [decodeEventLog({ abi: POOL_ABI, data: l.data, topics: l.topics as [] })];
+      } catch {
+        return [];
+      }
+    });
+  const single = events
+    .filter((ev) => ev.eventName === "Appended")
+    .map((ev) => Number((ev.args as { leafIndex: bigint }).leafIndex));
+  const batchStart = events.reduce<number | null>(
+    (acc, ev) =>
+      ev.eventName === "SubtreeAppended" ? Number((ev.args as { startLeafIndex: bigint }).startLeafIndex) : acc,
+    null,
+  );
   return { single: single.sort((a, b) => a - b), batchStart };
 }
 
@@ -158,12 +162,12 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 /** Poll `read` until `done`, at the driver's fixed interval. Answers the last
  *  value read so the caller can assert on it (and print what it actually saw). */
 async function pollUntil<T>(read: () => Promise<T>, done: (v: T) => boolean): Promise<T> {
-  let last = await read();
-  for (let i = 0; i < POLL_TRIES && !done(last); i++) {
+  const poll = async (last: T, triesLeft: number): Promise<T> => {
+    if (triesLeft <= 0 || done(last)) return last;
     await sleep(POLL_MS);
-    last = await read();
-  }
-  return last;
+    return poll(await read(), triesLeft - 1);
+  };
+  return poll(await read(), POLL_TRIES);
 }
 
 async function main(): Promise<void> {
@@ -331,7 +335,7 @@ async function main(): Promise<void> {
   step("LEAVES — merges append 2 each, the disburse attaches one B-block");
   // Where the tree stood when the disburse ran: after the deposit, plus whatever
   // the merge legs appended (2 leaves per transfer10x2).
-  let leafBeforeAttach = leafAfterDeposit;
+  const mergeLeafEnds: number[] = [];
   for (const [i, m] of payResult.mergeTxs.entries()) {
     const r = await publicClient.getTransactionReceipt({ hash: m.txHash as `0x${string}` });
     const ml = leafEvents(r.logs as never, ADDR.pool);
@@ -339,8 +343,9 @@ async function main(): Promise<void> {
       ml.single.length === 2,
       `merge ${i + 1} appended 2 leaves at ${ml.single.join(", ")}: ${m.txHash} (gasUsed ${r.gasUsed})`,
     );
-    leafBeforeAttach = ml.single[1] + 1;
+    mergeLeafEnds.push(ml.single[1] + 1);
   }
+  const leafBeforeAttach = mergeLeafEnds.length > 0 ? mergeLeafEnds[mergeLeafEnds.length - 1] : leafAfterDeposit;
 
   const payLeaves = leafEvents(payRcpt.logs as never, ADDR.pool);
   ok(payLeaves.batchStart !== null, "disburse emitted SubtreeAppended (the batch attach)");
@@ -364,7 +369,7 @@ async function main(): Promise<void> {
     `the proven witness conserves value: sum(${B} outputs) == input note ${kkrw(proven.inputValue)}`,
   );
 
-  let seen = 0n;
+  const seenValues: bigint[] = [];
   for (const [i, kp] of recipientKeys.entries()) {
     const want = PAYOUTS[i];
     const ns = await pollUntil(
@@ -376,8 +381,9 @@ async function main(): Promise<void> {
       hit !== undefined && hit.leafIndex >= batchStart && hit.leafIndex < batchStart + B,
       `recipient ${i + 1} holds ${kkrw(want)} unspent at leaf ${hit?.leafIndex} (inside the batch block)`,
     );
-    seen += BigInt(hit!.value);
+    seenValues.push(BigInt(hit!.value));
   }
+  const seen = seenValues.reduce((a, b) => a + b, 0n);
   ok(seen === PAYOUT_TOTAL, `the three recipients hold exactly the sheet total ${kkrw(PAYOUT_TOTAL)}`);
 
   const finalNotes = await pollUntil(employerNotes, (ns) =>
@@ -397,8 +403,8 @@ async function main(): Promise<void> {
   // The lock arms a 10-minute idle-wipe timer on every use; dropping the key (what
   // logging out does) disarms it, so the process can exit when the run is done.
   keyCache.lock();
-  if (failures > 0) {
-    console.error(`\nPAYROLL LIVE E2E: ${failures} FAILURE(S)`);
+  if (failures.count > 0) {
+    console.error(`\nPAYROLL LIVE E2E: ${failures.count} FAILURE(S)`);
     process.exit(1);
   }
   console.log(

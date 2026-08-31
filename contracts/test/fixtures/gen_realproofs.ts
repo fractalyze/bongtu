@@ -135,7 +135,7 @@ async function main(): Promise<void> {
     // All ten outputs are appended, pads included: an unused output slot is a
     // real value-0 note with a salt, so its commitment is nonzero and the
     // contract's ZeroOutputCommitment guard never fires on it.
-    for (let i = 0; i < 10; i++) t.appendLeaf(BigInt(cd.pub[128 + i]));
+    for (const i of Array(10).keys()) t.appendLeaf(BigInt(cd.pub[128 + i]));
     out[name] = { ...cd, seedLeaves: seed.map(s), rootAfter: s(t.getRoot()), ...kemFor(name, cd.pub[106]) };
   }
 
@@ -153,7 +153,7 @@ async function main(): Promise<void> {
     assertEq(rootAfterAppends(seed), cd.pub[52], `${name} membership root != pub[52]`);
     const t = new ImtTree(H, B);
     for (const c of seed) t.appendLeaf(c);
-    for (let i = 0; i < 2; i++) t.appendLeaf(BigInt(cd.pub[63 + i]));
+    for (const i of Array(2).keys()) t.appendLeaf(BigInt(cd.pub[63 + i]));
     out[name] = { ...cd, seedLeaves: seed.map(s), rootAfter: s(t.getRoot()), ...kemFor(name, cd.pub[41]) };
   }
 

@@ -237,7 +237,7 @@ function chainWorld(values: bigint[]) {
   }
   // What the last proof declared it would do — applied by the matching submit, so the
   // world only changes when a transaction actually goes through.
-  let pending: { spend: string[]; create: Output[] } | null = null;
+  const pending: { current: { spend: string[]; create: Output[] } | null } = { current: null };
 
   const record = (request: ProvingRequest): void => {
     const inp = request.input as unknown as {
@@ -249,7 +249,7 @@ function chainWorld(values: bigint[]) {
       outputOwnerPublicKeys: [string, string][];
     };
     proved.push(request.circuit);
-    pending = {
+    pending.current = {
       spend: inp.inputCommitments.filter((_, i) => inp.enabled[i] === "1"),
       create: inp.outputCommitments.map((c, i) => ({
         value: inp.outputValues[i],
@@ -264,10 +264,11 @@ function chainWorld(values: bigint[]) {
 
   const land = (circuit: string) => async (): Promise<{ txHash: string; explorerUrl: string }> => {
     submitted.push(circuit);
-    if (!pending) throw new Error("a submit with no proof before it");
-    for (const n of notes) if (pending.spend.includes(n.commitment)) n.spent = true;
-    for (const o of pending.create) add(o.value, o.salt, o.c, o.mine);
-    pending = null;
+    const p = pending.current;
+    if (!p) throw new Error("a submit with no proof before it");
+    for (const n of notes) if (p.spend.includes(n.commitment)) n.spent = true;
+    for (const o of p.create) add(o.value, o.salt, o.c, o.mine);
+    pending.current = null;
     return { txHash: `0x${circuit}${submitted.length}`, explorerUrl: `https://x/tx/${circuit}` };
   };
 

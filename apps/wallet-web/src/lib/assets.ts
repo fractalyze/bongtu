@@ -141,13 +141,10 @@ async function cachedFetch(
   const hit = await cache.match(url);
   if (hit) return hit.arrayBuffer();
   deps.onDownloadStart?.(url);
-  let bytes: ArrayBuffer;
-  try {
-    bytes = await downloadOnce(url, expectedTotal, deps);
-  } catch (e) {
+  const bytes = await downloadOnce(url, expectedTotal, deps).catch((e: unknown) => {
     if (!(e instanceof AssetStallError)) throw e;
-    bytes = await downloadOnce(url, expectedTotal, deps); // one fresh retry
-  }
+    return downloadOnce(url, expectedTotal, deps); // one fresh retry
+  });
   try {
     await cache.put(url, new Response(bytes));
   } catch {
@@ -178,34 +175,32 @@ async function downloadOnce(
   // reader below counts decoded bytes.
   const totalHeader = res.headers.get("content-length");
   const total = expectedTotal ?? (totalHeader ? Number(totalHeader) : null);
+  const onProgress = deps.onProgress;
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
-  let received = 0;
-  for (;;) {
-    let timer: ReturnType<typeof setTimeout> | undefined;
+  const readFrom = async (received: number): Promise<number> => {
+    const timer: { id?: ReturnType<typeof setTimeout> } = {};
     const stalled = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new AssetStallError(url, received)), deps.stallMs ?? STALL_MS);
+      timer.id = setTimeout(() => reject(new AssetStallError(url, received)), deps.stallMs ?? STALL_MS);
     });
-    let step: ReadableStreamReadResult<Uint8Array>;
-    try {
-      step = await Promise.race([reader.read(), stalled]);
-    } catch (e) {
-      void reader.cancel().catch(() => {});
-      throw e;
-    } finally {
-      clearTimeout(timer);
-    }
-    if (step.done) break;
+    const step = await Promise.race([reader.read(), stalled])
+      .catch((e: unknown) => {
+        void reader.cancel().catch(() => {});
+        throw e;
+      })
+      .finally(() => clearTimeout(timer.id));
+    if (step.done) return received;
     chunks.push(step.value);
-    received += step.value.byteLength;
-    deps.onProgress({ url, received, total });
-  }
+    const grown = received + step.value.byteLength;
+    onProgress({ url, received: grown, total });
+    return readFrom(grown);
+  };
+  const received = await readFrom(0);
   const out = new Uint8Array(received);
-  let off = 0;
-  for (const c of chunks) {
+  chunks.reduce((off, c) => {
     out.set(c, off);
-    off += c.byteLength;
-  }
+    return off + c.byteLength;
+  }, 0);
   return out.buffer;
 }
 
@@ -224,14 +219,15 @@ export async function prefetchCircuitAssets(
 ): Promise<CircuitAssets> {
   // Any Cache Storage failure at setup (API absent, open refused) degrades to the
   // no-cache path instead of blocking proving.
-  let cache: CacheLike = NOOP_CACHE;
-  try {
-    const cs = deps.cacheStorage ?? defaultCacheStorage();
-    await evictStaleCaches(version, { ...deps, cacheStorage: cs });
-    cache = await cs.open(cacheNameFor(version));
-  } catch {
-    cache = NOOP_CACHE;
-  }
+  const cache: CacheLike = await (async () => {
+    try {
+      const cs = deps.cacheStorage ?? defaultCacheStorage();
+      await evictStaleCaches(version, { ...deps, cacheStorage: cs });
+      return await cs.open(cacheNameFor(version));
+    } catch {
+      return NOOP_CACHE;
+    }
+  })();
   const base = circuitBaseUrl.replace(/\/$/, "");
   const expected = CIRCUIT_ASSET_BYTES[circuit];
   const [wasm, zkey] = await Promise.all([

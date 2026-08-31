@@ -99,19 +99,19 @@ const DUMMY_CALLDATA: Calldata = {
 };
 
 test("runDeposit rejects V > balance BEFORE approving, key-deriving, or proving", async () => {
-  let approveCalls = 0;
-  let proveCalls = 0;
-  let deriveCalls = 0;
+  const approveCalls = { n: 0 };
+  const proveCalls = { n: 0 };
+  const deriveCalls = { n: 0 };
   const deps: DepositIo = {
     ...fakeWalletDeps(),
-    keyCache: fakeKeyCache(() => deriveCalls++),
+    keyCache: fakeKeyCache(() => deriveCalls.n++),
     readTokenState: async () => ({ balance: 100n, allowance: 0n }),
     approveToken: async () => {
-      approveCalls++;
+      approveCalls.n++;
       return "0xapprove";
     },
     prove: async () => {
-      proveCalls++;
+      proveCalls.n++;
       return DUMMY_CALLDATA;
     },
     submitDeposit: async () => {
@@ -123,49 +123,49 @@ test("runDeposit rejects V > balance BEFORE approving, key-deriving, or proving"
     runDeposit(fakeContext(), { amount: "500" }, () => {}, deps),
     /insufficient kKRW balance/i,
   );
-  assert.equal(approveCalls, 0, "no approve tx may be emitted for a doomed deposit");
-  assert.equal(proveCalls, 0, "no proof may be generated for a doomed deposit");
-  assert.equal(deriveCalls, 0, "no key derivation (signature popup) for a doomed deposit");
+  assert.equal(approveCalls.n, 0, "no approve tx may be emitted for a doomed deposit");
+  assert.equal(proveCalls.n, 0, "no proof may be generated for a doomed deposit");
+  assert.equal(deriveCalls.n, 0, "no key derivation (signature popup) for a doomed deposit");
 });
 
 test("runDeposit happy path threads kem-guard → unlock → approve → prove → submit when affordable", async () => {
-  let approveCalls = 0;
-  let proveCalls = 0;
-  let kemGuardCalls = 0;
-  let deriveCalls = 0;
+  const approveCalls = { n: 0 };
+  const proveCalls = { n: 0 };
+  const kemGuardCalls = { n: 0 };
+  const deriveCalls = { n: 0 };
   const stages: string[] = [];
   const deps: DepositIo = {
     ...fakeWalletDeps(),
     keyCache: fakeKeyCache(() => {
       // The unlock signature appears only after the kem guard, and before any tx —
       // an account switch must not cost the user an approve.
-      assert.equal(kemGuardCalls, 1, "the wallet unlocks AFTER the kem guard");
-      assert.equal(approveCalls, 0, "the wallet unlocks BEFORE the approve tx");
-      assert.equal(proveCalls, 0, "the wallet unlocks BEFORE the proof");
-      deriveCalls++;
+      assert.equal(kemGuardCalls.n, 1, "the wallet unlocks AFTER the kem guard");
+      assert.equal(approveCalls.n, 0, "the wallet unlocks BEFORE the approve tx");
+      assert.equal(proveCalls.n, 0, "the wallet unlocks BEFORE the proof");
+      deriveCalls.n++;
     }),
     readTokenState: async () => ({ balance: 1_000n, allowance: 0n }), // allowance < V => approve
     approveToken: async () => {
-      approveCalls++;
+      approveCalls.n++;
       return "0xapprove";
     },
     assertPoolKemEpoch: async () => {
       // The on-chain key check must precede encapsulation/proving (design §4/§5).
-      assert.equal(proveCalls, 0, "kem guard runs BEFORE the proof");
-      kemGuardCalls++;
+      assert.equal(proveCalls.n, 0, "kem guard runs BEFORE the proof");
+      kemGuardCalls.n++;
     },
     prove: async () => {
-      proveCalls++;
+      proveCalls.n++;
       return DUMMY_CALLDATA;
     },
     submitDeposit: async () => ({ txHash: "0xdeposit", explorerUrl: "https://x/tx/0xdeposit" }),
   };
 
   const out = await runDeposit(fakeContext(), { amount: "500" }, (s) => stages.push(s), deps);
-  assert.equal(approveCalls, 1, "an exact-V approve is sent when allowance < V");
-  assert.equal(kemGuardCalls, 1, "the pool's arbiter KEM key hash was checked");
-  assert.equal(deriveCalls, 1, "exactly ONE signature to unlock a locked wallet");
-  assert.equal(proveCalls, 1);
+  assert.equal(approveCalls.n, 1, "an exact-V approve is sent when allowance < V");
+  assert.equal(kemGuardCalls.n, 1, "the pool's arbiter KEM key hash was checked");
+  assert.equal(deriveCalls.n, 1, "exactly ONE signature to unlock a locked wallet");
+  assert.equal(proveCalls.n, 1);
   assert.equal(out.approved, true);
   assert.equal(out.amount, "500");
   assert.equal(out.txHash, "0xdeposit");
@@ -173,7 +173,7 @@ test("runDeposit happy path threads kem-guard → unlock → approve → prove �
 });
 
 test("runDeposit refuses when the pool's KEM epoch rejects this build's key", async () => {
-  let proveCalls = 0;
+  const proveCalls = { n: 0 };
   const deps: DepositIo = {
     ...fakeWalletDeps(),
     keyCache: fakeKeyCache(() => {
@@ -184,7 +184,7 @@ test("runDeposit refuses when the pool's KEM epoch rejects this build's key", as
       throw new Error("on-chain arbiter KEM key hash 0x11 does not match this build's ARBITER_KEM_PK");
     },
     prove: async () => {
-      proveCalls++;
+      proveCalls.n++;
       return DUMMY_CALLDATA;
     },
     submitDeposit: async () => {
@@ -195,7 +195,7 @@ test("runDeposit refuses when the pool's KEM epoch rejects this build's key", as
     runDeposit(fakeContext(), { amount: "500" }, () => {}, deps),
     /does not match this build's ARBITER_KEM_PK/,
   );
-  assert.equal(proveCalls, 0, "no proof may be generated against an unverified key");
+  assert.equal(proveCalls.n, 0, "no proof may be generated against an unverified key");
 });
 
 // ============================ (4) TESTNET POSTURE ===========================

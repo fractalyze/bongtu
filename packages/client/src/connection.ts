@@ -154,15 +154,15 @@ export interface WatchedAccount {
 export function accountWatchHandler(
   handlers: WalletWatchHandlers,
 ): (account: WatchedAccount, prev: WatchedAccount) => void {
-  let last: string | null = null;
+  const seen: { last: string | null } = { last: null };
   return (account, prev) => {
     // Seed from `prev` when the watcher attached after the connect happened (the
     // first event it sees may already be the disconnect).
-    if (last === null && prev.address) last = prev.address.toLowerCase();
+    if (seen.last === null && prev.address) seen.last = prev.address.toLowerCase();
     if (account.address) {
       const now = account.address.toLowerCase();
-      if (last !== null && now !== last) handlers.accountsChanged?.();
-      last = now;
+      if (seen.last !== null && now !== seen.last) handlers.accountsChanged?.();
+      seen.last = now;
     }
     if (prev.status === "connected" && account.status === "disconnected") {
       handlers.disconnected?.();
@@ -265,7 +265,7 @@ export interface SubmitResult {
 // One successful verification per pool address is enough for the session: the
 // epoch hash only changes on an arbiter key rotation, which ships as a new
 // wallet bundle anyway (ARBITER_KEM_PK is a build-time deployment fact).
-let kemVerifiedPool: string | null = null;
+const kemVerified: { pool: string | null } = { pool: null };
 
 /** viem's shape of "the getter is missing / reverted": a pre-KEM V1 pool probe.
  *  Transport failures (HttpRequestError etc.) carry none of these names and fall
@@ -288,18 +288,19 @@ function isViemPreKemProbeError(e: unknown): boolean {
  * call this BEFORE drawing KEM material / proving.
  */
 export async function assertPoolKemEpoch(connection: Connection, poolAddr: string): Promise<void> {
-  if (kemVerifiedPool === poolAddr) return;
+  if (kemVerified.pool === poolAddr) return;
   const pool = { address: poolAddr as Address, abi: POOL_ABI } as const;
-  let onchainHash: string | null;
-  try {
-    const epoch = await connection.publicClient.readContract({ ...pool, functionName: "currentEpoch" });
-    onchainHash = String(
-      await connection.publicClient.readContract({ ...pool, functionName: "arbiterKemPkHash", args: [epoch] }),
-    );
-  } catch (e) {
-    if (!isViemPreKemProbeError(e) && !isPreKemProbeError(e)) throw e;
-    onchainHash = null;
-  }
+  const onchainHash = await (async (): Promise<string | null> => {
+    try {
+      const epoch = await connection.publicClient.readContract({ ...pool, functionName: "currentEpoch" });
+      return String(
+        await connection.publicClient.readContract({ ...pool, functionName: "arbiterKemPkHash", args: [epoch] }),
+      );
+    } catch (e) {
+      if (!isViemPreKemProbeError(e) && !isPreKemProbeError(e)) throw e;
+      return null;
+    }
+  })();
   const err = arbiterKemPkGuardError(onchainHash);
   if (err) {
     // The technical verdict (which key, which epoch) goes to the console for
@@ -307,7 +308,7 @@ export async function assertPoolKemEpoch(connection: Connection, poolAddr: strin
     console.error(err);
     throw new Error("This wallet version doesn't match the network yet. Try again in a moment.");
   }
-  kemVerifiedPool = poolAddr;
+  kemVerified.pool = poolAddr;
 }
 
 // Every pool op carries the op's raw ML-KEM-768 encapsulation ciphertext

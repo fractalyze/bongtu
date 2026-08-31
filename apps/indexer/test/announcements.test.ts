@@ -21,7 +21,7 @@ const ownerCompressed = packPubkey(OWNER.publicKey);
 
 function seededStore(): InMemoryStore {
   const store = new InMemoryStore();
-  for (let i = 0; i < 3; i++) {
+  for (const i of Array(3).keys()) {
     const e = store.addEvent({
       txHash: `0xw${i}`, blockNumber: 100 + i, logIndex: 0,
       kind: "withdraw", epoch: null, ecdhPublicKey: null, encryptionNonce: null,

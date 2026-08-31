@@ -92,12 +92,14 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
       async (onStage) => {
         // The stealth destination is derived JUST before the run: meta keys from
         // one extra popup, then a fresh ephemeral — nothing is reused or stored.
-        let stealth: StealthWithdrawTarget | undefined;
-        if (!isTransfer && stealthMode) {
-          const keys = await deriveStealthKeys(connection);
-          const d = deriveStealthAddress(keys.meta, randomEphemeralScalar());
-          stealth = { address: d.address, ephemeralPub: d.ephemeralPub, viewTag: d.viewTag };
-        }
+        const stealth: StealthWithdrawTarget | undefined =
+          !isTransfer && stealthMode
+            ? await (async () => {
+                const keys = await deriveStealthKeys(connection);
+                const d = deriveStealthAddress(keys.meta, randomEphemeralScalar());
+                return { address: d.address, ephemeralPub: d.ephemeralPub, viewTag: d.viewTag };
+              })()
+            : undefined;
         return runSpendChain(
           kind,
           {

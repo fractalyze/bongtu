@@ -197,19 +197,12 @@ export interface HistoryQuery {
  *  when every element is at or above it. Binary search, so a deep page costs a
  *  handful of comparisons instead of a walk from the tail. */
 function lastIndexBelow(arr: readonly LedgerHistoryItem[], before: number): number {
-  let lo = 0;
-  let hi = arr.length - 1;
-  let ans = -1;
-  while (lo <= hi) {
+  const search = (lo: number, hi: number, ans: number): number => {
+    if (lo > hi) return ans;
     const mid = (lo + hi) >> 1;
-    if (arr[mid].seq < before) {
-      ans = mid;
-      lo = mid + 1;
-    } else {
-      hi = mid - 1;
-    }
-  }
-  return ans;
+    return arr[mid].seq < before ? search(mid + 1, hi, mid) : search(lo, mid - 1, ans);
+  };
+  return search(0, arr.length - 1, -1);
 }
 
 export class PostgresLedger {
@@ -287,11 +280,10 @@ export class PostgresLedger {
     const arr = this.historyByOwner.get(ownerKey(ownerX, ownerY)) ?? [];
     // Start index: the newest item strictly below `before` (the whole feed's last
     // element when unbounded). -1 means nothing qualifies -> empty page.
-    let i = opts.before === undefined ? arr.length - 1 : lastIndexBelow(arr, opts.before);
+    const start = opts.before === undefined ? arr.length - 1 : lastIndexBelow(arr, opts.before);
     const limit = opts.limit ?? arr.length;
-    const out: LedgerHistoryItem[] = [];
-    for (; i >= 0 && out.length < limit; i--) out.push(arr[i]);
-    return out;
+    const count = Math.max(Math.min(start + 1, limit), 0);
+    return Array.from({ length: count }, (_, j) => arr[start - j]);
   }
 
   /** Envelope cross-check failures surfaced during ingest (auditor-console feed). */
@@ -341,8 +333,7 @@ export class PostgresLedger {
     const hres = await this.pool.query(
       "SELECT owner_key, kind, counterparty, amount, tx_hash, block_timestamp, seq FROM history ORDER BY seq ASC",
     );
-    let maxSeq = -1;
-    for (const r of hres.rows) {
+    const maxSeq = hres.rows.reduce<number>((acc, r) => {
       const item: LedgerHistoryItem = {
         kind: r.kind,
         counterparty: r.counterparty,
@@ -353,8 +344,8 @@ export class PostgresLedger {
       };
       const [ox, oy] = (r.owner_key as string).split(",");
       pushHistory(this.historyByOwner, [BigInt(ox), BigInt(oy)], item);
-      if (item.seq > maxSeq) maxSeq = item.seq;
-    }
+      return item.seq > acc ? item.seq : acc;
+    }, -1);
     this.historySeq = maxSeq + 1;
 
     // Envelope cross-check alarms.

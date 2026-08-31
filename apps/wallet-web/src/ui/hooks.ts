@@ -60,15 +60,15 @@ export function useWalletDescription(): WalletDescription {
       setInjected(null);
       return;
     }
-    let live = true;
+    const live = { current: true };
     connector
       .getProvider()
       .then((p) => {
-        if (live) setInjected(p);
+        if (live.current) setInjected(p);
       })
       .catch(() => {});
     return () => {
-      live = false;
+      live.current = false;
     };
   }, [connector]);
   return useMemo(

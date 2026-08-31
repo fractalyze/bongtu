@@ -70,7 +70,7 @@ function witness(circuit: string, name: string): WitnessResult {
   }
 }
 
-let failures = 0;
+const failures = { count: 0 };
 
 // Each throwing fixture, with the spending base whose belt assertion must name it.
 const MUST_THROW: [circuit: string, fixture: string, belt: string][] = [
@@ -84,10 +84,10 @@ for (const [circuit, name, belt] of MUST_THROW) {
   const r = witness(circuit, name);
   if (r.ok) {
     console.error(`FAIL: ${name} generated a witness but the value-belt should make it UNSATISFIABLE`);
-    failures++;
+    failures.count++;
   } else if (!r.out.includes("Assert Failed") || !r.out.includes(belt)) {
     console.error(`FAIL: ${name} threw, but not on the belt assertion. Output:\n${r.out}`);
-    failures++;
+    failures.count++;
   } else {
     console.log(`OK: ${name} witness-gen THROWS on the value-belt (Assert Failed in ${belt})`);
   }
@@ -102,7 +102,7 @@ for (const [circuit, name] of [
   const r = witness(circuit, name);
   if (!r.ok) {
     console.error(`FAIL: ${name} (genuine zero-value pads) must satisfy the belt. Output:\n${r.out}`);
-    failures++;
+    failures.count++;
   } else {
     console.log(`OK: ${name} witness-gen SUCCEEDS (zero-value pads satisfy the belt)`);
   }
@@ -141,14 +141,14 @@ async function kemBindingTamperGate(): Promise<void> {
     const proof = rd(proofP);
     if (!(await snarkjs.groth16.verify(vkey, pub, proof))) {
       console.error(`FAIL: ${name} honest proof does not verify (stale out/?)`);
-      failures++;
+      failures.count++;
       continue;
     }
     const tampered = [...pub];
     tampered[at] = (BigInt(pub[at]) + 1n).toString();
     if (await snarkjs.groth16.verify(vkey, tampered, proof)) {
       console.error(`FAIL: ${name} verified with a TAMPERED kemBinding (pub[${at}]+1)`);
-      failures++;
+      failures.count++;
     } else {
       console.log(`OK: ${name} tampered kemBinding (pub[${at}]+1) -> groth16 verify FAILS`);
     }
@@ -157,8 +157,8 @@ async function kemBindingTamperGate(): Promise<void> {
 
 await kemBindingTamperGate();
 
-if (failures) {
-  console.error(`\nBELT GATE: FAIL (${failures})`);
+if (failures.count) {
+  console.error(`\nBELT GATE: FAIL (${failures.count})`);
   process.exit(1);
 }
 console.log("\nBELT GATE: PASS — mint-from-nothing is unsatisfiable at the circuit level; kemBinding is proof-bound");

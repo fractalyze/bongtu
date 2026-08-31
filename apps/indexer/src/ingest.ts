@@ -116,7 +116,7 @@ export async function fetchBlockTimestamp(
   attempts = 3,
   sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
 ): Promise<number> {
-  for (let i = 0; i < attempts; i++) {
+  for (const i of Array(attempts).keys()) {
     try {
       const ts = await getBlock(blockNumber);
       // A zero from a "successful" call is as unusable as a throw: treat it the
@@ -211,17 +211,19 @@ export class Indexer {
    * exits on it (the databaseUrlError fail-fast posture).
    */
   async kemBootGuard(): Promise<string | null> {
-    let kemPkHash = "0x" + "0".repeat(64);
-    try {
-      const epoch = await this.read("currentEpoch");
-      kemPkHash = String(await this.read("arbiterKemPkHash", [epoch]));
-    } catch (e) {
-      // ONLY a contract-level revert / missing getter marks a pre-KEM V1 pool.
-      // A transient RPC failure must propagate — folding it into "V1 pool"
-      // would disarm the guard exactly when it cannot see the chain. (ethers'
-      // CALL_EXCEPTION became viem's ContractFunction*Error — OR both shapes.)
-      if (!isPreKemProbeError(e) && !isViemPreKemProbeError(e)) throw e;
-    }
+    const kemPkHash = await (async (): Promise<string> => {
+      try {
+        const epoch = await this.read("currentEpoch");
+        return String(await this.read("arbiterKemPkHash", [epoch]));
+      } catch (e) {
+        // ONLY a contract-level revert / missing getter marks a pre-KEM V1 pool.
+        // A transient RPC failure must propagate — folding it into "V1 pool"
+        // would disarm the guard exactly when it cannot see the chain. (ethers'
+        // CALL_EXCEPTION became viem's ContractFunction*Error — OR both shapes.)
+        if (!isPreKemProbeError(e) && !isViemPreKemProbeError(e)) throw e;
+        return "0x" + "0".repeat(64);
+      }
+    })();
     const kemKey = this.cfg.authorityKemKey ?? null;
     // Stale-op-ABI check first: it is unconditional (the fragments ship
     // in-repo), where the KEM guard only arms on a KEM-epoch pool.
@@ -257,16 +259,18 @@ export class Indexer {
           toBlock: BigInt(hi),
         });
         for (const log of raw) {
-          let ev: { eventName: string; args: unknown };
-          try {
-            // decodeEventLog THROWS on an unknown/ambiguous topic0 — reproducing
-            // ethers' parseLog-misses-unknown-topic0 SKIP: a pre-upgrade V1 log,
-            // a V2 log a V1 build can't model, or a foreign log all fall through
-            // to `continue`, never aborting the batch.
-            ev = decodeEventLog({ abi: this.abi, data: log.data, topics: log.topics });
-          } catch {
-            continue; // not a pool event we model (unknown topic0)
-          }
+          const ev = ((): { eventName: string; args: unknown } | null => {
+            try {
+              // decodeEventLog THROWS on an unknown/ambiguous topic0 — reproducing
+              // ethers' parseLog-misses-unknown-topic0 SKIP: a pre-upgrade V1 log,
+              // a V2 log a V1 build can't model, or a foreign log all fall through
+              // to `continue`, never aborting the batch.
+              return decodeEventLog({ abi: this.abi, data: log.data, topics: log.topics });
+            } catch {
+              return null;
+            }
+          })();
+          if (ev === null) continue; // not a pool event we model (unknown topic0)
           out.push({
             name: ev.eventName,
             blockNumber: Number(log.blockNumber),
@@ -288,9 +292,12 @@ export class Indexer {
     };
     // Seed the recursion with a coarse chunk so a healthy RPC needs few calls.
     const CHUNK = Number(process.env.LOG_CHUNK || 50000);
-    for (let lo = from; lo <= to; lo += CHUNK) {
+    const walkChunks = async (lo: number): Promise<void> => {
+      if (lo > to) return;
       await walk(lo, Math.min(lo + CHUNK - 1, to));
-    }
+      await walkChunks(lo + CHUNK);
+    };
+    await walkChunks(from);
     out.sort((a, b) => (a.blockNumber - b.blockNumber) || (a.logIndex - b.logIndex));
     // Block timestamps: the ledger's per-owner history feed stamps each activity
     // item with its block time. Fetch getBlock ONCE per distinct block in the
@@ -304,7 +311,7 @@ export class Indexer {
     // blocks; an unbounded Promise.all would open one socket per block and let a
     // single RPC rejection fail the whole ingest. Fetch in fixed-size waves.
     const CONC = 16;
-    for (let i = 0; i < blockNums.length; i += CONC) {
+    for (const i of Array.from({ length: Math.ceil(blockNums.length / CONC) }, (_, w) => w * CONC)) {
       const wave = blockNums.slice(i, i + CONC);
       const blocks = await Promise.all(wave.map((n) => this.blockTimestamp(n)));
       wave.forEach((n, j) => tsByBlock.set(n, blocks[j]));
@@ -743,7 +750,7 @@ export class Indexer {
         const ct: bigint[] = ctLog ? (ctLog.args.receiverCiphertexts as unknown[]).map(bn) : [];
         const slices: Slice[] = [];
         if (ct.length > 0) {
-          for (let i = 0; i < B; i++) slices.push({ offset: i * 4, elts: 4, leafIndex: start + i });
+          for (const i of Array(B).keys()) slices.push({ offset: i * 4, elts: 4, leafIndex: start + i });
           if (ct.length > B * 4) slices.push({ offset: B * 4, elts: ct.length - B * 4, leafIndex: null });
         }
         const disclosure = verifyDisclosure(ct, bn(l.args.disclosureHash), B, l.txHash, start);

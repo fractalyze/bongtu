@@ -55,12 +55,13 @@ export async function proveViaService(baseUrl: string, request: ProvingRequest):
     throw new Error("The prover service rejected this sign-in. Sign in again.");
   }
   if (!res.ok) throw new Error(`prover service ${res.status}: ${text.slice(0, 400)}`);
-  let cd: Calldata;
-  try {
-    cd = JSON.parse(text) as Calldata;
-  } catch {
-    throw new Error(`prover service returned non-JSON: ${text.slice(0, 200)}`);
-  }
+  const cd: Calldata = (() => {
+    try {
+      return JSON.parse(text) as Calldata;
+    } catch {
+      throw new Error(`prover service returned non-JSON: ${text.slice(0, 200)}`);
+    }
+  })();
   if (!cd.a || !cd.b || !cd.c || !cd.pub) throw new Error("prover service response missing a/b/c/pub");
   if (cd.pub.length !== expected) {
     throw new Error(`${request.circuit} calldata must have ${expected} public signals, got ${cd.pub.length}`);

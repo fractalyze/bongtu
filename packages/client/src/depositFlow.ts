@@ -135,10 +135,9 @@ export async function runDeposit(
   // key must never be preceded by an approve the user paid gas for.
   const identity = await io.keyCache.unlock(ctx.connection, ctx.sessionPubkey);
   if (locked) onStage("approve");
-  let approved = false;
-  if (allowance < V) {
+  const approved = allowance < V;
+  if (approved) {
     await io.approveToken(ctx.connection, ctx.token, ctx.pool, V);
-    approved = true;
   }
 
   try {

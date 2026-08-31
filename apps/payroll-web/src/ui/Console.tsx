@@ -173,17 +173,18 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
       // Trade the key for a view token while it is in hand, so background
       // balance reads never need it again. An indexer without /auth just means
       // key-signed reads (the read paths below handle both).
-      let viewToken: string | null = null;
-      try {
-        const view = await obtainViewToken(
-          INDEXER_URL,
-          identity.compressedPubkey,
-          identity.keypair.formattedPrivateKey,
-        );
-        viewToken = view.token;
-      } catch {
-        viewToken = null;
-      }
+      const viewToken: string | null = await (async () => {
+        try {
+          const view = await obtainViewToken(
+            INDEXER_URL,
+            identity.compressedPubkey,
+            identity.keypair.formattedPrivateKey,
+          );
+          return view.token;
+        } catch {
+          return null;
+        }
+      })();
       setWallet({ connection, pubkey: identity.compressedPubkey, viewToken });
     } catch (e) {
       // A declined signature is the most common outcome here; the toast keeps
@@ -236,13 +237,13 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
   const busy = pay.phase === "running" || deposit?.stage != null || deposit?.mint?.pending === true;
   useEffect(() => {
     if (!wallet) return;
-    let inflight = false;
+    const inflight = { now: false };
     const id = setInterval(() => {
-      if (document.visibilityState !== "visible" || inflight || busy) return;
+      if (document.visibilityState !== "visible" || inflight.now || busy) return;
       if (!wallet.viewToken && !keyCache.isUnlocked()) return;
-      inflight = true;
+      inflight.now = true;
       void refresh().finally(() => {
-        inflight = false;
+        inflight.now = false;
       });
     }, AUTO_REFRESH_MS);
     return () => clearInterval(id);

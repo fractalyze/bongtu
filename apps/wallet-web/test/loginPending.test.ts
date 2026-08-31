@@ -17,13 +17,12 @@ function drive(
   start: LoginPendingState,
   envs: { modalOpen: boolean; connected: boolean }[],
 ): { state: LoginPendingState; effects: string[] } {
-  let state = start;
   const effects: string[] = [];
-  for (const env of envs) {
-    const r = loginPendingStep(state, env);
-    state = r.state;
+  const state = envs.reduce((s, env) => {
+    const r = loginPendingStep(s, env);
     if (r.effect !== "none") effects.push(r.effect);
-  }
+    return r.state;
+  }, start);
   return { state, effects };
 }
 

@@ -82,34 +82,37 @@ export async function runLogin(ctx: LoginContext, deps: LoginIo): Promise<LoginR
   });
   assertKeyUnchanged(identity.compressedPubkey, known);
 
-  let session: StoredSession;
-  let tokenless = false;
-  try {
-    const view = await io.obtainViewToken(
-      ctx.indexerUrl,
-      identity.compressedPubkey,
-      identity.keypair.formattedPrivateKey,
-    );
-    session = {
-      eoaAddress: connection.address,
-      compressedPubkey: identity.compressedPubkey,
-      token: view.token,
-      exp: view.exp,
-      transport: connection.transport,
-    };
-    io.saveSession(session); // address + pubkey + view token; never key material
-  } catch {
-    // An indexer without /auth (older build) or an unreachable one: log in for this
-    // page only. loadSession drops tokenless records, so this is never persisted.
-    session = {
-      eoaAddress: connection.address,
-      compressedPubkey: identity.compressedPubkey,
-      token: "",
-      exp: 0,
-      transport: connection.transport,
-    };
-    tokenless = true;
-  }
+  const { session, tokenless } = await (async (): Promise<{ session: StoredSession; tokenless: boolean }> => {
+    try {
+      const view = await io.obtainViewToken(
+        ctx.indexerUrl,
+        identity.compressedPubkey,
+        identity.keypair.formattedPrivateKey,
+      );
+      const authed: StoredSession = {
+        eoaAddress: connection.address,
+        compressedPubkey: identity.compressedPubkey,
+        token: view.token,
+        exp: view.exp,
+        transport: connection.transport,
+      };
+      io.saveSession(authed); // address + pubkey + view token; never key material
+      return { session: authed, tokenless: false };
+    } catch {
+      // An indexer without /auth (older build) or an unreachable one: log in for this
+      // page only. loadSession drops tokenless records, so this is never persisted.
+      return {
+        session: {
+          eoaAddress: connection.address,
+          compressedPubkey: identity.compressedPubkey,
+          token: "",
+          exp: 0,
+          transport: connection.transport,
+        },
+        tokenless: true,
+      };
+    }
+  })();
 
   // Recorded even for a tokenless login: the binding is about which key the ACCOUNT
   // derives, which the indexer has no say in.

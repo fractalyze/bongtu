@@ -119,12 +119,11 @@ export function parseScalar(s: string): bigint {
 export function resolveConfig(): ChainConfig {
   const rpc = process.env.RPC || process.env.LIVE_RPC || process.env.E2E_RPC || "http://127.0.0.1:8545";
   const startBlock = process.env.START_BLOCK ? Number(process.env.START_BLOCK) : 0;
-  let pool = process.env.POOL || "";
-  if (!pool) {
+  const pool: string = process.env.POOL || (() => {
     const chainId = process.env.CHAIN_ID || String(CHAIN_ID);
     const addrPath = join(REPO_ROOT, "deploy", `addresses.${chainId}.json`);
-    pool = JSON.parse(readFileSync(addrPath, "utf8")).pool;
-  }
+    return JSON.parse(readFileSync(addrPath, "utf8")).pool;
+  })();
   if (!pool) throw new Error("no pool address (set POOL env or deploy/addresses.<chainId>.json)");
   // Arbiter mode is gated purely on AUTHORITY_KEY presence (the arbiter private key).
   const authorityKey = process.env.AUTHORITY_KEY ? parseScalar(process.env.AUTHORITY_KEY) : null;
@@ -151,7 +150,7 @@ export function parseKemKey(s: string): Uint8Array {
     );
   }
   const out = new Uint8Array(h.length / 2);
-  for (let i = 0; i < out.length; i++) out[i] = parseInt(h.slice(2 * i, 2 * i + 2), 16);
+  for (const i of Array(out.length).keys()) out[i] = parseInt(h.slice(2 * i, 2 * i + 2), 16);
   return out;
 }
 

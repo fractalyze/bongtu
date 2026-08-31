@@ -71,12 +71,14 @@ export async function discoverStealthFunds(
   const mine: Omit<StealthFund, "balance">[] = [];
   for (const a of await deps.fetchMine()) {
     if (!a.ephemeralPub || ZERO32.test(a.ephemeralPub)) continue;
-    let derived: { address: string };
-    try {
-      derived = scanStealthAnnouncement(keys.viewPriv, keys.meta.spendPub, a.ephemeralPub);
-    } catch {
-      continue; // malformed R — someone else's scheme or garbage calldata
-    }
+    const derived = ((): { address: string } | null => {
+      try {
+        return scanStealthAnnouncement(keys.viewPriv, keys.meta.spendPub, a.ephemeralPub);
+      } catch {
+        return null; // malformed R — someone else's scheme or garbage calldata
+      }
+    })();
+    if (derived === null) continue;
     if (derived.address.toLowerCase() !== a.recipient.toLowerCase()) continue;
     mine.push({
       address: derived.address,

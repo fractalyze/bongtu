@@ -15,16 +15,16 @@ export function ReceivePanel({ pubkey }: { pubkey: string }): ReactNode {
 
   useEffect(() => {
     if (!pubkey) return;
-    let alive = true;
+    const alive = { current: true };
     void QRCode.toDataURL(pubkey, { margin: 1, width: 240, color: { dark: "#111827", light: "#ffffff" } })
       .then((url) => {
-        if (alive) setQr(url);
+        if (alive.current) setQr(url);
       })
       .catch(() => {
-        if (alive) setQr("");
+        if (alive.current) setQr("");
       });
     return () => {
-      alive = false;
+      alive.current = false;
     };
   }, [pubkey]);
 

@@ -99,16 +99,15 @@ test("paging by cursor walks the feed exactly once — no gaps, no repeats", asy
   const ledger = await bootedLedger();
   const limit = 20;
   const walked: number[] = [];
-  let before: number | undefined;
-  let pages = 0;
-  for (;;) {
+  const walk = (before: number | undefined, pagesSoFar: number): number => {
     const page = ledger.historyOf(OWNER.publicKey[0], OWNER.publicKey[1], { limit, before });
-    pages++;
+    const pages = pagesSoFar + 1;
     walked.push(...seqs(page));
-    if (page.length < limit) break;
-    before = page[page.length - 1].seq;
+    if (page.length < limit) return pages;
     assert.ok(pages < 100, "cursor did not advance — the walk is not terminating");
-  }
+    return walk(page[page.length - 1].seq, pages);
+  };
+  const pages = walk(undefined, 0);
   assert.equal(pages, Math.ceil(FEED_SIZE / limit));
   assert.deepEqual(
     walked,

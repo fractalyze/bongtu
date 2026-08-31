@@ -65,10 +65,9 @@ export function ecdhSharedSecret(privScalar: FieldInput, pubPoint: PointInput): 
 }
 
 function addMod(a: FieldInput, b: FieldInput): bigint {
-  let r = ((BigInt(a) + F) % F) + BigInt(b);
-  r %= F;
-  while (r < 0n) r += F;
-  return r;
+  const an = ((BigInt(a) % F) + F) % F;
+  const bn = ((BigInt(b) % F) + F) % F;
+  return (an + bn) % F;
 }
 
 // Poseidon-sponge symmetric encryption — byte-compatible with encrypt.circom's
@@ -77,34 +76,33 @@ export function poseidonEncrypt(msg: FieldInput[], key: PointInput, nonce: Field
   const message = msg.map((m) => BigInt(m));
   while (message.length % 3 > 0) message.push(0n);
 
-  let state: bigint[] = [0n, BigInt(key[0]), BigInt(key[1]), BigInt(nonce) + BigInt(msg.length) * TWO128];
   const ciphertext: bigint[] = [];
   const n = Math.floor(message.length / 3);
-  for (let i = 0; i < n; i += 1) {
-    state = poseidonPerm(state, 4);
+  const finalState = Array.from({ length: n }).reduce<bigint[]>((prev, _, i) => {
+    const state = poseidonPerm(prev, 4);
     state[1] = addMod(message[i * 3], state[1]);
     state[2] = addMod(message[i * 3 + 1], state[2]);
     state[3] = addMod(message[i * 3 + 2], state[3]);
     ciphertext.push(state[1], state[2], state[3]);
-  }
-  state = poseidonPerm(state, 4);
-  ciphertext.push(state[1]);
+    return state;
+  }, [0n, BigInt(key[0]), BigInt(key[1]), BigInt(nonce) + BigInt(msg.length) * TWO128]);
+  ciphertext.push(poseidonPerm(finalState, 4)[1]);
   return ciphertext;
 }
 
 export function poseidonDecrypt(ciphertext: FieldInput[], key: PointInput, nonce: FieldInput, length: number): bigint[] {
-  let state: bigint[] = [0n, BigInt(key[0]), BigInt(key[1]), BigInt(nonce) + BigInt(length) * TWO128];
   const message: bigint[] = [];
   const n = Math.floor(ciphertext.length / 3);
-  for (let i = 0; i < n; i += 1) {
-    state = poseidonPerm(state, 4);
+  Array.from({ length: n }).reduce<bigint[]>((prev, _, i) => {
+    const state = poseidonPerm(prev, 4);
     message.push(addMod(ciphertext[i * 3], -state[1]));
     message.push(addMod(ciphertext[i * 3 + 1], -state[2]));
     message.push(addMod(ciphertext[i * 3 + 2], -state[3]));
     state[1] = BigInt(ciphertext[i * 3]);
     state[2] = BigInt(ciphertext[i * 3 + 1]);
     state[3] = BigInt(ciphertext[i * 3 + 2]);
-  }
+    return state;
+  }, [0n, BigInt(key[0]), BigInt(key[1]), BigInt(nonce) + BigInt(length) * TWO128]);
   return message.slice(0, length);
 }
 

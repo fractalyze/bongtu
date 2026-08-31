@@ -69,12 +69,17 @@ export const nameRegister: Route = {
     if (!name) {
       return bad({ error: "invalid name: 3-32 chars, lowercase a-z 0-9, interior hyphens" });
     }
-    let ownerPub;
-    try {
-      ownerPub = unpackPubkey(b.owner);
-    } catch (e) {
-      return bad({ error: `malformed compressed owner pubkey: ${(e as Error).message}` });
+    const unpacked = (() => {
+      try {
+        return { ownerPub: unpackPubkey(b.owner) };
+      } catch (e) {
+        return { err: (e as Error).message };
+      }
+    })();
+    if ("err" in unpacked) {
+      return bad({ error: `malformed compressed owner pubkey: ${unpacked.err}` });
     }
+    const ownerPub = unpacked.ownerPub;
     try {
       validateStealthMetaAddress({ viewPub: b.viewPub, spendPub: b.spendPub });
     } catch (e) {
@@ -84,13 +89,14 @@ export const nameRegister: Route = {
     if (!Number.isInteger(b.ts) || Math.abs(now - b.ts) > WINDOW_SECONDS) {
       return { status: 401, body: { error: `stale ts (|now - ts| must be <= ${WINDOW_SECONDS}s)` } };
     }
-    let sigOk = false;
-    try {
-      const msg = nameAuthMessage(ownerPub, nameBindingField(name, b.viewPub, b.spendPub), b.ts);
-      sigOk = verifyNotesAuth(ownerPub, msg, parseSignature(b.sig));
-    } catch {
-      sigOk = false; // malformed signature encoding fails like a wrong one
-    }
+    const sigOk = ((): boolean => {
+      try {
+        const msg = nameAuthMessage(ownerPub, nameBindingField(name, b.viewPub, b.spendPub), b.ts);
+        return verifyNotesAuth(ownerPub, msg, parseSignature(b.sig));
+      } catch {
+        return false; // malformed signature encoding fails like a wrong one
+      }
+    })();
     if (!sigOk) {
       return { status: 401, body: { error: "signature does not verify for this registration" } };
     }

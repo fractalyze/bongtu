@@ -200,12 +200,13 @@ export function selectInputNotes(
   amount: string,
   maxArity = 2,
 ): WalletInputNote[] {
-  let amt: bigint;
-  try {
-    amt = BigInt(amount);
-  } catch {
-    throw new Error(`amount must be a positive integer, got ${JSON.stringify(amount)}`);
-  }
+  const amt = ((): bigint => {
+    try {
+      return BigInt(amount);
+    } catch {
+      throw new Error(`amount must be a positive integer, got ${JSON.stringify(amount)}`);
+    }
+  })();
   if (amt <= 0n) throw new Error(`amount must be a positive integer, got ${amt}`);
 
   const unspent = unspentLargestFirst(notes);
@@ -214,12 +215,11 @@ export function selectInputNotes(
   }
 
   const chosen: WalletInputNote[] = [];
-  let covered = 0n;
-  for (const n of unspent) {
-    if (covered >= amt) break;
+  const covered = unspent.reduce<bigint>((sum, n) => {
+    if (sum >= amt) return sum;
     chosen.push(pickNote(n));
-    covered += BigInt(n.value);
-  }
+    return sum + BigInt(n.value);
+  }, 0n);
   if (covered >= amt && chosen.length <= maxArity) return chosen;
 
   const total = unspent.reduce((s, n) => s + BigInt(n.value), 0n);
@@ -340,11 +340,10 @@ export function planSpendChain(
 ): SpendLeg[] {
   const arity = terminalArity(kind);
   const legs: SpendLeg[] = [];
-  let working = unspentLargestFirst(notes);
 
   // Bounded by construction: every pass either returns or replaces ≥2 notes with 1,
   // so the working set strictly shrinks until one note holds the whole balance.
-  for (;;) {
+  const plan = (working: SelectableNote[]): SpendLeg[] => {
     try {
       // selectInputNotes owns the amount validation and the `insufficient` verdict,
       // and it runs BEFORE any merge is planned — a wallet that cannot afford the
@@ -363,11 +362,12 @@ export function planSpendChain(
     legs.push({ leg: "merge", inputs: fold.map(pickNote), mergedValue });
     // The folded notes leave the working set and the note they will become takes
     // their place, so the next pass plans against what the wallet will actually hold.
-    working = unspentLargestFirst([
+    return plan(unspentLargestFirst([
       { value: mergedValue, salt: "", leafIndex: pendingLeaf(legs.length - 1), spent: false },
       ...working.slice(TRANSFER10_ARITY),
-    ]);
-  }
+    ]));
+  };
+  return plan(unspentLargestFirst(notes));
 }
 
 /** A merge leg on its own — what planDisburseChain emits, since a disburse chain's
@@ -404,11 +404,10 @@ export function planDisburseChain(
   amount: string,
 ): DisburseChainPlan {
   const merges: MergeLeg[] = [];
-  let working = unspentLargestFirst(notes);
 
   // Bounded by construction: every pass either returns or replaces ≥2 notes with
   // 1, so the working set strictly shrinks until one note holds the whole balance.
-  for (;;) {
+  const plan = (working: SelectableNote[]): DisburseChainPlan => {
     try {
       // selectInputNotes at arity 1 owns the amount validation and the
       // `insufficient` verdict — a wallet that cannot afford the payroll is told
@@ -422,11 +421,12 @@ export function planDisburseChain(
     const fold = working.slice(0, TRANSFER10_ARITY);
     const mergedValue = totalValue(fold);
     merges.push({ leg: "merge", inputs: fold.map(pickNote), mergedValue });
-    working = unspentLargestFirst([
+    return plan(unspentLargestFirst([
       { value: mergedValue, salt: "", leafIndex: pendingLeaf(merges.length - 1), spent: false },
       ...working.slice(TRANSFER10_ARITY),
-    ]);
-  }
+    ]));
+  };
+  return plan(unspentLargestFirst(notes));
 }
 
 /** What the Send/Withdraw form shows while the user types. */
@@ -477,8 +477,7 @@ export type RandField = () => string;
 export function randField(): string {
   const b = new Uint8Array(31); // < 2^248, safely under the field prime
   crypto.getRandomValues(b);
-  let x = 0n;
-  for (const byte of b) x = (x << 8n) | BigInt(byte);
+  const x = b.reduce<bigint>((acc, byte) => (acc << 8n) | BigInt(byte), 0n);
   return (x === 0n ? 1n : x).toString();
 }
 
@@ -600,33 +599,33 @@ function assembleInputs(
   const enabled: bigint[] = [];
   const pathElements: bigint[][] = [];
   const leafIndices: bigint[] = [];
-  let inputTotal = 0n;
-  let membershipOk = true;
-
-  inputs.forEach((note, i) => {
-    const v = BigInt(note.value);
-    const s = BigInt(note.salt);
-    if (v < 0n) throw new Error(`input #${i + 1} value must be non-negative, got ${v}`);
-    const c = commitment(v, s, self.publicKey);
-    const nf = nullifier(v, s, self.formattedPrivateKey);
-    const path = memberships[i].pathElements.map((x) => BigInt(x));
-    if (foldToRoot(c, path, memberships[i].leafIndex) !== root) membershipOk = false;
-    nullifiers.push(nf);
-    inputCommitments.push(c);
-    inputValues.push(v);
-    inputSalts.push(s);
-    enabled.push(1n);
-    pathElements.push(path);
-    leafIndices.push(BigInt(memberships[i].leafIndex));
-    inputTotal += v;
-  });
+  const { inputTotal, membershipOk } = inputs.reduce(
+    (acc, note, i) => {
+      const v = BigInt(note.value);
+      const s = BigInt(note.salt);
+      if (v < 0n) throw new Error(`input #${i + 1} value must be non-negative, got ${v}`);
+      const c = commitment(v, s, self.publicKey);
+      const nf = nullifier(v, s, self.formattedPrivateKey);
+      const path = memberships[i].pathElements.map((x) => BigInt(x));
+      const pathOk = foldToRoot(c, path, memberships[i].leafIndex) === root;
+      nullifiers.push(nf);
+      inputCommitments.push(c);
+      inputValues.push(v);
+      inputSalts.push(s);
+      enabled.push(1n);
+      pathElements.push(path);
+      leafIndices.push(BigInt(memberships[i].leafIndex));
+      return { inputTotal: acc.inputTotal + v, membershipOk: acc.membershipOk && pathOk };
+    },
+    { inputTotal: 0n, membershipOk: true },
+  );
 
   // Pad the unused slots with value-0 notes owned by the wallet: nullifier 0,
   // enabled 0, zeros path (membership disabled; the value belt forces value 0 -> no
   // mint), each on its OWN salt so no two pads share a commitment. This is the
   // convention the committed circuits/fixtures/inputs/transfer10x2_merge.json (and
   // transfer10.json) fixtures carry.
-  for (let i = 0; i < padCount; i++) {
+  for (const i of Array(padCount).keys()) {
     const s = BigInt(padSalts[i]);
     nullifiers.push(0n);
     inputCommitments.push(commitment(0n, s, self.publicKey));

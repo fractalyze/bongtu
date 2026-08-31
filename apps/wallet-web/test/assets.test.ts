@@ -43,11 +43,10 @@ class FakeCache implements CacheLike {
 class FakeCacheStorage implements CacheStorageLike {
   readonly caches = new Map<string, FakeCache>();
   async open(cacheName: string): Promise<CacheLike> {
-    let c = this.caches.get(cacheName);
-    if (!c) {
-      c = new FakeCache();
-      this.caches.set(cacheName, c);
-    }
+    const existing = this.caches.get(cacheName);
+    if (existing) return existing;
+    const c = new FakeCache();
+    this.caches.set(cacheName, c);
     return c;
   }
   async keys(): Promise<string[]> {
@@ -143,17 +142,17 @@ test("warm prefetch serves from cache with no network and no download announceme
 
   // second (warm) run must not touch the network nor announce a download
   const downloads: string[] = [];
-  let calls = 0;
+  const calls = { n: 0 };
   const { wasm, zkey } = await prefetchCircuitAssets("withdraw", "/circuits", "88542b90", {
     cacheStorage: cs,
     fetchFn: async (url: string) => {
-      calls++;
+      calls.n++;
       return bytesResponse(url.endsWith(".zkey") ? 32 : 8);
     },
     onDownloadStart: (u) => downloads.push(u),
   });
 
-  assert.equal(calls, 0, "warm cache must not fetch");
+  assert.equal(calls.n, 0, "warm cache must not fetch");
   assert.deepEqual(downloads, [], "warm cache must not announce a download");
   assert.equal(wasm.byteLength, 8);
   assert.equal(zkey.byteLength, 32);
@@ -182,17 +181,17 @@ test("cold prefetch of the deposit circuit downloads deposit.wasm + deposit.zkey
   assert.deepEqual(downloads.sort(), ["/circuits/deposit.wasm", "/circuits/deposit.zkey"]);
 
   // warm re-run of deposit must not touch the network nor announce a download.
-  let calls = 0;
+  const calls = { n: 0 };
   const warmDownloads: string[] = [];
   await prefetchCircuitAssets("deposit", "/circuits", "88542b90", {
     cacheStorage: cs,
     fetchFn: async (url: string) => {
-      calls++;
+      calls.n++;
       return bytesResponse(url.endsWith(".zkey") ? 32 : 8);
     },
     onDownloadStart: (u) => warmDownloads.push(u),
   });
-  assert.equal(calls, 0, "warm deposit cache must not fetch");
+  assert.equal(calls.n, 0, "warm deposit cache must not fetch");
   assert.deepEqual(warmDownloads, [], "warm deposit cache must not announce a download");
 });
 
@@ -215,13 +214,13 @@ test("cold prefetch streams progress (received grows, total = Content-Length); w
   // A 3-chunk streamed body with an honest Content-Length — the shape a static
   // server serves the ~28 MB zkey with; progress must grow per chunk up to it.
   const streamed = (n: number, chunk: number): Response => {
-    let sent = 0;
+    const sent = { n: 0 };
     const body = new ReadableStream<Uint8Array>({
       pull(c) {
-        if (sent >= n) return c.close();
-        const size = Math.min(chunk, n - sent);
+        if (sent.n >= n) return c.close();
+        const size = Math.min(chunk, n - sent.n);
         c.enqueue(new Uint8Array(size).fill(7));
-        sent += size;
+        sent.n += size;
       },
     });
     return new Response(body, { headers: { "content-length": String(n) } });
@@ -286,9 +285,9 @@ test("a QuotaExceeded put falls back to no-cache: bytes still returned, next run
     }
   }
   const cs = new QuotaCacheStorage();
-  let fetches = 0;
+  const fetches = { n: 0 };
   const fetchFn = async (): Promise<Response> => {
-    fetches++;
+    fetches.n++;
     return bytesResponse(4);
   };
   const { wasm, zkey } = await prefetchCircuitAssets("deposit", "/circuits", "88542b90", {
@@ -297,10 +296,10 @@ test("a QuotaExceeded put falls back to no-cache: bytes still returned, next run
   });
   assert.equal(wasm.byteLength, 4, "the download still succeeds when the cache write fails");
   assert.equal(zkey.byteLength, 4);
-  assert.equal(fetches, 2, "both assets were fetched despite the failed cache writes");
+  assert.equal(fetches.n, 2, "both assets were fetched despite the failed cache writes");
   // the un-cacheable state just re-downloads (banner returns) — never throws.
   await prefetchCircuitAssets("deposit", "/circuits", "88542b90", { cacheStorage: cs, fetchFn });
-  assert.equal(fetches, 4, "no cache means the next prefetch re-downloads");
+  assert.equal(fetches.n, 4, "no cache means the next prefetch re-downloads");
 });
 
 test("a broken Cache Storage (open throws) degrades to plain downloads", async () => {
@@ -313,26 +312,26 @@ test("a broken Cache Storage (open throws) degrades to plain downloads", async (
     },
     delete: async () => false,
   };
-  let fetches = 0;
+  const fetches = { n: 0 };
   const { wasm } = await prefetchCircuitAssets("deposit", "/circuits", "88542b90", {
     cacheStorage: cs,
     fetchFn: async () => {
-      fetches++;
+      fetches.n++;
       return bytesResponse(6);
     },
   });
   assert.equal(wasm.byteLength, 6, "proving assets still arrive with no cache at all");
-  assert.equal(fetches, 2);
+  assert.equal(fetches.n, 2);
 });
 
 // --- streaming order + stall watchdog (the 95 MB zkey hang, observed live) -------
 
 function chunkStream(chunks: Uint8Array[], opts: { hangAfter?: number } = {}): Response {
-  let i = 0;
+  const cursor = { i: 0 };
   const body = new ReadableStream<Uint8Array>({
     pull(controller) {
-      if (opts.hangAfter !== undefined && i >= opts.hangAfter) return new Promise(() => {});
-      if (i < chunks.length) controller.enqueue(chunks[i++]);
+      if (opts.hangAfter !== undefined && cursor.i >= opts.hangAfter) return new Promise(() => {});
+      if (cursor.i < chunks.length) controller.enqueue(chunks[cursor.i++]);
       else controller.close();
       return undefined;
     },
@@ -377,21 +376,21 @@ test("the cache write happens AFTER the stream is fully read, with the whole bod
 test("a stalled stream retries once with a fresh fetch and succeeds", async () => {
   const { cache } = memCache();
   const storage: CacheStorageLike = { open: async () => cache, keys: async () => [], delete: async () => true };
-  let attempts = 0;
+  const attempts = { n: 0 };
   const assets = await prefetchCircuitAssets("deposit", "/c", "vtest2", {
     cacheStorage: storage,
     stallMs: 30,
     fetchFn: async () => {
-      attempts++;
+      attempts.n++;
       // first attempt per asset: one chunk then silence; retry: completes
-      return attempts <= 2
+      return attempts.n <= 2
         ? chunkStream([new Uint8Array(10)], { hangAfter: 1 })
         : chunkStream([new Uint8Array(10), new Uint8Array(10)]);
     },
     onProgress: () => {},
   });
   assert.equal(assets.wasm.byteLength + assets.zkey.byteLength >= 20, true);
-  assert.ok(attempts >= 3, `stalled attempts were retried (attempts=${attempts})`);
+  assert.ok(attempts.n >= 3, `stalled attempts were retried (attempts=${attempts.n})`);
 });
 
 test("a stream that stalls twice throws instead of hanging forever", async () => {

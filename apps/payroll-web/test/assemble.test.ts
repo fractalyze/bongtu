@@ -32,10 +32,10 @@ import { DEFAULTS, H, B } from "../src/config.js";
 // salts/pads/shuffle from the CSPRNG. Two `seededEntropy(s)` instances with the
 // same seed emit the identical stream. Production uses `cryptoEntropy` (the CSPRNG).
 function seededEntropy(seed = 1n): DisburseEntropy {
-  let s = seed & ((1n << 128n) - 1n);
+  const lcg = { s: seed & ((1n << 128n) - 1n) };
   const next = (): bigint => {
-    s = (s * 6364136223846793005n + 1442695040888963407n) & ((1n << 128n) - 1n);
-    return s;
+    lcg.s = (lcg.s * 6364136223846793005n + 1442695040888963407n) & ((1n << 128n) - 1n);
+    return lcg.s;
   };
   return {
     randField: () => {

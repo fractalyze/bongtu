@@ -48,10 +48,10 @@ import { parseKemKey } from "../src/chain.js";
 import { startApi } from "../src/api/router.js";
 import { runScenario } from "./scenario.js";
 
-let failures = 0;
+const failures = { count: 0 };
 function ok(cond: unknown, msg: string): void {
   const pass = !!cond;
-  if (!pass) failures++;
+  if (!pass) failures.count++;
   console.log(`   ${pass ? "PASS" : "FAIL"}  ${msg}`);
   if (!pass) throw new Error(`assertion failed: ${msg}`);
 }
@@ -83,11 +83,10 @@ async function freshDatabase(name: string): Promise<string> {
 }
 
 function foldToRoot(leaf: bigint, siblings: bigint[], pathIndices: number[]): bigint {
-  let cur = leaf;
-  for (let j = 0; j < siblings.length; j++) {
-    cur = pathIndices[j] === 1 ? poseidon2(siblings[j], cur) : poseidon2(cur, siblings[j]);
-  }
-  return cur;
+  return siblings.reduce<bigint>(
+    (cur, sibling, j) => (pathIndices[j] === 1 ? poseidon2(sibling, cur) : poseidon2(cur, sibling)),
+    leaf,
+  );
 }
 
 async function get(base: string, path: string): Promise<{ status: number; body: unknown }> {
@@ -429,7 +428,7 @@ async function main(): Promise<void> {
       && honest.ecdhPublicKey[1] === sc.disburseHonest.ecdhPublicKey[1], "feed ecdhPublicKey == on-chain ephemeral pub");
     ok(honest.encryptionNonce === sc.disburseHonest.nonce, "feed encryptionNonce == on-chain nonce");
     ok(honest.slices.length === sc.B + 1, `disburse has ${sc.B} receiver slices + 1 authority tail`);
-    for (let i = 0; i < sc.B; i++) {
+    for (const i of Array(sc.B).keys()) {
       ok(honest.slices[i].leafIndex === sc.disburseHonest.startLeafIndex + i,
         `slice ${i} leafIndex annotation == ${sc.disburseHonest.startLeafIndex + i}`);
     }
@@ -439,7 +438,7 @@ async function main(): Promise<void> {
     const nonce = BigInt(honest.encryptionNonce);
     const ephemeralPub: [bigint, bigint] = [BigInt(honest.ecdhPublicKey[0]), BigInt(honest.ecdhPublicKey[1])];
     const recovered: bigint[] = [];
-    for (let i = 0; i < sc.B; i++) {
+    for (const i of Array(sc.B).keys()) {
       const s = honest.slices[i];
       const ct = (honest.ciphertext as string[]).slice(s.offset, s.offset + s.elts).map(BigInt);
       const priv = BigInt(sc.disburseHonest.recipientPrivs[i]);
@@ -507,8 +506,8 @@ async function main(): Promise<void> {
   // with spent status derived from envelopes ALONE (no user key, no nullifier link).
   await runArbiter(sc);
 
-  console.log(`\n${failures === 0 ? "INDEXER TEST PASS — mirror==contract, /path folds, feed trial-decrypts, disclosureHash pass + tamper alarm, arbiter note-ledger spent-transition + batch paths + /nullifiers" : `INDEXER TEST FAIL — ${failures} assertion(s)`}`);
-  process.exit(failures === 0 ? 0 : 1);
+  console.log(`\n${failures.count === 0 ? "INDEXER TEST PASS — mirror==contract, /path folds, feed trial-decrypts, disclosureHash pass + tamper alarm, arbiter note-ledger spent-transition + batch paths + /nullifiers" : `INDEXER TEST FAIL — ${failures.count} assertion(s)`}`);
+  process.exit(failures.count === 0 ? 0 : 1);
 }
 
 main().catch((e) => {

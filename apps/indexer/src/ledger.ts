@@ -172,8 +172,9 @@ export function deriveOp(
   treeH: number,
   op: OpEnvelope,
 ): DerivedOp {
-  let kemSs: [bigint, bigint] | undefined;
-  if (op.kem) {
+  const kemGate = ((): { kemSs: [bigint, bigint] } | { early: DerivedOp } | null => {
+    const kem = op.kem;
+    if (!kem) return null;
     if (!kemSecret) {
       // The kem boot guard (§7) refuses to serve in exactly this configuration;
       // throwing (not alarming) keeps a misconfigured arbiter from recording a
@@ -185,28 +186,30 @@ export function deriveOp(
     // if the invariant ever slips upstream, alarm-and-withhold like any other
     // bad envelope — a throw here would crashloop ingest on the persisted
     // cursor re-hitting the same op forever.
-    let decapsulated: Uint8Array;
-    try {
-      decapsulated = ml_kem768.decapsulate(op.kem.ciphertext, kemSecret);
-    } catch (e) {
-      return {
-        outputs: [],
-        spent: [],
-        alarms: [{
-          kind: op.kind,
-          txHash: op.txHash,
-          detail: `kem decapsulation failed (${e instanceof Error ? e.message : String(e)}) — envelope withheld`,
-          recomputed: "0",
-          expected: dec(op.kem.binding),
-        }],
-        batchFill: null,
-        history: [],
-      };
-    }
+    const decapsulated = ((): Uint8Array | { early: DerivedOp } => {
+      try {
+        return ml_kem768.decapsulate(kem.ciphertext, kemSecret);
+      } catch (e) {
+        return { early: {
+          outputs: [],
+          spent: [],
+          alarms: [{
+            kind: op.kind,
+            txHash: op.txHash,
+            detail: `kem decapsulation failed (${e instanceof Error ? e.message : String(e)}) — envelope withheld`,
+            recomputed: "0",
+            expected: dec(kem.binding),
+          }],
+          batchFill: null,
+          history: [],
+        } };
+      }
+    })();
+    if (!(decapsulated instanceof Uint8Array)) return decapsulated;
     const limbs = kemSsToLimbs(decapsulated);
     const recomputed = kemBindingOf(limbs);
-    if (recomputed !== op.kem.binding) {
-      return {
+    if (recomputed !== kem.binding) {
+      return { early: {
         outputs: [],
         spent: [],
         alarms: [{
@@ -214,47 +217,49 @@ export function deriveOp(
           txHash: op.txHash,
           detail: "kem binding mismatch — envelope withheld",
           recomputed: dec(recomputed),
-          expected: dec(op.kem.binding),
+          expected: dec(kem.binding),
         }],
         batchFill: null,
         history: [],
-      };
+      } };
     }
-    kemSs = limbs;
-  }
+    return { kemSs: limbs };
+  })();
+  if (kemGate && "early" in kemGate) return kemGate.early;
+  const kemSs = kemGate?.kemSs;
   const env = parseEnvelope(arbiterPriv, op.ecdhPublicKey, op.nonce, op.authorityCt, op.kind, B, kemSs);
   const outputs: DerivedNote[] = [];
   const alarms: EnvelopeAlarm[] = [];
-  let batchFill: { start: number; leaves: bigint[] } | null = null;
-  let disburseCrossChecks = false;
-
-  if (op.kind === "disburse") {
-    // Cross-check: fold the B recovered commitments to a subtree root and compare
-    // to the on-chain subtreeRoot. On match, record the notes and mark the batch
-    // fillable; a mismatch is an ALARM and the batch stays unopened.
-    const start = op.batch!.startLeafIndex;
-    const commits = env.outputs.map((o) => noteCommitment(o.value, o.salt, o.owner));
-    const sub = new ImtTree(treeH, B).computeSubtreeRoot(commits);
-    if (sub !== op.batch!.subtreeRoot) {
-      alarms.push({
-        kind: op.kind,
-        txHash: op.txHash,
-        detail: `disburse batch @${start}: envelope leaves fold != on-chain subtreeRoot`,
-        recomputed: dec(sub),
-        expected: dec(op.batch!.subtreeRoot),
-      });
-    } else {
-      for (let i = 0; i < B; i++) {
+  const { batchFill, disburseCrossChecks } = ((): {
+    batchFill: { start: number; leaves: bigint[] } | null;
+    disburseCrossChecks: boolean;
+  } => {
+    if (op.kind === "disburse") {
+      // Cross-check: fold the B recovered commitments to a subtree root and compare
+      // to the on-chain subtreeRoot. On match, record the notes and mark the batch
+      // fillable; a mismatch is an ALARM and the batch stays unopened.
+      const start = op.batch!.startLeafIndex;
+      const commits = env.outputs.map((o) => noteCommitment(o.value, o.salt, o.owner));
+      const sub = new ImtTree(treeH, B).computeSubtreeRoot(commits);
+      if (sub !== op.batch!.subtreeRoot) {
+        alarms.push({
+          kind: op.kind,
+          txHash: op.txHash,
+          detail: `disburse batch @${start}: envelope leaves fold != on-chain subtreeRoot`,
+          recomputed: dec(sub),
+          expected: dec(op.batch!.subtreeRoot),
+        });
+        return { batchFill: null, disburseCrossChecks: false };
+      }
+      for (const i of Array(B).keys()) {
         const o = env.outputs[i];
         outputs.push({ owner: o.owner, value: o.value, salt: o.salt, leafIndex: start + i, commitment: commits[i] });
       }
-      batchFill = { start, leaves: commits };
-      disburseCrossChecks = true;
+      return { batchFill: { start, leaves: commits }, disburseCrossChecks: true };
     }
-  } else {
     // deposit / transfer / withdraw: each recovered output must reproduce a known
     // on-chain leaf commitment, in order.
-    for (let i = 0; i < op.outputLeaves.length; i++) {
+    for (const i of Array(op.outputLeaves.length).keys()) {
       const o = env.outputs[i];
       const c = noteCommitment(o.value, o.salt, o.owner);
       const known = op.outputLeaves[i];
@@ -270,7 +275,8 @@ export function deriveOp(
       }
       outputs.push({ owner: o.owner, value: o.value, salt: o.salt, leafIndex: known.leafIndex, commitment: c });
     }
-  }
+    return { batchFill: null, disburseCrossChecks: false };
+  })();
 
   // INPUT notes: the consumed note's commitment is recovered from the envelope; the
   // recording adapter marks the matching created note spent (a padded/disabled
@@ -317,13 +323,13 @@ export function deriveHistory(op: OpEnvelope, env: ParsedEnvelope, disburseCross
     case "disburse": {
       if (!disburseCrossChecks) return out;
       const sender = env.inputs[0].owner;
-      let paid = 0n;
-      for (const o of env.outputs) {
+      const paid = env.outputs.reduce<bigint>((acc, o) => {
         if (o.value !== 0n && !sameOwner(o.owner, sender)) {
           out.push({ owner: o.owner, kind: "received", counterparty: sender, amount: o.value });
-          paid += o.value;
+          return acc + o.value;
         }
-      }
+        return acc;
+      }, 0n);
       // The payer's side of the batch: ONE aggregated "sent" (counterparty null —
       // a 255-payee payroll has no single other party, and 255 per-payee rows
       // would bury every other item in the payer's feed). Without this the payer's
@@ -434,9 +440,8 @@ export function pushHistory(historyByOwner: Map<string, LedgerHistoryItem[]>, ow
   const k = ownerKey(owner[0], owner[1]);
   const arr = historyByOwner.get(k) ?? [];
   if (arr.length > 0 && item.seq <= arr[arr.length - 1].seq) {
-    let i = arr.length;
-    while (i > 0 && arr[i - 1].seq > item.seq) i--;
-    arr.splice(i, 0, item);
+    const insertionIndex = (i: number): number => (i > 0 && arr[i - 1].seq > item.seq ? insertionIndex(i - 1) : i);
+    arr.splice(insertionIndex(arr.length), 0, item);
   } else {
     arr.push(item);
   }

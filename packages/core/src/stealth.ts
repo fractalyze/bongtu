@@ -107,19 +107,11 @@ export function stealthKeysFromScalars(
 // 32-byte little-endian field-element encoding — same byte order packPubkey
 // uses, so the digest layout follows the package's one wire convention.
 function le32(x: bigint): Uint8Array {
-  const out = new Uint8Array(32);
-  let v = x;
-  for (let i = 0; i < 32; i++) {
-    out[i] = Number(v & 0xffn);
-    v >>= 8n;
-  }
-  return out;
+  return Uint8Array.from({ length: 32 }, (_, i) => Number((x >> BigInt(8 * i)) & 0xffn));
 }
 
 function bytesToBigIntBE(bytes: Uint8Array): bigint {
-  let v = 0n;
-  for (const b of bytes) v = (v << 8n) | BigInt(b);
-  return v;
+  return bytes.reduce<bigint>((v, b) => (v << 8n) | BigInt(b), 0n);
 }
 
 // Shared tail of derive/scan/recover: shared secret point -> (viewTag, tweak).

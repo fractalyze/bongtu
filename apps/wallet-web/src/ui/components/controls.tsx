@@ -144,21 +144,19 @@ export function AmountInput({
       value={value}
       onChange={(e) => {
         const input = e.target;
-        let raw = input.value;
+        const raw = input.value;
         const sel = input.selectionStart ?? raw.length;
         // Caret bookkeeping in SIGNIFICANT chars (digits + dot): regrouping
         // moves commas around, so the DOM caret index is meaningless after the
         // controlled re-render — re-place it after the same significant count.
-        let significant = raw.slice(0, sel).replace(/[^\d.]/g, "").length;
-        let next = groupAmountInput(raw);
+        const rawSignificant = raw.slice(0, sel).replace(/[^\d.]/g, "").length;
+        const grouped = groupAmountInput(raw);
         // Backspacing a comma deletes only the separator, which regroups back
         // to the SAME string — a visual no-op. Treat it as deleting the digit
         // left of the separator, which is what the keystroke meant.
-        if (next === value && raw.length < value.length && significant > 0) {
-          raw = raw.slice(0, sel - 1) + raw.slice(sel);
-          significant -= 1;
-          next = groupAmountInput(raw);
-        }
+        const commaBackspace = grouped === value && raw.length < value.length && rawSignificant > 0;
+        const significant = commaBackspace ? rawSignificant - 1 : rawSignificant;
+        const next = commaBackspace ? groupAmountInput(raw.slice(0, sel - 1) + raw.slice(sel)) : grouped;
         onValueChange(next);
         requestAnimationFrame(() => {
           const i = amountCaretIndex(next, significant);

@@ -231,12 +231,14 @@ async function main(): Promise<void> {
 
   // ---- helpers against the LIVE indexer ----------------------------------------
   const waitHead = async (wantLeaf: number): Promise<{ root: string; nextLeafIndex: number }> => {
-    let head: { root: string; nextLeafIndex: number } | null = null;
-    for (let i = 0; i < 30; i++) {
-      head = (await (await fetch(`${IDX}/head`)).json()) as { root: string; nextLeafIndex: number };
-      if (head.nextLeafIndex >= wantLeaf) break;
+    const poll = async (triesLeft: number): Promise<{ root: string; nextLeafIndex: number } | null> => {
+      if (triesLeft <= 0) return null;
+      const h = (await (await fetch(`${IDX}/head`)).json()) as { root: string; nextLeafIndex: number };
+      if (h.nextLeafIndex >= wantLeaf) return h;
       await new Promise((r) => setTimeout(r, 3000));
-    }
+      return (await poll(triesLeft - 1)) ?? h;
+    };
+    const head = await poll(30);
     ok(head !== null && head.nextLeafIndex >= wantLeaf, `indexer caught up (nextLeafIndex ${head?.nextLeafIndex} >= ${wantLeaf})`);
     ok(head!.root === (await pool.read("root")).toString(), "indexer /head root == pool.root");
     return head!;
@@ -279,17 +281,19 @@ async function main(): Promise<void> {
   // The merged note is output 0, on this run's payee salt — wait for the arbiter
   // ledger to surface it with its leaf index, exactly as the wallet's chain does.
   step("WAIT: the arbiter ledger surfaces the merged note");
-  let merged: { value: string; salt: string; leafIndex: number } | null = null;
   const wantedC = commitment(BigInt(mergedValue), BigInt(mCrypto.payeeSalt as string), A.keypair.publicKey).toString();
-  for (let i = 0; i < 30; i++) {
+  const findMerged = async (triesLeft: number): Promise<{ value: string; salt: string; leafIndex: number } | null> => {
+    if (triesLeft <= 0) return null;
     const res = await fetch(buildNotesUrl(IDX, A.compressedPubkey, A.keypair.formattedPrivateKey));
     if (res.ok) {
       const ns = (await res.json()) as Array<{ value: string; salt: string; leafIndex: number; commitment: string; spent: boolean }>;
       const hit = ns.find((n) => n.commitment === wantedC && !n.spent);
-      if (hit) { merged = { value: mergedValue, salt: mCrypto.payeeSalt as string, leafIndex: hit.leafIndex }; break; }
+      if (hit) return { value: mergedValue, salt: mCrypto.payeeSalt as string, leafIndex: hit.leafIndex };
     }
     await new Promise((r) => setTimeout(r, 3000));
-  }
+    return findMerged(triesLeft - 1);
+  };
+  const merged = await findMerged(30);
   ok(merged !== null, `merged note (${BigInt(mergedValue) / KKRW} kKRW) indexed with a leaf`);
 
   step("PAYMENT LEG: planSpendChain routes a >2-note spend to transfer10x2");
@@ -314,15 +318,17 @@ async function main(): Promise<void> {
 
   // ---- final verification: B received via the live ledger ----------------------
   step("VERIFY: B's ledger shows the unspent payment note");
-  let bHolds = false;
-  for (let i = 0; i < 30; i++) {
+  const holdsPay = async (triesLeft: number): Promise<boolean> => {
+    if (triesLeft <= 0) return false;
     const res = await fetch(buildNotesUrl(IDX, B.compressedPubkey, B.keypair.formattedPrivateKey));
     if (res.ok) {
       const ns = (await res.json()) as Array<{ value: string; spent: boolean }>;
-      if (ns.some((n) => BigInt(n.value) === pay && !n.spent)) { bHolds = true; break; }
+      if (ns.some((n) => BigInt(n.value) === pay && !n.spent)) return true;
     }
     await new Promise((r) => setTimeout(r, 3000));
-  }
+    return holdsPay(triesLeft - 1);
+  };
+  const bHolds = await holdsPay(30);
   ok(bHolds, `B's ledger shows the unspent ${pay / KKRW} kKRW payment note`);
 
   if (failureCount() > 0) {

@@ -15,7 +15,7 @@ const fmod = (x: bigint): bigint => ((x % P) + P) % P;
 // A y-coordinate that lies on NO curve point: x^2 = (1-y^2)/(a-d*y^2) is a
 // non-residue, so decompression has no root. Found deterministically (no RNG).
 function offCurveY(): bigint {
-  for (let y = 2n; y < 10000n; y++) {
+  for (const y of Array.from({ length: 9998 }, (_, j) => BigInt(j + 2))) {
     const y2 = fmod(y * y);
     const x2 = fmod(fmod(1n - y2) * modInv(fmod(A - fmod(D * y2))));
     if (sqrtMod(x2) === null) return y;
@@ -23,23 +23,16 @@ function offCurveY(): bigint {
   throw new Error("no off-curve y found in range");
 }
 function modInv(x: bigint): bigint {
-  let [old_r, r] = [fmod(x), P];
-  let [old_s, s] = [1n, 0n];
-  while (r !== 0n) {
+  const step = (old_r: bigint, r: bigint, old_s: bigint, s: bigint): bigint => {
+    if (r === 0n) return fmod(old_s);
     const q = old_r / r;
-    [old_r, r] = [r, old_r - q * r];
-    [old_s, s] = [s, old_s - q * s];
-  }
-  return fmod(old_s);
+    return step(r, old_r - q * r, s, old_s - q * s);
+  };
+  return step(fmod(x), P, 1n, 0n);
 }
 function leHex(y: bigint): string {
-  let hex = "";
-  let v = y;
-  for (let i = 0; i < 32; i++) {
-    hex += Number(v & 0xffn).toString(16).padStart(2, "0");
-    v >>= 8n;
-  }
-  return "0x" + hex;
+  const bytes = Uint8Array.from({ length: 32 }, (_, i) => Number((y >> BigInt(8 * i)) & 0xffn));
+  return "0x" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 test("sqrtMod: r*r == n for residues; null for a non-residue", () => {
@@ -61,16 +54,16 @@ test("packPubkey emits 0x + 64 hex chars (32-byte LE y + sign bit)", () => {
 });
 
 test("unpackPubkey(packPubkey(p)) === p for many keypairs (both x parities)", () => {
-  let sawEven = false;
-  let sawOdd = false;
-  for (let i = 1; i <= 250; i++) {
+  const points: [bigint, bigint][] = [];
+  for (const i of Array.from({ length: 250 }, (_, j) => j + 1)) {
     const p = mulPointEscalar(Base8, 1000003n * BigInt(i) + 7n) as [bigint, bigint];
     assert.ok(isOnCurve(p));
     const round = unpackPubkey(packPubkey(p));
     assert.deepEqual(round, p, `round-trip failed for keypair ${i}`);
-    if ((p[0] & 1n) === 0n) sawEven = true;
-    else sawOdd = true;
+    points.push(p);
   }
+  const sawEven = points.some((p) => (p[0] & 1n) === 0n);
+  const sawOdd = points.some((p) => (p[0] & 1n) !== 0n);
   // Both sign-bit branches must be exercised or the sign recovery is untested.
   assert.ok(sawEven && sawOdd, "test did not cover both x parities");
 });
@@ -129,16 +122,12 @@ test("decodeAddress rejects bad alphabet, bad length, wrong version — distinct
   const bytes = new Uint8Array(37);
   bytes[0] = 0x62;
   const h = "9c5450e237531487d332ca97ff2670ba9300d87bf9e3466e6392db1801714aa4";
-  for (let i = 0; i < 32; i++) bytes[i + 1] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
+  for (const i of Array(32).keys()) bytes[i + 1] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
   bytes.set(sha256(sha256(bytes.slice(0, 33))).slice(0, 4), 33);
-  let n = 0n;
-  for (const b of bytes) n = (n << 8n) | BigInt(b);
+  const n = bytes.reduce<bigint>((acc, b) => (acc << 8n) | BigInt(b), 0n);
   const ALPH = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-  let foreign = "";
-  while (n > 0n) {
-    foreign = ALPH[Number(n % 58n)] + foreign;
-    n /= 58n;
-  }
+  const digits = (m: bigint): string => (m === 0n ? "" : digits(m / 58n) + ALPH[Number(m % 58n)]);
+  const foreign = digits(n);
   assert.throws(() => decodeAddress(foreign), /unknown address version/);
 });
 

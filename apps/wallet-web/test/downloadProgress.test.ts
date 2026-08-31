@@ -17,9 +17,9 @@ test("asset totals are pinned at registration, before any byte arrives", async (
   });
 
   // A fetch that never yields a first chunk: totals must ALREADY be known.
-  let sawBoth: (() => void) | null = null;
+  const sawBoth: { fire: (() => void) | null } = { fire: null };
   const bothRegistered = new Promise<void>((res) => {
-    sawBoth = res;
+    sawBoth.fire = res;
   });
   const stall = new Promise<Response>(() => {});
   void ensureCircuitAssets("transfer10x2", "/circuits", {
@@ -29,7 +29,7 @@ test("asset totals are pinned at registration, before any byte arrives", async (
       delete: async () => true,
     },
     fetchFn: () => {
-      if (states.length >= 1 && Object.keys(states[states.length - 1]).length === 2) sawBoth?.();
+      if (states.length >= 1 && Object.keys(states[states.length - 1]).length === 2) sawBoth.fire?.();
       return stall;
     },
   });

@@ -93,42 +93,42 @@ test("actionReflected accepts each sufficient signal", () => {
 const instantSleep = async (): Promise<void> => {};
 
 test("pollForAction stops at the first reflecting snapshot", async () => {
-  let calls = 0;
+  const calls = { n: 0 };
   const snapshots: OwnerSnapshot[] = [
     PRE, // still stale
     PRE, // still stale
     snap([note("11", true)], [hist("0xnew", 2), hist("0xold", 1)]), // landed
   ];
-  const load = async (): Promise<OwnerSnapshot> => snapshots[Math.min(calls++, snapshots.length - 1)];
+  const load = async (): Promise<OwnerSnapshot> => snapshots[Math.min(calls.n++, snapshots.length - 1)];
   const res = await pollForAction(load, PRE, "0xnew", { intervalMs: 10, capMs: 1000, sleep: instantSleep });
   assert.equal(res.landed, true);
-  assert.equal(calls, 3, "polling stops the moment the action is reflected");
+  assert.equal(calls.n, 3, "polling stops the moment the action is reflected");
   assert.ok(res.last && res.last.history[0].txHash === "0xnew");
 });
 
 test("pollForAction caps out on a never-reflecting indexer, returning the last snapshot", async () => {
-  let calls = 0;
+  const calls = { n: 0 };
   const load = async (): Promise<OwnerSnapshot> => {
-    calls++;
+    calls.n++;
     return PRE;
   };
   const res = await pollForAction(load, PRE, "0xnew", { intervalMs: 3000, capMs: 30000, sleep: instantSleep });
   assert.equal(res.landed, false);
-  assert.equal(calls, 10, "cap/interval bounds the attempts (30s / 3s = 10)");
+  assert.equal(calls.n, 10, "cap/interval bounds the attempts (30s / 3s = 10)");
   assert.deepEqual(res.last, PRE, "the last good snapshot is still returned");
 });
 
 test("pollForAction skips failing loads and can still land afterwards", async () => {
-  let calls = 0;
+  const calls = { n: 0 };
   const landedSnap: OwnerSnapshot = snap(PRE.notes, [hist("0xnew", 2), hist("0xold", 1)]);
   const load = async (): Promise<OwnerSnapshot> => {
-    calls++;
-    if (calls < 3) throw new Error("indexer hiccup");
+    calls.n++;
+    if (calls.n < 3) throw new Error("indexer hiccup");
     return landedSnap;
   };
   const res = await pollForAction(load, PRE, "0xnew", { intervalMs: 10, capMs: 1000, sleep: instantSleep });
   assert.equal(res.landed, true);
-  assert.equal(calls, 3);
+  assert.equal(calls.n, 3);
 });
 
 test("pollForAction returns last:null when every poll errored", async () => {
@@ -230,14 +230,14 @@ test("snapshotChanged: identical data is quiet; any real change is loud", () => 
 
 test("runRefresh with skipUnchangedFrom: unchanged read clears the banner but never re-applies", async () => {
   const applied: unknown[] = [];
-  let banner: string | null = "stale";
+  const banner: { current: string | null } = { current: "stale" };
   const cur: OwnerSnapshot = { notes: [], history: [], historyNextBefore: null };
   await runRefresh(
     { token: "t", compressedPubkey: "p" },
     async () => ({ notes: [], history: [], historyNextBefore: null }),
     {
       applySnapshot: (s) => applied.push(s),
-      setBanner: (m) => { banner = m; },
+      setBanner: (m) => { banner.current = m; },
       toast: () => { throw new Error("background must not toast"); },
       signOut: () => {},
       setNotice: () => {},
@@ -245,7 +245,7 @@ test("runRefresh with skipUnchangedFrom: unchanged read clears the banner but ne
     { indexerUrl: "http://x", skipUnchangedFrom: cur },
   );
   assert.equal(applied.length, 0, "identical snapshot skipped — paging survives the tick");
-  assert.equal(banner, null, "a successful quiet read still clears the degraded banner");
+  assert.equal(banner.current, null, "a successful quiet read still clears the degraded banner");
 });
 
 // --- an empty account must still receive its balance ------------------------------

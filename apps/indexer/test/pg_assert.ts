@@ -15,10 +15,10 @@ if (!base || !fixturesPath) throw new Error("usage: pg_assert.ts <baseUrl> <fixt
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const sc: any = JSON.parse(readFileSync(fixturesPath, "utf8"));
 
-let failures = 0;
+const failures = { count: 0 };
 function ok(cond: unknown, msg: string): void {
   const pass = !!cond;
-  if (!pass) failures++;
+  if (!pass) failures.count++;
   console.log(`   ${pass ? "PASS" : "FAIL"}  ${msg}`);
 }
 
@@ -72,8 +72,8 @@ async function main(): Promise<void> {
 
   // The line the shell greps + diffs across the fresh and resumed instances.
   console.log(`SUMMARY notesCount=${notesCount} headRoot=${hb.root} nli=${hb.nextLeafIndex} historyLen=${histBody.length}`);
-  if (failures > 0) {
-    console.log(`PG ASSERT FAIL — ${failures} assertion(s)`);
+  if (failures.count > 0) {
+    console.log(`PG ASSERT FAIL — ${failures.count} assertion(s)`);
     process.exit(1);
   }
   console.log("PG ASSERT PASS");

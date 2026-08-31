@@ -40,14 +40,15 @@ export function groupAmountInput(raw: string): string {
  */
 export function amountCaretIndex(formatted: string, significantBefore: number): number {
   if (significantBefore <= 0) return 0;
-  let seen = 0;
-  for (let i = 0; i < formatted.length; i++) {
-    if (formatted[i] !== ",") {
-      seen += 1;
-      if (seen === significantBefore) return i + 1;
-    }
-  }
-  return formatted.length;
+  const { at } = formatted.split("").reduce<{ seen: number; at: number }>(
+    (acc, ch, i) => {
+      if (acc.at !== -1 || ch === ",") return acc;
+      const seen = acc.seen + 1;
+      return { seen, at: seen === significantBefore ? i + 1 : -1 };
+    },
+    { seen: 0, at: -1 },
+  );
+  return at === -1 ? formatted.length : at;
 }
 
 /**
@@ -57,9 +58,9 @@ export function amountCaretIndex(formatted: string, significantBefore: number): 
  * whole amount reads "1,000" and a half one "1,000.5"; 1e11 wei of dust renders "0".
  */
 export function formatKkrw(raw: string | bigint): string {
-  let v = typeof raw === "bigint" ? raw : BigInt(raw);
-  const neg = v < 0n;
-  if (neg) v = -v;
+  const signed = typeof raw === "bigint" ? raw : BigInt(raw);
+  const neg = signed < 0n;
+  const v = neg ? -signed : signed;
   const whole = (v / WEI_PER_KKRW).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   const frac = (v % WEI_PER_KKRW)
     .toString()

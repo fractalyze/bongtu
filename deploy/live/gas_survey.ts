@@ -42,8 +42,7 @@ const CHG = DEP - PAY;
 function randField(): bigint {
   const b = new Uint8Array(31);
   webcrypto.getRandomValues(b);
-  let x = 0n;
-  for (const byte of b) x = (x << 8n) | BigInt(byte);
+  const x = b.reduce<bigint>((acc, byte) => (acc << 8n) | BigInt(byte), 0n);
   return x === 0n ? 1n : x;
 }
 // nonce must fit the Poseidon-sponge nonce bound the circuits enforce (< 2^128)
@@ -63,12 +62,14 @@ async function livePath(idx: number): Promise<bigint[]> {
 
 async function liveHeadCaughtUp(wantLeaf: number): Promise<bigint> {
   const IDXER = process.env.INDEXER_URL || "https://bongtu.fractalyze.io/indexer";
-  for (let i = 0; i < 40; i++) {
+  const attempt = async (triesLeft: number): Promise<bigint> => {
+    if (triesLeft <= 0) throw new Error("indexer did not catch up");
     const h = (await (await fetch(`${IDXER}/head`)).json()) as { root: string; nextLeafIndex: number };
     if (h.nextLeafIndex >= wantLeaf) return BigInt(h.root);
     await new Promise((r) => setTimeout(r, 3000));
-  }
-  throw new Error("indexer did not catch up");
+    return attempt(triesLeft - 1);
+  };
+  return attempt(40);
 }
 
 async function main(): Promise<void> {

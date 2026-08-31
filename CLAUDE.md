@@ -15,6 +15,10 @@ not re-derive what those files own.
   `BONGTU_NODE_MODULES` (default `/home/a41/Workspace/zkx-snap/circuits/node_modules`) —
   there is no repo-local install for them. On another machine, set the env var. (ethers is
   gone repo-wide: every chain path is now viem, a normal dependency; `loadEthers` was removed.)
+- **const-only TypeScript**: `let` is banned in code (comment prose exempt) — express
+  loops/accumulation as `for (const … of Array(n).keys())`, `reduce`, or an IIFE
+  `const x = (() => { … })()`. Behavior-neutral conversions only; crypto folds keep
+  their iteration order.
 - **Commits**: use the `workflow:commit` skill (conventional `type(scope): summary` + why-body).
   **Never append a `Co-Authored-By` trailer** — fractalyze convention, overrides the harness default.
 - **Secrets**: the deployer key for the live chain lives in `.env` (gitignored; template
@@ -62,3 +66,4 @@ not re-derive what those files own.
   rabbitsnark.cli circom prove <zkey> <proof> <public> --wtns <wtns>` from `rabbitsnark-py`.
   A circuit change ALSO requires rebuilding that circuit's witness `.so` + `w2s`
   (`circuits/build/build_witness_so.sh`) — the prover service fails at boot without a matching pair.
+

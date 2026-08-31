@@ -149,9 +149,7 @@ export function viewTokenHostBinding(url: string): string {
   const pageOrigin = (globalThis as { location?: { origin?: string } }).location?.origin;
   const u = new URL(url.replace(/\/$/, ""), pageOrigin ?? "http://localhost");
   const digest = sha256(new TextEncoder().encode(u.origin.toLowerCase()));
-  let x = 0n;
-  for (const b of digest.slice(0, HOST_BINDING_BYTES)) x = (x << 8n) | BigInt(b);
-  return x.toString();
+  return digest.slice(0, HOST_BINDING_BYTES).reduce<bigint>((x, b) => (x << 8n) | BigInt(b), 0n).toString();
 }
 
 /** Sign a field-element message with a BabyJubJub private scalar. Deterministic. */
@@ -232,9 +230,7 @@ const NAME_BINDING_BYTES = 31;
 // Fixed tag: sha256("bongtu/name-auth-v1") folded the same way as the binding.
 const NAME_DOMAIN_TAG: bigint = (() => {
   const digest = sha256(new TextEncoder().encode("bongtu/name-auth-v1"));
-  let x = 0n;
-  for (const b of digest.slice(0, NAME_BINDING_BYTES)) x = (x << 8n) | BigInt(b);
-  return x;
+  return digest.slice(0, NAME_BINDING_BYTES).reduce<bigint>((x, b) => (x << 8n) | BigInt(b), 0n);
 })();
 
 /** Field element binding a registration payload: name + both stealth meta keys
@@ -243,9 +239,7 @@ export function nameBindingField(name: string, viewPub: string, spendPub: string
   const digest = sha256(
     new TextEncoder().encode(`${name}|${viewPub.toLowerCase()}|${spendPub.toLowerCase()}`),
   );
-  let x = 0n;
-  for (const b of digest.slice(0, NAME_BINDING_BYTES)) x = (x << 8n) | BigInt(b);
-  return x;
+  return digest.slice(0, NAME_BINDING_BYTES).reduce<bigint>((x, b) => (x << 8n) | BigInt(b), 0n);
 }
 
 /** The message an owner signs to (re)register a name (routes/names.ts). */

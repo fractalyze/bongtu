@@ -22,11 +22,10 @@ function commit(i: number): bigint {
 
 // Fold a leaf up to the root using a returned merkle path.
 function foldPath(leaf: bigint, siblings: bigint[], pathIndices: number[]): bigint {
-  let cur = BigInt(leaf);
-  for (let j = 0; j < siblings.length; j++) {
-    cur = pathIndices[j] === 0 ? poseidon2(cur, siblings[j]) : poseidon2(siblings[j], cur);
-  }
-  return cur;
+  return siblings.reduce<bigint>(
+    (cur, sibling, j) => (pathIndices[j] === 0 ? poseidon2(cur, sibling) : poseidon2(sibling, cur)),
+    BigInt(leaf),
+  );
 }
 
 // --- (a) Poseidon-v1 parity gate -------------------------------------------
@@ -50,7 +49,7 @@ test("(b) after k single appendLeaf calls, getRoot() === naiveRoot(leafArray, H)
   for (const k of [0, 1, 2, 17]) {
     const tree = new ImtTree(H, B);
     const leafArray: bigint[] = [];
-    for (let i = 0; i < k; i++) {
+    for (const i of Array(k).keys()) {
       const c = commit(i);
       tree.appendLeaf(c);
       leafArray.push(c);
@@ -120,8 +119,8 @@ test("(d) appendLeaf x2 -> attachSubtree(16) -> appendLeaf x1 == naive dense roo
   const batch = Array.from({ length: B }, (_, i) => commit(400 + i));
   const subtreeRoot = tree.computeSubtreeRoot(batch);
   tree.attachSubtree(subtreeRoot, batch);
-  for (let i = 2; i < B; i++) dense[i] = 0n; // padded dead leaves
-  for (let i = 0; i < B; i++) dense[B + i] = batch[i]; // aligned batch block
+  for (const i of Array.from({ length: B - 2 }, (_, j) => j + 2)) dense[i] = 0n; // padded dead leaves
+  for (const i of Array(B).keys()) dense[B + i] = batch[i]; // aligned batch block
   assert.equal(tree.getNextLeafIndex(), 2 * B, "nextLeafIndex after attach");
   assert.equal(tree.getRoot(), ImtTree.naiveRoot(dense, H), "after disburse attach");
 
@@ -136,27 +135,26 @@ test("(d) appendLeaf x2 -> attachSubtree(16) -> appendLeaf x1 == naive dense roo
 test("(d') full U3 shape deposit(2)->transfer(2)->disburse(16)->withdraw(1) matches naive at every insert", () => {
   const tree = new ImtTree(H, B);
   const dense: bigint[] = [];
-  let idx = 0;
 
   // deposit(2) + transfer(2) = four single appends
-  for (let i = 0; i < 4; i++) {
+  for (const i of Array(4).keys()) {
     const c = commit(500 + i);
     tree.appendLeaf(c);
-    dense[idx++] = c;
+    dense.push(c);
     assert.equal(tree.getRoot(), ImtTree.naiveRoot(dense, H), `single insert ${i}`);
   }
 
   // disburse(16): pad 4..15 dead, batch at block 1
   const batch = Array.from({ length: B }, (_, i) => commit(600 + i));
   tree.attachSubtree(tree.computeSubtreeRoot(batch), batch);
-  while (idx < B) dense[idx++] = 0n;
-  for (let i = 0; i < B; i++) dense[idx++] = batch[i];
+  while (dense.length < B) dense.push(0n);
+  for (const b of batch) dense.push(b);
   assert.equal(tree.getRoot(), ImtTree.naiveRoot(dense, H), "after disburse");
 
   // withdraw(1)
   const cw = commit(700);
   tree.appendLeaf(cw);
-  dense[idx++] = cw;
+  dense.push(cw);
   assert.equal(tree.getRoot(), ImtTree.naiveRoot(dense, H), "after withdraw");
 });
 
@@ -167,7 +165,7 @@ test("(e) merklePath(i) verifies against getRoot() for real leaves after mixed i
   const value = new Map<number, bigint>(); // leafIndex -> committed value
 
   // two single appends
-  for (let i = 0; i < 2; i++) {
+  for (const i of Array(2).keys()) {
     const c = commit(800 + i);
     value.set(tree.getNextLeafIndex(), c);
     tree.appendLeaf(c);
@@ -176,9 +174,9 @@ test("(e) merklePath(i) verifies against getRoot() for real leaves after mixed i
   const blockStart = B; // after pad from index 2
   const batch = Array.from({ length: B }, (_, i) => commit(900 + i));
   tree.attachSubtree(tree.computeSubtreeRoot(batch), batch);
-  for (let i = 0; i < B; i++) value.set(blockStart + i, batch[i]);
+  for (const i of Array(B).keys()) value.set(blockStart + i, batch[i]);
   // two more single appends after the batch
-  for (let i = 0; i < 2; i++) {
+  for (const i of Array(2).keys()) {
     const c = commit(1000 + i);
     value.set(tree.getNextLeafIndex(), c);
     tree.appendLeaf(c);
@@ -202,15 +200,15 @@ test("(e'') closure: foldToRoot(leaf, merklePath(i).siblings, i) === getRoot() f
   const value = new Map<number, bigint>();
 
   // mixed inserts: two singles, a batch (pads 2..15 dead), two more singles.
-  for (let i = 0; i < 2; i++) {
+  for (const i of Array(2).keys()) {
     const c = commit(1200 + i);
     value.set(tree.getNextLeafIndex(), c);
     tree.appendLeaf(c);
   }
   const batch = Array.from({ length: B }, (_, i) => commit(1300 + i));
   tree.attachSubtree(tree.computeSubtreeRoot(batch), batch);
-  for (let i = 0; i < B; i++) value.set(B + i, batch[i]);
-  for (let i = 0; i < 2; i++) {
+  for (const i of Array(B).keys()) value.set(B + i, batch[i]);
+  for (const i of Array(2).keys()) {
     const c = commit(1400 + i);
     value.set(tree.getNextLeafIndex(), c);
     tree.appendLeaf(c);
@@ -218,7 +216,7 @@ test("(e'') closure: foldToRoot(leaf, merklePath(i).siblings, i) === getRoot() f
 
   // EVERY leaf in [0, nextLeafIndex): real leaves fold their value, padded dead
   // slots (2..15) fold a zero leaf — all must reproduce the exact current root.
-  for (let i = 0; i < tree.getNextLeafIndex(); i++) {
+  for (const i of Array(tree.getNextLeafIndex()).keys()) {
     const { siblings } = tree.merklePath(i);
     assert.equal(
       foldToRoot(value.get(i) ?? 0n, siblings, i),
@@ -248,33 +246,32 @@ test("stress: frontier root == naive dense root across random append/attach inte
   // padding, back-to-back attaches, and appends after attaches.
   const sh = 7;
   const sb = 4;
-  let counter = 0;
+  const counter = { value: 0 };
 
-  for (let seed = 0; seed < 12; seed++) {
-    let rng = seed * 2654435761 + 12345;
+  for (const seed of Array(12).keys()) {
+    const rngState = { value: seed * 2654435761 + 12345 };
     const rand = () => {
-      rng = (rng * 1103515245 + 12345) & 0x7fffffff;
-      return rng;
+      rngState.value = (rngState.value * 1103515245 + 12345) & 0x7fffffff;
+      return rngState.value;
     };
 
     const tree = new ImtTree(sh, sb);
     const dense: bigint[] = [];
     const cap = 2 ** sh;
 
-    for (let op = 0; op < 30; op++) {
+    for (const op of Array(30).keys()) {
       const doAttach = rand() % 2 === 0;
       if (doAttach) {
         // pad dense to boundary, then room for a full block?
-        let padded = dense.length;
-        while (padded % sb !== 0) padded++;
+        const padded = Math.ceil(dense.length / sb) * sb;
         if (padded + sb > cap) continue;
         while (dense.length % sb !== 0) dense.push(0n);
-        const batch = Array.from({ length: sb }, () => commit(counter++));
+        const batch = Array.from({ length: sb }, () => commit(counter.value++));
         tree.attachSubtree(tree.computeSubtreeRoot(batch), batch);
         for (const b of batch) dense.push(b);
       } else {
         if (dense.length + 1 > cap) continue;
-        const c = commit(counter++);
+        const c = commit(counter.value++);
         tree.appendLeaf(c);
         dense.push(c);
       }
@@ -291,7 +288,8 @@ test("stress: frontier root == naive dense root across random append/attach inte
     // frontier/path mismatch without an O(N^2) sweep every run).
     const n = tree.getNextLeafIndex();
     const sample = new Set<number>([0, n - 1]);
-    for (let i = 0; i < n; i += Math.max(1, Math.floor(n / 6))) sample.add(i);
+    const step = Math.max(1, Math.floor(n / 6));
+    for (const i of Array.from({ length: Math.ceil(n / step) }, (_, j) => j * step)) sample.add(i);
     for (const i of sample) {
       const { siblings, pathIndices } = tree.merklePath(i);
       assert.equal(foldPath(dense[i], siblings, pathIndices), tree.getRoot(), `seed ${seed}: path ${i}`);
@@ -313,8 +311,8 @@ test("(f) B=256 attach at H=32 (LOG_B=8): root == naive dense root + a batch-lea
   tree.attachSubtree(tree.computeSubtreeRoot(batch), batch);
 
   const dense: bigint[] = [c0];
-  for (let i = 1; i < bigB; i++) dense[i] = 0n; // padded dead leaves
-  for (let i = 0; i < bigB; i++) dense[bigB + i] = batch[i]; // aligned batch block
+  for (const i of Array.from({ length: bigB - 1 }, (_, j) => j + 1)) dense[i] = 0n; // padded dead leaves
+  for (const i of Array(bigB).keys()) dense[bigB + i] = batch[i]; // aligned batch block
   assert.equal(tree.getNextLeafIndex(), 2 * bigB);
   assert.equal(tree.getRoot(), ImtTree.naiveRoot(dense, H), "B=256 frontier root != naive");
 

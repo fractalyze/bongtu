@@ -196,10 +196,13 @@ export function makeRig(opts: {
   // pre-write nextLeafIndex. A dedicated single node never shows this, which is why
   // the drivers were written without it.
   const settle = async (blockNumber: bigint): Promise<void> => {
-    for (let i = 0; i < 40; i++) {
+    const attempt = async (triesLeft: number): Promise<void> => {
+      if (triesLeft <= 0) return;
       if ((await publicClient.getBlockNumber({ cacheTime: 0 })) >= blockNumber) return;
       await new Promise((r) => setTimeout(r, 250));
-    }
+      return attempt(triesLeft - 1);
+    };
+    return attempt(40);
   };
 
   // Same cause, one step earlier: the node asked for the RECEIPT may be one of the

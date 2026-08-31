@@ -43,10 +43,10 @@ if (!refDatabaseUrl) throw new Error("pg_resume.ts requires REF_DATABASE_URL (th
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const sc: any = JSON.parse(readFileSync(fixturesPath, "utf8"));
 
-let failures = 0;
+const failures = { count: 0 };
 function ok(cond: unknown, msg: string): void {
   const pass = !!cond;
-  if (!pass) failures++;
+  if (!pass) failures.count++;
   console.log(`   ${pass ? "PASS" : "FAIL"}  ${msg}`);
 }
 
@@ -126,12 +126,14 @@ async function main(): Promise<void> {
   console.log("== phase 2: resume A+1..head, fault-inject a crash BEFORE COMMIT ==");
   process.env.BONGTU_CRASH_BEFORE_COMMIT = String(headNum);
   const ix2 = new Indexer(cfgPg);
-  let crashed = false;
-  try {
-    await ix2.ingest(A + 1);
-  } catch (e) {
-    crashed = /crash-before-commit/.test((e as Error).message);
-  }
+  const crashed = await (async (): Promise<boolean> => {
+    try {
+      await ix2.ingest(A + 1);
+      return false;
+    } catch (e) {
+      return /crash-before-commit/.test((e as Error).message);
+    }
+  })();
   delete process.env.BONGTU_CRASH_BEFORE_COMMIT;
   await ix2.close();
   ok(crashed, "phase 2 threw the injected crash-before-commit at the persist boundary");
@@ -146,12 +148,14 @@ async function main(): Promise<void> {
   // ---- phase 3: fresh instance boots from the post-crash DB and resumes ----
   console.log("== phase 3: fresh boot from the post-crash DB → resume, must not wedge ==");
   const ix3 = new Indexer(cfgPg);
-  let bootWedged: string | null = null;
-  try {
-    await ix3.ingest(); // bootPostgres resumes from cursor A; applyLogs A+1..head
-  } catch (e) {
-    bootWedged = (e as Error).message;
-  }
+  const bootWedged = await (async (): Promise<string | null> => {
+    try {
+      await ix3.ingest(); // bootPostgres resumes from cursor A; applyLogs A+1..head
+      return null;
+    } catch (e) {
+      return (e as Error).message;
+    }
+  })();
   ok(bootWedged === null, `boot + resume did NOT wedge${bootWedged ? ` (threw: ${bootWedged})` : ""}`);
   const cursor3 = await cursorOf(q);
   ok(cursor3 === headNum, `durable cursor advanced to head (${headNum}) after recovery`);
@@ -166,12 +170,14 @@ async function main(): Promise<void> {
   console.log("== phase 3.5: re-ingest [A+1..head] over already-persisted rows → no double-count ==");
   const eventsBefore = await countEvents(q);
   const fpBefore = fingerprint(ix3);
-  let reingestThrew: string | null = null;
-  try {
-    await ix3.ingest(A + 1); // tree already built → bootPostgres NOT re-run; forces a real replay
-  } catch (e) {
-    reingestThrew = (e as Error).message;
-  }
+  const reingestThrew = await (async (): Promise<string | null> => {
+    try {
+      await ix3.ingest(A + 1); // tree already built → bootPostgres NOT re-run; forces a real replay
+      return null;
+    } catch (e) {
+      return (e as Error).message;
+    }
+  })();
   const eventsAfter = await countEvents(q);
   const fpAfter = fingerprint(ix3);
   ok(reingestThrew === null, `re-ingest of a persisted range did not throw${reingestThrew ? ` (${reingestThrew})` : ""}`);
@@ -182,8 +188,8 @@ async function main(): Promise<void> {
   await q.end();
 
   console.log(`\nSUMMARY resume cursor A=${A}→head=${headNum} events=${eventsAfter} nli=${fp3.nli} root=${fp3.root}`);
-  if (failures > 0) {
-    console.log(`PG RESUME GATE: FAIL — ${failures} assertion(s)`);
+  if (failures.count > 0) {
+    console.log(`PG RESUME GATE: FAIL — ${failures.count} assertion(s)`);
     process.exit(1);
   }
   console.log("PG RESUME GATE: PASS (atomic persist closes the crash-in-persist-window wedge; resume converges idempotently)");

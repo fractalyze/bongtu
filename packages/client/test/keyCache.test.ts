@@ -56,7 +56,7 @@ function harness(opts: { suppressTimer?: boolean } = {}) {
     notifications: 0,
     armed: false,
   };
-  let pending: (() => void) | null = null;
+  const pending: { current: (() => void) | null } = { current: null };
   const deps: KeyCacheWiring = {
     derive: async () => {
       state.derives++;
@@ -66,10 +66,10 @@ function harness(opts: { suppressTimer?: boolean } = {}) {
     now: () => state.now,
     arm: (fn) => {
       if (opts.suppressTimer) return () => {};
-      pending = fn;
+      pending.current = fn;
       state.armed = true;
       return () => {
-        pending = null;
+        pending.current = null;
         state.armed = false;
       };
     },
@@ -85,9 +85,9 @@ function harness(opts: { suppressTimer?: boolean } = {}) {
     /** What App.connectWallet does with the identity its login signature produced. */
     seed: (): void => cache.seed(SESSION, ACCOUNT, SESSION.compressedPubkey),
     fireIdle: (): void => {
-      assert.ok(pending, "no idle wipe is armed");
-      const fn = pending;
-      pending = null;
+      const fn = pending.current;
+      assert.ok(fn, "no idle wipe is armed");
+      pending.current = null;
       state.armed = false;
       fn();
     },
@@ -335,15 +335,15 @@ test("the indicator tracks every transition: fresh → unlocked → wiped → si
 
 test("unsubscribing stops the notifications", async () => {
   const h = harness();
-  let seen = 0;
+  const seen = { n: 0 };
   const off = h.cache.subscribe(() => {
-    seen++;
+    seen.n++;
   });
   await h.unlock();
-  assert.equal(seen, 1);
+  assert.equal(seen.n, 1);
   off();
   h.cache.lock();
-  assert.equal(seen, 1);
+  assert.equal(seen.n, 1);
 });
 
 // ============================ (5) KEY CUSTODY ================================

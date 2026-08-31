@@ -182,13 +182,14 @@ test("fetchHistoryPage round-trips the page envelope over an injected fetch", as
     ],
     nextBefore: 8,
   };
-  let requested = "";
+  const requestedUrls: string[] = [];
   const fakeFetch = (async (url: string) => {
-    requested = url;
+    requestedUrls.push(url);
     return { ok: true, text: async () => JSON.stringify(served) };
   }) as unknown as typeof fetch;
 
   const page = await fetchHistoryPage("http://localhost:8600", compressed, "tok.en", { before: 20, limit: 2 }, fakeFetch);
+  const requested = requestedUrls[0] ?? "";
   assert.deepEqual(page, served, "the envelope is returned as-is, not flattened to an array");
   assert.ok(requested.includes("before=20") && requested.includes("limit=2"), requested);
 

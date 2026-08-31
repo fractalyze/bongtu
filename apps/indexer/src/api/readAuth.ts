@@ -66,12 +66,17 @@ export function authorizeOwner(
     return { ok: false, denied: bad({ error: "owner query param required: a compressed bjj pubkey (32-byte hex)" }) };
   }
   // owner is a COMPRESSED pubkey — unpack to [x,y]. Malformed → 400.
-  let pub: Point;
-  try {
-    pub = unpackPubkey(owner);
-  } catch (e) {
-    return { ok: false, denied: bad({ error: `malformed compressed owner pubkey: ${(e as Error).message}`, owner }) };
+  const unpacked = ((): { pub: Point } | { err: string } => {
+    try {
+      return { pub: unpackPubkey(owner) };
+    } catch (e) {
+      return { err: (e as Error).message };
+    }
+  })();
+  if ("err" in unpacked) {
+    return { ok: false, denied: bad({ error: `malformed compressed owner pubkey: ${unpacked.err}`, owner }) };
   }
+  const pub = unpacked.pub;
 
   // Auth path (b): a view token from POST /auth. Presence of `token` selects
   // this path exclusively — a bad token is a 401, never a silent fall-through
@@ -97,12 +102,17 @@ export function authorizeOwner(
   if (!Number.isInteger(ts)) {
     return { ok: false, denied: bad({ error: "ts must be an integer number of unix seconds", ts: tsRaw }) };
   }
-  let sig;
-  try {
-    sig = parseSignature(sigHex);
-  } catch (e) {
-    return { ok: false, denied: bad({ error: `malformed sig: ${(e as Error).message}` }) };
+  const parsedSig = ((): { sig: ReturnType<typeof parseSignature> } | { err: string } => {
+    try {
+      return { sig: parseSignature(sigHex) };
+    } catch (e) {
+      return { err: (e as Error).message };
+    }
+  })();
+  if ("err" in parsedSig) {
+    return { ok: false, denied: bad({ error: `malformed sig: ${parsedSig.err}` }) };
   }
+  const sig = parsedSig.sig;
 
   // Replay window (server clock, in the ROUTE only — never in workflow scripts).
   const now = nowSeconds;

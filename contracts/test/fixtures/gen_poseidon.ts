@@ -17,8 +17,8 @@ const OUT_DIR = HERE;
 
 async function main(): Promise<void> {
   // Creation bytecode for the on-chain Poseidon with 2 inputs.
-  let code: string = poseidonContract.createCode(2);
-  if (!code.startsWith("0x")) code = "0x" + code;
+  const rawCode: string = poseidonContract.createCode(2);
+  const code = rawCode.startsWith("0x") ? rawCode : "0x" + rawCode;
   writeFileSync(join(OUT_DIR, "poseidon2.hex"), code);
 
   // Reference hash Poseidon([1,2]) as a decimal string, computed with the
