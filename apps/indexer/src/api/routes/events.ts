@@ -28,6 +28,7 @@ export const events: Route = {
       slices: e.slices,
       ciphertext: e.ciphertext,
       disclosure: e.disclosure ? e.disclosure.status : undefined,
+      announcement: e.announcement,
     }));
     return { status: 200, body: out };
   },
