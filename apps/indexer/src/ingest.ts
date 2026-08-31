@@ -40,7 +40,7 @@ import { isPreKemProbeError } from "@bongtu/core/network";
 
 import { MirrorTree } from "./tree.js";
 import { poolAbi, abiKnowsKem, kemBootGuardError, staleOpAbiError, type ChainConfig } from "./chain.js";
-import { InMemoryStore, type StorePort, type Slice } from "./store.js";
+import { type FeedEntry, InMemoryStore, type StorePort, type Slice } from "./store.js";
 import { verifyDisclosure } from "./disclosure.js";
 import { connect, PostgresStore, PostgresLedger } from "./postgres.js";
 import { NameRegistry } from "./names.js";
@@ -568,6 +568,11 @@ export class Indexer {
     // build the whole feed entry at the Disbursed position — a plain disburse
     // then still yields a feed entry ("withheld" disclosure) in chain order.
     const ciphertextsByTx = new Map<string, Map<number, ParsedLog>>();
+    // Withdraw feed entries awaiting their paired WithdrawAnnouncement (emitted
+    // in the same tx, directly after Withdrawn — FIFO per tx like the append
+    // pairs). A replayed range re-adds nothing (addEvent dedups), so the queue
+    // stays empty and the already-attached announcement is left alone.
+    const withdrawEntriesByTx = new Map<string, FeedEntry[]>();
     for (const l of logs) {
       if (l.name === "DisburseCiphertexts") {
         const start = Number(bn(l.args.startLeafIndex));
@@ -699,6 +704,9 @@ export class Indexer {
           slices: [], ciphertext: [],
         });
         if (wEntry) {
+          const wq = withdrawEntriesByTx.get(l.txHash) ?? [];
+          wq.push(wEntry);
+          withdrawEntriesByTx.set(l.txHash, wq);
           this.store.addNullifiers([bn(l.args.nullifiers[0]), bn(l.args.nullifiers[1])]);
           if (this.ledger) {
             this.ledger.apply({
@@ -710,6 +718,18 @@ export class Indexer {
               outputLeaves: [{ leafIndex: ci, commitment: chg }],
             });
           }
+        }
+      } else if (l.name === "WithdrawAnnouncement") {
+        // Metadata on the withdraw entry, not a feed entry of its own. An
+        // announcement with no queued entry means the Withdrawn was deduped
+        // (replay) — the durable entry already carries it.
+        const w = withdrawEntriesByTx.get(l.txHash)?.shift();
+        if (w) {
+          w.announcement = {
+            recipient: "0x" + bn(l.args.recipient).toString(16).padStart(40, "0"),
+            ephemeralPub: String(l.args.stealthEphemeralPub),
+            viewTag: Number(l.args.stealthViewTag),
+          };
         }
       } else if (l.name === "Disbursed") {
         const st = subtreesByTx.get(l.txHash)?.shift();

@@ -414,6 +414,15 @@ async function main(): Promise<void> {
     ok(kinds === "deposit,disburse,transfer,withdraw,disburse,disburse,deposit,deposit,transfer10",
       `feed kinds in chain order: ${kinds}`);
 
+    // The stealth-withdraw announcement rides the withdraw feed entry (Stage-D
+    // attach): values are exactly what the scenario submitted on-chain.
+    const wAnn = feed.find((e) => e.kind === "withdraw");
+    ok(!!wAnn?.announcement, "withdraw feed entry carries its announcement");
+    ok(wAnn.announcement.viewTag === 7 && wAnn.announcement.ephemeralPub === "0x" + "11".repeat(32),
+      "announcement (ephemeralPub, viewTag) == scenario calldata");
+    ok(wAnn.announcement.recipient === "0xbeef00000000000000000000000000000000beef",
+      "announcement recipient == the proof-bound pub[26]");
+
     const honest = feed.find((e) => e.kind === "disburse" && e.slices[0]?.leafIndex === sc.disburseHonest.startLeafIndex);
     ok(!!honest, "honest disburse present in feed");
     ok(honest.ecdhPublicKey[0] === sc.disburseHonest.ecdhPublicKey[0]

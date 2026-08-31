@@ -53,6 +53,10 @@ export interface FeedEntry {
   slices: Slice[];
   ciphertext: string[]; // decimal strings; the bytes a wallet trial-decrypts
   disclosure?: DisclosureResult; // present for `disburse`
+  /** present for `withdraw` since the stealth upgrade: the proof-bound payout
+   *  address + the discovery announcement (routes/announcements.ts serves the
+   *  projection). Absent on pre-upgrade history. */
+  announcement?: { recipient: string; ephemeralPub: string; viewTag: number };
 }
 
 /**

@@ -36,13 +36,14 @@ instead, submitted by anyone (relayer), announced via (R, viewTag) on the event.
       keeps its historical shape — no dual-ABI freeze needed); `reinitializeV2(IWithdrawVerifier)` —
       `reinitializer(2)` + `onlyOwner` (an unguarded reinitializer is claimable
       by anyone after upgrade). Old uint[26] entry point is REPLACED, not kept.
-- [ ] D. indexer: refresh `abi/BongtuPool.abi.json` (CI drift gate); ingest the
-      new Withdrawn fields into an announcements table; `GET /announcements`
+- [x] D. indexer: refresh `abi/BongtuPool.abi.json` (CI drift gate); ingest attaches each
+      `WithdrawAnnouncement` to its withdraw feed entry (payload-persisted, no
+      new table); `GET /announcements`
       (public, cursor) + arbiter-mode `?owner=` behind the `/notes` read-auth
       (owner attribution from the envelope the ledger already decrypts).
-- [ ] E. client: withdraw request/ABI fragment carries recipient + announcement;
+- [x] E. client (engine half — wallet UI toggle still open): withdraw request/ABI fragment carries recipient + announcement;
       self-stealth destination derived via `stealth.ts`; wallet UI toggle.
-- [ ] F. gates: core tests + tsc → forge test → prove_all withdraw leg →
+- [x] F. gates: core tests + tsc → forge test → prove_all withdraw leg →
       indexer unit + conformance (scenario drives the new signature) → e2e_m0.
 - [ ] G. LIVE upgrade (separate explicit go): re-measure withdraw gas for
       docs/performance.md on the upgraded pool; deploy new WithdrawVerifier +

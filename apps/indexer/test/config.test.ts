@@ -119,11 +119,18 @@ step("UNIT: staleOpAbiError — a build missing a dispatched op event fails clos
   const full = parseAbi([
     "event Transferred10(uint256 indexed epoch)",
     "event Transferred10x2(uint256 indexed epoch)",
+    "event WithdrawAnnouncement(uint256 recipient, bytes32 stealthEphemeralPub, uint8 stealthViewTag)",
   ]);
-  ok(staleOpAbiError(full) === null, "ABI carrying both 10-input op events passes");
+  ok(staleOpAbiError(full) === null, "ABI carrying every dispatched op event passes");
   const preV5 = parseAbi(["event Transferred10(uint256 indexed epoch)"]);
   const err = staleOpAbiError(preV5) ?? "";
   ok(err.includes("Transferred10x2"), "a V4-vintage ABI names the missing V5 event");
+  const preStealth = parseAbi([
+    "event Transferred10(uint256 indexed epoch)",
+    "event Transferred10x2(uint256 indexed epoch)",
+  ]);
+  ok((staleOpAbiError(preStealth) ?? "").includes("WithdrawAnnouncement"),
+    "a pre-stealth ABI names the missing announcement event");
   const preV4 = parseAbi(["event Appended(uint256 indexed leafIndex)"]);
   const err4 = staleOpAbiError(preV4) ?? "";
   ok(err4.includes("Transferred10"), "a pre-V4 ABI is refused on its first missing event");

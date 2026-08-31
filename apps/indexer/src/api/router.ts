@@ -16,6 +16,9 @@
 //                                alarms (disclosure+envelope count), lastSuccessAt,
 //                                lastError, lastErrorAt, consecutiveFailures }
 //   GET /nullifiers          -> string[]  (spent nullifier set; PUBLIC, key-free)
+//   GET /announcements       -> [WithdrawAnnouncementRecord]  (PUBLIC cursor
+//                               feed; with ?owner= — ARBITER MODE, /notes
+//                               read-auth — only the caller's own)
 //   GET  /names/:name        -> NameRecord  (PUBLIC name directory: owner bjj
 //                               pubkey + stealth meta-address; names.ts)
 //   POST /names {name,owner,viewPub,spendPub,ts,sig} -> NameRecord  (PUBLIC;
@@ -60,6 +63,7 @@ import { alarms } from "./routes/alarms.js";
 import { health } from "./routes/health.js";
 import { nullifiers } from "./routes/nullifiers.js";
 import { nameRegister, nameResolve } from "./routes/names.js";
+import { announcements } from "./routes/announcements.js";
 import { notes } from "./routes/notes.js";
 import { history } from "./routes/history.js";
 import { authChallenge, authRedeem } from "./routes/auth.js";
@@ -94,7 +98,7 @@ export interface Route {
 // is public (always on); `/notes` + `/history` are ARBITER-ONLY and composed in
 // per-indexer by makeHandler, so public mode returns 404 for them (the endpoints
 // do not exist).
-export const routes: Route[] = [head, events, path, alarms, health, nullifiers, nameResolve, nameRegister];
+export const routes: Route[] = [head, events, path, alarms, health, nullifiers, nameResolve, nameRegister, announcements];
 
 function writeJson(res: ServerResponse, status: number, body: unknown, headers?: Record<string, string>): void {
   const s = JSON.stringify(body, null, 2);

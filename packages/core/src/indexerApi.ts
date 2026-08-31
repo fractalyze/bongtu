@@ -74,6 +74,22 @@ export interface FeedEvent {
   slices: FeedSlice[];
   ciphertext: string[];
   disclosure?: DisclosureStatus; // present for `disburse`
+  /** present for `withdraw` since the stealth upgrade (see WithdrawAnnouncementRecord). */
+  announcement?: { recipient: string; ephemeralPub: string; viewTag: number };
+}
+
+/** One `GET /announcements` entry — the stealth-withdraw discovery feed a
+ *  wallet scans with its view key (`@bongtu/core/stealth` scanStealthAnnouncement).
+ *  `ephemeralPub`/`viewTag` are zero when the withdraw announced nothing. */
+export interface WithdrawAnnouncementRecord {
+  seq: number;
+  txHash: string;
+  blockNumber: number;
+  /** "0x" + 20-byte hex — the proof-bound payout address. */
+  recipient: string;
+  /** "0x" + 32-byte hex — the packed bjj ephemeral pubkey R. */
+  ephemeralPub: string;
+  viewTag: number;
 }
 
 /** One owner note as the arbiter-mode `GET /notes` serves it (no private key, ever). */
@@ -240,7 +256,7 @@ export function getAlarms(indexerUrl: string): Promise<Alarm[]> {
 
 /** The two arbiter-mode owner feeds. They share one read-auth (api/readAuth.ts on
  *  the server), so they share one URL builder here — only the path differs. */
-export type OwnerReadRoute = "notes" | "history";
+export type OwnerReadRoute = "notes" | "history" | "announcements";
 
 /**
  * Build the signed read URL for an owner feed (SPEC §6b v2 read-auth) — the ONE
@@ -509,4 +525,31 @@ export async function resolveName(indexerUrl: string, name: string): Promise<Nam
   const body = await res.text();
   if (!res.ok) throw new Error(`resolveName: HTTP ${res.status}: ${body}`);
   return JSON.parse(body) as NameRecord;
+}
+
+/** The public announcement feed (seq > cursor, capped). The trustless scan-all
+ *  path — pair each record with scanStealthAnnouncement to find your own. */
+export function getAnnouncements(
+  indexerUrl: string,
+  cursor = -1,
+  limit = 5000,
+): Promise<WithdrawAnnouncementRecord[]> {
+  return getJson<WithdrawAnnouncementRecord[]>(
+    `${indexerUrl.replace(/\/$/, "")}/announcements?cursor=${cursor}&limit=${limit}`,
+  );
+}
+
+/** The signed arbiter-mode `GET /announcements?owner=` URL — only the caller's
+ *  own announcements, no scanning (same read-auth as /notes). */
+export function buildAnnouncementsUrl(
+  indexerUrl: string,
+  ownerCompressed: string,
+  ownerPrivateKey: FieldInput,
+): string {
+  return signedReadUrl(indexerUrl, "announcements", ownerCompressed, ownerPrivateKey);
+}
+
+/** Fetch a signed /announcements URL (from `buildAnnouncementsUrl`). */
+export function fetchAnnouncements(url: string): Promise<WithdrawAnnouncementRecord[]> {
+  return getJson<WithdrawAnnouncementRecord[]>(url);
 }

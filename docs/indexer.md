@@ -230,3 +230,17 @@ so a later ENS/CCIP-read gateway can serve the same records without migration. W
 shapes + the client half (`buildNameRegistration`, `registerName`, `resolveName`):
 `@bongtu/core/indexerApi`; server half: `apps/indexer/src/names.ts` +
 `api/routes/names.ts`; stealth meta-address semantics: `packages/core/src/stealth.ts`.
+
+## Announcement feed
+
+Stealth withdraws pair each `Withdrawn` with a `WithdrawAnnouncement` event; the
+ingest attaches it to the withdraw feed entry (payload-persisted, no extra
+table) and `/announcements` serves the projection. Two read paths, one privacy
+story: the PUBLIC cursor feed is the trustless scan-all a wallet walks with its
+view key; the ARBITER-MODE `?owner=` slice serves only the caller's own rows
+behind the `/notes` read-auth — zero marginal disclosure, because the arbiter
+already learns each withdraw's owner from the authority envelope, and the
+per-owner attribution is exactly the ledger's decrypted history. A wallet that
+distrusts the indexer falls back to the public feed; announcements are
+calldata-carried, so a tampered one can only break discovery, never redirect
+the proof-bound payout.

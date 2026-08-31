@@ -65,7 +65,7 @@ export function abiKnowsKem(abi: Abi): boolean {
  *  kemBootGuardError. */
 export function staleOpAbiError(abi: Abi): string | null {
   const names = new Set(abi.filter((x): x is AbiEvent => x.type === "event").map((ev) => ev.name));
-  for (const wanted of ["Transferred10", "Transferred10x2"]) {
+  for (const wanted of ["Transferred10", "Transferred10x2", "WithdrawAnnouncement"]) {
     if (!names.has(wanted)) {
       return `FATAL: this build's ABI lacks the ${wanted} event — a stale contracts/out (or apps/indexer/abi/BongtuPool.abi.json) silently skips every ${wanted} op while /health stays green. Rebuild the pool ABI (recipe: apps/indexer/abi/README.md).`;
     }
