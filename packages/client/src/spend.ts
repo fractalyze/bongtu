@@ -921,7 +921,12 @@ export function buildWithdrawRequest(
   memberships: MembershipWitness[],
   amount: string,
   crypto: SpendCrypto,
+  recipient: string,
 ): SpendResult<"withdraw"> {
+  const recipientBig = BigInt(recipient);
+  if (recipientBig === 0n || recipientBig > (1n << 160n) - 1n) {
+    throw new Error(`withdraw recipient must be a nonzero L1 address, got ${recipient}`);
+  }
   const self = identity.keypair;
   const ins = assembleInputs(identity, inputs, memberships, crypto.padSalts, 2);
 
@@ -954,6 +959,7 @@ export function buildWithdrawRequest(
     kemSs: [BigInt(crypto.kemSs[0]), BigInt(crypto.kemSs[1])],
     encryptionNonce: BigInt(crypto.encryptionNonce),
     authorityPublicKey: [BigInt(crypto.authorityPubKey[0]), BigInt(crypto.authorityPubKey[1])],
+    recipient: recipientBig,
   };
 
   const request = { circuit: "withdraw", input: toWire(inputBig), backend: "cpu" } as const;

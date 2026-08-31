@@ -208,8 +208,10 @@ export const POOL_ABI_FRAGMENTS = {
     "function deposit(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[19] pub, bytes kemCiphertext)",
   transfer:
     "function transfer(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[37] pub, bytes kemCiphertext)",
+  // withdraw pays the proof-bound pub[26] recipient (never msg.sender), so it is
+  // relayable; the trailing pair is the stealth announcement (zero when none).
   withdraw:
-    "function withdraw(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[26] pub, bytes kemCiphertext)",
+    "function withdraw(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[27] pub, bytes kemCiphertext, bytes32 stealthEphemeralPub, uint8 stealthViewTag)",
   disburseWithCiphertexts:
     "function disburseWithCiphertexts(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[11] pub, uint256[] receiverCiphertexts, bytes kemCiphertext)",
   root: "function root() view returns (uint256)",

@@ -95,9 +95,9 @@ contract GasReportTest is Base {
         for (uint256 i = 0; i < 11; i++) p[i] = pv[i];
     }
 
-    function _pub26(string memory key) internal view returns (uint[26] memory p) {
+    function _pub27(string memory key) internal view returns (uint[27] memory p) {
         uint256[] memory pv = _pub(key);
-        for (uint256 i = 0; i < 26; i++) p[i] = pv[i];
+        for (uint256 i = 0; i < 27; i++) p[i] = pv[i];
     }
 
     function _pub37(string memory key) internal view returns (uint[37] memory p) {
@@ -130,11 +130,11 @@ contract GasReportTest is Base {
         BongtuPool pool = _freshPool(false);
         _seed(pool, ".withdraw");
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".withdraw");
-        uint[26] memory pub = _pub26(".withdraw");
+        uint[27] memory pub = _pub27(".withdraw");
         bytes memory kemCt = _kemCt(".withdraw");
         uint256 g = gasleft();
-        pool.withdraw(a, b, c, pub, kemCt);
-        emit log_named_uint("gas withdraw (2-in/1-out, +authority envelope, +KEM ct)", g - gasleft());
+        pool.withdraw(a, b, c, pub, kemCt, bytes32(uint256(1)), 7);
+        emit log_named_uint("gas withdraw (2-in/1-out, +authority envelope, +KEM ct, +announcement)", g - gasleft());
     }
 
     function testGasDisburse16() public {

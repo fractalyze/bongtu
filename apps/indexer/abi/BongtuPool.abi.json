@@ -517,6 +517,19 @@
     },
     {
       "type": "function",
+      "name": "reinitializeV2",
+      "inputs": [
+        {
+          "name": "_withdrawVerifier",
+          "type": "address",
+          "internalType": "contract IWithdrawVerifier"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
       "name": "root",
       "inputs": [],
       "outputs": [
@@ -749,13 +762,23 @@
         },
         {
           "name": "pub",
-          "type": "uint256[26]",
-          "internalType": "uint256[26]"
+          "type": "uint256[27]",
+          "internalType": "uint256[27]"
         },
         {
           "name": "kemCiphertext",
           "type": "bytes",
           "internalType": "bytes"
+        },
+        {
+          "name": "stealthEphemeralPub",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        },
+        {
+          "name": "stealthViewTag",
+          "type": "uint8",
+          "internalType": "uint8"
         }
       ],
       "outputs": [],
@@ -1319,6 +1342,31 @@
     },
     {
       "type": "event",
+      "name": "WithdrawAnnouncement",
+      "inputs": [
+        {
+          "name": "recipient",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "stealthEphemeralPub",
+          "type": "bytes32",
+          "indexed": false,
+          "internalType": "bytes32"
+        },
+        {
+          "name": "stealthViewTag",
+          "type": "uint8",
+          "indexed": false,
+          "internalType": "uint8"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
       "name": "Withdrawn",
       "inputs": [
         {
@@ -1436,6 +1484,17 @@
       "type": "error",
       "name": "InvalidProof",
       "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "InvalidRecipient",
+      "inputs": [
+        {
+          "name": "recipient",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ]
     },
     {
       "type": "error",

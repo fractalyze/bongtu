@@ -341,13 +341,14 @@ async function main(): Promise<void> {
       kemSs: KEM_WITHDRAW.kemSs,
       encryptionNonce: NONCE_WITHDRAW,
       authorityPublicKey: AUTHORITY.publicKey,
+      recipient: BigInt(employerAddr), // proof-bound payout: same target the old msg.sender path paid
     };
     const { a, b, c, pub } = await prove("withdraw", input);
     withdrawnAmount = BigInt(pub[0]);
     ok(withdrawnAmount === chgVal, `withdraw out (pub[0]) == change value ${chgVal}`);
     oracle.appendLeaf(resCommit); // leaf 34
     const balBefore: bigint = await token.read("balanceOf", [employerAddr]);
-    await pool.write("withdraw", [...proofArgs({ a, b, c, pub }), kemCtHex(KEM_WITHDRAW.kemCiphertext)]);
+    await pool.write("withdraw", [...proofArgs({ a, b, c, pub }), kemCtHex(KEM_WITHDRAW.kemCiphertext), "0x" + "00".repeat(32), 0]);
     await matchRoot("after withdraw(1 change output)");
     const got = (await token.read("balanceOf", [employerAddr])) - balBefore;
     ok(got.toString() === chgVal.toString(), `withdraw pushed ${chgVal} ERC20 out of the pool`);

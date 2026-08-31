@@ -149,16 +149,18 @@ async function fetchMemberships(
   return memberships;
 }
 
-// Each circuit's builder gets exactly the witness its `main` takes; withdraw has no
-// payee, and transfer10x2 serves both the 3–10-note payment and the merge legs.
+// Each circuit's builder gets exactly the witness its `main` takes; withdraw's
+// payee is an L1 address (the proof-bound payout target), and transfer10x2
+// serves both the 3–10-note payment and the merge legs.
 function buildRequest(
   action: SpendAction,
   identity: WalletIdentity,
   memberships: MembershipWitness[],
   crypto: SpendCrypto,
+  withdrawRecipient: string,
 ) {
   const { circuit, inputs, to, amount } = action;
-  if (circuit === "withdraw") return buildWithdrawRequest(identity, inputs, memberships, amount, crypto);
+  if (circuit === "withdraw") return buildWithdrawRequest(identity, inputs, memberships, amount, crypto, withdrawRecipient);
   if (circuit === "transfer10x2") {
     return buildTransfer10x2Request(identity, inputs, memberships, to, amount, crypto);
   }
@@ -207,7 +209,10 @@ async function runLeg(
 ): Promise<{ outcome: SpendOutcome; payeeSalt: string }> {
   const memberships = await fetchMemberships(io, ctx.indexerUrl, identity, action.inputs);
   const crypto = freshSpendCrypto(randField);
-  const built = buildRequest(action, identity, memberships, crypto);
+  // Withdraw pays the CONNECTED account by default — byte-for-byte the old money
+  // movement, now proof-bound instead of msg.sender-implied. A stealth
+  // destination is a caller-supplied recipient (wallet UI slice).
+  const built = buildRequest(action, identity, memberships, crypto, ctx.connection.address);
   if (!built.meta.membershipOk) {
     throw new Error("Your balance just changed. Go back and try again.");
   }

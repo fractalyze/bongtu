@@ -109,11 +109,12 @@ contract Disburse256Test is Base {
     /// (withdraw appends exactly its change output). This reproduces the proof's
     /// membership root: pool.root() == pub[6], and pub[6] enters root history.
     function _seedInputAtLeaf0(BongtuPool pool) internal {
-        uint[26] memory w; // out=0, nf0=nf1=0 (nothing spent/pushed)
+        uint[27] memory w; // out=0, nf0=nf1=0 (nothing spent/pushed)
         w[19] = pool.root(); // membership root = current (empty) root, known
         w[22] = inputCommitment; // change output = the input note commitment
+        w[26] = uint160(address(this)); // recipient of the 0-token push (must be nonzero)
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = dummyABC();
-        pool.withdraw(a, b, c, w, dummyKemCt());
+        pool.withdraw(a, b, c, w, dummyKemCt(), bytes32(0), 0);
         assertEq(pool.root(), seedRoot, "seed: pool.root() != pub[6] (membership root)");
         assertEq(pool.root(), _pub()[6], "seed: pool.root() != public.json[6]");
         assertTrue(pool.isKnownRoot(seedRoot), "seed: membership root not in history");

@@ -264,9 +264,11 @@ export async function runScenario(): Promise<ScenarioResult> {
       outputOwnerPublicKeys: [RCPTS[0].publicKey],
       ecdhPrivateKey: ECDH_W, kemSs: KEM_W.kemSs,
       encryptionNonce: NONCE_W, authorityPublicKey: AUTHORITY.publicKey,
+      recipient: 0xbeef00000000000000000000000000000000beefn,
     });
     oracle.appendLeaf(resCommit);
-    await (await pool.withdraw(a, b, c, pub, kemCtHex(KEM_W.kemCiphertext))).wait();
+    await (await pool.withdraw(a, b, c, pub, kemCtHex(KEM_W.kemCiphertext),
+      "0x" + "11".repeat(32), 7)).wait();
   }
 
   // ---- disburse #2 (TAMPERED): note(0)@1 -> 16 zero-value recipients; emit corrupted ct ----

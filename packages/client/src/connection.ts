@@ -363,14 +363,20 @@ async function submit(
 ): Promise<SubmitResult> {
   assertKemCiphertext(kemCiphertext);
   const { a, b, c, pub } = asProofArgs(calldata);
+  // withdraw alone carries the stealth announcement pair after the KEM ct
+  // (zeros = "no announcement"; the payout target rides inside pub[26]).
+  const args =
+    fn === "withdraw"
+      ? [a, b, c, pub, kemCiphertext, ("0x" + "00".repeat(32)) as `0x${string}`, 0]
+      : [a, b, c, pub, kemCiphertext];
   const hash = await connection.walletClient.writeContract({
     address: poolAddr as Address,
     abi: POOL_ABI,
     functionName: fn,
-    // The pub vector's length is per-circuit (19/37/68/26) and checked by the ABI
+    // The pub vector's length is per-circuit (19/37/68/27) and checked by the ABI
     // encoder at runtime; a plain bigint[] cannot satisfy the per-function tuple
     // type statically, hence the one cast.
-    args: [a, b, c, pub, kemCiphertext as `0x${string}`] as never,
+    args: args as never,
     account: connection.address as Address,
     chain: liveChain,
     nonce: await nextNonce(connection),

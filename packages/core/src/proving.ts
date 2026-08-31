@@ -162,6 +162,9 @@ export interface WithdrawInput {
   kemSs: FieldInput[]; // [2] LE-uint128 limbs of the ML-KEM-768 shared secret (hybrid envelope key, @bongtu/core/kem)
   encryptionNonce: FieldInput;
   authorityPublicKey: PointInput;
+  /** L1 address the pool pays (public input, uint160 range) — bound in-proof
+   *  so a relayer cannot redirect a stealth withdraw. */
+  recipient: FieldInput;
 }
 
 /** disburse (1-in / 256-out): IMT membership + one nullifier; subtree gadget +
