@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 import { SUBGROUP_ORDER } from "../src/babyjub.js";
 import {
   SECP256K1_ORDER,
+  ZERO_EPHEMERAL,
+  isStealthAnnouncement,
   stealthKeysFromScalars,
   deriveStealthAddress,
   scanStealthAnnouncement,
@@ -81,6 +83,25 @@ test("randomEphemeralScalar draws in-range and non-constant", () => {
   const b = randomEphemeralScalar();
   for (const x of [a, b]) assert.ok(x > 0n && x < SUBGROUP_ORDER);
   assert.notEqual(a, b); // 2^-251 false-failure probability
+});
+
+test("isStealthAnnouncement: zero sentinel false, real R true, malformed false", () => {
+  // The sentinel constant IS the wire shape the contract emits for a plain withdraw.
+  assert.equal(ZERO_EPHEMERAL, "0x" + "00".repeat(32));
+  assert.equal(isStealthAnnouncement(ZERO_EPHEMERAL), false);
+  const sent = deriveStealthAddress(KEYS.meta, EPHEMERAL);
+  assert.equal(isStealthAnnouncement(sent.ephemeralPub), true);
+  for (const bad of [
+    "",
+    "0x",
+    "0x1234",
+    "11".repeat(32), // no 0x prefix
+    "0x" + "zz".repeat(32), // non-hex
+    "0x" + "11".repeat(31), // too short
+    "0x" + "11".repeat(33), // too long
+  ]) {
+    assert.equal(isStealthAnnouncement(bad), false, `must reject: ${bad}`);
+  }
 });
 
 // Committed determinism pin: the exact wire values for one fixed input set.

@@ -33,8 +33,9 @@ function seededStore(): InMemoryStore {
       viewTag: i,
     };
   }
-  // A withdraw WITHOUT an announcement (pre-upgrade history) and a non-withdraw
-  // entry: neither may appear in the feed.
+  // A withdraw WITHOUT an announcement (pre-upgrade history, or a plain
+  // withdraw — the ingest's core-predicate gate attaches nothing for the
+  // zero-sentinel pair) and a non-withdraw entry: neither may appear in the feed.
   store.addEvent({
     txHash: "0xold", blockNumber: 50, logIndex: 0,
     kind: "withdraw", epoch: null, ecdhPublicKey: null, encryptionNonce: null,

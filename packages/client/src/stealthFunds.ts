@@ -19,6 +19,7 @@ import { parseAbi } from "viem";
 import type { PublicClient } from "viem";
 import { ERC20_ABI_FRAGMENTS } from "@bongtu/core/network";
 import {
+  isStealthAnnouncement,
   scanStealthAnnouncement,
   recoverStealthKey,
   type StealthKeys,
@@ -55,14 +56,12 @@ export interface DiscoverDeps {
   balanceOf: (address: string) => Promise<bigint>;
 }
 
-const ZERO32 = /^0x0{64}$/;
-
 /**
- * Discover the user's stealth holdings. Records that announce nothing
- * (ephemeralPub zero — a plain-address withdraw), fail to parse, or do not
- * reproduce their own recipient under this identity's keys are skipped, not
- * fatal: the feed legitimately mixes other users' announcements (public path)
- * and non-stealth withdraws.
+ * Discover the user's stealth holdings. Records that announce nothing (the
+ * core predicate rejects the zero sentinel and shape-malformed R values),
+ * fail to parse as curve points, or do not reproduce their own recipient
+ * under this identity's keys are skipped, not fatal: the feed legitimately
+ * mixes other users' announcements (public path) and non-stealth withdraws.
  */
 export async function discoverStealthFunds(
   keys: StealthKeys,
@@ -70,7 +69,7 @@ export async function discoverStealthFunds(
 ): Promise<StealthDiscovery> {
   const mine: Omit<StealthFund, "balance">[] = [];
   for (const a of await deps.fetchMine()) {
-    if (!a.ephemeralPub || ZERO32.test(a.ephemeralPub)) continue;
+    if (!isStealthAnnouncement(a.ephemeralPub)) continue;
     const derived = ((): { address: string } | null => {
       try {
         return scanStealthAnnouncement(keys.viewPriv, keys.meta.spendPub, a.ephemeralPub);

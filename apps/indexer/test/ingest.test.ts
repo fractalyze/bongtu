@@ -34,6 +34,7 @@ import {
   hybridEnvelopeKey,
 } from "@bongtu/core/kem";
 import { ImtTree } from "@bongtu/core/imt";
+import { ZERO_EPHEMERAL } from "@bongtu/core/stealth";
 import type { Pool } from "pg";
 import { MirrorTree } from "../src/tree.js";
 import { type OpEnvelope } from "../src/ledger.js";
@@ -355,7 +356,30 @@ function makeSim() {
     return { logs, start, commits };
   };
 
-  return { oracle, deposit, transfer, transfer10, transfer10x2, disburse };
+  // Withdrawn + its unconditionally-paired WithdrawAnnouncement (the contract
+  // emits both for EVERY withdraw; a plain payout carries the all-zero
+  // ephemeral sentinel). Only the public-mode fields ingest actually reads —
+  // the authority-envelope legs are exercised by the arbiter scenarios above.
+  const withdraw = (
+    txHash: string,
+    change: NoteSpec,
+    nfs: [bigint, bigint],
+    ann: { recipient: bigint; ephemeralPub: string; viewTag: number },
+  ): ParsedLog[] => {
+    tx();
+    const chg = commitOf(change);
+    return [
+      appended(txHash, chg),
+      log("Withdrawn", txHash, { nullifiers: nfs, changeCommitment: chg }),
+      log("WithdrawAnnouncement", txHash, {
+        recipient: ann.recipient,
+        stealthEphemeralPub: ann.ephemeralPub,
+        stealthViewTag: ann.viewTag,
+      }),
+    ];
+  };
+
+  return { oracle, deposit, transfer, transfer10, transfer10x2, disburse, withdraw };
 }
 
 // PostgresLedger is the ONLY ledger (Postgres-only, U-I4); its apply/notesOf/
@@ -906,6 +930,36 @@ async function main(): Promise<void> {
       }
     })();
     ok(/AUTHORITY_KEM_KEY/.test(msg), `keyless ledger on a V2 op throws, not alarms (got: ${msg || "no throw"})`);
+  }
+
+  step("WITHDRAW ANNOUNCEMENT: the sentinel pair attaches nothing; a real R attaches exactly");
+  {
+    const simW = makeSim();
+    // Public mode: the announcement attach is store-level; the arbiter ledger
+    // legs are covered elsewhere and irrelevant to the gating under test.
+    const ixW = makeIndexer(false);
+    const wDep0 = note(U1, 30n, 7001n);
+    const wDep1 = note(U1, 0n, 7002n);
+    // Any well-formed non-zero 32-byte value: ingest gates on shape + sentinel,
+    // not on curve validity (the wallet's scan owns that).
+    const REAL_R = "0x" + "c9".repeat(32);
+    ixW.applyLogs([
+      ...simW.deposit("0xwdep", wDep0, wDep1, 620000000000000000003n, 771n),
+      ...simW.withdraw("0xwplain", note(U1, 25n, 7003n), [501n, 0n], {
+        recipient: BigInt("0x" + "ab".repeat(20)), ephemeralPub: ZERO_EPHEMERAL, viewTag: 0,
+      }),
+      ...simW.withdraw("0xwstealth", note(U1, 20n, 7004n), [502n, 0n], {
+        recipient: BigInt("0x" + "cd".repeat(20)), ephemeralPub: REAL_R, viewTag: 32,
+      }),
+    ]);
+    const wFeed = ixW.store.allEvents().filter((e) => e.kind === "withdraw");
+    ok(wFeed.length === 2, "both withdraws produced feed entries");
+    ok(!("announcement" in wFeed[0]) || wFeed[0].announcement === undefined,
+      "plain withdraw (zero-sentinel pair) carries NO announcement field");
+    const a = wFeed[1].announcement;
+    ok(a !== undefined, "stealth withdraw entry carries the announcement");
+    ok(a!.ephemeralPub === REAL_R && a!.viewTag === 32 && a!.recipient === "0x" + "cd".repeat(20),
+      "announcement carries the exact announced (recipient, R, viewTag)");
   }
 
   step("POLL: pollOnce records failure/success state; /health projects it");

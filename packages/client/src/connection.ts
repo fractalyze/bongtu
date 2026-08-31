@@ -34,6 +34,7 @@ import {
   isPreKemProbeError,
 } from "@bongtu/core/network";
 import { liveChain } from "./chain.js";
+import { ZERO_EPHEMERAL } from "@bongtu/core/stealth";
 
 // The shared per-function ABI fragments (@bongtu/core/network) — only the pool
 // functions the wallet touches, parsed once for viem. deposit is the 0-in/2-out
@@ -371,7 +372,7 @@ async function submit(
     fn === "withdraw"
       ? [
           a, b, c, pub, kemCiphertext,
-          (stealthAnnouncement?.ephemeralPub ?? "0x" + "00".repeat(32)) as `0x${string}`,
+          (stealthAnnouncement?.ephemeralPub ?? ZERO_EPHEMERAL) as `0x${string}`,
           stealthAnnouncement?.viewTag ?? 0,
         ]
       : [a, b, c, pub, kemCiphertext];

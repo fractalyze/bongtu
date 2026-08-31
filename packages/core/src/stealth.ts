@@ -70,6 +70,24 @@ export interface StealthKeys {
   meta: StealthMetaAddress;
 }
 
+/**
+ * The on-wire "no announcement" sentinel. The contract emits a
+ * WithdrawAnnouncement unconditionally — a paired event per Withdrawn — and a
+ * plain (non-stealth) withdraw carries this all-zero ephemeralPub.
+ */
+export const ZERO_EPHEMERAL = "0x" + "00".repeat(32);
+
+/**
+ * The one predicate for "did this withdraw actually announce": true iff
+ * `ephemeralPub` is well-formed 32-byte 0x-hex AND not the zero sentinel.
+ * Because the paired event exists for every Withdrawn, every consumer (ingest
+ * attach, wallet scan, calldata default) must make this call identically —
+ * this function is that decision's single home.
+ */
+export function isStealthAnnouncement(ephemeralPub: string): boolean {
+  return /^0x[0-9a-fA-F]{64}$/.test(ephemeralPub) && !/^0x0{64}$/.test(ephemeralPub);
+}
+
 /** What a sender produces: the announcement (R, viewTag) plus the destination. */
 export interface StealthDerivation {
   /** compressed BabyJubJub ephemeral pubkey R — the on-announcement value. */

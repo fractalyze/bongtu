@@ -10,9 +10,12 @@
 //       does not already hold — it just spares the wallet the O(all) scan.
 //
 // Announcements are withdraw-feed metadata, not their own table: the ingest
-// attaches each WithdrawAnnouncement to its paired Withdrawn feed entry, and
-// the owner attribution is the ledger's history (kind=withdraw rows carry the
-// tx hashes the owner's envelopes decrypted from).
+// attaches only REAL stealth announcements (core isStealthAnnouncement — the
+// contract pairs a WithdrawAnnouncement with every Withdrawn, zero-sentinel
+// for plain payouts) to the withdraw feed entry, so `.announcement` absence is
+// the single truth this route filters on — no zero-check here. The owner
+// attribution is the ledger's history (kind=withdraw rows carry the tx hashes
+// the owner's envelopes decrypted from).
 
 import type { Route, RouteResult } from "../router.js";
 import type { WithdrawAnnouncementRecord } from "@bongtu/core/indexerApi";

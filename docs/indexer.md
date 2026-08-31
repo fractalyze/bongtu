@@ -235,7 +235,10 @@ shapes + the client half (`buildNameRegistration`, `registerName`, `resolveName`
 
 Stealth withdraws pair each `Withdrawn` with a `WithdrawAnnouncement` event; the
 ingest attaches it to the withdraw feed entry (payload-persisted, no extra
-table) and `/announcements` serves the projection. Two read paths, one privacy
+table) and `/announcements` serves the projection. Plain (non-stealth) withdraws
+never enter the feed: the contract emits the pair unconditionally with a
+zero-sentinel ephemeral key, and the ingest applies the core
+`isStealthAnnouncement` predicate once, attaching nothing for the sentinel. Two read paths, one privacy
 story: the PUBLIC cursor feed is the trustless scan-all a wallet walks with its
 view key; the ARBITER-MODE `?owner=` slice serves only the caller's own rows
 behind the `/notes` read-auth — zero marginal disclosure, because the arbiter

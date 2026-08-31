@@ -37,6 +37,7 @@ import {
 
 import { kemPkFromSecret } from "@bongtu/core/kem";
 import { isPreKemProbeError } from "@bongtu/core/network";
+import { isStealthAnnouncement } from "@bongtu/core/stealth";
 
 import { MirrorTree } from "./tree.js";
 import { poolAbi, abiKnowsKem, kemBootGuardError, staleOpAbiError, type ChainConfig } from "./chain.js";
@@ -727,14 +728,19 @@ export class Indexer {
           }
         }
       } else if (l.name === "WithdrawAnnouncement") {
-        // Metadata on the withdraw entry, not a feed entry of its own. An
+        // Metadata on the withdraw entry, not a feed entry of its own. The
+        // contract emits this pair for EVERY Withdrawn, so the queue is
+        // consumed either way; only a real stealth announcement (the core
+        // predicate: 32-byte R, not the zero sentinel) is attached — a plain
+        // withdraw's entry stays bare and never reaches /announcements. An
         // announcement with no queued entry means the Withdrawn was deduped
         // (replay) — the durable entry already carries it.
         const w = withdrawEntriesByTx.get(l.txHash)?.shift();
-        if (w) {
+        const eph = String(l.args.stealthEphemeralPub);
+        if (w && isStealthAnnouncement(eph)) {
           w.announcement = {
             recipient: "0x" + bn(l.args.recipient).toString(16).padStart(40, "0"),
-            ephemeralPub: String(l.args.stealthEphemeralPub),
+            ephemeralPub: eph,
             viewTag: Number(l.args.stealthViewTag),
           };
         }
