@@ -26,6 +26,7 @@ import type { ReactNode } from "react";
 import { decodeAddress, encodeAddress } from "@bongtu/core/pubkey";
 import { DEFAULTS } from "../../config.js";
 import { runSpendChain, type SpendOutcome } from "@bongtu/client/spendFlow";
+import { resolveName, type NameRecord } from "@bongtu/client/indexerClient";
 import { prepareStealthDestination } from "@bongtu/client/stealthKeys";
 import { navigate } from "../hooks.js";
 import { previewSpend } from "@bongtu/client/spend";
@@ -34,7 +35,7 @@ import { proveInBrowser } from "../../lib/prove.js";
 import { useWallet } from "../App.js";
 import { useActionMachine, stepsForRun } from "../actionMachine.js";
 import { formatKkrw, parseKkrw } from "@bongtu/client/money";
-import { amountError, recipientError } from "../format.js";
+import { amountError, recipientError, recipientName } from "../format.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
 import { activeStep, chainSteps, SPEND_STEPS } from "../components/StagedProgress.js";
 import { SuccessPanel } from "../components/SuccessPanel.js";
@@ -57,6 +58,11 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
   // Withdraw-only: pay a freshly derived one-time (stealth) address instead of
   // the connected account. Costs one extra signature popup at submit.
   const [stealthMode, setStealthMode] = useState(false);
+  // Pay-by-name (transfer-only): the directory record resolved for the CURRENT
+  // input at Continue time, plus the resolve step's own error (unregistered /
+  // network) — a judgment the form-shape recipientError cannot make.
+  const [resolved, setResolved] = useState<NameRecord | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
 
   // The raw-wei amount the protocol layer receives; 0n while the input is invalid.
   const amountWei = useMemo(() => {
@@ -73,6 +79,16 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
   const action = useActionMachine<SpendOutcome>({ circuit: plan.circuit, steps: SPEND_STEPS });
 
   const rcptErr = isTransfer ? recipientError(recipient) : null;
+  // Which reading the input gets is unambiguous BY LENGTH (recipientName): a name
+  // normalizes to <=32 chars while both address encodings are longer (legacy hex
+  // 0x+64 chars, base58check 51), so a non-null name IS the name path and every
+  // other input stays on today's decodeAddress path untouched.
+  const typedName = isTransfer ? recipientName(recipient) : null;
+  // Stale-resolve guard: the stored record only counts while it still matches
+  // what the field says NOW (the name is re-derived from the input), so editing
+  // the field after a resolve can never pay the previously resolved name.
+  const activeRecord =
+    resolved !== null && typedName !== null && resolved.name === typedName ? resolved : null;
   const amtErr = amountError(amount, balance);
   // Guard on a KNOWN balance: until /notes loads (balance===null) amountError can't
   // catch over-spend, so don't let the user start a proof that would revert on-chain.
@@ -112,10 +128,13 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
             sessionPubkey: session.compressedPubkey,
             reloadNotes,
           },
-          // The flow/witness layer only ever sees the canonical hex form — base58
-          // stops at this edge.
+          // The flow/witness layer only ever sees the canonical hex form — a
+          // resolved name contributes its owner key through the same decodeAddress
+          // normalization a typed address gets; base58 and names stop at this edge.
           {
-            to: isTransfer ? decodeAddress(recipient.trim()) : undefined,
+            to: isTransfer
+              ? decodeAddress(activeRecord ? activeRecord.owner : recipient.trim())
+              : undefined,
             amount: amountWei.toString(),
             stealth,
           },
@@ -127,6 +146,30 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
       },
       refreshAfterAction,
     );
+  }
+
+  // Continue resolves a name BEFORE the confirm sheet opens — the sheet must show
+  // the name→owner binding, so the record has to exist first. A plain address goes
+  // straight to review as before. This small async wrapper stays OUTSIDE
+  // useActionMachine: resolution is a form-time concern, not an action phase.
+  async function handleContinue(): Promise<void> {
+    if (typedName === null) {
+      action.review();
+      return;
+    }
+    setNameError(null);
+    try {
+      const record = await resolveName(indexerUrl, typedName);
+      if (!record) {
+        setNameError("That name isn't registered.");
+        return;
+      }
+      setResolved(record);
+      action.review();
+    } catch (e) {
+      // A network/server failure surfaces its thrown message in the same slot.
+      setNameError(e instanceof Error ? e.message : String(e));
+    }
   }
 
   // --- success ---------------------------------------------------------------
@@ -183,9 +226,19 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
           <>
             <dt className="text-muted text-sm">To</dt>
             <dd className="font-mono text-right text-[0.9rem] [overflow-wrap:anywhere]">
-              {/* canonical base58 regardless of which form was typed — what
-                  the user confirms is the address, not their keystrokes */}
-              {encodeAddress(decodeAddress(recipient.trim()))}
+              {/* canonical base58 regardless of which form was typed — what the
+                  user confirms is the address, not their keystrokes. A resolved
+                  name shows BOTH halves of the binding (name AND owner address):
+                  what is confirmed is "this name pays this key". */}
+              {activeRecord ? (
+                <>
+                  <span className="font-sans font-semibold">{activeRecord.name}</span>
+                  <br />
+                  {encodeAddress(decodeAddress(activeRecord.owner))}
+                </>
+              ) : (
+                encodeAddress(decodeAddress(recipient.trim()))
+              )}
             </dd>
           </>
         )}
@@ -240,12 +293,19 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
           </label>
         )}
         {isTransfer && (
-          <Field label="Recipient address" error={recipient.trim() ? rcptErr : null}>
+          <Field label="Recipient" error={recipient.trim() ? (rcptErr ?? nameError) : null}>
             <TextInput
               mono
-              placeholder="bongtu address (3… or legacy 0x…)"
+              placeholder="bongtu address (3… or legacy 0x…) or name"
               value={recipient}
-              onChange={(e) => setRecipient(e.target.value)}
+              onChange={(e) => {
+                setRecipient(e.target.value);
+                // any edit invalidates the resolve result AND its error — the
+                // activeRecord guard would re-judge anyway; clearing keeps the
+                // field honest immediately
+                setResolved(null);
+                setNameError(null);
+              }}
               autoCapitalize="off"
               autoCorrect="off"
               spellCheck={false}
@@ -263,7 +323,7 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
 
         {action.error && <ErrorBanner message={action.error} />}
 
-        <Button variant="primary" block disabled={!formValid} onClick={action.review}>
+        <Button variant="primary" block disabled={!formValid} onClick={() => void handleContinue()}>
           Continue
         </Button>
       </div>

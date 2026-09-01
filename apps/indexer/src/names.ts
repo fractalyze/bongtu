@@ -16,16 +16,11 @@
 import type { Pool } from "pg";
 import type { NameRecord } from "@bongtu/core/indexerApi";
 
-// Lowercase label, 3–32 chars, alnum with interior hyphens — a deliberately
-// DNS-label-shaped grammar so a name can later become an ENS/CCIP subname
-// without a migration.
-const NAME_PATTERN = /^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/;
-
-/** Canonical form of a requested name, or null when no canonical form exists. */
-export function normalizeName(raw: string): string | null {
-  const name = raw.trim().toLowerCase();
-  return NAME_PATTERN.test(name) ? name : null;
-}
+// The name grammar (NAME_PATTERN + normalizeName) lives with the names
+// wire-contract in @bongtu/core/indexerApi, so the wallet's pay-by-name form
+// judges input with the SAME function this registry registers under.
+// Re-exported here so the routes and tests keep their registry-module import.
+export { normalizeName } from "@bongtu/core/indexerApi";
 
 export type RegisterOutcome =
   | { ok: true; record: NameRecord }

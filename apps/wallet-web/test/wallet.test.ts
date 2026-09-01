@@ -42,7 +42,7 @@ import {
 import { sumUnspent, trialDecryptEvents } from "@bongtu/client/balance";
 import { KEY_DERIVATION } from "@bongtu/client/identity";
 import { walletErrorMessage } from "@bongtu/client/connection";
-import type { FeedEvent } from "@bongtu/client/indexerClient";
+import { resolveName, type FeedEvent, type NameRecord } from "@bongtu/client/indexerClient";
 import {
   buildTransferRequest,
   buildWithdrawRequest,
@@ -574,12 +574,55 @@ test("recipientError: accepts base58check, legacy hex AND the wallet's own addre
   const tampered = b58.slice(0, -1) + (last === "2" ? "5" : "2");
   assert.equal(recipientError(tampered), "That doesn't look like a valid bongtu address.");
   assert.equal(recipientError(""), "Enter a recipient.");
-  assert.equal(recipientError("junk"), "That doesn't look like a valid bongtu address.");
+  // "ju_nk": the underscore is outside the name grammar AND it is no address —
+  // the shape recipientError still rejects outright. Bare "junk" is now a valid
+  // NAME candidate (pay-by-name), judged by the resolve step, not the form.
+  assert.equal(recipientError("ju_nk"), "That doesn't look like a valid bongtu address.");
 
   // Self-send is allowed in EITHER encoding (per-output nonce, §11-8 v1.1) — the
   // wallet's own address is judged exactly like any other, no self-pubkey passed in.
   assert.equal(recipientError(self), null, "own address (hex) must be accepted");
   assert.equal(recipientError(encodeAddress(self)), null, "own address (base58) must be accepted");
+});
+
+test("recipientError: a name-shaped recipient is a candidate (resolve judges registration), junk still dies", () => {
+  // "alice-3" normalizes under the ONE core grammar -> the form passes it and the
+  // Continue-time resolve step decides whether it is actually registered.
+  assert.equal(recipientError("alice-3"), null, "name-shaped input must pass the form");
+  // Neither name nor address: "AB" lowercases to a 2-char label (the grammar
+  // minimum is 3) and is nowhere near an address; "0xnope" declares ADDRESS
+  // intent with its 0x prefix, so it must die on the address judgment instead of
+  // quietly becoming a directory lookup.
+  assert.equal(recipientError("AB"), "That doesn't look like a valid bongtu address.");
+  assert.equal(recipientError("0xnope"), "That doesn't look like a valid bongtu address.");
+});
+
+test("resolveName through the barrel: a hit resolves the record, a miss resolves null", async () => {
+  const f = fixture([1000n]);
+  const record: NameRecord = {
+    name: "alice-3",
+    owner: f.recipient,
+    viewPub: "0x" + "22".repeat(32),
+    spendPub: "0x" + "33".repeat(33),
+    updatedAt: 1_700_000_000,
+  };
+  const hit = (async () => ({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify(record),
+  })) as unknown as typeof fetch;
+  const got = await resolveName("http://indexer.local", "alice-3", hit);
+  assert.deepEqual(got, record);
+  // The resolved owner is what the spend pays: it must decode like any recipient.
+  assert.equal(decodeAddress((got as NameRecord).owner), decodeAddress(f.recipient));
+
+  // 404 is an ANSWER (unregistered) — the Send form turns it into its distinct copy.
+  const miss = (async () => ({
+    ok: false,
+    status: 404,
+    text: async () => "no such name",
+  })) as unknown as typeof fetch;
+  assert.equal(await resolveName("http://indexer.local", "nobody", miss), null);
 });
 
 test("spend path: a base58 recipient normalized via decodeAddress builds the identical request", () => {

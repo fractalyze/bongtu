@@ -4,6 +4,7 @@
 // what that parser returns.
 
 import { decodeAddress } from "@bongtu/core/pubkey";
+import { normalizeName } from "@bongtu/client/indexerClient";
 import { parseKkrw } from "@bongtu/client/money";
 
 /**
@@ -60,17 +61,37 @@ export function downloadOnceSubtitle(totalBytes: number | null): string {
 }
 
 /**
+ * The pay-by-name reading of a recipient input, or null when the input is meant
+ * as an address. Name vs address is unambiguous BY LENGTH: a name normalizes to
+ * <=32 chars (core normalizeName, the one grammar the registry registers under),
+ * while both address encodings are longer — legacy hex is 0x + 64 chars,
+ * base58check 51 — so no address can ever normalize into a name. The extra 0x
+ * guard is intent, not disambiguation: a "0x…" input declares an ADDRESS, and a
+ * fat-fingered hex address must die on the checksum below, not quietly turn
+ * into a directory lookup for someone else's short name.
+ */
+export function recipientName(raw: string): string | null {
+  const v = raw.trim();
+  if (v.startsWith("0x") || v.startsWith("0X")) return null;
+  return normalizeName(v);
+}
+
+/**
  * Reject an obviously-bad recipient before proving (the pure spend.ts rejects it
  * too, but a 28 MB proof is a bad place to learn you fat-fingered a key).
- * decodeAddress is the one normalization point — it accepts base58check AND
- * legacy hex, and its checksum catches typos. The address is judged on its own:
- * sending to YOUR OWN address is allowed, since the transfer circuit's per-output
- * receiver nonce (§11-8 v1.1, U-X3) removed the two-time pad that used to make a
- * self-send unsafe — which is why this takes no self-pubkey to compare against.
+ * A name-shaped input (recipientName above) passes as-is: whether the name is
+ * actually REGISTERED is the Continue-time resolve step's judgment, not a form
+ * shape's. Everything else goes to decodeAddress — the one normalization point:
+ * it accepts base58check AND legacy hex, and its checksum catches typos. The
+ * address is judged on its own: sending to YOUR OWN address is allowed, since
+ * the transfer circuit's per-output receiver nonce (§11-8 v1.1, U-X3) removed
+ * the two-time pad that used to make a self-send unsafe — which is why this
+ * takes no self-pubkey to compare against.
  */
 export function recipientError(raw: string): string | null {
   const v = raw.trim();
   if (!v) return "Enter a recipient.";
+  if (recipientName(v) !== null) return null;
   try {
     decodeAddress(v);
   } catch {

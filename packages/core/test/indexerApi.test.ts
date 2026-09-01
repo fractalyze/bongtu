@@ -32,6 +32,7 @@ import {
   tokenReadUrl,
   assertValidChallenge,
   viewTokenHostBinding,
+  normalizeName,
   registerName,
   resolveName,
   getAnnouncements,
@@ -274,6 +275,17 @@ function fakeFetch(status: number, body: string) {
   }) as unknown as typeof fetch;
   return { fn, calls };
 }
+
+test("normalizeName: canonical form is trim+lowercase; shape violations are null", () => {
+  // trim + lowercase IS the canonicalization (the registry stores this form)…
+  assert.equal(normalizeName("  PayRoll-Team "), "payroll-team");
+  // …interior hyphens are part of the DNS-label shape…
+  assert.equal(normalizeName("a-b-c"), "a-b-c");
+  // …but a hyphen at either end, or a length outside 3..32, has no canonical form.
+  for (const bad of ["-abc", "abc-", "ab", "a".repeat(33)]) {
+    assert.equal(normalizeName(bad), null, `accepted: ${JSON.stringify(bad)}`);
+  }
+});
 
 test("registerName POSTs the registration body verbatim and parses the accepted record", async () => {
   const reg: NameRegistration = {

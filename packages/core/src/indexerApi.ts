@@ -498,6 +498,20 @@ export function fetchHistoryPage(
 import { nameAuthMessage, nameBindingField } from "./eddsa.js";
 import type { StealthMetaAddress } from "./stealth.js";
 
+// Lowercase label, 3–32 chars, alnum with interior hyphens — a deliberately
+// DNS-label-shaped grammar so a name can later become an ENS/CCIP subname
+// without a migration. The grammar lives HERE, beside the wire shapes, so the
+// server's registry and the wallet's pay-by-name form judge input with the ONE
+// function — a form that accepted what the registry rejects (or vice versa)
+// would be wire drift by another name.
+const NAME_PATTERN = /^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/;
+
+/** Canonical form of a requested name, or null when no canonical form exists. */
+export function normalizeName(raw: string): string | null {
+  const name = raw.trim().toLowerCase();
+  return NAME_PATTERN.test(name) ? name : null;
+}
+
 /** One directory record, as served by GET /names/:name. */
 export interface NameRecord {
   name: string;
