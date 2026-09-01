@@ -439,6 +439,38 @@ test("a stealth withdraw pays the address its announcement rediscovers, and a me
   assert.deepEqual(provedRecipients, [BigInt(rediscovered.address)]);
 });
 
+test("a withdraw pays the user-typed L1 destination through the same recipient param, announcement stays plain", async () => {
+  // Same chain shape as the stealth gate above (merge then withdraw), because the
+  // destination shares its seam: withdrawTo must reach only the terminal proof's
+  // recipient, and — with no derivation in play — submitWithdraw must see NO
+  // stealth value, which is exactly the plain-withdraw sentinel path (U-A).
+  const w = chainWorld([100n, 100n, 100n]);
+  const base = w.deps();
+  const DEST = "0x00000000000000000000000000000000000d0001";
+
+  const provedRecipients: bigint[] = [];
+  const announced: (StealthDerivation | undefined)[] = [];
+  const deps = w.deps({
+    prove: async (request) => {
+      if (request.circuit === "withdraw") {
+        provedRecipients.push(BigInt((request.input as unknown as { recipient: string }).recipient));
+      }
+      return base.prove(request);
+    },
+    submitWithdraw: async (conn, pool, calldata, kem, explorer, s2) => {
+      announced.push(s2);
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      return base.submitWithdraw!(conn, pool, calldata, kem, explorer, s2);
+    },
+  });
+
+  await runSpendChain("withdraw", w.ctx(), { amount: "250", withdrawTo: DEST }, () => {}, deps);
+
+  assert.deepEqual(w.submitted, ["transfer10x2", "withdraw"], "one merge, then the payment");
+  assert.deepEqual(provedRecipients, [BigInt(DEST)], "the proof binds the typed destination, merge untouched");
+  assert.deepEqual(announced, [undefined], "no derivation reaches submit — the sentinel announcement path");
+});
+
 // ============================ (3) FAILURE ====================================
 
 test("a leg that fails partway says the money did not move, and what did survive", async () => {

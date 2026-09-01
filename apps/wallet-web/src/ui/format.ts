@@ -3,6 +3,7 @@
 // @bongtu/client/money (the single raw-wei <-> kKRW edge) — amountError below only judges
 // what that parser returns.
 
+import { isAddress } from "viem";
 import { decodeAddress } from "@bongtu/core/pubkey";
 import { normalizeName } from "@bongtu/client/indexerClient";
 import { parseKkrw } from "@bongtu/client/money";
@@ -98,4 +99,19 @@ export function recipientError(raw: string): string | null {
     return "That doesn't look like a valid bongtu address.";
   }
   return null;
+}
+
+/**
+ * Why a withdraw destination can't be paid, or null when it can. This judges an
+ * L1 EOA, not a bongtu address, so it shares nothing with recipientError: empty
+ * is VALID (the field's stated default — the connected account), and everything
+ * else goes to viem's isAddress, whose strict mode accepts an all-lowercase
+ * address but holds mixed case to the EIP-55 checksum (a typo dies here, not
+ * on-chain). A pasted bjj compressed pubkey (0x + 64 hex) is 12 bytes too long
+ * for an L1 address and fails the same shape check.
+ */
+export function evmAddressError(raw: string): string | null {
+  const v = raw.trim();
+  if (!v) return null;
+  return isAddress(v) ? null : "That doesn't look like an L1 address.";
 }

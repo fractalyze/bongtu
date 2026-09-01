@@ -69,7 +69,6 @@ import { Deposit } from "./screens/Deposit.js";
 import { SpendScreen } from "./screens/SpendScreen.js";
 import { Activity } from "./screens/Activity.js";
 import { Settings } from "./screens/Settings.js";
-import { Stealth } from "./screens/Stealth.js";
 
 // --- wallet context --------------------------------------------------------------
 
@@ -528,8 +527,6 @@ function Router({ route }: { route: string }): ReactNode {
       return <Activity />;
     case "settings":
       return <Settings />;
-    case "stealth":
-      return <Stealth />;
     default:
       return <Home />;
   }

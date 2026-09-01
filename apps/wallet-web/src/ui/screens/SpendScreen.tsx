@@ -23,19 +23,18 @@
 
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { getAddress } from "viem";
 import { decodeAddress, encodeAddress } from "@bongtu/core/pubkey";
 import { DEFAULTS } from "../../config.js";
 import { runSpendChain, type SpendOutcome } from "@bongtu/client/spendFlow";
 import { resolveName, type NameRecord } from "@bongtu/client/indexerClient";
-import { prepareStealthDestination } from "@bongtu/client/stealthKeys";
-import { navigate } from "../hooks.js";
 import { previewSpend } from "@bongtu/client/spend";
 import { keyCache } from "../../lib/keyCache.js";
 import { proveInBrowser } from "../../lib/prove.js";
 import { useWallet } from "../App.js";
 import { useActionMachine, stepsForRun } from "../actionMachine.js";
 import { formatKkrw, parseKkrw } from "@bongtu/client/money";
-import { amountError, recipientError, recipientName } from "../format.js";
+import { amountError, evmAddressError, recipientError, recipientName } from "../format.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
 import { activeStep, chainSteps, SPEND_STEPS } from "../components/StagedProgress.js";
 import { SuccessPanel } from "../components/SuccessPanel.js";
@@ -55,9 +54,10 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
 
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
-  // Withdraw-only: pay a freshly derived one-time (stealth) address instead of
-  // the connected account. Costs one extra signature popup at submit.
-  const [stealthMode, setStealthMode] = useState(false);
+  // Withdraw-only: an optional L1 payout address. Empty pays the connected
+  // account (today's default, and what the field's hint says); non-empty must
+  // be a real L1 address (evmAddressError) — an EOA, not a bongtu address.
+  const [destination, setDestination] = useState("");
   // Pay-by-name (transfer-only): the directory record resolved for the CURRENT
   // input at Continue time, plus the resolve step's own error (unregistered /
   // network) — a judgment the form-shape recipientError cannot make.
@@ -90,9 +90,19 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
   const activeRecord =
     resolved !== null && typedName !== null && resolved.name === typedName ? resolved : null;
   const amtErr = amountError(amount, balance);
+  // The destination is judged as an L1 address (never recipientError's bjj
+  // grammar), and becomes an address exactly once: checksummed here, so the
+  // string the confirm sheet shows IS the string the flow's proof binds. Null
+  // means "defaulted" — the flow then pays the connected account on its own.
+  const destErr = isTransfer ? null : evmAddressError(destination);
+  const withdrawDest =
+    !isTransfer && destErr === null && destination.trim() !== ""
+      ? getAddress(destination.trim())
+      : null;
   // Guard on a KNOWN balance: until /notes loads (balance===null) amountError can't
   // catch over-spend, so don't let the user start a proof that would revert on-chain.
-  const formValid = balance !== null && !amtErr && !plan.blocker && (!isTransfer || !rcptErr);
+  const formValid =
+    balance !== null && !amtErr && !plan.blocker && (!isTransfer || !rcptErr) && !destErr;
 
   const title = isTransfer ? "Send" : "Withdraw";
   const terminalWord = isTransfer ? "payment" : "withdrawal";
@@ -104,20 +114,8 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
     // component never holds it. The session pubkey rides along so the flow can refuse
     // a key that isn't this session's, and is the payee of every merge leg.
     void action.submit(
-      async (onStage) => {
-        // The stealth destination is derived JUST before the run: meta keys from
-        // the wallet's ONE lock (unlockStealth — the first stealth action pays a
-        // popup, later ones ride the hold under the lock's idle/account rules),
-        // then a fresh ephemeral — this screen stores nothing.
-        // prepareStealthDestination owns the derivation whole (address +
-        // announcement as one value); this screen only decides WHETHER.
-        const stealth =
-          !isTransfer && stealthMode
-            ? await prepareStealthDestination(connection, {
-                getKeys: () => keyCache.unlockStealth(connection, session.compressedPubkey),
-              })
-            : undefined;
-        return runSpendChain(
+      async (onStage) =>
+        runSpendChain(
           kind,
           {
             connection,
@@ -131,19 +129,20 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
           // The flow/witness layer only ever sees the canonical hex form — a
           // resolved name contributes its owner key through the same decodeAddress
           // normalization a typed address gets; base58 and names stop at this edge.
+          // The withdraw destination rides the flow's proof-bound recipient param
+          // (withdrawTo); undefined is the flow's own connected-account default.
           {
             to: isTransfer
               ? decodeAddress(activeRecord ? activeRecord.owner : recipient.trim())
               : undefined,
             amount: amountWei.toString(),
-            stealth,
+            withdrawTo: withdrawDest ?? undefined,
           },
           onStage,
           // The engine takes the app's lock + prover through its deps seam: proving
           // is in-browser snarkjs over the same-origin circuit assets.
           { keyCache, prove: (request) => proveInBrowser(request, DEFAULTS.circuitBaseUrl) },
-        );
-      },
+        ),
       refreshAfterAction,
     );
   }
@@ -242,10 +241,14 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
             </dd>
           </>
         )}
-        {!isTransfer && stealthMode && (
+        {!isTransfer && (
           <>
             <dt className="text-muted text-sm">To</dt>
-            <dd className="text-right text-[0.9rem]">new stealth address (derived at submit)</dd>
+            <dd className="font-mono text-right text-[0.9rem] [overflow-wrap:anywhere]">
+              {/* always the CHECKSUMMED L1 address — a defaulted field confirms
+                  the connected account explicitly, not an implicit blank. */}
+              {withdrawDest ?? (connection ? getAddress(connection.address) : "—")}
+            </dd>
           </>
         )}
         <dt className="text-muted text-sm">Network</dt>
@@ -271,26 +274,21 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
       <ScreenHeader title={title} />
       <div className="flex flex-col gap-4">
         {!isTransfer && (
-          <label className="flex items-start gap-2.5 bg-surface border border-border rounded-xl p-3 cursor-pointer">
-            <input
-              type="checkbox"
-              className="mt-0.5"
-              checked={stealthMode}
-              onChange={(e) => setStealthMode(e.target.checked)}
+          <Field
+            label="Destination address"
+            hint={<>Optional — leave empty to withdraw to your connected account.</>}
+            error={destination.trim() ? destErr : null}
+          >
+            <TextInput
+              mono
+              placeholder="0x… L1 address (defaults to your connected account)"
+              value={destination}
+              onChange={(e) => setDestination(e.target.value)}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
             />
-            <span className="flex flex-col gap-0.5">
-              <span className="text-sm font-semibold">Anonymous withdrawal (stealth address)</span>
-              <span className="text-[11.5px] text-muted">
-                Pays a fresh one-time address only you can spend from — your wallet address never
-                appears on-chain. Find the funds later under{" "}
-                <button type="button" className="underline" onClick={() => navigate("stealth")}>
-                  Stealth funds
-                </button>
-                . Your first stealth action asks for one extra signature; after that your
-                unlocked wallet reuses it.
-              </span>
-            </span>
-          </label>
+          </Field>
         )}
         {isTransfer && (
           <Field label="Recipient" error={recipient.trim() ? (rcptErr ?? nameError) : null}>

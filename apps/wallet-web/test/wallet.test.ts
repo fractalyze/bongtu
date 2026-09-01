@@ -52,7 +52,7 @@ import {
   type WalletInputNote,
   type MembershipWitness,
 } from "@bongtu/client/spend";
-import { recipientError } from "../src/ui/format.js";
+import { evmAddressError, recipientError } from "../src/ui/format.js";
 import { CIRCUITS_VERSION, DEFAULTS, H, B } from "../src/config.js";
 import { ml_kem768, kemSsToLimbs, kemHexToBytes, kemBytesToHex } from "@bongtu/core/kem";
 import { ARBITER_KEM_PK, CHAIN_ID, GAS_TOKEN_PHRASE } from "@bongtu/core/network";
@@ -649,4 +649,43 @@ test("the app shell derives ONLY through the owner module (no inlined derivation
   ]) {
     assert.ok(!app.includes(inlined), `the derivation is re-implemented via ${inlined}`);
   }
+});
+
+// ====================== WITHDRAW DESTINATION (U-R1) ==========================
+// The withdraw destination is an L1 EOA, not a bongtu address, so it never goes
+// near recipientError: empty is VALID (the field defaults to the connected
+// account) and a pasted bjj compressed pubkey must die on shape.
+
+test("evmAddressError: accepts checksummed, lowercase and the empty default; rejects a bjj pubkey and junk", () => {
+  const checksummed = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
+  assert.equal(evmAddressError(checksummed), null, "a checksummed L1 address must pass");
+  assert.equal(evmAddressError(checksummed.toLowerCase()), null, "all-lowercase must pass (no checksum to hold it to)");
+  assert.equal(evmAddressError("  " + checksummed + "  "), null, "whitespace-padded input is trimmed first");
+  assert.equal(evmAddressError(""), null, "empty means the connected account — the field's default, not an error");
+  assert.equal(evmAddressError("   "), null, "blank is still the default");
+
+  // A bjj compressed pubkey is 0x + 64 hex — 12 bytes too long for an L1 address.
+  // This is the paste mistake the field exists to catch (Receive shows exactly this string).
+  assert.equal(evmAddressError("0x" + "ab".repeat(32)), "That doesn't look like an L1 address.");
+  // A mixed-case address with a broken EIP-55 checksum is a typo, not a destination.
+  assert.equal(
+    evmAddressError("0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045"),
+    "That doesn't look like an L1 address.",
+  );
+  assert.equal(evmAddressError("junk"), "That doesn't look like an L1 address.");
+});
+
+test("the withdraw screen pays a plain L1 destination — the stealth exit left the wallet (source fact)", () => {
+  // The library keeps its stealth surface for the future DEPOSIT direction
+  // (stealthKeys/stealthFunds and the keyCache custody half stay tested); the
+  // SCREEN must no longer reach any of it. Same style as the App.tsx derivation gate.
+  const spend = readFileSync(
+    new URL("../src/ui/screens/SpendScreen.tsx", import.meta.url).pathname,
+    "utf8",
+  );
+  for (const gone of ["prepareStealthDestination", "unlockStealth", "stealthMode", "stealth"]) {
+    assert.ok(!spend.includes(gone), `the stealth withdraw wiring is back via ${gone}`);
+  }
+  assert.match(spend, /evmAddressError/, "the destination field must judge through the shared helper");
+  assert.match(spend, /withdrawTo/, "the destination must ride the flow's proof-bound recipient param");
 });

@@ -209,15 +209,17 @@ async function runLeg(
   onStage: OnSpendStage,
   leg: LegProgress,
   stealth?: StealthDerivation,
+  withdrawTo?: string,
 ): Promise<{ outcome: SpendOutcome; payeeSalt: string }> {
   const memberships = await fetchMemberships(io, ctx.indexerUrl, identity, action.inputs);
   const crypto = freshSpendCrypto(randField);
   // Withdraw pays the CONNECTED account by default — byte-for-byte the old
-  // money movement, now proof-bound instead of msg.sender-implied. A stealth
-  // run substitutes its freshly derived one-time address.
+  // money movement, now proof-bound instead of msg.sender-implied. A user-typed
+  // destination (withdrawTo) substitutes theirs through the SAME proof-bound
+  // param; a stealth run substitutes its freshly derived one-time address.
   const built = buildRequest(
     action, identity, memberships, crypto,
-    stealth?.address ?? ctx.connection.address,
+    stealth?.address ?? withdrawTo ?? ctx.connection.address,
   );
   if (!built.meta.membershipOk) {
     throw new Error("Your balance just changed. Go back and try again.");
@@ -323,8 +325,12 @@ export async function runSpendChain(
   kind: SpendKind,
   ctx: SpendContext,
   // `stealth` is the core derivation from prepareStealthDestination
-  // (stealthKeys.ts), consumed only by the terminal withdraw leg.
-  args: { to?: string; amount: string; stealth?: StealthDerivation },
+  // (stealthKeys.ts), consumed only by the terminal withdraw leg. `withdrawTo`
+  // is a user-specified L1 payout address for a plain withdraw (undefined pays
+  // the connected account): it rides the same proof-bound recipient param, and
+  // because no derivation reaches submitWithdraw, the announcement fields stay
+  // the plain-withdraw sentinel (core ZERO_EPHEMERAL) exactly as the default.
+  args: { to?: string; amount: string; stealth?: StealthDerivation; withdrawTo?: string },
   onStage: OnSpendStage,
   deps: SpendIo,
 ): Promise<SpendOutcome> {
@@ -346,6 +352,7 @@ export async function runSpendChain(
       const run = await runLeg(
         io, ctx, identity, legAction(step, ctx, args, merged), onStage, leg,
         step.leg === "merge" ? undefined : args.stealth,
+        step.leg === "merge" ? undefined : args.withdrawTo,
       );
       outcomes.push(run.outcome);
       if (step.leg === "merge") {
