@@ -122,6 +122,9 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
             indexerUrl,
             pool: DEFAULTS.pool,
             explorer: DEFAULTS.explorer,
+            // Empty config means "no relayer" — the flow's undefined default
+            // (wallet self-submit); the flow itself relays only withdraw legs.
+            relayerUrl: DEFAULTS.relayerUrl || undefined,
             notes,
             sessionPubkey: session.compressedPubkey,
             reloadNotes,
@@ -249,6 +252,14 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
                   the connected account explicitly, not an implicit blank. */}
               {withdrawDest ?? (connection ? getAddress(connection.address) : "—")}
             </dd>
+          </>
+        )}
+        {!isTransfer && DEFAULTS.relayerUrl && (
+          <>
+            {/* the relayed path shows no wallet gas popup after Confirm — say
+                why up front, or the missing popup reads as a hang. */}
+            <dt className="text-muted text-sm">Gas</dt>
+            <dd className="text-right text-[0.9rem]">Sponsored — submitted by the relayer</dd>
           </>
         )}
         <dt className="text-muted text-sm">Network</dt>

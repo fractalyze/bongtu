@@ -62,6 +62,15 @@ export const DEFAULTS = {
   // `import.meta.env` is a Vite build-time inject — undefined under the plain
   // node:test runner, so read it defensively (falls back to the relative default).
   indexerUrl: import.meta.env?.VITE_INDEXER_URL || "/indexer",
+  // The gas-sponsoring withdraw relayer (apps/relayer): set => the withdraw leg
+  // submits through it (no gas popup — the payout is proof-bound, pub[26], so
+  // the relayer cannot redirect it); EMPTY => self-submit, the pre-relayer
+  // behavior. Dev gets the RELATIVE `/relayer` (Vite proxy → localhost:8700,
+  // the same same-origin story as indexerUrl above); every other environment
+  // defaults EMPTY because vercel.json has no /relayer rewrite yet — keep it
+  // empty until that rewrite ships or deployments would POST into a 404.
+  // VITE_RELAYER_URL overrides either way (absolute URL bypasses the proxy).
+  relayerUrl: import.meta.env?.VITE_RELAYER_URL || (import.meta.env?.DEV ? "/relayer" : ""),
   // Where the transfer/withdraw circuit assets (wasm + zkey) are served for browser
   // snarkjs proving. One source in every environment: the bongtu-circuits blob store
   // under the CIRCUITS_VERSION path — reached through this same-origin path by the

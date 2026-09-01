@@ -471,6 +471,48 @@ test("a withdraw pays the user-typed L1 destination through the same recipient p
   assert.deepEqual(announced, [undefined], "no derivation reaches submit — the sentinel announcement path");
 });
 
+test("a relayed withdraw hands the relayer the same calldata the direct path submits, and merges still self-submit", async () => {
+  // Same merge-then-withdraw shape as the stealth gate: the one chain where a
+  // wrongly-scoped relayer could sponsor a merge leg. With ctx.relayerUrl set,
+  // ONLY the terminal withdraw goes through the relayed submitter; the merge is
+  // a transfer10x2 and self-submits exactly as before.
+  const w = chainWorld([100n, 100n, 100n]);
+  const base = w.deps();
+  const provedCalldata: Calldata[] = [];
+  const relayed: { url: string; calldata: Calldata; kem: string; stealth?: StealthDerivation }[] = [];
+  const deps = w.deps({
+    prove: async (request) => {
+      const calldata = await base.prove(request);
+      if (request.circuit === "withdraw") provedCalldata.push(calldata);
+      return calldata;
+    },
+    // A configured relayer means the DIRECT withdraw submit must never fire —
+    // that would be the silent fallback relayerClient.ts forbids.
+    submitWithdraw: async () => {
+      throw new Error("direct withdraw submit reached despite a configured relayer");
+    },
+    submitWithdrawRelayed: async (url, calldata, kem, _explorer, s) => {
+      relayed.push({ url, calldata, kem, stealth: s });
+      // land the tx in the fake world the same way a direct submit would
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      return base.submitWithdraw!({} as never, "", calldata, kem, "", s);
+    },
+  });
+
+  const ctx = { ...w.ctx(), relayerUrl: "http://relayer:8700" };
+  const out = await runSpendChain("withdraw", ctx, { amount: "250" }, () => {}, deps);
+
+  assert.deepEqual(w.submitted, ["transfer10x2", "withdraw"], "merge self-submitted; only the withdraw relayed");
+  assert.equal(relayed.length, 1);
+  assert.equal(relayed[0].url, "http://relayer:8700");
+  // THE calldata invariant: what reaches the relayer is the proof output
+  // itself — byte-identical to what io.submitWithdraw would have been handed.
+  assert.deepEqual(relayed[0].calldata, provedCalldata[0]);
+  assert.match(relayed[0].kem, /^0x[0-9a-fA-F]+$/);
+  assert.equal(relayed[0].stealth, undefined, "a plain relayed withdraw carries no derivation");
+  assert.equal(out.txHash, "0xwithdraw2", "the relayed outcome is the chain's outcome");
+});
+
 // ============================ (3) FAILURE ====================================
 
 test("a leg that fails partway says the money did not move, and what did survive", async () => {

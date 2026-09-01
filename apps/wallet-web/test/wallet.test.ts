@@ -116,6 +116,23 @@ test("the default indexer base is same-origin relative (Vite proxy contract)", (
   assert.ok(!/^https?:/i.test(DEFAULTS.indexerUrl), "indexerUrl default must not be an absolute origin");
 });
 
+test("the relayer default is empty (self-submit) outside Vite dev", () => {
+  // Under the node runner import.meta.env is absent — the same posture a
+  // deployment build gets until vercel.json grows a /relayer rewrite: EMPTY,
+  // meaning the withdraw flow self-submits exactly as before the relayer
+  // existed. Only `vite dev` flips the default to the same-origin "/relayer".
+  assert.equal(DEFAULTS.relayerUrl, "");
+});
+
+test("the Vite relayer proxy mirrors the indexer rule: dev-on, production-off", () => {
+  const dev = resolveWalletProxy("development");
+  assert.ok(dev && "/relayer" in dev, "development must proxy /relayer");
+  const relayer = (dev as Record<string, { target: string; rewrite: (p: string) => string }>)["/relayer"];
+  assert.equal(relayer.rewrite("/relayer/relay"), "/relay");
+  assert.equal(relayer.rewrite("/relayer/health"), "/health");
+  assert.equal(resolveWalletProxy("production"), undefined, "production must not proxy — infra owns /relayer");
+});
+
 test("the Vite indexer proxy is on in development and auto-disabled in production", () => {
   // The proxy is a dev-only convenience; in production the app is a static build served
   // behind an Nginx/ingress reverse-proxy that owns `/indexer/*`. `vite preview` defaults

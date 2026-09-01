@@ -31,6 +31,7 @@ import {
   submitWithdraw,
   walletErrorMessage,
 } from "./connection.js";
+import { submitWithdrawRelayed } from "./relayerClient.js";
 import type { KeyCache } from "./keyCache.js";
 import { getHead, getSignedPath, type OwnerNote } from "./indexerClient.js";
 import { pollUntil, type PollForActionOptions } from "./refresh.js";
@@ -75,6 +76,13 @@ export interface SpendContext {
   pool: string;
   /** the explorer base URL the success link is built on (app config). */
   explorer: string;
+  /** the gas-sponsoring relayer base URL (app config; apps/relayer). Set => the
+   *  terminal WITHDRAW leg is submitted through it — no wallet popup, the
+   *  relayer pays gas, and it cannot redirect the payout because the recipient
+   *  is proof-bound (pub[26]). Absent/empty => wallet self-submit, the
+   *  pre-relayer behavior. Transfer and merge legs NEVER relay: they carry no
+   *  proof-bound recipient, so there is nothing a relayer could safely offer. */
+  relayerUrl?: string;
   notes: OwnerNote[];
   /** the logged-in session's compressed bjj pubkey — what the just-in-time
    *  derivation must reproduce before any of these notes may be spent, and the payee
@@ -108,6 +116,9 @@ export interface RunSpendDeps {
   submitTransfer: typeof submitTransfer;
   submitTransfer10x2: typeof submitTransfer10x2;
   submitWithdraw: typeof submitWithdraw;
+  /** reached only when ctx carries a relayerUrl, and only by the terminal
+   *  withdraw leg (relayerClient.ts). */
+  submitWithdrawRelayed: typeof submitWithdrawRelayed;
   /** interval/cap/sleep for the between-legs wait — the wallet's one bounded-poll
    *  policy (refresh.ts), so tests can run a chain without real seconds. */
   poll: PollForActionOptions;
@@ -125,6 +136,7 @@ const DEFAULT_DEPS: Omit<RunSpendDeps, "keyCache" | "prove"> = {
   submitTransfer,
   submitTransfer10x2,
   submitWithdraw,
+  submitWithdrawRelayed,
   poll: {},
 };
 
@@ -232,14 +244,25 @@ async function runLeg(
   // The tx carries the SAME encapsulation the proof's kemBinding committed to
   // (crypto.kemCiphertext) — a different ct would decapsulate to mismatching
   // limbs at the arbiter and burn the envelope into an alarm.
+  // Withdraw alone may go through the gas-sponsoring relayer (ctx.relayerUrl):
+  // its payout target is proof-bound (pub[26]), so a third-party submitter can
+  // pay the gas without being able to redirect it. A configured-but-failing
+  // relayer THROWS here rather than falling back to the wallet — silently
+  // paying gas from the user's own account is the promise the relayer breaks
+  // (relayerClient.ts owns that WHY). Merge legs are transfer10x2 and take the
+  // non-withdraw branch, so they can never relay by construction.
   const res =
     action.circuit === "withdraw"
-      ? await io.submitWithdraw(
-          // The derivation travels WHOLE: connection.ts maps its announcement
-          // half to calldata, and splitting it here is exactly the seam where
-          // the pays-what-it-announces invariant could silently break.
-          ctx.connection, ctx.pool, calldata, crypto.kemCiphertext, ctx.explorer, stealth,
-        )
+      ? ctx.relayerUrl
+        ? await io.submitWithdrawRelayed(
+            ctx.relayerUrl, calldata, crypto.kemCiphertext, ctx.explorer, stealth,
+          )
+        : await io.submitWithdraw(
+            // The derivation travels WHOLE: connection.ts maps its announcement
+            // half to calldata, and splitting it here is exactly the seam where
+            // the pays-what-it-announces invariant could silently break.
+            ctx.connection, ctx.pool, calldata, crypto.kemCiphertext, ctx.explorer, stealth,
+          )
       : await (action.circuit === "transfer" ? io.submitTransfer : io.submitTransfer10x2)(
           ctx.connection, ctx.pool, calldata, crypto.kemCiphertext, ctx.explorer,
         );
