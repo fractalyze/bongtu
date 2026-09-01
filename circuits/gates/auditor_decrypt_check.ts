@@ -234,6 +234,9 @@ async function checkWithdraw(): Promise<void> {
 
   const ecdhPrivateKey = 34343434343434343434343n;
   const encryptionNonce = 818181818181n;
+  // The proof-bound L1 payout address (uint160; withdraw.circom pub[26]) — the
+  // gate proves with a fresh one and re-finds it in the publics below.
+  const recipient = 1234567890123456789012345678901234567890n;
   const kem = encap("bongtu/gate/kem/encap/withdraw-fresh");
 
   const pub = await prove("withdraw", {
@@ -254,9 +257,11 @@ async function checkWithdraw(): Promise<void> {
     kemSs: kem.kemSs,
     encryptionNonce,
     authorityPublicKey: AUTHORITY.publicKey,
+    recipient,
   });
-  ok(pub.length === 26, `withdraw publics length == 26 (got ${pub.length})`);
+  ok(pub.length === 27, `withdraw publics length == 27 (got ${pub.length})`);
   eq(pub[0], 1000n, "withdraw out (pub[0]) == 1100 - 100 == 1000");
+  eq(pub[26], recipient, "withdraw recipient is proof-bound (pub[26])");
 
   // chain-carried: ecdhPublicKey = pub[1..2]; ct = pub[3..15]; kemBinding = pub[16].
   const ecdhPublicKey: [bigint, bigint] = [pub[1], pub[2]];
@@ -548,7 +553,7 @@ const rd = (p: string): any => JSON.parse(readFileSync(p, "utf8"));
 // the output commitments start. `ctAt < 0` means the envelope rides off-proof.
 const FIXTURES = [
   { name: "deposit", ecdhAt: 1, ctAt: 3, ctLen: 10, bindAt: 13, nPub: 19, plainLen: 8, nOut: 0, ocAt: -1 },
-  { name: "withdraw", ecdhAt: 1, ctAt: 3, ctLen: 13, bindAt: 16, nPub: 26, plainLen: 10, nOut: 0, ocAt: -1 },
+  { name: "withdraw", ecdhAt: 1, ctAt: 3, ctLen: 13, bindAt: 16, nPub: 27, plainLen: 10, nOut: 0, ocAt: -1 },
   { name: "transfer", ecdhAt: 0, ctAt: 10, ctLen: 16, bindAt: 26, nPub: 37, plainLen: 14, nOut: 2, ocAt: 32 },
   { name: "transfer10", ecdhAt: 0, ctAt: 42, ctLen: 64, bindAt: 106, nPub: 141, plainLen: 62, nOut: 10, ocAt: 128 },
   { name: "transfer10_consolidate", ecdhAt: 0, ctAt: 42, ctLen: 64, bindAt: 106, nPub: 141, plainLen: 62, nOut: 10, ocAt: 128 },
