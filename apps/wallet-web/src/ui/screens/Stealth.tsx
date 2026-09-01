@@ -140,7 +140,7 @@ export function Stealth(): ReactNode {
                   <code className="font-mono text-[11px] break-all select-all">{revealed[f.address]}</code>
                 </div>
               ) : (
-                <Button variant="secondary" onClick={() => void reveal(f.ephemeralPub)}>
+                <Button variant="ghost" onClick={() => void reveal(f.ephemeralPub)}>
                   Reveal private key
                 </Button>
               )}
