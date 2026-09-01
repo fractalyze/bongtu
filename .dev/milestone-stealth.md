@@ -45,12 +45,16 @@ instead, submitted by anyone (relayer), announced via (R, viewTag) on the event.
       self-stealth destination derived via `stealth.ts`; wallet UI toggle.
 - [x] F. gates: core tests + tsc → forge test → prove_all withdraw leg →
       indexer unit + conformance (scenario drives the new signature) → e2e_m0.
-- [ ] G. LIVE upgrade (separate explicit go): re-measure withdraw gas for
-      docs/performance.md on the upgraded pool; deploy new WithdrawVerifier +
-      impl, `upgradeToAndCall(reinitializeV2)`, update `addresses.84532.json`
-      + `network.ts` mirror, wallet zkey re-upload (`upload_circuits.sh`,
-      CIRCUITS_VERSION bump), arbiter indexer ABI redeploy (ops: the live
-      bongtu-deploy checkout is not touched from dev sessions).
+- [x] G. LIVE upgrade — executed 2026-09-01 (user go): `UpgradeV2.s.sol`
+      (owner broadcast, one upgradeToAndCall) — WithdrawVerifier
+      `0xB9E4b3D65424eff12A06c46eBaAc69eEe198CCBc`, impl
+      `0x68f553667d653929e8E795E1EF695279d2aE7086`, reinit version 2, storage
+      preserved; `addresses.84532.json` merged (`network.ts` owns none of the
+      changed fields — no mirror edit); withdraw re-measured 1,716,736 gas
+      (docs/performance.md); zkey upload done, CIRCUITS_VERSION
+      f91bd0d2 -> bb0115c4. STILL OPEN (ops, not a dev-session action):
+      arbiter indexer ABI redeploy — the live bongtu-deploy checkout must pull
+      this branch and rebuild, or post-upgrade withdraws will not ingest.
 
 Announcement fields (ephemeralPub, viewTag) ride as calldata/event, NOT in the
 proof: tampering them by a relayer can only break discovery (funds still reach

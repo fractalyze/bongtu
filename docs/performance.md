@@ -32,15 +32,17 @@ would overstate the product's cost by 8.3×.
 
 ## Live chain, hybrid envelope
 
-Whole-transaction `gasUsed` from Base Sepolia receipts, **measured 2026-08-12**
+Whole-transaction `gasUsed` from Base Sepolia receipts, **measured 2026-09-01**
 (`deploy/live/gas_survey.ts` and `deploy/live/transfer10x2_e2e.ts`, fresh identities per run),
-against the current pool on its arbiter epoch 0:
+against the current pool on its arbiter epoch 0 — the withdraw row is the
+withdraw-v2 (proof-bound recipient) entrypoint shipped by the stealth-exit
+upgrade; the transfer10x2 rows carry their 2026-08-12 measurements forward:
 
 | operation | L2 gas | L1 data fee | tx |
 |---|---|---|---|
-| `deposit` | 2,638,241 | 9.28e-8 ETH | |
-| `transfer` (2-in / 2-out) | 2,785,501 | 1.18e-7 ETH | |
-| `withdraw` | 1,734,728 | 1.01e-7 ETH | |
+| `deposit` | 2,642,328 | | [`0xa5538ac8…`](https://sepolia.basescan.org/tx/0xa5538ac8af8af0df80b8c824c38db74c17dc5cfb60d349f7efa353c029f02090) |
+| `transfer` (2-in / 2-out) | 2,780,006 | | [`0xb46cc15e…`](https://sepolia.basescan.org/tx/0xb46cc15e855367b40bb08417b370dd591f1881215ba8782c4fa6970670e32202) |
+| `withdraw` (v2, recipient-bound) | 1,716,736 | | [`0xdc7ebd89…`](https://sepolia.basescan.org/tx/0xdc7ebd891183825c2104c6d6ba21f4530c583cf81d6be65494294d982f98a583) |
 | `transfer10x2` (merge, 3-in, zero change) | 3,068,690 | | [`0xdc29fee9…`](https://sepolia.basescan.org/tx/0xdc29fee94a5a10fb32f885e343f3fcbdfd767391cf4c84609c57edfcd955ddb6) |
 | `transfer10x2` (payment, 3-in + change) | 3,063,954 | | [`0xf096282a…`](https://sepolia.basescan.org/tx/0xf096282a800761df7faec966075d0497fbc0008941efbefb9ae4e1e07bb3fff7) |
 
