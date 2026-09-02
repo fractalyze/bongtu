@@ -80,7 +80,7 @@ key, the SAME trust domain as the arbiter that already decrypts every note.
 A cheated recipient detects it (address funded, no note arrived) — the /notes
 mismatch is the alarm surface.
 
-Units: U-P1 contracts (PortalFactory + Sweeper, CREATE2 address parity with
+Units (ALL COMMITTED 2026-09-02 — 08df15c/ec0b534/86c17d9 + the U-P4 wallet/e2e commit; every unit workflow-verified green): U-P1 contracts (PortalFactory + Sweeper, CREATE2 address parity with
 core TS derivation, forge tests incl. only-bot + re-sweep refusal) → U-P2 core
 + indexer (portalAddress derivation in stealth.ts; issuance route + announcement
 kind "portal", unswept index) → U-P3 apps/sweeper bot (watch → prove → sweep;

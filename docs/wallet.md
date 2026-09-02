@@ -431,6 +431,15 @@ primitives (`@bongtu/core/stealth`, `@bongtu/client/stealthKeys` /
 `stealthFunds`, the lock's stealth custody) and their tests remain in the
 packages as the deposit slice's foundation (`.dev/milestone-stealth.md`).
 
+## Receiving through the portal
+
+The Receive panel issues **one-time deposit addresses** (name-gated — the
+issuance route is keyed on the registered name, and the wallet first proves
+the directory owner is this session's key). The address accepts a plain kKRW
+transfer from any wallet or exchange and the deposit lands shielded with no
+further action; the mechanism, and its recorded v1 trust concession, are
+[Portal](portal.md)'s.
+
 ## Pay by name
 
 The Send screen's recipient field also takes a **registered name**
