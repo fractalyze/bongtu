@@ -20,6 +20,16 @@ library SafeERC20 {
         _callOptionalReturn(token, abi.encodeCall(IERC20.transferFrom, (from, to, value)));
     }
 
+
+    // Added for the portal sweeper (PortalSweeper.sol): approve the pool for the
+    // exact proof-bound amount with the same optional-return tolerance as the
+    // transfer paths. No increase/decrease dance is needed — the sweep approves
+    // exactly what the immediately-following deposit pulls, so the allowance
+    // returns to zero within the same transaction.
+    function safeApprove(IERC20 token, address spender, uint256 value) internal {
+        _callOptionalReturn(token, abi.encodeCall(IERC20.approve, (spender, value)));
+    }
+
     function _callOptionalReturn(IERC20 token, bytes memory data) private {
         (bool ok, bytes memory ret) = address(token).call(data);
         if (!ok || (ret.length != 0 && !abi.decode(ret, (bool)))) {
