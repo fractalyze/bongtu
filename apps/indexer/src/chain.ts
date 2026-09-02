@@ -54,6 +54,17 @@ export function abiKnowsKem(abi: Abi): boolean {
   );
 }
 
+/** The PortalFactory fragments the indexer needs (Slice ⑤ portal deposits):
+ *  the `Swept` event ingest matches back to issuance records, and the
+ *  `addressOf` view the POST /pay route eth_calls so the CHAIN stays the one
+ *  owner of the CREATE2 initcode-hash fact (no local re-derivation). Inline
+ *  (not a Foundry artifact load) because these two fragments are the whole
+ *  surface the indexer touches. */
+export const portalFactoryAbi = parseAbi([
+  "event Swept(bytes32 indexed salt, address indexed sweeper, uint256 amount)",
+  "function addressOf(bytes32 salt) view returns (address)",
+]);
+
 /** Op-event fragments the ingest dispatches on that postdate the V2 artifact
  *  vintage. Unlike the KEM axis (conditioned on chain state), these ship
  *  in-repo, so a build missing one is stale UNCONDITIONALLY — and a stale
@@ -92,6 +103,11 @@ export interface ChainConfig {
   // the PQ half of the hybrid envelope. Required in arbiter mode once the pool
   // is in a KEM epoch (kemBootGuardError refuses otherwise). NEVER logged.
   authorityKemKey?: Uint8Array | null;
+  // The PortalFactory address (env PORTAL_FACTORY). Set => the portal-deposit
+  // surface is live: POST /pay/{name} issues destinations via the factory's
+  // addressOf, and ingest also scans the factory's Swept logs. Unset => the
+  // /pay + /portal routes 404 with a clear body (index.ts logs one boot line).
+  portalFactory?: string | null;
   // Postgres connection string (env DATABASE_URL) — REQUIRED at runtime (U-I4
   // Postgres-only): the indexer persists its derived state (events / nullifiers /
   // leaves / notes / history + a block cursor) to Postgres and boot-RESUMES from
@@ -130,7 +146,9 @@ export function resolveConfig(): ChainConfig {
   const authorityKemKey = process.env.AUTHORITY_KEM_KEY ? parseKemKey(process.env.AUTHORITY_KEM_KEY) : null;
   // Required at runtime (index.ts fail-fasts via databaseUrlError before this).
   const databaseUrl = process.env.DATABASE_URL || null;
-  return { rpc, pool, startBlock, authorityKey, authorityKemKey, databaseUrl };
+  // Portal deposits are opt-in per deployment: no factory address, no /pay.
+  const portalFactory = process.env.PORTAL_FACTORY || null;
+  return { rpc, pool, startBlock, authorityKey, authorityKemKey, databaseUrl, portalFactory };
 }
 
 /** Parse AUTHORITY_KEM_KEY (the 2400-byte ML-KEM-768 decapsulation key) from

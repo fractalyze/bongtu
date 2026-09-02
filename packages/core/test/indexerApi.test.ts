@@ -349,3 +349,72 @@ test("getAnnouncements sends cursor/limit and parses the feed", async () => {
   assert.deepEqual(await getAnnouncements("http://localhost:8600", undefined, undefined, defaults.fn), []);
   assert.equal(defaults.calls[0]?.url, "http://localhost:8600/announcements?cursor=-1&limit=5000");
 });
+
+// --- portal client half (fake-fetch round-trips, the names-client pattern) --------
+
+import {
+  payPortal,
+  fetchUnswept,
+  getPortalAnnouncements,
+  type PortalIssuance,
+  type PortalRecord,
+} from "../src/indexerApi.js";
+
+const PORTAL_ISSUANCE: PortalIssuance = {
+  destination: "0x" + "77".repeat(20),
+  ephemeralPub: "0x" + "88".repeat(32),
+  viewTag: 42,
+  stealthAddr: "0x" + "99".repeat(20),
+  factory: "0x" + "aa".repeat(20),
+};
+
+const PORTAL_RECORD: PortalRecord = {
+  kind: "portal",
+  seq: 3,
+  name: "alice",
+  owner: "0x" + "11".repeat(32),
+  ephemeralPub: "0x" + "88".repeat(32),
+  viewTag: 42,
+  stealthAddr: "0x" + "99".repeat(20),
+  destination: "0x" + "77".repeat(20),
+  createdAt: 1_700_000_000,
+  swept: false,
+  sweptTxHash: null,
+  sweptAmount: null,
+};
+
+test("payPortal POSTs to /pay/{name} and parses the issuance", async () => {
+  const { fn, calls } = fakeFetch(200, JSON.stringify(PORTAL_ISSUANCE));
+  const issued = await payPortal("http://localhost:8600/", "alice", fn);
+  assert.deepEqual(issued, PORTAL_ISSUANCE);
+  assert.equal(calls[0]?.url, "http://localhost:8600/pay/alice"); // trailing slash trimmed
+  assert.equal(calls[0]?.init?.method, "POST");
+
+  // The name segment is URL-encoded, against a slash smuggling a different route.
+  const encoded = fakeFetch(404, "no such name");
+  await assert.rejects(() => payPortal("http://localhost:8600", "a/b", encoded.fn), /-> 404: no such name/);
+  assert.equal(encoded.calls[0]?.url, "http://localhost:8600/pay/a%2Fb");
+});
+
+test("payPortal keeps the shared error shape on the unconfigured-factory 404", async () => {
+  const { fn } = fakeFetch(404, "portal deposits are not configured");
+  await assert.rejects(
+    () => payPortal("http://localhost:8600", "alice", fn),
+    /http:\/\/localhost:8600\/pay\/alice -> 404: portal deposits are not configured/,
+  );
+});
+
+test("fetchUnswept and getPortalAnnouncements send cursor/limit and parse the feed", async () => {
+  const unswept = fakeFetch(200, JSON.stringify([PORTAL_RECORD]));
+  assert.deepEqual(await fetchUnswept("http://localhost:8600/", 41, 7, unswept.fn), [PORTAL_RECORD]);
+  assert.equal(unswept.calls[0]?.url, "http://localhost:8600/portal/unswept?cursor=41&limit=7");
+
+  const announce = fakeFetch(200, JSON.stringify([PORTAL_RECORD]));
+  assert.deepEqual(await getPortalAnnouncements("http://localhost:8600", 2, 3, announce.fn), [PORTAL_RECORD]);
+  assert.equal(announce.calls[0]?.url, "http://localhost:8600/portal/announcements?cursor=2&limit=3");
+
+  // Defaults: cursor -1 (from the start) and the 5000 cap, like getAnnouncements.
+  const defaults = fakeFetch(200, "[]");
+  assert.deepEqual(await fetchUnswept("http://localhost:8600", undefined, undefined, defaults.fn), []);
+  assert.equal(defaults.calls[0]?.url, "http://localhost:8600/portal/unswept?cursor=-1&limit=5000");
+});

@@ -40,11 +40,12 @@ import { isPreKemProbeError } from "@bongtu/core/network";
 import { isStealthAnnouncement } from "@bongtu/core/stealth";
 
 import { MirrorTree } from "./tree.js";
-import { poolAbi, abiKnowsKem, kemBootGuardError, staleOpAbiError, type ChainConfig } from "./chain.js";
+import { poolAbi, abiKnowsKem, kemBootGuardError, staleOpAbiError, portalFactoryAbi, type ChainConfig } from "./chain.js";
 import { type FeedEntry, InMemoryStore, type StorePort, type Slice } from "./store.js";
 import { verifyDisclosure } from "./disclosure.js";
 import { connect, PostgresStore, PostgresLedger } from "./postgres.js";
 import { NameRegistry } from "./names.js";
+import { PortalRegistry } from "./portal.js";
 
 // A block pin for readContract: viem takes a bigint blockNumber or a named
 // blockTag, where ethers took a single `{ blockTag }` override.
@@ -182,6 +183,10 @@ export class Indexer {
   // The name directory (names.ts) — always present so /names serves in every
   // mode; bootPostgres swaps in the pool-backed one (pre-boot: memory-only).
   names: NameRegistry = new NameRegistry(null);
+  // Portal issuance records (portal.ts) — always present so the /portal routes
+  // can answer in every mode; bootPostgres swaps in the pool-backed one. The
+  // routes themselves 404 when cfg.portalFactory is unset.
+  portal: PortalRegistry = new PortalRegistry(null);
   // The shared Postgres pool (set by bootPostgres; null only before first ingest).
   // Store and ledger are built on this ONE pool, so `persist` can acquire a single
   // client and commit the store rows, ledger rows, and cursor in ONE transaction.
@@ -203,7 +208,11 @@ export class Indexer {
 
   constructor(cfg: ChainConfig) {
     this.cfg = cfg;
-    this.abi = poolAbi();
+    // Pool ABI ++ the PortalFactory fragments: decodeEventLog dispatches on
+    // topic0 across the set, so Swept logs (scanned only when PORTAL_FACTORY
+    // is configured — see getLogsChunked's address filter) decode through the
+    // same path as pool events. Extra fragments are inert for pool reads.
+    this.abi = [...poolAbi(), ...portalFactoryAbi];
     this.publicClient = createPublicClient({ transport: http(cfg.rpc) });
     this.arbiterPriv = cfg.authorityKey ?? null;
     this.arbiterMode = this.arbiterPriv !== null;
@@ -225,6 +234,26 @@ export class Indexer {
   /** ethers' single `{ blockTag }` override -> viem's bigint blockNumber / tag. */
   private blockOpts(blockTag: number | string): BlockOpts {
     return typeof blockTag === "number" ? { blockNumber: BigInt(blockTag) } : { blockTag: blockTag as BlockTag };
+  }
+
+  /**
+   * eth_call `PortalFactory.addressOf(salt)` — the issuance route's destination
+   * lookup. Goes to the CHAIN (not a local EIP-1014 recompute) because the
+   * factory's initcode hash is the chain's fact to own; a drifted local mirror
+   * would hand payers an address nobody can sweep.
+   */
+  async portalAddressOf(salt: string): Promise<string> {
+    if (!this.cfg.portalFactory) {
+      throw new Error("portalAddressOf: PORTAL_FACTORY is not configured");
+    }
+    return String(
+      await this.publicClient.readContract({
+        address: this.cfg.portalFactory as Address,
+        abi: portalFactoryAbi,
+        functionName: "addressOf",
+        args: [salt as `0x${string}`],
+      }),
+    );
   }
 
   /** Live head state straight from the contract (the mirror is asserted against it). */
@@ -284,7 +313,11 @@ export class Indexer {
     const walk = async (lo: number, hi: number): Promise<void> => {
       try {
         const raw = await this.publicClient.getLogs({
-          address: this.cfg.pool as Address,
+          // One scan covers the pool AND (when configured) the PortalFactory,
+          // so Swept marks ride the same ordered range + cursor as pool events.
+          address: this.cfg.portalFactory
+            ? ([this.cfg.pool, this.cfg.portalFactory] as Address[])
+            : (this.cfg.pool as Address),
           fromBlock: BigInt(lo),
           toBlock: BigInt(hi),
         });
@@ -442,6 +475,7 @@ export class Indexer {
       await client.query("BEGIN");
       await this.store.flushInto!(client);
       await this.ledger?.flushInto(client);
+      await this.portal.flushInto(client);
       await this.store.persistCursorInto!(client, head);
       // TEST-ONLY fault injection: crash at the pre-COMMIT point (every row + the
       // cursor staged but not yet durable) so the atomicity window is exercised
@@ -465,6 +499,7 @@ export class Indexer {
     // range from the unadvanced cursor and re-persists.
     this.store.commitFlush?.();
     this.ledger?.commitFlush();
+    this.portal.commitFlush();
     this.store.lastBlock = head;
   }
 
@@ -496,6 +531,9 @@ export class Indexer {
     const names = new NameRegistry(pool);
     await names.boot();
     this.names = names;
+    const portal = new PortalRegistry(pool);
+    await portal.boot();
+    this.portal = portal;
     const cursor = this.store.lastBlock;
     if (cursor >= 0) {
       // A rebuild bug must fail the boot loudly, not serve a wrong root/path: the
@@ -784,6 +822,12 @@ export class Indexer {
             viewTag: Number(l.args.stealthViewTag),
           };
         }
+      } else if (l.name === "Swept") {
+        // PortalFactory sweep landed: flip the matching issuance record. The
+        // salt IS portalSalt(stealthAddr) (the one rule — PortalFactory header);
+        // the registry matches on it and no-ops an unknown or replayed salt,
+        // keeping this branch replay-idempotent like every sibling.
+        this.portal.markSwept(String(l.args.salt), l.txHash, bn(l.args.amount));
       } else if (l.name === "Disbursed") {
         const st = subtreesByTx.get(l.txHash)?.shift();
         if (!st) throw new Error(`ingest: Disbursed in tx ${l.txHash} has no matching SubtreeAppended log`);

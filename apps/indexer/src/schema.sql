@@ -94,3 +94,23 @@ CREATE TABLE IF NOT EXISTS names (
   updated_at BIGINT NOT NULL   -- unix seconds, server clock at acceptance
 );
 CREATE INDEX IF NOT EXISTS names_owner_idx ON names (owner);
+
+-- Portal-deposit issuance records (src/portal.ts): announcements the resolver
+-- writes at POST /pay/{name} time (indexer-owned like names — issuance has no
+-- chain footprint) whose swept state IS chain-derived: the factory's Swept
+-- event flips it inside the same ingest transaction as the block cursor.
+CREATE TABLE IF NOT EXISTS portal_announcements (
+  seq           BIGINT  PRIMARY KEY,  -- issuance order (the feed's cursor key)
+  name          TEXT    NOT NULL,     -- the resolved payment name
+  owner         TEXT    NOT NULL,     -- compressed bjj pubkey of the name's owner
+  ephemeral_pub TEXT    NOT NULL,     -- packed bjj ephemeral pubkey R (0x-hex)
+  view_tag      INTEGER NOT NULL,
+  stealth_addr  TEXT    NOT NULL,     -- lowercase 0x-hex; portalSalt(this) == the Swept salt
+  destination   TEXT    NOT NULL,     -- the CREATE2 sweeper address the payer funds
+  created_at    BIGINT  NOT NULL,     -- unix seconds, server clock at issuance
+  swept         BOOLEAN NOT NULL,
+  swept_tx_hash TEXT,
+  swept_amount  TEXT                  -- decimal
+);
+CREATE INDEX IF NOT EXISTS portal_stealth_addr_idx ON portal_announcements (stealth_addr);
+CREATE INDEX IF NOT EXISTS portal_owner_idx ON portal_announcements (owner);
