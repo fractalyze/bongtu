@@ -59,6 +59,7 @@ import {
   amounts, V,
 } from "../live/lib/e2e_harness.js";
 import { proofArgs } from "../live/lib/viem_client.js";
+import { runPortalLeg } from "./portal_leg.js";
 
 // ok() / step() and the failure count are the toolbox's (deploy/live/lib/proof_toolbox.ts),
 // shared with the live driver (deploy/live/payroll_e2e.ts).
@@ -474,6 +475,11 @@ async function main(): Promise<void> {
     console.log(`\n   FINAL ROOT = ${liveRoot}`);
     console.log(`   CONSERVED  = V(${V}) == withdrawn(${withdrawnAmount}) + shielded(${shielded})`);
   }
+
+  // ========================== PORTAL DEPOSITS =============================
+  // portal_leg throws when E2E_DATABASE_URL is unset, so the gate cannot go
+  // green without the portal loop having actually run.
+  await runPortalLeg(rig, pool, token);
 
   const failures = failureCount();
   console.log(`\n${failures === 0 ? "E2E PASS — full cross-circuit spend cycle verified on live anvil" : `E2E FAIL — ${failures} assertion(s) failed`}`);

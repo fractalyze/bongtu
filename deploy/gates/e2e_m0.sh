@@ -7,7 +7,10 @@
 #   batch-note spend + padded enabled=0) -> withdraw -> self-transfer (§11-8
 #   v1.1), asserting contract.root == ImtTree oracle root after every insert,
 #   the recipient note recovered from ciphertext (not memory), and end-to-end
-#   value conserved.
+#   value conserved — then the portal-deposit loop (deploy/gates/portal_leg.ts:
+#   factory + real indexer + sweeper runOnce), which needs the Postgres this
+#   script provisions. No Postgres is FATAL: the portal loop is part of the
+#   DoD and must never be skipped silently.
 #
 #   cd bongtu && bash deploy/gates/e2e_m0.sh    # exits 0 iff every assertion holds
 #
@@ -41,10 +44,13 @@ done
 ANVIL_LOG="$(mktemp)"
 "$ANVIL" --port "$PORT" --silent >"$ANVIL_LOG" 2>&1 &
 ANVIL_PID=$!
+PG_NAME=""
+DOCKER="${DOCKER:-$(command -v docker || echo docker)}"
 cleanup() {
   [ -n "${ANVIL_PID:-}" ] && kill "$ANVIL_PID" 2>/dev/null
   wait "$ANVIL_PID" 2>/dev/null
   rm -f "$ANVIL_LOG"
+  [ -n "$PG_NAME" ] && "$DOCKER" rm -f "$PG_NAME" >/dev/null 2>&1
 }
 trap cleanup EXIT INT TERM
 echo "== anvil started (pid $ANVIL_PID) on :$PORT =="
@@ -59,6 +65,32 @@ for _ in $(seq 1 50); do
   sleep 0.2
 done
 [ "$READY" = 1 ] || { cat "$ANVIL_LOG"; fail "anvil did not become ready on :$PORT"; }
+
+# --- postgres for the portal leg (the indexer is Postgres-only) --------------
+# The portal e2e leg spawns a real arbiter indexer, which needs Postgres. Honor
+# an exported E2E_DATABASE_URL (CI service / dev override); otherwise spin a
+# throwaway postgres:16-alpine in docker (trap-removed, same pattern as the
+# indexer conformance gate). NO silent skip: the portal leg is part of the DoD,
+# so "no postgres possible" is a FATAL — the orchestrator also fails on a
+# missing E2E_DATABASE_URL as the belt.
+if [ -z "${E2E_DATABASE_URL:-}" ]; then
+  if command -v "$DOCKER" >/dev/null 2>&1 && "$DOCKER" info >/dev/null 2>&1; then
+    PG_PORT="${E2E_PG_PORT:-$((22000 + (RANDOM % 20000)))}"
+    PG_NAME="bongtu-m0-pg-$$"
+    echo "== start throwaway postgres:16-alpine on :$PG_PORT (container $PG_NAME) =="
+    "$DOCKER" run -d --name "$PG_NAME" -e POSTGRES_PASSWORD=postgres \
+      -p "127.0.0.1:${PG_PORT}:5432" postgres:16-alpine >/dev/null || fail "docker run postgres failed"
+    PGREADY=0
+    for _ in $(seq 1 60); do
+      if "$DOCKER" exec "$PG_NAME" pg_isready -U postgres -q >/dev/null 2>&1; then PGREADY=1; break; fi
+      sleep 0.5
+    done
+    [ "$PGREADY" = 1 ] || { "$DOCKER" logs "$PG_NAME" 2>&1 | tail -20; fail "postgres did not become ready"; }
+    export E2E_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:${PG_PORT}/postgres"
+  else
+    fail "the portal leg needs Postgres: export E2E_DATABASE_URL or make docker available (the leg is part of the DoD — no silent skip)"
+  fi
+fi
 
 # --- drive the cycle --------------------------------------------------------
 echo "== running e2e orchestrator =="
