@@ -56,6 +56,38 @@ instead, submitted by anyone (relayer), announced via (R, viewTag) on the event.
       arbiter indexer ABI redeploy — the live bongtu-deploy checkout must pull
       this branch and rebuild, or post-upgrade withdraws will not ingest.
 
+## Slice ⑤ — portal deposits (design decided 2026-09-02, Curvy-style)
+
+User decisions: Portal-escrow lane REJECTED (payer must call a contract — kills
+CEX/plain-wallet senders); adopted the Curvy structure (knowledge:
+curvy-architecture-stealth-frontdoor-plus-shielded-pool): CREATE2-precomputed
+sweeper addresses + an operator bot.
+
+Flow: resolver issues a fresh address at resolve time (derives ephemeral R,
+CREATE2 salt = the DKSAP-derived stealth address — the whole existing
+derivation/scan machinery is reused verbatim) and RECORDS the announcement then
+(a CEX sender can never announce; issuance-time recording is what makes plain
+transfers workable). Payer: plain kKRW transfer from any wallet. Bot: watches
+unswept announcements, on funding deploys the sweeper via the factory and calls
+sweep — approve(pool) + pool.deposit with a proof the BOT builds minting notes
+to the RECIPIENT's bjj key (deposit has no owner binding; no recipient secret
+needed). Recipient: does nothing — balance appears via the arbiter /notes path.
+
+Trust note (recorded, not hidden): sweep is onlyBot in v1 — an on-chain
+binding of "these commitments belong to the announced recipient" is impossible
+without exposing owners, so redirection-resistance rests on the institution
+key, the SAME trust domain as the arbiter that already decrypts every note.
+A cheated recipient detects it (address funded, no note arrived) — the /notes
+mismatch is the alarm surface.
+
+Units: U-P1 contracts (PortalFactory + Sweeper, CREATE2 address parity with
+core TS derivation, forge tests incl. only-bot + re-sweep refusal) → U-P2 core
++ indexer (portalAddress derivation in stealth.ts; issuance route + announcement
+kind "portal", unswept index) → U-P3 apps/sweeper bot (watch → prove → sweep;
+key never logged; separate from the relayer to keep its withdraw-only story) →
+U-P4 wallet payer flow + e2e + live wiring (factory deploy is NEW standalone —
+the pool is NOT touched, no UUPS this time).
+
 Announcement fields (ephemeralPub, viewTag) ride as calldata/event, NOT in the
 proof: tampering them by a relayer can only break discovery (funds still reach
 the proof-bound recipient); binding R to the disclosed owner in-circuit is the
