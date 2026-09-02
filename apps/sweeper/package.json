@@ -1,0 +1,26 @@
+{
+  "name": "@bongtu/sweeper",
+  "version": "0.0.0",
+  "description": "bongtu portal sweeper — the Slice ⑤ U-P3 operator bot (PoC): polls the indexer's /portal/unswept feed, and for each funded CREATE2 portal destination builds+proves a deposit minting the full balance to the announced recipient's bjj key, then calls PortalFactory.sweep as the factory owner. No batching, no fee, full-balance sweeps only; retries by rescan.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "private": true,
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "start": "node --import tsx src/index.ts",
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@bongtu/client": "*",
+    "@bongtu/core": "*",
+    "viem": "^2.55.10"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

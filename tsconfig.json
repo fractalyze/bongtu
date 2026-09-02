@@ -10,6 +10,8 @@
     "apps/indexer/src/**/*.ts",
     "apps/indexer/test/**/*.ts",
     "apps/relayer/src/**/*.ts",
-    "apps/relayer/test/**/*.ts"
+    "apps/relayer/test/**/*.ts",
+    "apps/sweeper/src/**/*.ts",
+    "apps/sweeper/test/**/*.ts"
   ]
 }
