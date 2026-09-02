@@ -38,7 +38,9 @@ not re-derive what those files own.
 - **Gate runs in background**: never pipe a gate through `| tail` when backgrounding —
   the pipeline rc becomes tail's and a FAILED gate reports exit 0 (this shipped a
   false-green once). Redirect to a log file and `exit $RC`, then read the file.
-- **Heavy gates**: iterate on `packages/core` tests + `tsc`; run `deploy/gates/e2e_m0.sh` and the indexer
+- **Heavy gates**: iterate on `packages/core` tests + `tsc` + `npm run typecheck --workspaces --if-present`
+  (vite build and the root tsc project both MISS per-workspace typecheck errors — one shipped red to CI);
+  run `deploy/gates/e2e_m0.sh` and the indexer
   conformance test (`cd apps/indexer && npm test`) as the final gate, not per iteration (each spins
   an anvil + CPU proofs).
 - **Indexer arbiter mode**: `AUTHORITY_KEY` (the arbiter bjj private key) flips the indexer
@@ -59,7 +61,9 @@ not re-derive what those files own.
   deploy breaks. Never regen the lock casually; to regen, copy package.json + all workspace
   package.jsons (NO node_modules, NO old lock) to a scratch dir, `npm install
   --package-lock-only` there, copy back. Adding a dep with the complete lock as base is safe
-  (verified) — check `@esbuild/` entry count (=49) after any lock-touching operation.
+  (verified) — after any lock-touching operation, diff against the old lock (a workspace/dep add
+  should only ADD lines) and check the optional-entry counts are unchanged: 26 `node_modules/@esbuild/`
+  + 25 `node_modules/@rollup/rollup-` (the "~49" above is their sum, not an @esbuild-only count).
 - **Pushing workflow-file changes**: the dev checkout's git PAT lacks the `workflow` scope —
   a push touching `.github/workflows/*` is rejected. Push those with the gh CLI token:
   `GHTOKEN=$(gh auth token); git -c credential.helper= -c "http.https://github.com/.extraheader=Authorization: Basic $(printf "x-access-token:%s" "$GHTOKEN" | base64 -w0)" push origin main`.
