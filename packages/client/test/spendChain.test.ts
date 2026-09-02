@@ -26,8 +26,11 @@ import { ImtTree } from "@bongtu/core/imt";
 import { packPubkey } from "@bongtu/core/pubkey";
 import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
 
+import { scanStealthAnnouncement, type StealthDerivation } from "@bongtu/core/stealth";
+
 import { deriveIdentityFromSignature } from "../src/derive.js";
 import { KeyCache } from "../src/keyCache.js";
+import { prepareStealthDestination, stealthKeysFromKdfSignature } from "../src/stealthKeys.js";
 import {
   runSpendChain,
   CHAIN_FAILURE_REASSURANCE,
@@ -225,6 +228,10 @@ function chainWorld(values: bigint[]) {
   // run already paid a signature for.
   const keyCache = new KeyCache({
     derive: async () => deriveIdentityFromSignature(SIG),
+    // The stealth destination reaches these runs pre-derived; the seam is unused.
+    deriveStealth: async () => {
+      throw new Error("stealth derive must not be reached here");
+    },
     currentAccount: async () => "0x1",
     arm: () => () => {},
   });
@@ -237,7 +244,7 @@ function chainWorld(values: bigint[]) {
   }
   // What the last proof declared it would do — applied by the matching submit, so the
   // world only changes when a transaction actually goes through.
-  let pending: { spend: string[]; create: Output[] } | null = null;
+  const pending: { current: { spend: string[]; create: Output[] } | null } = { current: null };
 
   const record = (request: ProvingRequest): void => {
     const inp = request.input as unknown as {
@@ -249,7 +256,7 @@ function chainWorld(values: bigint[]) {
       outputOwnerPublicKeys: [string, string][];
     };
     proved.push(request.circuit);
-    pending = {
+    pending.current = {
       spend: inp.inputCommitments.filter((_, i) => inp.enabled[i] === "1"),
       create: inp.outputCommitments.map((c, i) => ({
         value: inp.outputValues[i],
@@ -264,10 +271,11 @@ function chainWorld(values: bigint[]) {
 
   const land = (circuit: string) => async (): Promise<{ txHash: string; explorerUrl: string }> => {
     submitted.push(circuit);
-    if (!pending) throw new Error("a submit with no proof before it");
-    for (const n of notes) if (pending.spend.includes(n.commitment)) n.spent = true;
-    for (const o of pending.create) add(o.value, o.salt, o.c, o.mine);
-    pending = null;
+    const p = pending.current;
+    if (!p) throw new Error("a submit with no proof before it");
+    for (const n of notes) if (p.spend.includes(n.commitment)) n.spent = true;
+    for (const o of p.create) add(o.value, o.salt, o.c, o.mine);
+    pending.current = null;
     return { txHash: `0x${circuit}${submitted.length}`, explorerUrl: `https://x/tx/${circuit}` };
   };
 
@@ -378,6 +386,131 @@ test("a chain the indexer never catches up with stops rather than proving a note
     new RegExp(MERGE_NOT_INDEXED_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
   );
   assert.deepEqual(w.submitted, ["transfer10x2"], "and it does not blindly submit the next leg");
+});
+
+test("a stealth withdraw pays the address its announcement rediscovers, and a merge never consumes it", async () => {
+  // Three 100s withdrawing 250: a merge leg then the withdraw — the one chain
+  // shape where handing the derivation to the wrong leg is possible at all.
+  const w = chainWorld([100n, 100n, 100n]);
+  const base = w.deps();
+  // The derivation comes through the real owner function, headless: the seam
+  // signs deterministically and the ephemeral is pinned.
+  const STEALTH_SIG = "0x" + "e5".repeat(64) + "1c";
+  const stealth = await prepareStealthDestination(w.ctx().connection, {
+    sign: async () => STEALTH_SIG,
+    drawEphemeral: () => 31337n,
+  });
+
+  // Record the two seams the invariant spans: the recipient the withdraw PROOF
+  // binds (prove) and the derivation the submit ANNOUNCES (submitWithdraw).
+  // The witness rides the request in wire form (decimal strings), so record
+  // through BigInt: what is compared is the VALUE, not the serialization.
+  const provedRecipients: bigint[] = [];
+  const announced: (StealthDerivation | undefined)[] = [];
+  const deps = w.deps({
+    prove: async (request) => {
+      if (request.circuit === "withdraw") {
+        provedRecipients.push(BigInt((request.input as unknown as { recipient: string }).recipient));
+      }
+      return base.prove(request);
+    },
+    submitWithdraw: async (conn, pool, calldata, kem, explorer, s) => {
+      announced.push(s);
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      return base.submitWithdraw!(conn, pool, calldata, kem, explorer, s);
+    },
+  });
+
+  await runSpendChain("withdraw", w.ctx(), { amount: "250", stealth }, () => {}, deps);
+
+  assert.deepEqual(w.submitted, ["transfer10x2", "withdraw"], "one merge, then the payment");
+  // Only the terminal withdraw announced, and it carried the derivation WHOLE —
+  // the merge leg (a self-send with no announcement seam) never touched it.
+  assert.deepEqual(announced, [stealth]);
+  // THE invariant: the address the proof paid is the address the view key
+  // rediscovers from nothing but the announced R (re-derived from the same
+  // signature, as a wiped browser would).
+  const keys = stealthKeysFromKdfSignature(STEALTH_SIG);
+  const rediscovered = scanStealthAnnouncement(
+    keys.viewPriv,
+    keys.meta.spendPub,
+    (announced[0] as StealthDerivation).ephemeralPub,
+  );
+  assert.deepEqual(provedRecipients, [BigInt(rediscovered.address)]);
+});
+
+test("a withdraw pays the user-typed L1 destination through the same recipient param, announcement stays plain", async () => {
+  // Same chain shape as the stealth gate above (merge then withdraw), because the
+  // destination shares its seam: withdrawTo must reach only the terminal proof's
+  // recipient, and — with no derivation in play — submitWithdraw must see NO
+  // stealth value, which is exactly the plain-withdraw sentinel path (U-A).
+  const w = chainWorld([100n, 100n, 100n]);
+  const base = w.deps();
+  const DEST = "0x00000000000000000000000000000000000d0001";
+
+  const provedRecipients: bigint[] = [];
+  const announced: (StealthDerivation | undefined)[] = [];
+  const deps = w.deps({
+    prove: async (request) => {
+      if (request.circuit === "withdraw") {
+        provedRecipients.push(BigInt((request.input as unknown as { recipient: string }).recipient));
+      }
+      return base.prove(request);
+    },
+    submitWithdraw: async (conn, pool, calldata, kem, explorer, s2) => {
+      announced.push(s2);
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      return base.submitWithdraw!(conn, pool, calldata, kem, explorer, s2);
+    },
+  });
+
+  await runSpendChain("withdraw", w.ctx(), { amount: "250", withdrawTo: DEST }, () => {}, deps);
+
+  assert.deepEqual(w.submitted, ["transfer10x2", "withdraw"], "one merge, then the payment");
+  assert.deepEqual(provedRecipients, [BigInt(DEST)], "the proof binds the typed destination, merge untouched");
+  assert.deepEqual(announced, [undefined], "no derivation reaches submit — the sentinel announcement path");
+});
+
+test("a relayed withdraw hands the relayer the same calldata the direct path submits, and merges still self-submit", async () => {
+  // Same merge-then-withdraw shape as the stealth gate: the one chain where a
+  // wrongly-scoped relayer could sponsor a merge leg. With ctx.relayerUrl set,
+  // ONLY the terminal withdraw goes through the relayed submitter; the merge is
+  // a transfer10x2 and self-submits exactly as before.
+  const w = chainWorld([100n, 100n, 100n]);
+  const base = w.deps();
+  const provedCalldata: Calldata[] = [];
+  const relayed: { url: string; calldata: Calldata; kem: string; stealth?: StealthDerivation }[] = [];
+  const deps = w.deps({
+    prove: async (request) => {
+      const calldata = await base.prove(request);
+      if (request.circuit === "withdraw") provedCalldata.push(calldata);
+      return calldata;
+    },
+    // A configured relayer means the DIRECT withdraw submit must never fire —
+    // that would be the silent fallback relayerClient.ts forbids.
+    submitWithdraw: async () => {
+      throw new Error("direct withdraw submit reached despite a configured relayer");
+    },
+    submitWithdrawRelayed: async (url, calldata, kem, _explorer, s) => {
+      relayed.push({ url, calldata, kem, stealth: s });
+      // land the tx in the fake world the same way a direct submit would
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      return base.submitWithdraw!({} as never, "", calldata, kem, "", s);
+    },
+  });
+
+  const ctx = { ...w.ctx(), relayerUrl: "http://relayer:8700" };
+  const out = await runSpendChain("withdraw", ctx, { amount: "250" }, () => {}, deps);
+
+  assert.deepEqual(w.submitted, ["transfer10x2", "withdraw"], "merge self-submitted; only the withdraw relayed");
+  assert.equal(relayed.length, 1);
+  assert.equal(relayed[0].url, "http://relayer:8700");
+  // THE calldata invariant: what reaches the relayer is the proof output
+  // itself — byte-identical to what io.submitWithdraw would have been handed.
+  assert.deepEqual(relayed[0].calldata, provedCalldata[0]);
+  assert.match(relayed[0].kem, /^0x[0-9a-fA-F]+$/);
+  assert.equal(relayed[0].stealth, undefined, "a plain relayed withdraw carries no derivation");
+  assert.equal(out.txHash, "0xwithdraw2", "the relayed outcome is the chain's outcome");
 });
 
 // ============================ (3) FAILURE ====================================

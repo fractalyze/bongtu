@@ -404,3 +404,43 @@ the wallet encrypts every authority envelope under a key folded from the two —
 against the chain before use: the bjj key by the contract's own injection before verifying, the KEM
 key by the pre-encapsulation hash guard above. A stale copy of either costs a wasted proof, not a
 silent mis-encryption. No private key ever lives in the wallet.
+
+## Withdraw destination, and who submits
+
+The Withdraw screen takes an optional **destination address** (an ordinary L1
+EOA; empty means the connected account, today's default). It can accept any
+address the user types because the circuit binds the payout into the proof
+(`recipient`, pub[26], docs/circuits.md): whoever submits the transaction,
+the pool pays exactly the proven address. That binding is what makes the
+**relayer** safe — see [Relayer](relayer.md) — so when one is configured the
+wallet POSTs the proof there and the user pays no gas. A configured relayer
+that fails SURFACES its error instead of quietly falling back to wallet
+submission: silently charging the user's own account is precisely the promise
+a sponsor breaks. With no relayer configured (the production default until a
+`/relayer` rewrite ships) the wallet submits and pays gas itself, exactly as
+before. Destination input is judged by its own validator (EVM address, not
+`recipientError`): an L1 EOA and an in-pool bjj key are different address
+universes, and a pasted pool address must read as a category mistake, not a
+typo.
+
+**Stealth addressing was repointed at the deposit direction** (user decision
+2026-09-01): the withdraw toggle and the Stealth-funds screen left the wallet,
+because with a relayer paying gas, "withdraw to a fresh address you control"
+needs no stealth machinery — while non-interactive receiving does. The
+primitives (`@bongtu/core/stealth`, `@bongtu/client/stealthKeys` /
+`stealthFunds`, the lock's stealth custody) and their tests remain in the
+packages as the deposit slice's foundation (`.dev/milestone-stealth.md`).
+
+## Pay by name
+
+The Send screen's recipient field also takes a **registered name**
+(`docs/indexer.md` `/names`). Which reading an input gets is decided by length
+alone: a name normalizes to ≤ 32 chars (`normalizeName`, the ONE grammar the
+registry itself registers under, `@bongtu/core/indexerApi`) while both address
+encodings are longer — and a `0x` prefix declares an address outright, so a
+fat-fingered hex address dies on its checksum instead of turning into a
+directory lookup. Resolution runs when the user presses Continue — whether a
+name is REGISTERED is the indexer's answer, not a form shape's — and the
+confirm sheet shows both halves of the binding (the name AND the resolved
+owner address), because what the user approves is "this name pays this key".
+An unregistered name gets its own copy and keeps the form.

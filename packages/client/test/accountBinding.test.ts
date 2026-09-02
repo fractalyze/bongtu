@@ -93,6 +93,10 @@ function testCache(trace: Trace, wallet: FakeWallet): KeyCache {
       trace.derive++;
       return deriveIdentityFromSignature(wallet.sig);
     },
+    // Not this suite's subject: a flow that reached the stealth seam would be a bug.
+    deriveStealth: async () => {
+      throw new Error("stealth derive must not be reached here");
+    },
     currentAccount: async () => wallet.account,
     arm: () => () => {},
   });

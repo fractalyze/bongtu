@@ -66,7 +66,7 @@ export async function prove(name: string, input: unknown, opts: { verbose?: bool
 // on its failure count
 // ---------------------------------------------------------------------------
 
-let failures = 0;
+const failures = { count: 0 };
 
 /** Section header in the driver's transcript. */
 export function step(title: string): void {
@@ -78,10 +78,10 @@ export function step(title: string): void {
  *  exits on. */
 export function ok(cond: unknown, msg: string): void {
   const pass = !!cond;
-  if (!pass) failures++;
+  if (!pass) failures.count++;
   console.log(`   ${pass ? "PASS" : "FAIL"}  ${msg}`);
   if (!pass) throw new Error(`assertion failed: ${msg}`);
 }
 
 /** How many `ok()` assertions failed — the driver's exit code. */
-export const failureCount = (): number => failures;
+export const failureCount = (): number => failures.count;

@@ -37,12 +37,14 @@ import {
 
 import { kemPkFromSecret } from "@bongtu/core/kem";
 import { isPreKemProbeError } from "@bongtu/core/network";
+import { isStealthAnnouncement } from "@bongtu/core/stealth";
 
 import { MirrorTree } from "./tree.js";
 import { poolAbi, abiKnowsKem, kemBootGuardError, staleOpAbiError, type ChainConfig } from "./chain.js";
-import { InMemoryStore, type StorePort, type Slice } from "./store.js";
+import { type FeedEntry, InMemoryStore, type StorePort, type Slice } from "./store.js";
 import { verifyDisclosure } from "./disclosure.js";
 import { connect, PostgresStore, PostgresLedger } from "./postgres.js";
+import { NameRegistry } from "./names.js";
 
 // A block pin for readContract: viem takes a bigint blockNumber or a named
 // blockTag, where ethers took a single `{ blockTag }` override.
@@ -115,7 +117,7 @@ export async function fetchBlockTimestamp(
   attempts = 3,
   sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
 ): Promise<number> {
-  for (let i = 0; i < attempts; i++) {
+  for (const i of Array(attempts).keys()) {
     try {
       const ts = await getBlock(blockNumber);
       // A zero from a "successful" call is as unusable as a throw: treat it the
@@ -153,6 +155,9 @@ export class Indexer {
   readonly arbiterPriv: bigint | null;
   readonly arbiterMode: boolean;
   ledger: PostgresLedger | null = null;
+  // The name directory (names.ts) — always present so /names serves in every
+  // mode; bootPostgres swaps in the pool-backed one (pre-boot: memory-only).
+  names: NameRegistry = new NameRegistry(null);
   // The shared Postgres pool (set by bootPostgres; null only before first ingest).
   // Store and ledger are built on this ONE pool, so `persist` can acquire a single
   // client and commit the store rows, ledger rows, and cursor in ONE transaction.
@@ -207,17 +212,19 @@ export class Indexer {
    * exits on it (the databaseUrlError fail-fast posture).
    */
   async kemBootGuard(): Promise<string | null> {
-    let kemPkHash = "0x" + "0".repeat(64);
-    try {
-      const epoch = await this.read("currentEpoch");
-      kemPkHash = String(await this.read("arbiterKemPkHash", [epoch]));
-    } catch (e) {
-      // ONLY a contract-level revert / missing getter marks a pre-KEM V1 pool.
-      // A transient RPC failure must propagate — folding it into "V1 pool"
-      // would disarm the guard exactly when it cannot see the chain. (ethers'
-      // CALL_EXCEPTION became viem's ContractFunction*Error — OR both shapes.)
-      if (!isPreKemProbeError(e) && !isViemPreKemProbeError(e)) throw e;
-    }
+    const kemPkHash = await (async (): Promise<string> => {
+      try {
+        const epoch = await this.read("currentEpoch");
+        return String(await this.read("arbiterKemPkHash", [epoch]));
+      } catch (e) {
+        // ONLY a contract-level revert / missing getter marks a pre-KEM V1 pool.
+        // A transient RPC failure must propagate — folding it into "V1 pool"
+        // would disarm the guard exactly when it cannot see the chain. (ethers'
+        // CALL_EXCEPTION became viem's ContractFunction*Error — OR both shapes.)
+        if (!isPreKemProbeError(e) && !isViemPreKemProbeError(e)) throw e;
+        return "0x" + "0".repeat(64);
+      }
+    })();
     const kemKey = this.cfg.authorityKemKey ?? null;
     // Stale-op-ABI check first: it is unconditional (the fragments ship
     // in-repo), where the KEM guard only arms on a KEM-epoch pool.
@@ -253,16 +260,18 @@ export class Indexer {
           toBlock: BigInt(hi),
         });
         for (const log of raw) {
-          let ev: { eventName: string; args: unknown };
-          try {
-            // decodeEventLog THROWS on an unknown/ambiguous topic0 — reproducing
-            // ethers' parseLog-misses-unknown-topic0 SKIP: a pre-upgrade V1 log,
-            // a V2 log a V1 build can't model, or a foreign log all fall through
-            // to `continue`, never aborting the batch.
-            ev = decodeEventLog({ abi: this.abi, data: log.data, topics: log.topics });
-          } catch {
-            continue; // not a pool event we model (unknown topic0)
-          }
+          const ev = ((): { eventName: string; args: unknown } | null => {
+            try {
+              // decodeEventLog THROWS on an unknown/ambiguous topic0 — reproducing
+              // ethers' parseLog-misses-unknown-topic0 SKIP: a pre-upgrade V1 log,
+              // a V2 log a V1 build can't model, or a foreign log all fall through
+              // to `continue`, never aborting the batch.
+              return decodeEventLog({ abi: this.abi, data: log.data, topics: log.topics });
+            } catch {
+              return null;
+            }
+          })();
+          if (ev === null) continue; // not a pool event we model (unknown topic0)
           out.push({
             name: ev.eventName,
             blockNumber: Number(log.blockNumber),
@@ -284,9 +293,12 @@ export class Indexer {
     };
     // Seed the recursion with a coarse chunk so a healthy RPC needs few calls.
     const CHUNK = Number(process.env.LOG_CHUNK || 50000);
-    for (let lo = from; lo <= to; lo += CHUNK) {
+    const walkChunks = async (lo: number): Promise<void> => {
+      if (lo > to) return;
       await walk(lo, Math.min(lo + CHUNK - 1, to));
-    }
+      await walkChunks(lo + CHUNK);
+    };
+    await walkChunks(from);
     out.sort((a, b) => (a.blockNumber - b.blockNumber) || (a.logIndex - b.logIndex));
     // Block timestamps: the ledger's per-owner history feed stamps each activity
     // item with its block time. Fetch getBlock ONCE per distinct block in the
@@ -300,7 +312,7 @@ export class Indexer {
     // blocks; an unbounded Promise.all would open one socket per block and let a
     // single RPC rejection fail the whole ingest. Fetch in fixed-size waves.
     const CONC = 16;
-    for (let i = 0; i < blockNums.length; i += CONC) {
+    for (const i of Array.from({ length: Math.ceil(blockNums.length / CONC) }, (_, w) => w * CONC)) {
       const wave = blockNums.slice(i, i + CONC);
       const blocks = await Promise.all(wave.map((n) => this.blockTimestamp(n)));
       wave.forEach((n, j) => tsByBlock.set(n, blocks[j]));
@@ -452,6 +464,9 @@ export class Indexer {
       await ledger.boot();
       this.ledger = ledger;
     }
+    const names = new NameRegistry(pool);
+    await names.boot();
+    this.names = names;
     const cursor = this.store.lastBlock;
     if (cursor >= 0) {
       // A rebuild bug must fail the boot loudly, not serve a wrong root/path: the
@@ -561,6 +576,11 @@ export class Indexer {
     // build the whole feed entry at the Disbursed position — a plain disburse
     // then still yields a feed entry ("withheld" disclosure) in chain order.
     const ciphertextsByTx = new Map<string, Map<number, ParsedLog>>();
+    // Withdraw feed entries awaiting their paired WithdrawAnnouncement (emitted
+    // in the same tx, directly after Withdrawn — FIFO per tx like the append
+    // pairs). A replayed range re-adds nothing (addEvent dedups), so the queue
+    // stays empty and the already-attached announcement is left alone.
+    const withdrawEntriesByTx = new Map<string, FeedEntry[]>();
     for (const l of logs) {
       if (l.name === "DisburseCiphertexts") {
         const start = Number(bn(l.args.startLeafIndex));
@@ -692,6 +712,9 @@ export class Indexer {
           slices: [], ciphertext: [],
         });
         if (wEntry) {
+          const wq = withdrawEntriesByTx.get(l.txHash) ?? [];
+          wq.push(wEntry);
+          withdrawEntriesByTx.set(l.txHash, wq);
           this.store.addNullifiers([bn(l.args.nullifiers[0]), bn(l.args.nullifiers[1])]);
           if (this.ledger) {
             this.ledger.apply({
@@ -703,6 +726,23 @@ export class Indexer {
               outputLeaves: [{ leafIndex: ci, commitment: chg }],
             });
           }
+        }
+      } else if (l.name === "WithdrawAnnouncement") {
+        // Metadata on the withdraw entry, not a feed entry of its own. The
+        // contract emits this pair for EVERY Withdrawn, so the queue is
+        // consumed either way; only a real stealth announcement (the core
+        // predicate: 32-byte R, not the zero sentinel) is attached — a plain
+        // withdraw's entry stays bare and never reaches /announcements. An
+        // announcement with no queued entry means the Withdrawn was deduped
+        // (replay) — the durable entry already carries it.
+        const w = withdrawEntriesByTx.get(l.txHash)?.shift();
+        const eph = String(l.args.stealthEphemeralPub);
+        if (w && isStealthAnnouncement(eph)) {
+          w.announcement = {
+            recipient: "0x" + bn(l.args.recipient).toString(16).padStart(40, "0"),
+            ephemeralPub: eph,
+            viewTag: Number(l.args.stealthViewTag),
+          };
         }
       } else if (l.name === "Disbursed") {
         const st = subtreesByTx.get(l.txHash)?.shift();
@@ -716,7 +756,7 @@ export class Indexer {
         const ct: bigint[] = ctLog ? (ctLog.args.receiverCiphertexts as unknown[]).map(bn) : [];
         const slices: Slice[] = [];
         if (ct.length > 0) {
-          for (let i = 0; i < B; i++) slices.push({ offset: i * 4, elts: 4, leafIndex: start + i });
+          for (const i of Array(B).keys()) slices.push({ offset: i * 4, elts: 4, leafIndex: start + i });
           if (ct.length > B * 4) slices.push({ offset: B * 4, elts: ct.length - B * 4, leafIndex: null });
         }
         const disclosure = verifyDisclosure(ct, bn(l.args.disclosureHash), B, l.txHash, start);

@@ -59,16 +59,11 @@ export function verifyDisclosure(
 ): DisclosureResult {
   const receiverCount = batchSize * 4;
   const recomputed = disclosureChain(emitted);
-  let status: DisclosureStatus;
-  if (emitted.length === 0) {
-    status = "withheld";
-  } else if (recomputed === onchainDH) {
-    status = "verified";
-  } else if (emitted.length === receiverCount) {
-    status = "unverifiable";
-  } else {
-    status = "mismatch";
-  }
+  const status: DisclosureStatus =
+    emitted.length === 0 ? "withheld"
+    : recomputed === onchainDH ? "verified"
+    : emitted.length === receiverCount ? "unverifiable"
+    : "mismatch";
   return {
     status,
     txHash,

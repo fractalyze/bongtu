@@ -18,13 +18,12 @@ function harness(): {
   switches: () => number;
   disconnects: () => number;
 } {
-  let switches = 0;
-  let disconnects = 0;
+  const counts = { switches: 0, disconnects: 0 };
   const fire = accountWatchHandler({
-    accountsChanged: () => switches++,
-    disconnected: () => disconnects++,
+    accountsChanged: () => counts.switches++,
+    disconnected: () => counts.disconnects++,
   });
-  return { fire, switches: () => switches, disconnects: () => disconnects };
+  return { fire, switches: () => counts.switches, disconnects: () => counts.disconnects };
 }
 
 test("a direct account switch fires accountsChanged (the pre-existing path)", () => {

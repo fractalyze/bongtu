@@ -213,18 +213,16 @@ export function parseEnvelope(
   // One shared input owner for every input (the circuits take a single
   // inputOwnerPrivateKey); deposit mints and carries no input head.
   const inOwn: [bigint, bigint] = nIn > 0 ? [m[0], m[1]] : [0n, 0n];
-  const inputs: EnvNote[] = [];
-  for (let i = 0; i < nIn; i++) {
-    inputs.push({ owner: inOwn, value: m[inValBase + 2 * i], salt: m[inValBase + 2 * i + 1] });
-  }
-  const outputs: EnvNote[] = [];
-  for (let i = 0; i < nOut; i++) {
-    outputs.push({
-      owner: [m[outOwnBase + 2 * i], m[outOwnBase + 2 * i + 1]],
-      value: m[outValBase + 2 * i],
-      salt: m[outValBase + 2 * i + 1],
-    });
-  }
+  const inputs: EnvNote[] = Array.from({ length: nIn }, (_, i) => ({
+    owner: inOwn,
+    value: m[inValBase + 2 * i],
+    salt: m[inValBase + 2 * i + 1],
+  }));
+  const outputs: EnvNote[] = Array.from({ length: nOut }, (_, i) => ({
+    owner: [m[outOwnBase + 2 * i], m[outOwnBase + 2 * i + 1]] as [bigint, bigint],
+    value: m[outValBase + 2 * i],
+    salt: m[outValBase + 2 * i + 1],
+  }));
   return { inputs, outputs };
 }
 
@@ -233,7 +231,5 @@ export function parseEnvelope(
  *  [...receiverFlat, ...authorityCt]); the final value equals the proof's
  *  disclosureHash public signal. */
 export function disclosureChain(elements: bigint[]): bigint {
-  let dh = 0n;
-  for (const x of elements) dh = poseidon2(dh, x);
-  return dh;
+  return elements.reduce((dh, x) => poseidon2(dh, x), 0n);
 }

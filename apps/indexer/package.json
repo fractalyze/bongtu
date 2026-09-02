@@ -1,7 +1,7 @@
 {
   "name": "@bongtu/indexer",
   "version": "0.0.0",
-  "description": "bongtu indexer — BongtuPool event ingest, SDK-ImtTree mirror (root == on-chain root), merkle-path + ciphertext-feed API, disclosureHash verify (SPEC §6b)",
+  "description": "bongtu indexer \u2014 BongtuPool event ingest, SDK-ImtTree mirror (root == on-chain root), merkle-path + ciphertext-feed API, disclosureHash verify (SPEC \u00a76b)",
   "type": "module",
   "license": "Apache-2.0",
   "private": true,
@@ -21,9 +21,11 @@
     "test:ingest": "node --import tsx test/ingest.test.ts",
     "test:config": "node --import tsx test/config.test.ts",
     "test:viewtoken": "node --import tsx --test test/viewtoken.test.ts",
+    "test:names": "node --import tsx --test test/names.test.ts",
+    "test:announcements": "node --import tsx --test test/announcements.test.ts",
     "test:derivehistory": "node --import tsx --test test/deriveHistory.test.ts",
     "test:history": "node --import tsx --test test/history.test.ts",
-    "test:unit": "npm run test:tree && npm run test:disclosure && npm run test:ingest && npm run test:config && npm run test:viewtoken && npm run test:derivehistory && npm run test:history",
+    "test:unit": "npm run test:tree && npm run test:disclosure && npm run test:ingest && npm run test:config && npm run test:viewtoken && npm run test:names && npm run test:announcements && npm run test:derivehistory && npm run test:history",
     "test:pg": "bash test/pg_integration.sh",
     "typecheck": "tsc --noEmit"
   },

@@ -83,8 +83,8 @@ const signFor = (kp: typeof OWNER, challenge: string, origin: string): string =>
 
 // A movable clock so expiry is tested without sleeping.
 function clock(start: number): { now: () => number; advance: (s: number) => void } {
-  let t = start;
-  return { now: () => t, advance: (s) => (t += s) };
+  const t = { v: start };
+  return { now: () => t.v, advance: (s) => (t.v += s) };
 }
 
 // The routes only touch arbiterMode + ledger.{notesOf,historyOf}; a stub Indexer
@@ -97,12 +97,13 @@ const fakeIx = {
 } as unknown as Indexer;
 
 function call(
-  route: { handle: (ctx: RouteContext) => RouteResult },
+  route: { handle: (ctx: RouteContext) => RouteResult | Promise<RouteResult> },
   tokens: ViewTokenService | null,
   query: string,
   body?: unknown,
 ): RouteResult {
-  return route.handle({ ix: fakeIx, tokens, params: [], query: new URLSearchParams(query), body });
+  // Every route this suite drives is synchronous (async is the names route only).
+  return route.handle({ ix: fakeIx, tokens, params: [], query: new URLSearchParams(query), body }) as RouteResult;
 }
 
 // ============================ (1) SERVICE ====================================
@@ -201,8 +202,9 @@ test("resolvePublicUrls: PUBLIC_URL list wins, loopback listen address is the fa
 // ============================ (2) BINDINGS ===================================
 
 test("VIEWTOKEN_DOMAIN_TAG is the pinned ascii constant both halves compile in", () => {
-  let expected = 0n;
-  for (const b of new TextEncoder().encode("bongtu/viewtoken/v1")) expected = (expected << 8n) | BigInt(b);
+  const expected = new TextEncoder()
+    .encode("bongtu/viewtoken/v1")
+    .reduce<bigint>((acc, b) => (acc << 8n) | BigInt(b), 0n);
   assert.equal(VIEWTOKEN_DOMAIN_TAG, expected);
   assert.notEqual(VIEWTOKEN_DOMAIN_TAG, 0n);
 });
@@ -439,7 +441,7 @@ test("/notes and /history 503 while the arbiter ledger is still unbuilt", () => 
   const signedQ = new URL(buildNotesUrl("http://x", ownerCompressed, OWNER.formattedPrivateKey), "http://x")
     .searchParams.toString();
   for (const route of [notes, history]) {
-    const r = route.handle({ ix: preIngest, tokens: svc, params: [], query: new URLSearchParams(signedQ) });
+    const r = route.handle({ ix: preIngest, tokens: svc, params: [], query: new URLSearchParams(signedQ) }) as RouteResult;
     assert.equal(r.status, 503);
   }
 });
@@ -473,7 +475,7 @@ test("/path gates a within-batch leaf behind read-auth + leaf ownership", () => 
     },
   } as unknown as Indexer;
   const at = (leafIndex: number, query: string): RouteResult =>
-    pathRoute.handle({ ix: pathIx, tokens: svc, params: [String(leafIndex)], query: new URLSearchParams(query) });
+    pathRoute.handle({ ix: pathIx, tokens: svc, params: [String(leafIndex)], query: new URLSearchParams(query) }) as RouteResult;
 
   const signedQ = new URL(buildNotesUrl("http://x", ownerCompressed, OWNER.formattedPrivateKey), "http://x")
     .searchParams.toString();

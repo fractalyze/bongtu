@@ -59,10 +59,10 @@ const snarkjs: any = loadSnarkjs();
 
 const H = 32;
 
-let failures = 0;
+const failures = { count: 0 };
 function ok(cond: unknown, msg: string): void {
   const pass = !!cond;
-  if (!pass) failures++;
+  if (!pass) failures.count++;
   console.log(`   ${pass ? "PASS" : "FAIL"}  ${msg}`);
 }
 function eq(a: FieldInput, b: FieldInput, msg: string): void {
@@ -94,11 +94,7 @@ const TAG_BIND = 551801912866789441808127721329104955329015775696865359484468949
 
 /** LE-uint128 limb pair from the 32-byte ML-KEM shared secret. */
 function limbs(ss: Uint8Array): [bigint, bigint] {
-  const le = (b: Uint8Array): bigint => {
-    let v = 0n;
-    for (let i = b.length - 1; i >= 0; i--) v = (v << 8n) | BigInt(b[i]);
-    return v;
-  };
+  const le = (b: Uint8Array): bigint => b.reduceRight<bigint>((v, byte) => (v << 8n) | BigInt(byte), 0n);
   return [le(ss.subarray(0, 16)), le(ss.subarray(16, 32))];
 }
 function hybridKey(ecdh: [bigint, bigint], ss: [bigint, bigint]): [bigint, bigint] {
@@ -238,6 +234,9 @@ async function checkWithdraw(): Promise<void> {
 
   const ecdhPrivateKey = 34343434343434343434343n;
   const encryptionNonce = 818181818181n;
+  // The proof-bound L1 payout address (uint160; withdraw.circom pub[26]) — the
+  // gate proves with a fresh one and re-finds it in the publics below.
+  const recipient = 1234567890123456789012345678901234567890n;
   const kem = encap("bongtu/gate/kem/encap/withdraw-fresh");
 
   const pub = await prove("withdraw", {
@@ -258,9 +257,11 @@ async function checkWithdraw(): Promise<void> {
     kemSs: kem.kemSs,
     encryptionNonce,
     authorityPublicKey: AUTHORITY.publicKey,
+    recipient,
   });
-  ok(pub.length === 26, `withdraw publics length == 26 (got ${pub.length})`);
+  ok(pub.length === 27, `withdraw publics length == 27 (got ${pub.length})`);
   eq(pub[0], 1000n, "withdraw out (pub[0]) == 1100 - 100 == 1000");
+  eq(pub[26], recipient, "withdraw recipient is proof-bound (pub[26])");
 
   // chain-carried: ecdhPublicKey = pub[1..2]; ct = pub[3..15]; kemBinding = pub[16].
   const ecdhPublicKey: [bigint, bigint] = [pub[1], pub[2]];
@@ -334,7 +335,7 @@ async function checkTransferSelfSend(): Promise<void> {
   // chain-carried: ecdhPublicKey = pub[0..1]; receiver ct_i = pub[2+4i .. 5+4i].
   const ecdhPublicKey: [bigint, bigint] = [pub[0], pub[1]];
   const shared = ecdhSharedSecret(owner.formattedPrivateKey, ecdhPublicKey);
-  for (let i = 0; i < 2; i++) {
+  for (const i of Array(2).keys()) {
     const ct = pub.slice(2 + 4 * i, 2 + 4 * i + 4);
     const [v, s] = poseidonDecrypt(ct, shared, BigInt(encryptionNonce) + BigInt(i), 2);
     eq(v, outValues[i], `self-send output ${i} value recovered with nonce+${i}`);
@@ -410,13 +411,11 @@ async function checkTransfer10SelfMerge(): Promise<void> {
   // outputCommitments = pub[128..137].
   const ecdhPublicKey: [bigint, bigint] = [pub[0], pub[1]];
   const shared = ecdhSharedSecret(owner.formattedPrivateKey, ecdhPublicKey);
-  let allOpened = true;
-  for (let i = 0; i < 10; i++) {
+  const allOpened = Array.from({ length: 10 }, (_, i) => i).reduce<boolean>((acc, i) => {
     const ct = pub.slice(2 + 4 * i, 2 + 4 * i + 4);
     const [v, s] = poseidonDecrypt(ct, shared, BigInt(encryptionNonce) + BigInt(i), 2);
-    allOpened =
-      allOpened && v === outValues[i] && s === outSalts[i] && commitment(v, s, owner.publicKey) === pub[128 + i];
-  }
+    return acc && v === outValues[i] && s === outSalts[i] && commitment(v, s, owner.publicKey) === pub[128 + i];
+  }, true);
   ok(allOpened, "all 10 receiver ciphertexts open with nonce+i and rebuild pub[128+i]");
 
   // NEGATIVE: one shared nonce cannot open them all — ct_1 under the base nonce
@@ -434,19 +433,19 @@ async function checkTransfer10SelfMerge(): Promise<void> {
   const m = poseidonDecrypt(pub.slice(42, 42 + 64), hybridKey([ecdh[0], ecdh[1]], ssArb), encryptionNonce, 62);
   // layout: [inOwner(2), (inVal,inSalt)*10, (outOwner)*10, (outVal,outSalt)*10]
   eq(m[0], owner.publicKey[0], "authority envelope: recovered input owner pub.x");
-  let inputsOk = true;
-  for (let i = 0; i < 10; i++) {
-    inputsOk = inputsOk && m[2 + 2 * i] === inValues[i] && m[3 + 2 * i] === inSalts[i];
-  }
+  const inputsOk = Array.from({ length: 10 }, (_, i) => i).reduce<boolean>(
+    (acc, i) => acc && m[2 + 2 * i] === inValues[i] && m[3 + 2 * i] === inSalts[i],
+    true,
+  );
   ok(inputsOk, "authority envelope: all 10 spent (value, salt) pairs recovered");
-  let outputsOk = true;
-  for (let i = 0; i < 10; i++) {
-    outputsOk =
-      outputsOk &&
+  const outputsOk = Array.from({ length: 10 }, (_, i) => i).reduce<boolean>(
+    (acc, i) =>
+      acc &&
       m[22 + 2 * i] === owner.publicKey[0] &&
       m[42 + 2 * i] === outValues[i] &&
-      m[43 + 2 * i] === outSalts[i];
-  }
+      m[43 + 2 * i] === outSalts[i],
+    true,
+  );
   ok(outputsOk, "authority envelope: all 10 created (owner, value, salt) triples recovered");
 }
 
@@ -497,7 +496,7 @@ async function checkTransfer10x2Merge(): Promise<void> {
   // outputCommitments = pub[63..64].
   const ecdhPublicKey: [bigint, bigint] = [pub[0], pub[1]];
   const shared = ecdhSharedSecret(owner.formattedPrivateKey, ecdhPublicKey);
-  for (let i = 0; i < 2; i++) {
+  for (const i of Array(2).keys()) {
     const [v, s] = poseidonDecrypt(
       pub.slice(2 + 4 * i, 2 + 4 * i + 4),
       shared,
@@ -525,20 +524,20 @@ async function checkTransfer10x2Merge(): Promise<void> {
   // layout: [inOwner(2), (inVal,inSalt)*10, (outOwner)*2, (outVal,outSalt)*2]
   eq(m[0], owner.publicKey[0], "authority envelope: recovered input owner pub.x");
   eq(m[1], owner.publicKey[1], "authority envelope: recovered input owner pub.y");
-  let inputsOk = true;
-  for (let i = 0; i < 10; i++) {
-    inputsOk = inputsOk && m[2 + 2 * i] === inValues[i] && m[3 + 2 * i] === inSalts[i];
-  }
+  const inputsOk = Array.from({ length: 10 }, (_, i) => i).reduce<boolean>(
+    (acc, i) => acc && m[2 + 2 * i] === inValues[i] && m[3 + 2 * i] === inSalts[i],
+    true,
+  );
   ok(inputsOk, "authority envelope: all 10 spent (value, salt) pairs recovered at 2..21");
-  let outputsOk = true;
-  for (let i = 0; i < 2; i++) {
-    outputsOk =
-      outputsOk &&
+  const outputsOk = Array.from({ length: 2 }, (_, i) => i).reduce<boolean>(
+    (acc, i) =>
+      acc &&
       m[22 + 2 * i] === owner.publicKey[0] &&
       m[23 + 2 * i] === owner.publicKey[1] &&
       m[26 + 2 * i] === outValues[i] &&
-      m[27 + 2 * i] === outSalts[i];
-  }
+      m[27 + 2 * i] === outSalts[i],
+    true,
+  );
   ok(outputsOk, "authority envelope: both created (owner, value, salt) triples recovered at 22..29");
   // The zero change note is disclosed as a real note, not omitted.
   eq(m[28], 0n, "authority envelope: the ZERO change note is carried (value 0 at field 28)");
@@ -554,7 +553,7 @@ const rd = (p: string): any => JSON.parse(readFileSync(p, "utf8"));
 // the output commitments start. `ctAt < 0` means the envelope rides off-proof.
 const FIXTURES = [
   { name: "deposit", ecdhAt: 1, ctAt: 3, ctLen: 10, bindAt: 13, nPub: 19, plainLen: 8, nOut: 0, ocAt: -1 },
-  { name: "withdraw", ecdhAt: 1, ctAt: 3, ctLen: 13, bindAt: 16, nPub: 26, plainLen: 10, nOut: 0, ocAt: -1 },
+  { name: "withdraw", ecdhAt: 1, ctAt: 3, ctLen: 13, bindAt: 16, nPub: 27, plainLen: 10, nOut: 0, ocAt: -1 },
   { name: "transfer", ecdhAt: 0, ctAt: 10, ctLen: 16, bindAt: 26, nPub: 37, plainLen: 14, nOut: 2, ocAt: 32 },
   { name: "transfer10", ecdhAt: 0, ctAt: 42, ctLen: 64, bindAt: 106, nPub: 141, plainLen: 62, nOut: 10, ocAt: 128 },
   { name: "transfer10_consolidate", ecdhAt: 0, ctAt: 42, ctLen: 64, bindAt: 106, nPub: 141, plainLen: 62, nOut: 10, ocAt: 128 },
@@ -591,9 +590,9 @@ function fixturePlaintext(name: string, inp: any): bigint[] {
   // spend layout: [inOwner, (inVal,inSalt)*nIn, (outOwner)*nOut, (outVal,outSalt)*nOut]
   const inOwner = deriveKeypair(BigInt(inp.inputOwnerPrivateKey)).publicKey;
   const out: bigint[] = [inOwner[0], inOwner[1]];
-  for (let i = 0; i < inp.inputValues.length; i++) out.push(b(inp.inputValues[i]), b(inp.inputSalts[i]));
+  for (const i of Array(inp.inputValues.length).keys()) out.push(b(inp.inputValues[i]), b(inp.inputSalts[i]));
   for (const o of inp.outputOwnerPublicKeys) out.push(b(o[0]), b(o[1]));
-  for (let i = 0; i < inp.outputValues.length; i++) out.push(b(inp.outputValues[i]), b(inp.outputSalts[i]));
+  for (const i of Array(inp.outputValues.length).keys()) out.push(b(inp.outputValues[i]), b(inp.outputSalts[i]));
   return out;
 }
 
@@ -624,28 +623,23 @@ async function checkFixtureEnvelopes(): Promise<void> {
     const ecdh = ecdhSharedSecret(AUTHORITY.formattedPrivateKey, ecdhPub);
     const m = poseidonDecrypt(ct, hybridKey([ecdh[0], ecdh[1]], ssArb), BigInt(inp.encryptionNonce), f.plainLen);
     const want = fixturePlaintext(f.name, inp);
-    let all = true;
-    for (let i = 0; i < want.length; i++) all = all && m[i] === want[i];
+    const all = want.reduce<boolean>((acc, w, i) => acc && m[i] === w, true);
     ok(all, `${f.name}: FULL envelope decrypt matches all ${want.length} plaintext fields`);
 
     // Transfer arities only (§11-8 v1.1): receiver ciphertext i opens with
     // nonce + i, under the key of whichever fixture owner holds output i.
-    let receiversOk = true;
-    for (let i = 0; i < f.nOut; i++) {
+    const receiversOk = Array.from({ length: f.nOut }, (_, i) => i).reduce<boolean>((acc, i) => {
       const ownerPub: [bigint, bigint] = [
         BigInt(inp.outputOwnerPublicKeys[i][0]),
         BigInt(inp.outputOwnerPublicKeys[i][1]),
       ];
       const rcpt = fixtureKeyFor(ownerPub);
-      if (!rcpt) {
-        receiversOk = false;
-        continue;
-      }
+      if (!rcpt) return false;
       const rct = pub.slice(2 + 4 * i, 2 + 4 * i + 4);
       const rShared = ecdhSharedSecret(rcpt.formattedPrivateKey, ecdhPub);
       const [v, slt] = poseidonDecrypt(rct, rShared, BigInt(inp.encryptionNonce) + BigInt(i), 2);
-      receiversOk = receiversOk && commitment(v, slt, rcpt.publicKey) === pub[f.ocAt + i];
-    }
+      return acc && commitment(v, slt, rcpt.publicKey) === pub[f.ocAt + i];
+    }, true);
     if (f.nOut > 0) {
       ok(
         receiversOk,
@@ -663,11 +657,11 @@ async function main(): Promise<void> {
   await checkTransfer10x2Merge();
   await checkFixtureEnvelopes();
   console.log(
-    `\n${failures === 0
+    `\n${failures.count === 0
       ? "AUDITOR-DECRYPT GATE: PASS — hybrid (ECDH||ML-KEM) envelopes are recoverable by the arbiter key material alone; wrong-kemSs and legacy-ECDH decrypts fail"
-      : `AUDITOR-DECRYPT GATE: FAIL — ${failures} assertion(s)`}`,
+      : `AUDITOR-DECRYPT GATE: FAIL — ${failures.count} assertion(s)`}`,
   );
-  process.exit(failures === 0 ? 0 : 1);
+  process.exit(failures.count === 0 ? 0 : 1);
 }
 
 main().catch((e) => {

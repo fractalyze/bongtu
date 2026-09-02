@@ -8,6 +8,8 @@
     "circuits/**/*.ts",
     "contracts/test/fixtures/**/*.ts",
     "apps/indexer/src/**/*.ts",
-    "apps/indexer/test/**/*.ts"
+    "apps/indexer/test/**/*.ts",
+    "apps/relayer/src/**/*.ts",
+    "apps/relayer/test/**/*.ts"
   ]
 }

@@ -11,15 +11,21 @@
 
 import { KeyCache } from "@bongtu/client/keyCache";
 import { KEY_DERIVATION, deriveTransientIdentity } from "@bongtu/client/identity";
+import { deriveStealthKeys } from "@bongtu/client/stealthKeys";
 import type { Connection } from "@bongtu/client/connection";
 import type { WalletIdentity } from "@bongtu/client/derive";
+import type { StealthKeys } from "@bongtu/core/stealth";
 import { currentAccount } from "./wagmi.js";
 
 /** The wallet's one cache. Flows take it through their deps seam so tests can run
- *  their own instance with a fake clock. */
+ *  their own instance with a fake clock. It holds BOTH derived values — the
+ *  spending key and the stealth identity — under the one set of custody rules;
+ *  the stealth seam is its own EIP-712 struct (stealthKeys.ts), unlocked lazily
+ *  by the first stealth action. */
 export const keyCache = new KeyCache({
   derive: (connection: Connection): Promise<WalletIdentity> =>
     deriveTransientIdentity(connection, KEY_DERIVATION),
+  deriveStealth: (connection: Connection): Promise<StealthKeys> => deriveStealthKeys(connection),
   currentAccount,
 });
 

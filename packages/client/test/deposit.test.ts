@@ -141,10 +141,10 @@ test("deposit: rejects a non-positive amount before proving", () => {
 // ==================== (3) PER-TX CRYPTO ======================================
 
 test("freshDepositCrypto draws exactly four fields from the injected randomness", () => {
-  let i = 0;
-  const rand = (): string => String(++i * 1111);
+  const draws = { n: 0 };
+  const rand = (): string => String(++draws.n * 1111);
   const c = freshDepositCrypto(rand);
-  assert.equal(i, 4); // ecdh key, nonce, salt0, salt1 — one fresh draw each; NOT the arbiter key
+  assert.equal(draws.n, 4); // ecdh key, nonce, salt0, salt1 — one fresh draw each; NOT the arbiter key
   const drawn = [c.ecdhPrivateKey, c.encryptionNonce, c.salt0, c.salt1];
   assert.equal(new Set(drawn).size, 4, "no two fields share a draw (two-time-pad guard)");
   // the arbiter key is the pool's fixed stored key, not drawn from randomness.
@@ -158,15 +158,14 @@ test("freshDepositCrypto draws exactly four fields from the injected randomness"
 test("freshDepositCrypto: kem draw — deterministic injection in tests, fresh encapsulation by default", () => {
   // deterministic injection: the injected KEM material passes through untouched
   // (the field draws stay on `rand` — the kem draw never consumes one).
-  let i = 0;
-  const rand = (): string => String(++i * 3333);
-  let kemDraws = 0;
+  const draws = { fields: 0, kem: 0 };
+  const rand = (): string => String(++draws.fields * 3333);
   const injected = freshDepositCrypto(rand, () => {
-    kemDraws++;
+    draws.kem++;
     return FIXED_KEM;
   });
-  assert.equal(kemDraws, 1, "exactly one KEM encapsulation per crypto bundle");
-  assert.equal(i, 4, "the kem draw does not consume field randomness");
+  assert.equal(draws.kem, 1, "exactly one KEM encapsulation per crypto bundle");
+  assert.equal(draws.fields, 4, "the kem draw does not consume field randomness");
   assert.deepEqual(injected.kemSs, FIXED_KEM.kemSs);
   assert.equal(injected.kemCiphertext, FIXED_KEM.kemCiphertext);
 

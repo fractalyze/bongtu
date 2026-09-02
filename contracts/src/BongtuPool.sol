@@ -234,6 +234,16 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         uint256 kemBinding,
         bytes kemCiphertext
     );
+    /// @notice Stealth payout surface, paired 1:1 with a Withdrawn in the same
+    ///         tx: the proof-bound payout address plus the announcement a
+    ///         recipient's wallet scans for (ephemeralPub/viewTag zero when the
+    ///         caller withdrew to a plainly-known address and announced
+    ///         nothing). A separate event so Withdrawn keeps its historical
+    ///         shape — one fragment decodes the whole chain. The announcement
+    ///         halves are calldata-carried, NOT proof-bound: tampering them can
+    ///         only break discovery; funds still reach the proof-bound
+    ///         recipient.
+    event WithdrawAnnouncement(uint256 recipient, bytes32 stealthEphemeralPub, uint8 stealthViewTag);
     event ArbiterRotated(uint256 indexed epoch, uint256 keyX, uint256 keyY, uint256 activatedBlock);
     /// @notice The keccak256 of the epoch's 1184-byte ML-KEM-768 encapsulation
     ///         key (the full pk is distributed off-chain; clients verify it
@@ -258,6 +268,7 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     error ZeroKemPkHash();
     error ZeroVerifier();
     error ZeroOutputCommitment();
+    error InvalidRecipient(uint256 recipient);
 
     // --- reentrancy guard -----------------------------------------------------
     // Behind a proxy the inline default does not reach the proxy's storage, so
@@ -415,6 +426,20 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     ///      circuit/verifier change ships as `upgradeToAndCall`, SPEC §5.2/§5.3).
     ///      On mainnet the owner is a multisig/timelock (docs/zeto-derivation.md).
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+
+    /// @notice One-shot migration payload for the stealth-withdraw upgrade:
+    ///         swaps in the verifier for the 27-public withdraw circuit
+    ///         (recipient bound at pub[26]). Ridden by `upgradeToAndCall` so the
+    ///         implementation and its verifier change atomically — a pool
+    ///         serving the new `withdraw(uint[27],…)` ABI with the old
+    ///         26-public verifier (or vice versa) would reject every proof.
+    ///         `onlyOwner` because `reinitializer(2)` alone is first-come:
+    ///         after a bare `upgradeTo` anyone could otherwise claim the slot
+    ///         and wire a forged verifier.
+    function reinitializeV2(IWithdrawVerifier _withdrawVerifier) external onlyOwner reinitializer(2) {
+        if (address(_withdrawVerifier) == address(0)) revert ZeroVerifier();
+        withdrawVerifier = _withdrawVerifier;
+    }
 
     /// @notice Append an epoch and emit its index; the arbiter pubkey is read
     ///         from storage at execution (never calldata) so a sender cannot
@@ -818,22 +843,35 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         );
     }
 
-    /// @notice withdraw (2-in / 1-out): permissionless. Contract injects
+    /// @notice withdraw (2-in / 1-out): permissionless — and RELAYABLE: the
+    ///         tokens go to the proof-bound `pub[26]` recipient, never to
+    ///         msg.sender, so anyone may submit a withdraw without being able
+    ///         to redirect it (stealth exits ride a relayer so the recipient's
+    ///         own wallet never appears on-chain). Contract injects
     ///         enabled[i]=(nullifier[i]!=0) (§5.2) AND the stored arbiter key into
     ///         the authority envelope (§6b v2 — a withdraw not encrypted to the
     ///         current arbiter key FAILS), spends the real nullifiers, appends the
-    ///         change output, pushes `out` tokens.
+    ///         change output, pushes `out` tokens to the recipient.
+    ///         `stealthEphemeralPub`/`stealthViewTag` are the recipient-discovery
+    ///         announcement (zero when withdrawing to a plainly-known address);
+    ///         they are event-carried, not proof-bound — see the event comment.
     function withdraw(
         uint[2] calldata a,
         uint[2][2] calldata b,
         uint[2] calldata c,
-        uint[26] calldata pub,
-        bytes calldata kemCiphertext
+        uint[27] calldata pub,
+        bytes calldata kemCiphertext,
+        bytes32 stealthEphemeralPub,
+        uint8 stealthViewTag
     ) external whenInitialized nonReentrant {
         _checkKemCiphertext(kemCiphertext);
         if (!knownRoots[pub[19]]) revert UnknownRoot(pub[19]);
+        // The payout address must be a real uint160 image: the circuit binds the
+        // field element but cannot range-check an address, and truncating here
+        // would let two field values alias one address (payout confusion).
+        if (pub[26] == 0 || pub[26] > type(uint160).max) revert InvalidRecipient(pub[26]);
 
-        uint[26] memory injected = pub;
+        uint[27] memory injected = pub;
         injected[20] = pub[17] != 0 ? 1 : 0;
         injected[21] = pub[18] != 0 ? 1 : 0;
         (injected[24], injected[25]) = currentArbiterKey();
@@ -847,12 +885,27 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         if (change == 0) revert ZeroOutputCommitment();
         _appendLeaf(change);
 
+        _emitWithdrawn(pub, kemCiphertext, stealthEphemeralPub, stealthViewTag);
+        token.safeTransfer(address(uint160(pub[26])), pub[0]);
+    }
+
+    /// @dev Both withdraw emits in their own frame: the widened signature (two
+    ///      announcement params on top of the proof args) leaves the main body
+    ///      no stack headroom for the 10-argument Withdrawn emit under non-IR
+    ///      solc. `pub[22]` is the change commitment (nonzero — guarded before
+    ///      this runs).
+    function _emitWithdrawn(
+        uint[27] calldata pub,
+        bytes calldata kemCiphertext,
+        bytes32 stealthEphemeralPub,
+        uint8 stealthViewTag
+    ) private {
         uint256[13] memory cta;
         for (uint256 i = 0; i < 13; i++) cta[i] = pub[3 + i];
         emit Withdrawn(
-            currentEpoch(), [pub[17], pub[18]], pub[0], change, [pub[1], pub[2]], cta, pub[23], root, pub[16], kemCiphertext
+            currentEpoch(), [pub[17], pub[18]], pub[0], pub[22], [pub[1], pub[2]], cta, pub[23], root, pub[16], kemCiphertext
         );
-        token.safeTransfer(msg.sender, pub[0]);
+        emit WithdrawAnnouncement(pub[26], stealthEphemeralPub, stealthViewTag);
     }
 
     // ==========================================================================

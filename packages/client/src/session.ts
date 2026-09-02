@@ -73,12 +73,13 @@ export function loadSession(
   storage: StorageLike | null = defaultStorage(),
 ): StoredSession | null {
   if (!storage) return null;
-  let raw: string | null = null;
-  try {
-    raw = storage.getItem(SESSION_KEY);
-  } catch {
-    return null;
-  }
+  const raw = ((): string | null => {
+    try {
+      return storage.getItem(SESSION_KEY);
+    } catch {
+      return null;
+    }
+  })();
   if (!raw) return null;
   try {
     const s = JSON.parse(raw) as StoredSession;

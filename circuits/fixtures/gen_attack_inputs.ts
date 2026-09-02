@@ -88,6 +88,7 @@ function genMint(): WithdrawInput {
     outputSalts: [salt(0)],
     outputOwnerPublicKeys: owners,
     ...authEnvelope("withdraw_mint"),
+    recipient: 0x1111111111111111111111111111111111111111n,
   };
 }
 
@@ -117,6 +118,7 @@ function genAttack(): WithdrawInput {
     outputSalts: outValues.map((_, i) => salt(i)),
     outputOwnerPublicKeys: owners,
     ...authEnvelope("withdraw_attack"),
+    recipient: 0x1111111111111111111111111111111111111111n,
   };
 }
 
@@ -147,6 +149,7 @@ function genPadded(): WithdrawInput {
     outputSalts: outValues.map((_, i) => salt(i)),
     outputOwnerPublicKeys: owners,
     ...authEnvelope("withdraw_padded"),
+    recipient: 0x1111111111111111111111111111111111111111n,
   };
 }
 

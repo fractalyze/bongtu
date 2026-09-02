@@ -55,21 +55,13 @@ export const history: Route = {
     const rawBefore = ctx.query.get("before");
     const paged = rawLimit !== null || rawBefore !== null;
 
-    let limit = DEFAULT_LIMIT;
-    if (rawLimit !== null) {
-      const n = wholeNumber(rawLimit);
-      if (n === null || n < 1 || n > MAX_LIMIT) {
-        return { status: 400, body: { error: `limit must be an integer in 1..${MAX_LIMIT}`, limit: rawLimit } };
-      }
-      limit = n;
+    const limit = rawLimit === null ? DEFAULT_LIMIT : wholeNumber(rawLimit);
+    if (limit === null || limit < 1 || limit > MAX_LIMIT) {
+      return { status: 400, body: { error: `limit must be an integer in 1..${MAX_LIMIT}`, limit: rawLimit } };
     }
-    let before: number | undefined;
-    if (rawBefore !== null) {
-      const n = wholeNumber(rawBefore);
-      if (n === null) {
-        return { status: 400, body: { error: "before must be an integer seq >= 0", before: rawBefore } };
-      }
-      before = n;
+    const before = rawBefore === null ? undefined : wholeNumber(rawBefore);
+    if (before === null) {
+      return { status: 400, body: { error: "before must be an integer seq >= 0", before: rawBefore } };
     }
 
     if (!ctx.ix.ledger) {

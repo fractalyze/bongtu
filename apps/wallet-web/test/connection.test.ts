@@ -286,11 +286,11 @@ test("ensureChain switches, and registers the chain first when the wallet answer
   );
 
   // Unknown chain: add, then switch again.
-  let switches = 0;
+  const switches = { n: 0 };
   const unknown = fakeRpc({
     wallet_switchEthereumChain: () => {
-      switches += 1;
-      if (switches === 1) throw { code: 4902, message: "Unrecognized chain ID" };
+      switches.n += 1;
+      if (switches.n === 1) throw { code: 4902, message: "Unrecognized chain ID" };
       return null;
     },
     wallet_addEthereumChain: () => null,

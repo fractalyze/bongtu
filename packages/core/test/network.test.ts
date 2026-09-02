@@ -123,7 +123,7 @@ test("POOL_ABI_FRAGMENTS fragments match the hybrid (V2) BongtuPool signatures",
   );
   assert.equal(
     POOL_ABI_FRAGMENTS.withdraw,
-    "function withdraw(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[26] pub, bytes kemCiphertext)",
+    "function withdraw(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[27] pub, bytes kemCiphertext, bytes32 stealthEphemeralPub, uint8 stealthViewTag)",
   );
   // Admin fragment (apps/payroll-web/src/lib/chain.ts): §6b v2 enforced-length
   // disburse — receiverCiphertexts is the separate 2054-element calldata arg.

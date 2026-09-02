@@ -45,9 +45,7 @@ export interface DiscoveredNote {
 
 /** Balance = sum(value) over the notes that are not spent. PURE. */
 export function sumUnspent(notes: UnspentSummable[]): bigint {
-  let total = 0n;
-  for (const n of notes) if (!n.spent) total += BigInt(n.value);
-  return total;
+  return notes.reduce<bigint>((total, n) => (n.spent ? total : total + BigInt(n.value)), 0n);
 }
 
 /** Context a key-only trial-decrypt needs beyond the /events feed itself. */
@@ -94,13 +92,15 @@ export function trialDecryptEvents(
       const ctIndex = BigInt(slice.offset / 4);
       const candidates = ctIndex === 0n ? [nonce] : [nonce, nonce + ctIndex];
       for (const tryNonce of candidates) {
-        let value: bigint;
-        let salt: bigint;
-        try {
-          [value, salt] = poseidonDecrypt(ct.map((x) => BigInt(x)), shared, tryNonce, 2);
-        } catch {
-          continue;
-        }
+        const decrypted = (() => {
+          try {
+            return poseidonDecrypt(ct.map((x) => BigInt(x)), shared, tryNonce, 2);
+          } catch {
+            return null;
+          }
+        })();
+        if (decrypted === null) continue;
+        const [value, salt] = decrypted;
         const c = commitment(value, salt, keypair.publicKey);
         const known = ctx.leafCommitments.get(slice.leafIndex);
         if (known === undefined || BigInt(known) !== c) continue; // garbage decrypt or not our leaf

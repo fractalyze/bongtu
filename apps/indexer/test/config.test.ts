@@ -19,10 +19,10 @@ import { parseAbi } from "viem";
 
 import { databaseUrlError, kemBootGuardError, parseKemKey, staleOpAbiError } from "../src/chain.js";
 
-let failures = 0;
+const failures = { count: 0 };
 function ok(cond: unknown, msg: string): void {
   const pass = !!cond;
-  if (!pass) failures++;
+  if (!pass) failures.count++;
   console.log(`   ${pass ? "PASS" : "FAIL"}  ${msg}`);
 }
 function step(t: string): void {
@@ -87,12 +87,14 @@ step("UNIT: parseKemKey — exact 2400-byte ML-KEM-768 dk, malformed rejected");
     ["beef", "wrong length (decapsulating with a truncated key throws mid-ingest)"],
     ["0x" + "ab".repeat(1184), "pk-sized material is not a decapsulation key"],
   ] as const) {
-    let threw = false;
-    try {
-      parseKemKey(bad);
-    } catch {
-      threw = true;
-    }
+    const threw = ((): boolean => {
+      try {
+        parseKemKey(bad);
+        return false;
+      } catch {
+        return true;
+      }
+    })();
     ok(threw, `${why} rejected`);
   }
 }
@@ -119,15 +121,22 @@ step("UNIT: staleOpAbiError — a build missing a dispatched op event fails clos
   const full = parseAbi([
     "event Transferred10(uint256 indexed epoch)",
     "event Transferred10x2(uint256 indexed epoch)",
+    "event WithdrawAnnouncement(uint256 recipient, bytes32 stealthEphemeralPub, uint8 stealthViewTag)",
   ]);
-  ok(staleOpAbiError(full) === null, "ABI carrying both 10-input op events passes");
+  ok(staleOpAbiError(full) === null, "ABI carrying every dispatched op event passes");
   const preV5 = parseAbi(["event Transferred10(uint256 indexed epoch)"]);
   const err = staleOpAbiError(preV5) ?? "";
   ok(err.includes("Transferred10x2"), "a V4-vintage ABI names the missing V5 event");
+  const preStealth = parseAbi([
+    "event Transferred10(uint256 indexed epoch)",
+    "event Transferred10x2(uint256 indexed epoch)",
+  ]);
+  ok((staleOpAbiError(preStealth) ?? "").includes("WithdrawAnnouncement"),
+    "a pre-stealth ABI names the missing announcement event");
   const preV4 = parseAbi(["event Appended(uint256 indexed leafIndex)"]);
   const err4 = staleOpAbiError(preV4) ?? "";
   ok(err4.includes("Transferred10"), "a pre-V4 ABI is refused on its first missing event");
 }
 
-console.log(`\n${failures === 0 ? "CONFIG TEST PASS — Postgres-only boot refusal (unit + spawn)" : `CONFIG TEST FAIL — ${failures} assertion(s)`}`);
-process.exit(failures === 0 ? 0 : 1);
+console.log(`\n${failures.count === 0 ? "CONFIG TEST PASS — Postgres-only boot refusal (unit + spawn)" : `CONFIG TEST FAIL — ${failures.count} assertion(s)`}`);
+process.exit(failures.count === 0 ? 0 : 1);

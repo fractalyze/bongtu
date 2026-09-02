@@ -20,14 +20,13 @@ export const SERVICE_AUTH_KEY = "bongtu.payroll.serviceAuth.v1";
  *  "Basic " + base64(utf8(id + ":" + password)). */
 export function basicAuthValue(id: string, password: string): string {
   const bytes = new TextEncoder().encode(`${id}:${password}`);
-  let bin = "";
-  for (const b of bytes) bin += String.fromCharCode(b);
+  const bin = Array.from(bytes, (b) => String.fromCharCode(b)).join("");
   return `Basic ${btoa(bin)}`;
 }
 
 // Fallback holder for storage-less runtimes (node tests, the deploy e2e driver,
 // a browser that blocks sessionStorage): process-lifetime memory.
-let memoryHeld: string | null = null;
+const memory: { held: string | null } = { held: null };
 const listeners = new Set<() => void>();
 
 function storage(): Storage | null {
@@ -44,17 +43,17 @@ export const serviceAuth = {
   /** The held Basic value, or null = no service session (show the login page). */
   header(): string | null {
     const s = storage();
-    if (!s) return memoryHeld;
+    if (!s) return memory.held;
     try {
       return s.getItem(SERVICE_AUTH_KEY);
     } catch {
-      return memoryHeld;
+      return memory.held;
     }
   },
 
   /** Start the service session (after /auth/check accepted the pair). */
   set(header: string): void {
-    memoryHeld = header;
+    memory.held = header;
     try {
       storage()?.setItem(SERVICE_AUTH_KEY, header);
     } catch {
@@ -67,7 +66,7 @@ export const serviceAuth = {
    *  (the prover said this credential is no longer valid — pretending otherwise
    *  would just fail the next request too). */
   drop(): void {
-    memoryHeld = null;
+    memory.held = null;
     try {
       storage()?.removeItem(SERVICE_AUTH_KEY);
     } catch {

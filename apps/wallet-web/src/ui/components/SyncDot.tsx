@@ -88,22 +88,22 @@ export function IndexerSyncDot({
   const [healthErrored, setHealthErrored] = useState(false);
 
   useEffect(() => {
-    let alive = true;
+    const alive = { current: true };
     const poll = async (): Promise<void> => {
       try {
         const h = await fetchHealth(indexerUrl);
-        if (alive) {
+        if (alive.current) {
           setHealth(h);
           setHealthErrored(false);
         }
       } catch {
-        if (alive) setHealthErrored(true);
+        if (alive.current) setHealthErrored(true);
       }
     };
     void poll();
     const id = setInterval(poll, 15_000);
     return () => {
-      alive = false;
+      alive.current = false;
       clearInterval(id);
     };
   }, [indexerUrl]);

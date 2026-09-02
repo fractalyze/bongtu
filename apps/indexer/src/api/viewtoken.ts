@@ -143,8 +143,7 @@ export class ViewTokenService {
     // CHALLENGE_BYTES is the SAME constant the client's assertValidChallenge
     // refuses beyond (@bongtu/core/eddsa), so the issuer can never draw a value
     // its own clients reject.
-    let x = 0n;
-    for (const b of randomBytes(CHALLENGE_BYTES)) x = (x << 8n) | BigInt(b);
+    const x = randomBytes(CHALLENGE_BYTES).reduce<bigint>((acc, b) => (acc << 8n) | BigInt(b), 0n);
     const challenge = (x === 0n ? 1n : x).toString();
     const exp = this.now() + CHALLENGE_TTL_SECONDS;
     this.sweep();
@@ -164,13 +163,15 @@ export class ViewTokenService {
     const entry = this.challenges.get(challenge);
     this.challenges.delete(challenge); // single-use: burned whether or not it verifies
     if (!entry || entry.owner !== owner || entry.exp < this.now()) return null;
-    let pub, sig;
-    try {
-      pub = unpackPubkey(owner);
-      sig = parseSignature(sigHex);
-    } catch {
-      return null;
-    }
+    const parsed = (() => {
+      try {
+        return { pub: unpackPubkey(owner), sig: parseSignature(sigHex) };
+      } catch {
+        return null;
+      }
+    })();
+    if (parsed === null) return null;
+    const { pub, sig } = parsed;
     const bound = this.hostBindings.some((b) =>
       verifyNotesAuth(pub, viewTokenAuthMessage(pub, challenge, b), sig),
     );

@@ -121,6 +121,8 @@ jobs:
         run: npm test -w @bongtu/ui
       - name: client tests
         run: npm test -w @bongtu/client
+      - name: relayer tests
+        run: npm test -w @bongtu/relayer
       - name: payroll-web tests
         run: npm test -w @bongtu/payroll-web
       - name: wallet-web tests

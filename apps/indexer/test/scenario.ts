@@ -264,9 +264,11 @@ export async function runScenario(): Promise<ScenarioResult> {
       outputOwnerPublicKeys: [RCPTS[0].publicKey],
       ecdhPrivateKey: ECDH_W, kemSs: KEM_W.kemSs,
       encryptionNonce: NONCE_W, authorityPublicKey: AUTHORITY.publicKey,
+      recipient: 0xbeef00000000000000000000000000000000beefn,
     });
     oracle.appendLeaf(resCommit);
-    await (await pool.withdraw(a, b, c, pub, kemCtHex(KEM_W.kemCiphertext))).wait();
+    await (await pool.withdraw(a, b, c, pub, kemCtHex(KEM_W.kemCiphertext),
+      "0x" + "11".repeat(32), 7)).wait();
   }
 
   // ---- disburse #2 (TAMPERED): note(0)@1 -> 16 zero-value recipients; emit corrupted ct ----
@@ -357,8 +359,7 @@ export async function runScenario(): Promise<ScenarioResult> {
   const KEM_DEP2_JUNK = kemDraw("scen/deposit-mismatch/junk-ct");
   const kNoteV = commitment(7n, sK0, EMPLOYER.publicKey);
   const kNote0 = commitment(0n, sK1, EMPLOYER.publicKey);
-  let kemMismatchTxHash: string;
-  {
+  const kemMismatchTxHash: string = await (async () => {
     const { a, b, c, pub } = await prove("deposit", {
       outputCommitments: [kNoteV, kNote0], outputValues: [7n, 0n],
       outputSalts: [sK0, sK1], outputOwnerPublicKeys: [EMPLOYER.publicKey, EMPLOYER.publicKey],
@@ -369,8 +370,8 @@ export async function runScenario(): Promise<ScenarioResult> {
     oracle.appendLeaf(kNote0);
     const tx = await pool.deposit(a, b, c, pub, kemCtHex(KEM_DEP2_JUNK.kemCiphertext));
     await tx.wait();
-    kemMismatchTxHash = tx.hash;
-  }
+    return tx.hash;
+  })();
 
   // ---- transfer10 (arity 10, ALL ten outputs to one owner) -------------------
   // The V4 entry point, driven on-chain rather than from a synthetic log: a

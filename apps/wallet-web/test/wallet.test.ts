@@ -42,7 +42,7 @@ import {
 import { sumUnspent, trialDecryptEvents } from "@bongtu/client/balance";
 import { KEY_DERIVATION } from "@bongtu/client/identity";
 import { walletErrorMessage } from "@bongtu/client/connection";
-import type { FeedEvent } from "@bongtu/client/indexerClient";
+import { resolveName, type FeedEvent, type NameRecord } from "@bongtu/client/indexerClient";
 import {
   buildTransferRequest,
   buildWithdrawRequest,
@@ -52,7 +52,7 @@ import {
   type WalletInputNote,
   type MembershipWitness,
 } from "@bongtu/client/spend";
-import { recipientError } from "../src/ui/format.js";
+import { evmAddressError, recipientError } from "../src/ui/format.js";
 import { CIRCUITS_VERSION, DEFAULTS, H, B } from "../src/config.js";
 import { ml_kem768, kemSsToLimbs, kemHexToBytes, kemBytesToHex } from "@bongtu/core/kem";
 import { ARBITER_KEM_PK, CHAIN_ID, GAS_TOKEN_PHRASE } from "@bongtu/core/network";
@@ -75,6 +75,9 @@ const PIN_SCALAR = 2232542207878167874305209947598685605095785653266525372150719
 const PIN_COMPRESSED = "0x05c818db6e4feb82639a2170ec769abcdbfc9077833153ed2266a52b653c1f96";
 
 // ============================ (1) DERIVATION =================================
+
+// The proof-bound withdraw payout address (uint160-ranged; spend.ts guards it).
+const TEST_RECIPIENT = "0x" + "22".repeat(20);
 
 test("derivation is deterministic: a fixed signature yields a stable keypair", () => {
   const a = deriveIdentityFromSignature(SIG);
@@ -111,6 +114,23 @@ test("the default indexer base is same-origin relative (Vite proxy contract)", (
   // tunnel, so pin the default to a root-relative path.
   assert.ok(DEFAULTS.indexerUrl.startsWith("/"), `indexerUrl must be root-relative, got ${DEFAULTS.indexerUrl}`);
   assert.ok(!/^https?:/i.test(DEFAULTS.indexerUrl), "indexerUrl default must not be an absolute origin");
+});
+
+test("the relayer default is empty (self-submit) outside Vite dev", () => {
+  // Under the node runner import.meta.env is absent — the same posture a
+  // deployment build gets until vercel.json grows a /relayer rewrite: EMPTY,
+  // meaning the withdraw flow self-submits exactly as before the relayer
+  // existed. Only `vite dev` flips the default to the same-origin "/relayer".
+  assert.equal(DEFAULTS.relayerUrl, "");
+});
+
+test("the Vite relayer proxy mirrors the indexer rule: dev-on, production-off", () => {
+  const dev = resolveWalletProxy("development");
+  assert.ok(dev && "/relayer" in dev, "development must proxy /relayer");
+  const relayer = (dev as Record<string, { target: string; rewrite: (p: string) => string }>)["/relayer"];
+  assert.equal(relayer.rewrite("/relayer/relay"), "/relay");
+  assert.equal(relayer.rewrite("/relayer/health"), "/health");
+  assert.equal(resolveWalletProxy("production"), undefined, "production must not proxy — infra owns /relayer");
 });
 
 test("the Vite indexer proxy is on in development and auto-disabled in production", () => {
@@ -196,7 +216,7 @@ test("trial-decrypt discovers exactly the wallet's notes from the /events feed",
   ]);
 
   // unspent
-  let found = trialDecryptEvents([ev], wallet, { leafCommitments, spentNullifiers: new Set() });
+  const found = trialDecryptEvents([ev], wallet, { leafCommitments, spentNullifiers: new Set() });
   assert.equal(found.length, 1, "only the wallet's own envelope is discovered");
   assert.equal(found[0].value, "321");
   assert.equal(found[0].leafIndex, 5);
@@ -206,12 +226,12 @@ test("trial-decrypt discovers exactly the wallet's notes from the /events feed",
   assert.equal(sumUnspent(found), 321n);
 
   // once its nullifier is in the spent set, it is flagged spent -> balance 0
-  found = trialDecryptEvents([ev], wallet, {
+  const foundSpent = trialDecryptEvents([ev], wallet, {
     leafCommitments,
     spentNullifiers: new Set([myNullifier.toString()]),
   });
-  assert.equal(found[0].spent, true);
-  assert.equal(sumUnspent(found), 0n);
+  assert.equal(foundSpent[0].spent, true);
+  assert.equal(sumUnspent(foundSpent), 0n);
 });
 
 test("trial-decrypt recovers BOTH notes of a per-output-nonce self-send AND a legacy shared-nonce change note", () => {
@@ -393,7 +413,7 @@ test("transfer: accepts a self-pay (per-output nonce, §11-8 v1.1) and rejects a
 
 test("withdraw: out == amount, change conserved, single output to self", () => {
   const f = fixture([1000n, 500n]); // total 1500
-  const { request, meta } = buildWithdrawRequest(f.wallet, f.inputs, f.memberships, "1200", f.crypto);
+  const { request, meta } = buildWithdrawRequest(f.wallet, f.inputs, f.memberships, "1200", f.crypto, TEST_RECIPIENT);
   assert.equal(request.circuit, "withdraw");
   const inp = request.input;
   assert.equal(inp.outputCommitments.length, 1);
@@ -413,7 +433,7 @@ test("withdraw: out == amount, change conserved, single output to self", () => {
 
 test("withdraw: full withdrawal leaves a value-0 (non-zero commitment) change note", () => {
   const f = fixture([1000n]);
-  const { request } = buildWithdrawRequest(f.wallet, f.inputs, f.memberships, "1000", f.crypto);
+  const { request } = buildWithdrawRequest(f.wallet, f.inputs, f.memberships, "1000", f.crypto, TEST_RECIPIENT);
   const inp = request.input;
   assert.equal(inp.outputValues[0], "0"); // full withdrawal
   assert.notEqual(inp.outputCommitments[0], "0"); // commitment(0,salt,self) != 0 -> contract accepts
@@ -480,12 +500,12 @@ test("selection rejects empty/all-spent wallets and malformed amounts", () => {
 });
 
 test("freshSpendCrypto draws every field from the injected randomness", () => {
-  let i = 0;
-  const rand = (): string => String(++i * 1111);
+  const draws = { i: 0 };
+  const rand = (): string => String(++draws.i * 1111);
   const c = freshSpendCrypto(rand);
   // ecdh key, nonce, change salt, 9 input-pad salts, payee salt, 8 output-pad salts —
   // one fresh draw each, drawn at the WIDEST arity so one bundle serves either circuit.
-  assert.equal(i, 21);
+  assert.equal(draws.i, 21);
   const drawn = [c.ecdhPrivateKey, c.encryptionNonce, c.changeSalt, ...c.padSalts, c.payeeSalt, ...c.outputPadSalts];
   assert.equal(new Set(drawn).size, 21, "no two fields share a draw (two-time-pad guard)");
   assert.deepEqual([...c.authorityPubKey], [...DEFAULTS.arbiterPubKey]); // pool's stored arbiter key
@@ -497,15 +517,15 @@ test("freshSpendCrypto draws every field from the injected randomness", () => {
 test("freshSpendCrypto: kem draw — deterministic injection, fresh by default, limbs reach the witness", () => {
   // deterministic injection: the injected material passes through untouched and
   // never consumes a field draw.
-  let i = 0;
-  const rand = (): string => String(++i * 2222);
-  let kemDraws = 0;
+  const draws = { i: 0 };
+  const rand = (): string => String(++draws.i * 2222);
+  const kem = { draws: 0 };
   const injected = freshSpendCrypto(rand, () => {
-    kemDraws++;
+    kem.draws++;
     return FIXED_KEM;
   });
-  assert.equal(kemDraws, 1, "exactly one KEM encapsulation per crypto bundle");
-  assert.equal(i, 21, "the kem draw does not consume field randomness");
+  assert.equal(kem.draws, 1, "exactly one KEM encapsulation per crypto bundle");
+  assert.equal(draws.i, 21, "the kem draw does not consume field randomness");
   assert.deepEqual(injected.kemSs, FIXED_KEM.kemSs);
   assert.equal(injected.kemCiphertext, FIXED_KEM.kemCiphertext);
 
@@ -515,7 +535,7 @@ test("freshSpendCrypto: kem draw — deterministic injection, fresh by default, 
   const t = buildTransferRequest(f.wallet, f.inputs, f.memberships, f.recipient, "100", injected);
   assert.deepEqual(t.request.input.kemSs, [FIXED_KEM.kemSs[0], FIXED_KEM.kemSs[1]]);
   assert.equal("kemCiphertext" in t.request.input, false);
-  const w = buildWithdrawRequest(f.wallet, f.inputs, f.memberships, "100", injected);
+  const w = buildWithdrawRequest(f.wallet, f.inputs, f.memberships, "100", injected, TEST_RECIPIENT);
   assert.deepEqual(w.request.input.kemSs, [FIXED_KEM.kemSs[0], FIXED_KEM.kemSs[1]]);
 
   // default draw: a real fresh encapsulation against ARBITER_KEM_PK per call.
@@ -571,12 +591,55 @@ test("recipientError: accepts base58check, legacy hex AND the wallet's own addre
   const tampered = b58.slice(0, -1) + (last === "2" ? "5" : "2");
   assert.equal(recipientError(tampered), "That doesn't look like a valid bongtu address.");
   assert.equal(recipientError(""), "Enter a recipient.");
-  assert.equal(recipientError("junk"), "That doesn't look like a valid bongtu address.");
+  // "ju_nk": the underscore is outside the name grammar AND it is no address —
+  // the shape recipientError still rejects outright. Bare "junk" is now a valid
+  // NAME candidate (pay-by-name), judged by the resolve step, not the form.
+  assert.equal(recipientError("ju_nk"), "That doesn't look like a valid bongtu address.");
 
   // Self-send is allowed in EITHER encoding (per-output nonce, §11-8 v1.1) — the
   // wallet's own address is judged exactly like any other, no self-pubkey passed in.
   assert.equal(recipientError(self), null, "own address (hex) must be accepted");
   assert.equal(recipientError(encodeAddress(self)), null, "own address (base58) must be accepted");
+});
+
+test("recipientError: a name-shaped recipient is a candidate (resolve judges registration), junk still dies", () => {
+  // "alice-3" normalizes under the ONE core grammar -> the form passes it and the
+  // Continue-time resolve step decides whether it is actually registered.
+  assert.equal(recipientError("alice-3"), null, "name-shaped input must pass the form");
+  // Neither name nor address: "AB" lowercases to a 2-char label (the grammar
+  // minimum is 3) and is nowhere near an address; "0xnope" declares ADDRESS
+  // intent with its 0x prefix, so it must die on the address judgment instead of
+  // quietly becoming a directory lookup.
+  assert.equal(recipientError("AB"), "That doesn't look like a valid bongtu address.");
+  assert.equal(recipientError("0xnope"), "That doesn't look like a valid bongtu address.");
+});
+
+test("resolveName through the barrel: a hit resolves the record, a miss resolves null", async () => {
+  const f = fixture([1000n]);
+  const record: NameRecord = {
+    name: "alice-3",
+    owner: f.recipient,
+    viewPub: "0x" + "22".repeat(32),
+    spendPub: "0x" + "33".repeat(33),
+    updatedAt: 1_700_000_000,
+  };
+  const hit = (async () => ({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify(record),
+  })) as unknown as typeof fetch;
+  const got = await resolveName("http://indexer.local", "alice-3", hit);
+  assert.deepEqual(got, record);
+  // The resolved owner is what the spend pays: it must decode like any recipient.
+  assert.equal(decodeAddress((got as NameRecord).owner), decodeAddress(f.recipient));
+
+  // 404 is an ANSWER (unregistered) — the Send form turns it into its distinct copy.
+  const miss = (async () => ({
+    ok: false,
+    status: 404,
+    text: async () => "no such name",
+  })) as unknown as typeof fetch;
+  assert.equal(await resolveName("http://indexer.local", "nobody", miss), null);
 });
 
 test("spend path: a base58 recipient normalized via decodeAddress builds the identical request", () => {
@@ -603,4 +666,43 @@ test("the app shell derives ONLY through the owner module (no inlined derivation
   ]) {
     assert.ok(!app.includes(inlined), `the derivation is re-implemented via ${inlined}`);
   }
+});
+
+// ====================== WITHDRAW DESTINATION (U-R1) ==========================
+// The withdraw destination is an L1 EOA, not a bongtu address, so it never goes
+// near recipientError: empty is VALID (the field defaults to the connected
+// account) and a pasted bjj compressed pubkey must die on shape.
+
+test("evmAddressError: accepts checksummed, lowercase and the empty default; rejects a bjj pubkey and junk", () => {
+  const checksummed = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
+  assert.equal(evmAddressError(checksummed), null, "a checksummed L1 address must pass");
+  assert.equal(evmAddressError(checksummed.toLowerCase()), null, "all-lowercase must pass (no checksum to hold it to)");
+  assert.equal(evmAddressError("  " + checksummed + "  "), null, "whitespace-padded input is trimmed first");
+  assert.equal(evmAddressError(""), null, "empty means the connected account — the field's default, not an error");
+  assert.equal(evmAddressError("   "), null, "blank is still the default");
+
+  // A bjj compressed pubkey is 0x + 64 hex — 12 bytes too long for an L1 address.
+  // This is the paste mistake the field exists to catch (Receive shows exactly this string).
+  assert.equal(evmAddressError("0x" + "ab".repeat(32)), "That doesn't look like an L1 address.");
+  // A mixed-case address with a broken EIP-55 checksum is a typo, not a destination.
+  assert.equal(
+    evmAddressError("0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045"),
+    "That doesn't look like an L1 address.",
+  );
+  assert.equal(evmAddressError("junk"), "That doesn't look like an L1 address.");
+});
+
+test("the withdraw screen pays a plain L1 destination — the stealth exit left the wallet (source fact)", () => {
+  // The library keeps its stealth surface for the future DEPOSIT direction
+  // (stealthKeys/stealthFunds and the keyCache custody half stay tested); the
+  // SCREEN must no longer reach any of it. Same style as the App.tsx derivation gate.
+  const spend = readFileSync(
+    new URL("../src/ui/screens/SpendScreen.tsx", import.meta.url).pathname,
+    "utf8",
+  );
+  for (const gone of ["prepareStealthDestination", "unlockStealth", "stealthMode", "stealth"]) {
+    assert.ok(!spend.includes(gone), `the stealth withdraw wiring is back via ${gone}`);
+  }
+  assert.match(spend, /evmAddressError/, "the destination field must judge through the shared helper");
+  assert.match(spend, /withdrawTo/, "the destination must ride the flow's proof-bound recipient param");
 });

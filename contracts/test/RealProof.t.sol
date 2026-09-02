@@ -188,17 +188,21 @@ contract RealProofTest is Base {
         _seed(pool, ".withdraw");
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".withdraw");
         uint256[] memory p = _pub(".withdraw");
-        uint[26] memory pub;
-        for (uint256 i = 0; i < 26; i++) pub[i] = p[i];
+        uint[27] memory pub;
+        for (uint256 i = 0; i < 27; i++) pub[i] = p[i];
         uint256 rootAfter = vm.parseJsonUint(j, ".withdraw.rootAfter");
 
-        uint256 balBefore = token.balanceOf(address(this));
-        pool.withdraw(a, b, c, pub, _kemCt(".withdraw"));
+        // Tokens go to the proof-bound recipient (pub[26]), NOT the submitter.
+        address recipient = address(uint160(p[26]));
+        uint256 balBefore = token.balanceOf(recipient);
+        uint256 senderBefore = token.balanceOf(address(this));
+        pool.withdraw(a, b, c, pub, _kemCt(".withdraw"), bytes32(uint256(1)), 7);
 
         assertEq(pool.nextLeafIndex(), 3, "withdraw appends 1 change leaf (seed 2 + 1)");
         assertEq(pool.root(), rootAfter, "withdraw root != oracle");
         assertTrue(pool.nullifierUsed(p[17]) && pool.nullifierUsed(p[18]), "withdraw nullifiers not marked");
-        assertEq(token.balanceOf(address(this)) - balBefore, p[0], "withdraw did not push `out` tokens");
+        assertEq(token.balanceOf(recipient) - balBefore, p[0], "withdraw did not push `out` to the recipient");
+        assertEq(token.balanceOf(address(this)), senderBefore, "the submitter must receive nothing");
     }
 
     // ============== (ii) MINT-FROM-NOTHING CLOSED + PADDED ACCEPT ============
@@ -236,15 +240,15 @@ contract RealProofTest is Base {
         _seed(pool, ".withdraw_padded");
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".withdraw_padded");
         uint256[] memory p = _pub(".withdraw_padded");
-        uint[26] memory pub;
-        for (uint256 i = 0; i < 26; i++) pub[i] = p[i];
+        uint[27] memory pub;
+        for (uint256 i = 0; i < 27; i++) pub[i] = p[i];
 
         assertEq(p[18], 0, "padded fixture must have nullifier[1]=0");
         pub[21] = 1; // adversarial calldata lie: claim enabled[1]=1
 
         // Contract injects injected[21]=(nullifier[1]!=0)=0, overriding the lie, so
         // the vector matches the proof and verification passes.
-        pool.withdraw(a, b, c, pub, _kemCt(".withdraw_padded"));
+        pool.withdraw(a, b, c, pub, _kemCt(".withdraw_padded"), bytes32(0), 0);
         assertTrue(pool.nullifierUsed(p[17]), "real nullifier[0] must be marked");
     }
 
@@ -255,14 +259,14 @@ contract RealProofTest is Base {
         _seed(pool, ".withdraw_padded");
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".withdraw_padded");
         uint256[] memory p = _pub(".withdraw_padded");
-        uint[26] memory pub;
-        for (uint256 i = 0; i < 26; i++) pub[i] = p[i];
+        uint[27] memory pub;
+        for (uint256 i = 0; i < 27; i++) pub[i] = p[i];
         uint256 rootAfter = vm.parseJsonUint(j, ".withdraw_padded.rootAfter");
 
         assertEq(p[18], 0, "padded fixture must have nullifier[1]=0");
         assertEq(p[21], 0, "padded fixture must have enabled[1]=0");
 
-        pool.withdraw(a, b, c, pub, _kemCt(".withdraw_padded"));
+        pool.withdraw(a, b, c, pub, _kemCt(".withdraw_padded"), bytes32(0), 0);
 
         assertEq(pool.root(), rootAfter, "padded withdraw root != oracle");
         assertTrue(pool.nullifierUsed(p[17]), "real nullifier[0] not marked");
@@ -276,16 +280,16 @@ contract RealProofTest is Base {
         _seed(pool, ".withdraw");
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".withdraw");
         uint256[] memory p = _pub(".withdraw");
-        uint[26] memory pub;
-        for (uint256 i = 0; i < 26; i++) pub[i] = p[i];
+        uint[27] memory pub;
+        for (uint256 i = 0; i < 27; i++) pub[i] = p[i];
 
         bytes memory kemCt = _kemCt(".withdraw");
-        pool.withdraw(a, b, c, pub, kemCt); // first spend OK
+        pool.withdraw(a, b, c, pub, kemCt, bytes32(0), 0); // first spend OK
 
         // The proof's membership root is still known, so it re-verifies; the
         // second spend must revert on nullifier reuse.
         vm.expectRevert(abi.encodeWithSelector(BongtuPool.NullifierAlreadyUsed.selector, p[17]));
-        pool.withdraw(a, b, c, pub, kemCt);
+        pool.withdraw(a, b, c, pub, kemCt, bytes32(0), 0);
     }
 
     // ======================= (iv) TAMPER REVERT ==============================
@@ -295,8 +299,8 @@ contract RealProofTest is Base {
         _seed(pool, ".withdraw");
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".withdraw");
         uint256[] memory p = _pub(".withdraw");
-        uint[26] memory pub;
-        for (uint256 i = 0; i < 26; i++) pub[i] = p[i];
+        uint[27] memory pub;
+        for (uint256 i = 0; i < 27; i++) pub[i] = p[i];
 
         // Flip one bit of the change-commitment public signal (pub[22]); the root
         // (pub[19]) is untouched so the known-root guard still passes and the
@@ -304,7 +308,7 @@ contract RealProofTest is Base {
         pub[22] = pub[22] ^ 1;
 
         vm.expectRevert(BongtuPool.InvalidProof.selector);
-        pool.withdraw(a, b, c, pub, _kemCt(".withdraw"));
+        pool.withdraw(a, b, c, pub, _kemCt(".withdraw"), bytes32(0), 0);
     }
 
     // ============ §6b v2 enforced disclosure: WRONG AUTHORITY KEY =============
@@ -341,13 +345,13 @@ contract RealProofTest is Base {
         _seed(pool, ".withdraw");
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".withdraw");
         uint256[] memory p = _pub(".withdraw");
-        uint[26] memory pub;
-        for (uint256 i = 0; i < 26; i++) pub[i] = p[i];
+        uint[27] memory pub;
+        for (uint256 i = 0; i < 27; i++) pub[i] = p[i];
 
         pool.rotateArbiter([uint256(0x1234), uint256(0x5678)], bytes32(uint256(0x9abc)));
 
         vm.expectRevert(BongtuPool.InvalidProof.selector);
-        pool.withdraw(a, b, c, pub, _kemCt(".withdraw"));
+        pool.withdraw(a, b, c, pub, _kemCt(".withdraw"), bytes32(0), 0);
     }
 
     // ================= disburse access control (§5.3) ========================
@@ -392,9 +396,9 @@ contract RealProofTest is Base {
         vm.expectRevert(err);
         pool.transfer(a, b, c, tpub, shortCt);
 
-        uint[26] memory wpub;
+        uint[27] memory wpub;
         vm.expectRevert(err);
-        pool.withdraw(a, b, c, wpub, shortCt);
+        pool.withdraw(a, b, c, wpub, shortCt, bytes32(0), 0);
 
         uint[11] memory spub;
         uint256[] memory blob = _ctBlob(pool);
@@ -464,8 +468,8 @@ contract RealProofTest is Base {
         _seed(pool, ".withdraw");
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".withdraw");
         uint256[] memory p = _pub(".withdraw");
-        uint[26] memory pub;
-        for (uint256 i = 0; i < 26; i++) pub[i] = p[i];
+        uint[27] memory pub;
+        for (uint256 i = 0; i < 27; i++) pub[i] = p[i];
         bytes memory kemCt = _kemCt(".withdraw");
         assertEq(p[16], vm.parseJsonUint(j, ".withdraw.kemBinding"), "pub[16] != fixture kemBinding");
 
@@ -476,7 +480,7 @@ contract RealProofTest is Base {
             0, [p[17], p[18]], p[0], p[22], [p[1], p[2]], cta, p[23],
             vm.parseJsonUint(j, ".withdraw.rootAfter"), p[16], kemCt
         );
-        pool.withdraw(a, b, c, pub, kemCt);
+        pool.withdraw(a, b, c, pub, kemCt, bytes32(0), 0);
     }
 
     event Transferred(
@@ -552,11 +556,11 @@ contract RealProofTest is Base {
         BongtuPool pool = _freshPool(false); // deliberately NOT seeded
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = _abc(".withdraw");
         uint256[] memory p = _pub(".withdraw");
-        uint[26] memory pub;
-        for (uint256 i = 0; i < 26; i++) pub[i] = p[i];
+        uint[27] memory pub;
+        for (uint256 i = 0; i < 27; i++) pub[i] = p[i];
 
         vm.expectRevert(abi.encodeWithSelector(BongtuPool.UnknownRoot.selector, p[19]));
-        pool.withdraw(a, b, c, pub, _kemCt(".withdraw"));
+        pool.withdraw(a, b, c, pub, _kemCt(".withdraw"), bytes32(0), 0);
     }
 
     /// Operations revert NotInitialized until initialize() seeds arbiter epoch 0.

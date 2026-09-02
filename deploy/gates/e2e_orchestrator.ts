@@ -163,10 +163,11 @@ async function main(): Promise<void> {
   const rcptPubs = RCPTS.map((r) => r.publicKey);
   assertDistinctOwnerPubkeys(rcptPubs); // §4 two-time-pad guard (shared ephemeral key)
   const subtreeRoot = oracle.computeSubtreeRoot(outCommits);
-  let disbEcdhPub: [bigint, bigint] = [0n, 0n];
-  let disbNonce = 0n;
-  let disbCtFlat: bigint[] = [];
-  {
+  const { disbEcdhPub, disbNonce, disbCtFlat } = await (async (): Promise<{
+    disbEcdhPub: [bigint, bigint];
+    disbNonce: bigint;
+    disbCtFlat: bigint[];
+  }> => {
     // membership of the deposit note (leaf 0) against the LIVE post-deposit root
     const { siblings } = oracle.merklePath(0);
     const membershipRoot = oracle.getRoot();
@@ -230,28 +231,27 @@ async function main(): Promise<void> {
     const ctEvs = parseEventLogs({ abi: pool.abi, logs: rcpt.logs, eventName: "DisburseCiphertexts" });
     const disbEvs = parseEventLogs({ abi: pool.abi, logs: rcpt.logs, eventName: "Disbursed" });
     const sawCt = ctEvs.length > 0, sawDisb = disbEvs.length > 0;
-    if (sawCt) disbCtFlat = [...((ctEvs[0].args as any).receiverCiphertexts as bigint[])];
-    if (sawDisb) {
-      const da = disbEvs[0].args as any;
-      disbEcdhPub = [da.ecdhPublicKey[0], da.ecdhPublicKey[1]];
-      disbNonce = da.encryptionNonce;
-    }
+    const ctFlatEv: bigint[] = sawCt ? [...((ctEvs[0].args as any).receiverCiphertexts as bigint[])] : [];
+    const da = sawDisb ? (disbEvs[0].args as any) : null;
+    const ecdhPubEv: [bigint, bigint] = sawDisb ? [da.ecdhPublicKey[0], da.ecdhPublicKey[1]] : [0n, 0n];
+    const nonceEv: bigint = sawDisb ? da.encryptionNonce : 0n;
     ok(sawCt && sawDisb, "disburse emitted DisburseCiphertexts + Disbursed events");
-    ok(disbCtFlat.length === B * 4 + authCt.length,
+    ok(ctFlatEv.length === B * 4 + authCt.length,
       `event carries ${B}*4 receiver + ${authCt.length} authority ciphertext elements`);
-  }
+    return { disbEcdhPub: ecdhPubEv, disbNonce: nonceEv, disbCtFlat: ctFlatEv };
+  })();
 
   // ==================== TRIAL-DECRYPT (recipient #0, genuine) ==============
   step("TRIAL-DECRYPT: recipient #0 recovers its note from the on-chain event ONLY");
   const R0 = RCPTS[0];
-  let recoveredValue0: bigint;
-  let recoveredSalt0: bigint;
-  {
+  const { recoveredValue0, recoveredSalt0 } = await (async (): Promise<{
+    recoveredValue0: bigint;
+    recoveredSalt0: bigint;
+  }> => {
     // recipient uses ONLY: its bjj private key + (ecdhPublicKey, nonce, ct) from chain.
     const ct0 = disbCtFlat.slice(0, 4);
     const shared = ecdhSharedSecret(R0.formattedPrivateKey, disbEcdhPub); // ECDH(myPriv, ephemeralPub)
     const [value0, salt0] = poseidonDecrypt(ct0, shared, disbNonce, 2);
-    recoveredValue0 = value0; recoveredSalt0 = salt0;
     // rebuild the commitment from the RECOVERED (value,salt) + own pubkey
     const rebuilt = poseidonN([value0, salt0, R0.publicKey[0], R0.publicKey[1]]);
     ok(rebuilt === outCommits[0], "recovered commitment == batch leaf value (from ciphertext, not memory)");
@@ -262,7 +262,8 @@ async function main(): Promise<void> {
     ok(foldToRoot(rebuilt, siblings, idx0).toString() === (await pool.root()).toString(),
       "recovered note's merkle path folds to the LIVE contract root");
     ok(value0 === amounts[0], `recovered value (${value0}) == recipient #0 disbursed amount`);
-  }
+    return { recoveredValue0: value0, recoveredSalt0: salt0 };
+  })();
 
   // ============================ TRANSFER ==================================
   step("TRANSFER (2-in/2-out): recipient #0 spends batch note + PADDED input(enabled=0)");
@@ -307,8 +308,9 @@ async function main(): Promise<void> {
 
     // replay must revert on nullifier reuse — viem estimates gas on the (un-pinned
     // anvil) write, so a reverting call throws before it is ever sent.
-    let reverted = false;
-    try { await pool.write("transfer", [...proofArgs({ a, b, c, pub }), kemCtHex(KEM_TRANSFER.kemCiphertext)]); } catch { reverted = true; }
+    const reverted = await (async (): Promise<boolean> => {
+      try { await pool.write("transfer", [...proofArgs({ a, b, c, pub }), kemCtHex(KEM_TRANSFER.kemCiphertext)]); return false; } catch { return true; }
+    })();
     ok(reverted, "replaying the transfer proof reverts (nullifier already used)");
   }
 
@@ -317,8 +319,7 @@ async function main(): Promise<void> {
   const nfChange = nullifier(chgVal, sChg, R0.formattedPrivateKey);
   const resCommit = commitment(0n, sRes, R0.publicKey); // residual note (value 0)
   const padCommitW = commitment(0n, sPadW, R0.publicKey);
-  let withdrawnAmount: bigint;
-  {
+  const withdrawnAmount = await (async (): Promise<bigint> => {
     const idxChg = 33;
     const { siblings } = oracle.merklePath(idxChg);
     const zeros: bigint[] = new Array(H).fill(0n);
@@ -341,18 +342,20 @@ async function main(): Promise<void> {
       kemSs: KEM_WITHDRAW.kemSs,
       encryptionNonce: NONCE_WITHDRAW,
       authorityPublicKey: AUTHORITY.publicKey,
+      recipient: BigInt(employerAddr), // proof-bound payout: same target the old msg.sender path paid
     };
     const { a, b, c, pub } = await prove("withdraw", input);
-    withdrawnAmount = BigInt(pub[0]);
+    const withdrawnAmount = BigInt(pub[0]);
     ok(withdrawnAmount === chgVal, `withdraw out (pub[0]) == change value ${chgVal}`);
     oracle.appendLeaf(resCommit); // leaf 34
     const balBefore: bigint = await token.read("balanceOf", [employerAddr]);
-    await pool.write("withdraw", [...proofArgs({ a, b, c, pub }), kemCtHex(KEM_WITHDRAW.kemCiphertext)]);
+    await pool.write("withdraw", [...proofArgs({ a, b, c, pub }), kemCtHex(KEM_WITHDRAW.kemCiphertext), "0x" + "00".repeat(32), 0]);
     await matchRoot("after withdraw(1 change output)");
     const got = (await token.read("balanceOf", [employerAddr])) - balBefore;
     ok(got.toString() === chgVal.toString(), `withdraw pushed ${chgVal} ERC20 out of the pool`);
     ok(await pool.read("nullifierUsed", [nfChange]), "withdraw marked the change-note nullifier");
-  }
+    return withdrawnAmount;
+  })();
 
   // ================= TRANSFER TO SELF (U-X3, §11-8 v1.1) ==================
   step("SELF-SEND (2-in/2-out): PAYEE pays PAYEE — per-output receiver nonce");
@@ -415,7 +418,7 @@ async function main(): Promise<void> {
     const sharedSelf = ecdhSharedSecret(PAYEE.formattedPrivateKey, ephPub);
     const wantVals = [selfPayVal, selfChgVal];
     const wantCommits = [selfPayCommit, selfChgCommit];
-    for (let i = 0; i < 2; i++) {
+    for (const i of Array(2).keys()) {
       const [v, s] = poseidonDecrypt(evCts[i], sharedSelf, evNonce + BigInt(i), 2);
       ok(v === wantVals[i], `self-send ct_${i} (nonce+${i}) decrypts to value ${wantVals[i]}`);
       ok(
@@ -445,27 +448,27 @@ async function main(): Promise<void> {
       { v: selfPayVal, nf: nullifier(selfPayVal, sSelfPay, PAYEE.formattedPrivateKey) }, // self-send out0 - unspent
       { v: selfChgVal, nf: nullifier(selfChgVal, sSelfChg, PAYEE.formattedPrivateKey) }, // self-send out1 - unspent
     ];
-    let shielded = 0n;
+    const unspentVals: bigint[] = [];
     for (const n of notes) {
       const spent = await pool.read("nullifierUsed", [n.nf]); // unspent-ness read from the CHAIN
-      if (!spent) shielded += n.v;
+      if (!spent) unspentVals.push(n.v);
     }
+    const shielded = unspentVals.reduce((a, b) => a + b, 0n);
     console.log(`   deposited V=${V}  withdrawn=${withdrawnAmount}  shielded(unspent)=${shielded}`);
     ok(V === withdrawnAmount + shielded, `V (${V}) == withdrawn (${withdrawnAmount}) + shielded (${shielded})`);
 
     // every emitted disburse ciphertext trial-decrypts to a note that is a real leaf
     const liveRoot = (await pool.root()).toString();
-    let allDecrypt = true;
-    for (let i = 0; i < B; i++) {
+    const allDecrypt = Array.from({ length: B }, (_, i) => i).reduce<boolean>((acc, i) => {
       const ct = disbCtFlat.slice(i * 4, i * 4 + 4);
       const ss = ecdhSharedSecret(RCPTS[i].formattedPrivateKey, disbEcdhPub);
       const [v, s] = poseidonDecrypt(ct, ss, disbNonce, 2);
       const c = poseidonN([v, s, RCPTS[i].publicKey[0], RCPTS[i].publicKey[1]]);
       const { siblings } = oracle.merklePath(B + i);
-      if (c !== outCommits[i] || foldToRoot(c, siblings, B + i).toString() !== liveRoot || v !== amounts[i]) {
-        allDecrypt = false;
-      }
-    }
+      return c !== outCommits[i] || foldToRoot(c, siblings, B + i).toString() !== liveRoot || v !== amounts[i]
+        ? false
+        : acc;
+    }, true);
     ok(allDecrypt, `all ${B} disburse ciphertexts decrypt to notes that are real tree leaves`);
 
     console.log(`\n   FINAL ROOT = ${liveRoot}`);

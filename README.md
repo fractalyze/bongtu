@@ -227,7 +227,9 @@ System guarantees and inter-component contracts live in [`docs/`](docs/), one fi
 - [Indexer](docs/indexer.md): the mirror invariant, single-transaction persist and gap-only resume, the HTTP
   API with its read-auth, and the arbiter-mode trust boundary.
 - [Wallet](docs/wallet.md): key derivation from a MetaMask signature, in-browser proving and the stale-zkey
-  hazard, the deposit/faucet shape, and the indexer dependency.
+  hazard, the deposit/faucet shape, pay-by-name, the withdraw destination, and the indexer dependency.
+- [Relayer](docs/relayer.md): the gas-sponsoring withdraw submitter — why a proof-bound recipient makes
+  third-party submission safe, its API, and the no-silent-fallback client contract.
 - [Error surfaces](docs/errors.md): the five consequence classes and their surfaces (toast = event,
   banner = state), the money-state line, and the no-telemetry stance.
 - [Security model](docs/security-model.md): who sees what, the enforced-auditor-disclosure invariant, the

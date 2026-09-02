@@ -134,6 +134,10 @@ function chainWorld(values: bigint[]) {
 
   const keyCache = new KeyCache({
     derive: async () => deriveIdentityFromSignature(SIG),
+    // The stealth destination reaches these runs pre-derived; the seam is unused.
+    deriveStealth: async () => {
+      throw new Error("stealth derive must not be reached here");
+    },
     currentAccount: async () => "0x1",
     arm: () => () => {},
   });
@@ -144,7 +148,7 @@ function chainWorld(values: bigint[]) {
     c: bigint;
     mine: boolean;
   }
-  let pending: { spend: string[]; create: Output[] } | null = null;
+  const pending: { current: { spend: string[]; create: Output[] } | null } = { current: null };
 
   const deps = (over: Partial<RunSpendDeps> = {}): SpendIo => ({
     ensureChain: async () => {},
@@ -171,7 +175,7 @@ function chainWorld(values: bigint[]) {
         outputSalts: string[];
         outputOwnerPublicKeys: [string, string][];
       };
-      pending = {
+      pending.current = {
         spend: inp.inputCommitments.filter((_, i) => inp.enabled[i] === "1"),
         create: inp.outputCommitments.map((c, i) => ({
           value: inp.outputValues[i],
@@ -186,10 +190,11 @@ function chainWorld(values: bigint[]) {
     },
     submitTransfer10x2: async () => {
       submitted.push("transfer10x2");
-      if (!pending) throw new Error("a submit with no proof before it");
-      for (const n of notes) if (pending.spend.includes(n.commitment)) n.spent = true;
-      for (const o of pending.create) add(o.value, o.salt, o.c, o.mine);
-      pending = null;
+      const p = pending.current;
+      if (!p) throw new Error("a submit with no proof before it");
+      for (const n of notes) if (p.spend.includes(n.commitment)) n.spent = true;
+      for (const o of p.create) add(o.value, o.salt, o.c, o.mine);
+      pending.current = null;
       return { txHash: `0xmerge${submitted.length}`, explorerUrl: "https://x/tx/merge" };
     },
     poll: { sleep: async () => {} },

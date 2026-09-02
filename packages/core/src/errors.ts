@@ -46,22 +46,23 @@ export function bugError(message: string, thrown: unknown): AppError & { kind: "
  *  Copy-details payload. Never throws. */
 export function describeThrown(thrown: unknown): string {
   const parts: string[] = [];
-  let cur: unknown = thrown;
-  for (let depth = 0; cur !== null && cur !== undefined && depth < 8; depth++) {
+  const walk = (cur: unknown, depth: number): void => {
+    if (cur === null || cur === undefined || depth >= 8) return;
     if (cur instanceof Error) {
       parts.push(depth === 0 ? cur.stack ?? `${cur.name}: ${cur.message}` : `caused by: ${cur.name}: ${cur.message}`);
-      cur = cur.cause;
-    } else {
-      let text: string;
-      try {
-        text = typeof cur === "string" ? cur : JSON.stringify(cur);
-      } catch {
-        text = String(cur);
-      }
-      parts.push(depth === 0 ? text : `caused by: ${text}`);
-      break;
+      walk(cur.cause, depth + 1);
+      return;
     }
-  }
+    const text = (() => {
+      try {
+        return typeof cur === "string" ? cur : JSON.stringify(cur);
+      } catch {
+        return String(cur);
+      }
+    })();
+    parts.push(depth === 0 ? text : `caused by: ${text}`);
+  };
+  walk(thrown, 0);
   return parts.length > 0 ? parts.join("\n") : String(thrown);
 }
 
@@ -102,10 +103,12 @@ export function classifyIndexerRead(err: unknown): IndexerReadFailure {
  *  levels deep); bounded so a cyclic cause cannot spin. */
 export function causeChain(e: unknown): Record<string, unknown>[] {
   const chain: Record<string, unknown>[] = [];
-  for (let cur = e; cur !== null && typeof cur === "object" && chain.length < 8; ) {
+  const walk = (cur: unknown): void => {
+    if (cur === null || typeof cur !== "object" || chain.length >= 8) return;
     chain.push(cur as Record<string, unknown>);
-    cur = (cur as { cause?: unknown }).cause;
-  }
+    walk((cur as { cause?: unknown }).cause);
+  };
+  walk(e);
   return chain;
 }
 

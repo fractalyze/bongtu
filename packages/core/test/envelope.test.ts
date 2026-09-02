@@ -142,12 +142,12 @@ test("p1.A: sdk builder reproduces the admin buildDisburseRequest envelope bytes
   // The site's output layout: 3 recipients, then the change note, then
   // zero-value pads to B (padSeed derivation), salts = saltSeed + i.
   const outs: { owner: Point; value: bigint }[] = [];
-  for (let i = 0; i < 3; i++) {
+  for (const i of Array(3).keys()) {
     outs.push({ owner: deriveKeypair(4000000019n + BigInt(i) * 1000003n).publicKey, value: 100n + BigInt(i) });
   }
   const disbursed = outs.reduce((a, o) => a + o.value, 0n);
   outs.push({ owner: employer.publicKey, value: value - disbursed }); // change
-  for (let i = outs.length; i < B; i++) {
+  for (const i of Array.from({ length: B - outs.length }, (_, j) => j + outs.length)) {
     outs.push({ owner: deriveKeypair(50000000000n + BigInt(i) * 1000003n + 1n).publicKey, value: 0n });
   }
   const outputSalts = outs.map((_, i) => 9000000n + BigInt(i));
@@ -605,7 +605,7 @@ test("transfer10 layout: the field order the circuit encrypts, at arity 10", () 
   const p = buildAuthorityPlaintext("transfer10", env);
   assert.equal(p.length, 62);
   assert.deepEqual([p[0], p[1]], sender, "fields 0..1 are the shared input owner");
-  for (let i = 0; i < 10; i++) {
+  for (const i of Array(10).keys()) {
     assert.equal(p[2 + 2 * i], env.inputs[i].value, `input ${i} value at ${2 + 2 * i}`);
     assert.equal(p[3 + 2 * i], env.inputs[i].salt, `input ${i} salt at ${3 + 2 * i}`);
     assert.equal(p[22 + 2 * i], env.outputs[i].owner[0], `output ${i} owner.x at ${22 + 2 * i}`);
@@ -657,7 +657,7 @@ test("transfer10 fixture parity: the committed witness input agrees with the sdk
   // commitment equality: recomputing every output commitment with the sdk
   // reproduces the witness input the circuit hashed.
   const outCommits = arr("outputCommitments");
-  for (let i = 0; i < 10; i++) {
+  for (const i of Array(10).keys()) {
     assert.equal(commitment(outValues[i], outSalts[i], owners[i]), outCommits[i], `output ${i}`);
   }
   // conservation: CheckSum is an equality over ALL 10 slots, pads included.
@@ -666,7 +666,7 @@ test("transfer10 fixture parity: the committed witness input agrees with the sdk
     outValues.reduce((a, v) => a + v, 0n),
   );
   // the §5.2 value belt on the fixture's own padding: enabled=0 ⟹ value=0.
-  for (let i = 0; i < 10; i++) {
+  for (const i of Array(10).keys()) {
     if (enabled[i] === 0n) assert.equal(inValues[i], 0n, `padded slot ${i} must carry value 0`);
   }
 
@@ -730,14 +730,14 @@ test("transfer10x2 layout: the field order the circuit encrypts, at (10, 2)", ()
   const p = buildAuthorityPlaintext("transfer10x2", env);
   assert.equal(p.length, 30);
   assert.deepEqual([p[0], p[1]], sender, "fields 0..1 are the shared input owner");
-  for (let i = 0; i < 10; i++) {
+  for (const i of Array(10).keys()) {
     assert.equal(p[2 + 2 * i], env.inputs[i].value, `input ${i} value at ${2 + 2 * i}`);
     assert.equal(p[3 + 2 * i], env.inputs[i].salt, `input ${i} salt at ${3 + 2 * i}`);
   }
   // The output run starts right after the ten input pairs — at 22, not at 42
   // where transfer10 puts it. A layout that hardcoded transfer10's offsets would
   // decrypt this envelope into garbage.
-  for (let i = 0; i < 2; i++) {
+  for (const i of Array(2).keys()) {
     assert.equal(p[22 + 2 * i], env.outputs[i].owner[0], `output ${i} owner.x at ${22 + 2 * i}`);
     assert.equal(p[23 + 2 * i], env.outputs[i].owner[1], `output ${i} owner.y at ${23 + 2 * i}`);
     assert.equal(p[26 + 2 * i], env.outputs[i].value, `output ${i} value at ${26 + 2 * i}`);
@@ -793,7 +793,7 @@ test("transfer10x2 fixture parity: both committed witness inputs agree with the 
     assert.equal(outValues.length, 2, `${fixture} creates two notes`);
 
     const outCommits = arr("outputCommitments");
-    for (let i = 0; i < 2; i++) {
+    for (const i of Array(2).keys()) {
       assert.equal(commitment(outValues[i], outSalts[i], owners[i]), outCommits[i], `${fixture} output ${i}`);
     }
     // conservation: CheckSum is an equality over all ten input slots, pads included.
@@ -803,7 +803,7 @@ test("transfer10x2 fixture parity: both committed witness inputs agree with the 
       `${fixture} conserves value`,
     );
     // the §5.2 value belt on the fixture's own padding: enabled=0 ⟹ value=0.
-    for (let i = 0; i < 10; i++) {
+    for (const i of Array(10).keys()) {
       if (enabled[i] === 0n) assert.equal(inValues[i], 0n, `${fixture} padded slot ${i} carries value 0`);
     }
 
@@ -847,7 +847,7 @@ test("per-output nonces keep ten same-owner ciphertexts independent (§11-8 v1.1
   notes.forEach((n, i) => {
     assert.deepEqual(poseidonDecrypt(cts[i], shared, base + BigInt(i), 2), n, `note ${i} at nonce+${i}`);
   });
-  for (let i = 1; i < 10; i++) {
+  for (const i of Array.from({ length: 9 }, (_, j) => j + 1)) {
     assert.notDeepEqual(
       poseidonDecrypt(cts[i], shared, base, 2),
       notes[i],

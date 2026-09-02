@@ -77,3 +77,26 @@ export function resolveIndexerProxy(
     },
   };
 }
+
+/**
+ * The same-origin `/relayer` proxy — the `/indexer` rule's twin for the
+ * gas-sponsoring withdraw relayer (apps/relayer, default port 8700). Identical
+ * mode-gating for the identical reason: dev-only convenience, and in production
+ * the reverse proxy must own `/relayer/*` or the path simply does not exist
+ * (which the wallet treats as "no relayer configured" — self-submit).
+ *
+ * `proxyTarget` overrides the relayer host/port (env `VITE_RELAYER_PROXY_TARGET`).
+ */
+export function resolveRelayerProxy(
+  mode: string,
+  proxyTarget?: string,
+): Record<string, ProxyRule> | undefined {
+  if (mode === "production") return undefined;
+  return {
+    "/relayer": {
+      target: proxyTarget || process.env.VITE_RELAYER_PROXY_TARGET || "http://localhost:8700",
+      changeOrigin: true,
+      rewrite: (p: string) => p.replace(/^\/relayer/, ""),
+    },
+  };
+}

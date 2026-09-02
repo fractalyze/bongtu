@@ -23,7 +23,7 @@ contract StubDepositVerifier is IDepositVerifier {
 }
 
 contract StubWithdrawVerifier is IWithdrawVerifier {
-    function verifyProof(uint[2] calldata, uint[2][2] calldata, uint[2] calldata, uint[26] calldata)
+    function verifyProof(uint[2] calldata, uint[2][2] calldata, uint[2] calldata, uint[27] calldata)
         external
         pure
         returns (bool)

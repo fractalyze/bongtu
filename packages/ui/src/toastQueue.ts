@@ -82,12 +82,10 @@ export class ToastQueue {
       variant: opts.variant ?? "error",
       details,
     };
-    let next = [...this.items, item];
-    while (next.length > this.max) {
-      this.disarm(next[0].id);
-      next = next.slice(1);
-    }
-    this.items = next;
+    const appended = [...this.items, item];
+    const overflow = Math.max(0, appended.length - this.max);
+    for (const dropped of appended.slice(0, overflow)) this.disarm(dropped.id);
+    this.items = appended.slice(overflow);
     this.arm(item.id, durationMs);
     this.notify();
     return item.id;

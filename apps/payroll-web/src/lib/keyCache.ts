@@ -10,12 +10,17 @@
 
 import { KeyCache } from "@bongtu/client/keyCache";
 import { KEY_DERIVATION, deriveTransientIdentity } from "@bongtu/client/identity";
+import { deriveStealthKeys } from "@bongtu/client/stealthKeys";
 import type { Connection } from "@bongtu/client/connection";
 import type { WalletIdentity } from "@bongtu/client/derive";
+import type { StealthKeys } from "@bongtu/core/stealth";
 import { currentAccount } from "./connect.js";
 
 export const keyCache = new KeyCache({
   derive: (connection: Connection): Promise<WalletIdentity> =>
     deriveTransientIdentity(connection, KEY_DERIVATION),
+  // The console has no stealth screen today, but the lock's seam is mandatory:
+  // if it ever grows one, the keys can only live here — never beside it.
+  deriveStealth: (connection: Connection): Promise<StealthKeys> => deriveStealthKeys(connection),
   currentAccount,
 });

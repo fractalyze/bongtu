@@ -1,4 +1,4 @@
-// Live per-action gas survey against the CURRENT live pool (V4 impl, PQ epoch 1).
+// Live per-action gas survey against the CURRENT live pool (withdraw-v2 stealth-exit impl).
 // deposit -> transfer(2x2) -> withdraw, one fresh chain with survey-only identities,
 // each tx's gasUsed printed for docs/performance.md. Built on @bongtu/core + the
 // proof toolbox only — deliberately no wallet-lib imports, so the survey stays
@@ -42,8 +42,7 @@ const CHG = DEP - PAY;
 function randField(): bigint {
   const b = new Uint8Array(31);
   webcrypto.getRandomValues(b);
-  let x = 0n;
-  for (const byte of b) x = (x << 8n) | BigInt(byte);
+  const x = b.reduce<bigint>((acc, byte) => (acc << 8n) | BigInt(byte), 0n);
   return x === 0n ? 1n : x;
 }
 // nonce must fit the Poseidon-sponge nonce bound the circuits enforce (< 2^128)
@@ -63,12 +62,14 @@ async function livePath(idx: number): Promise<bigint[]> {
 
 async function liveHeadCaughtUp(wantLeaf: number): Promise<bigint> {
   const IDXER = process.env.INDEXER_URL || "https://bongtu.fractalyze.io/indexer";
-  for (let i = 0; i < 40; i++) {
+  const attempt = async (triesLeft: number): Promise<bigint> => {
+    if (triesLeft <= 0) throw new Error("indexer did not catch up");
     const h = (await (await fetch(`${IDXER}/head`)).json()) as { root: string; nextLeafIndex: number };
     if (h.nextLeafIndex >= wantLeaf) return BigInt(h.root);
     await new Promise((r) => setTimeout(r, 3000));
-  }
-  throw new Error("indexer did not catch up");
+    return attempt(triesLeft - 1);
+  };
+  return attempt(40);
 }
 
 async function main(): Promise<void> {
@@ -84,7 +85,7 @@ async function main(): Promise<void> {
     parseAbi([
       "function deposit(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[19] pub, bytes kemCiphertext)",
       "function transfer(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[37] pub, bytes kemCiphertext)",
-      "function withdraw(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[26] pub, bytes kemCiphertext)",
+      "function withdraw(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[27] pub, bytes kemCiphertext, bytes32 stealthEphemeralPub, uint8 stealthViewTag)",
       "function nextLeafIndex() view returns (uint256)",
     ]),
   );
@@ -174,13 +175,18 @@ async function main(): Promise<void> {
       kemSs: kemW.kemSs,
       encryptionNonce: randNonce(),
       authorityPublicKey: AUTHORITY_PUB,
+      // proof-bound payout (withdraw-v2, pub[26]): same target the old
+      // msg.sender path paid, so the survey's economics are unchanged.
+      recipient: BigInt(rig.address),
     });
     ok(BigInt(pub[0]) === PAY, `withdraw pub[0] == ${PAY}`);
-    const r = await pool.write("withdraw", [...proofArgs({ a, b, c, pub }), kemW.ctHex]);
+    ok(BigInt(pub[26]) === BigInt(rig.address), "withdraw recipient proof-bound (pub[26])");
+    // plain (non-stealth) withdraw: the announcement pair rides as the zero sentinel.
+    const r = await pool.write("withdraw", [...proofArgs({ a, b, c, pub }), kemW.ctHex, "0x" + "00".repeat(32), 0]);
     gas.withdraw = { used: r.gasUsed.toString(), tx: r.transactionHash };
   }
 
-  step("GAS SURVEY (V4 impl, PQ epoch 1)");
+  step("GAS SURVEY (withdraw-v2 stealth-exit impl)");
   for (const [op, g] of Object.entries(gas)) {
     console.log(`  ${op.padEnd(9)} ${g.used.padStart(10)}  ${explorerTxUrl(g.tx.split(" ")[0])}`);
   }

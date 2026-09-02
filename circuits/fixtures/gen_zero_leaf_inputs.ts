@@ -157,6 +157,7 @@ function genWithdrawZeroLeaf(): WithdrawInput {
     kemSs: kemDraw("withdraw_zero_leaf").kemSs,
     encryptionNonce: ENCRYPTION_NONCE,
     authorityPublicKey: AUTHORITY.publicKey,
+    recipient: 0x1111111111111111111111111111111111111111n,
   };
 }
 

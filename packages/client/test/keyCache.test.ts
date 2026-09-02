@@ -20,12 +20,17 @@
 //       after one, locked again on wipe or sign-out, with a subscriber notified on
 //       every one of those transitions.
 //   (5) KEY CUSTODY — running the whole lifecycle touches NO browser storage.
+//   (6) STEALTH IDENTITY — the stealth meta keys are a SECOND derived value under
+//       the same lock: unlocked once through their own seam and reused while fresh,
+//       wiped at the same idle deadline, dropped by lock(), and refused under a
+//       switched account exactly like the spending key — one state machine.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { deriveIdentityFromSignature } from "../src/derive.js";
+import { stealthKeysFromKdfSignature } from "../src/stealthKeys.js";
 import { ACCOUNT_MISMATCH_MESSAGE } from "../src/identity.js";
 import { IDLE_WIPE_MS, KeyCache, type KeyCacheWiring } from "../src/keyCache.js";
 import type { Connection } from "../src/connection.js";
@@ -53,23 +58,28 @@ function harness(opts: { suppressTimer?: boolean } = {}) {
     account: ACCOUNT as string | null,
     now: 1_000_000,
     derives: 0,
+    stealthDerives: 0,
     notifications: 0,
     armed: false,
   };
-  let pending: (() => void) | null = null;
+  const pending: { current: (() => void) | null } = { current: null };
   const deps: KeyCacheWiring = {
     derive: async () => {
       state.derives++;
       return deriveIdentityFromSignature(state.sig);
     },
+    deriveStealth: async () => {
+      state.stealthDerives++;
+      return stealthKeysFromKdfSignature(state.sig);
+    },
     currentAccount: async () => state.account,
     now: () => state.now,
     arm: (fn) => {
       if (opts.suppressTimer) return () => {};
-      pending = fn;
+      pending.current = fn;
       state.armed = true;
       return () => {
-        pending = null;
+        pending.current = null;
         state.armed = false;
       };
     },
@@ -82,12 +92,13 @@ function harness(opts: { suppressTimer?: boolean } = {}) {
     cache,
     state,
     unlock: () => cache.unlock(CONNECTION, SESSION.compressedPubkey),
+    unlockStealth: () => cache.unlockStealth(CONNECTION, SESSION.compressedPubkey),
     /** What App.connectWallet does with the identity its login signature produced. */
     seed: (): void => cache.seed(SESSION, ACCOUNT, SESSION.compressedPubkey),
     fireIdle: (): void => {
-      assert.ok(pending, "no idle wipe is armed");
-      const fn = pending;
-      pending = null;
+      const fn = pending.current;
+      assert.ok(fn, "no idle wipe is armed");
+      pending.current = null;
       state.armed = false;
       fn();
     },
@@ -335,15 +346,15 @@ test("the indicator tracks every transition: fresh → unlocked → wiped → si
 
 test("unsubscribing stops the notifications", async () => {
   const h = harness();
-  let seen = 0;
+  const seen = { n: 0 };
   const off = h.cache.subscribe(() => {
-    seen++;
+    seen.n++;
   });
   await h.unlock();
-  assert.equal(seen, 1);
+  assert.equal(seen.n, 1);
   off();
   h.cache.lock();
-  assert.equal(seen, 1);
+  assert.equal(seen.n, 1);
 });
 
 // ============================ (5) KEY CUSTODY ================================
@@ -375,6 +386,7 @@ test("a full unlock/reuse/wipe cycle touches no browser storage", async () => {
     h.seed(); // the login hand-off is part of the lifecycle, and writes nothing
     await h.unlock();
     await h.unlock();
+    await h.unlockStealth(); // the stealth identity lives by the same memory-only rule
     h.fireIdle();
     h.state.now += IDLE_WIPE_MS;
     await h.unlock();
@@ -390,4 +402,103 @@ test("a full unlock/reuse/wipe cycle touches no browser storage", async () => {
 
 test("IDLE_WIPE_MS is ten minutes", () => {
   assert.equal(IDLE_WIPE_MS, 10 * 60 * 1000);
+});
+
+// ============================ (6) STEALTH IDENTITY ===========================
+
+test("the stealth identity unlocks once and is reused without a re-derive while fresh", async () => {
+  const h = harness();
+  h.seed(); // a logged-in wallet: the spending key is already held
+  const first = await h.unlockStealth();
+  const second = await h.unlockStealth();
+  assert.equal(h.state.stealthDerives, 1, "one stealth popup for the whole page session");
+  assert.equal(h.state.derives, 0, "and riding the seeded spending key costs nothing extra");
+  assert.equal(second, first, "the SAME keys object is handed back, not a re-derivation");
+  assert.equal(first.meta.spendPub, stealthKeysFromKdfSignature(SESSION_SIG).meta.spendPub);
+});
+
+test("the stealth identity is wiped at the same idle deadline as the spending key", async () => {
+  const h = harness();
+  await h.unlock();
+  await h.unlockStealth();
+  assert.equal(h.state.stealthDerives, 1);
+
+  // layer 1: the ONE armed timer fires and both derived values are gone at once
+  h.fireIdle();
+  assert.equal(h.cache.isUnlocked(), false, "the wipe is shared — there is no second timer");
+  h.state.now += IDLE_WIPE_MS;
+  await h.unlockStealth();
+  assert.equal(h.state.derives, 2, "past the wipe the spending key re-derives");
+  assert.equal(h.state.stealthDerives, 2, "and so does the stealth identity — same deadline");
+});
+
+test("a throttled tab wipes the stealth identity at use time, like the spending key", async () => {
+  const h = harness({ suppressTimer: true });
+  await h.unlock();
+  await h.unlockStealth();
+  h.state.now += IDLE_WIPE_MS - 1; // one tick short: both still ride the hold
+  await h.unlockStealth();
+  assert.equal(h.state.stealthDerives, 1);
+
+  h.state.now += IDLE_WIPE_MS; // a full idle span past that use
+  await h.unlockStealth();
+  assert.equal(h.state.derives, 2, "the use-time belt re-derives the spending key");
+  assert.equal(h.state.stealthDerives, 2, "and refuses the stale stealth keys with it");
+});
+
+test("lock() drops the stealth identity with the spending key", async () => {
+  const h = harness();
+  await h.unlockStealth();
+  assert.equal(h.state.stealthDerives, 1);
+
+  h.cache.lock(); // sign out
+  assert.equal(h.cache.isUnlocked(), false);
+  await h.unlockStealth();
+  assert.equal(h.state.derives, 2, "a fresh page session for the spending key");
+  assert.equal(h.state.stealthDerives, 2, "and for the stealth identity — nothing survived lock()");
+});
+
+test("a stealth unlock under a switched account refuses the same way, spending no popup", async () => {
+  const h = harness();
+  await h.unlockStealth(); // both identities held under ACCOUNT
+  h.state.account = OTHER_ACCOUNT;
+
+  await assert.rejects(h.unlockStealth(), MISMATCH);
+  assert.equal(h.state.derives, 1, "the held spending key proves the mismatch — no popup");
+  assert.equal(h.state.stealthDerives, 1, "and the stealth derivation is never reached");
+  assert.equal(h.cache.isUnlocked(), false, "the refused switch left the whole hold dropped");
+});
+
+test("an account switch while the stealth popup is open refuses the derived keys", async () => {
+  // The stealth keys cannot be checked against the session pubkey the way the
+  // spending key can (assertSessionIdentity) — so the lock re-reads the account
+  // AFTER the derive and must refuse keys that a mid-popup switch produced.
+  const h = harness();
+  await h.unlock();
+  const deps = h.state;
+  const cache = h.cache;
+  // First stealth derive switches the account under the open popup.
+  const original = deps.account;
+  const flip = (): void => {
+    deps.account = OTHER_ACCOUNT;
+  };
+  const prior = deps.stealthDerives;
+  const switching = (async () => {
+    // simulate: the derive callback flips the selected account before returning
+    const swap = cache as unknown as { deps: { deriveStealth: () => Promise<unknown> } };
+    const real = swap.deps.deriveStealth;
+    swap.deps.deriveStealth = async () => {
+      flip();
+      return real();
+    };
+    try {
+      await h.unlockStealth();
+    } finally {
+      swap.deps.deriveStealth = real;
+    }
+  })();
+  await assert.rejects(switching, MISMATCH);
+  assert.equal(deps.stealthDerives, prior + 1, "the popup was spent — the switch came after it");
+  assert.equal(cache.isUnlocked(), false, "nothing derived across the switch is held");
+  deps.account = original;
 });

@@ -1,0 +1,25 @@
+{
+  "name": "@bongtu/relayer",
+  "version": "0.0.0",
+  "description": "bongtu withdraw relayer — gas-sponsored withdraw submission (PoC): anyone may submit a withdraw tx because the payout address is proof-bound (pub[26]); the relayer pays gas and cannot redirect funds",
+  "type": "module",
+  "license": "Apache-2.0",
+  "private": true,
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "start": "node --import tsx src/index.ts",
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@bongtu/core": "*",
+    "viem": "^2.55.10"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

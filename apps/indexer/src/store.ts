@@ -15,6 +15,7 @@
 // derives any user private key. Trial-decrypt happens in the wallet.
 
 import type { PoolClient } from "pg";
+import type { WithdrawAnnouncementRecord } from "@bongtu/core/indexerApi";
 import type { DisclosureResult } from "./disclosure.js";
 
 /** Kind of note-bearing pool operation a feed entry came from. Mirrors the wire
@@ -53,6 +54,10 @@ export interface FeedEntry {
   slices: Slice[];
   ciphertext: string[]; // decimal strings; the bytes a wallet trial-decrypts
   disclosure?: DisclosureResult; // present for `disburse`
+  /** present for `withdraw` since the stealth upgrade: the proof-bound payout
+   *  address + the discovery announcement (routes/announcements.ts serves the
+   *  projection). Absent on pre-upgrade history. */
+  announcement?: { recipient: string; ephemeralPub: string; viewTag: number };
 }
 
 /**
@@ -67,6 +72,10 @@ export interface StorePort {
   addEvent(e: Omit<FeedEntry, "seq">): FeedEntry | null;
   events(cursor?: number, limit?: number): FeedEntry[];
   allEvents(): FeedEntry[];
+  /** The `GET /announcements` projection: every announcement-carrying withdraw
+   *  entry (ingest attaches `.announcement` only for REAL stealth announcements,
+   *  so its presence is the single filter), cursor-paged by feed seq. */
+  announcements(cursor?: number, limit?: number): WithdrawAnnouncementRecord[];
   getAlarms(): DisclosureResult[];
   addNullifiers(nfs: bigint[]): void;
   nullifiers(): string[];
@@ -122,6 +131,29 @@ export class InMemoryStore implements StorePort {
 
   allEvents(): FeedEntry[] {
     return this.feed;
+  }
+
+  /**
+   * Announcement-carrying withdraw entries with seq > cursor (cursor -1/undefined
+   * returns all), capped, projected to the wire record. The projection lives HERE
+   * because "which feed entries are announcements" is feed knowledge, not route
+   * knowledge — the route only pages and fences (SPEC §6b /announcements).
+   */
+  announcements(cursor = -1, limit = Infinity): WithdrawAnnouncementRecord[] {
+    const out: WithdrawAnnouncementRecord[] = [];
+    for (const e of this.feed) {
+      if (e.kind !== "withdraw" || !e.announcement || e.seq <= cursor) continue;
+      if (out.length >= limit) break;
+      out.push({
+        seq: e.seq,
+        txHash: e.txHash,
+        blockNumber: e.blockNumber,
+        recipient: e.announcement.recipient,
+        ephemeralPub: e.announcement.ephemeralPub,
+        viewTag: e.announcement.viewTag,
+      });
+    }
+    return out;
   }
 
   getAlarms(): DisclosureResult[] {

@@ -62,6 +62,15 @@ export const DEFAULTS = {
   // `import.meta.env` is a Vite build-time inject — undefined under the plain
   // node:test runner, so read it defensively (falls back to the relative default).
   indexerUrl: import.meta.env?.VITE_INDEXER_URL || "/indexer",
+  // The gas-sponsoring withdraw relayer (apps/relayer): set => the withdraw leg
+  // submits through it (no gas popup — the payout is proof-bound, pub[26], so
+  // the relayer cannot redirect it); EMPTY => self-submit, the pre-relayer
+  // behavior. Dev gets the RELATIVE `/relayer` (Vite proxy → localhost:8700,
+  // the same same-origin story as indexerUrl above); every other environment
+  // defaults EMPTY because vercel.json has no /relayer rewrite yet — keep it
+  // empty until that rewrite ships or deployments would POST into a 404.
+  // VITE_RELAYER_URL overrides either way (absolute URL bypasses the proxy).
+  relayerUrl: import.meta.env?.VITE_RELAYER_URL || (import.meta.env?.DEV ? "/relayer" : ""),
   // Where the transfer/withdraw circuit assets (wasm + zkey) are served for browser
   // snarkjs proving. One source in every environment: the bongtu-circuits blob store
   // under the CIRCUITS_VERSION path — reached through this same-origin path by the
@@ -90,7 +99,10 @@ export const DEFAULTS = {
 // and point vercel.json's /circuits rewrite at the new circuits/<version>/ path.
 // (2109f115 -> f91bd0d2: transfer10 left the set — deprecated 2026-07-28 — and
 // transfer10x2 joined it; the other three keys are unchanged.)
-export const CIRCUITS_VERSION = "f91bd0d2";
+// (f91bd0d2 -> bb0115c4: withdraw regenerated for the stealth exit — recipient
+// public input at pub[26], milestone-stealth slice B; the other three keys are
+// byte-identical, verified against the served f91bd0d2 assets.)
+export const CIRCUITS_VERSION = "bb0115c4";
 
 // Exact byte sizes of the served proving assets — the download progress bar's
 // denominator. Needed because the CDN strips/deflates Content-Length on some
@@ -111,7 +123,7 @@ export const CIRCUIT_ASSET_BYTES: Record<BrowserCircuit, { wasm: number; zkey: n
   // fetches it ONLY once note selection says a spend needs 3+ input notes, never on
   // screen open (sizes from circuits/out/, the same build the blob store serves).
   transfer10x2: { wasm: 4520070, zkey: 95008180 },
-  withdraw: { wasm: 3881862, zkey: 24869572 },
+  withdraw: { wasm: 3884612, zkey: 24870344 },
   deposit: { wasm: 3364023, zkey: 6776800 },
 };
 

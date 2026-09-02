@@ -280,18 +280,30 @@ export async function pollUntil<T>(
   const intervalMs = opts.intervalMs ?? 3000;
   const capMs = opts.capMs ?? 30000;
   const sleep = opts.sleep ?? realSleep;
-  let last: T | null = null;
-  for (let elapsed = 0; elapsed < capMs; elapsed += intervalMs) {
+  const attempt = async (elapsed: number, last: T | null): Promise<PollResult<T>> => {
+    if (elapsed >= capMs) return { landed: false, last };
     await sleep(intervalMs);
-    try {
-      const cur = await load();
-      last = cur;
-      if (accept(cur)) return { landed: true, last };
-    } catch {
-      // transient indexer failure — keep polling until the cap
-    }
-  }
-  return { landed: false, last };
+    const loaded = await (async (): Promise<{ cur: T } | null> => {
+      try {
+        return { cur: await load() };
+      } catch {
+        // transient indexer failure — keep polling until the cap
+        return null;
+      }
+    })();
+    if (loaded === null) return attempt(elapsed + intervalMs, last);
+    const landed = ((): boolean => {
+      try {
+        return accept(loaded.cur);
+      } catch {
+        // an accept that throws counts as a non-acceptance, as the shared catch had it
+        return false;
+      }
+    })();
+    if (landed) return { landed: true, last: loaded.cur };
+    return attempt(elapsed + intervalMs, loaded.cur);
+  };
+  return attempt(0, null);
 }
 
 /**

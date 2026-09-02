@@ -20,6 +20,7 @@
 // own ("waiting"), so the screen can say what it is waiting for.
 
 import { commitment } from "@bongtu/core/note";
+import type { StealthDerivation } from "@bongtu/core/stealth";
 import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
 import type { Connection } from "./connection.js";
 import {
@@ -30,6 +31,7 @@ import {
   submitWithdraw,
   walletErrorMessage,
 } from "./connection.js";
+import { submitWithdrawRelayed } from "./relayerClient.js";
 import type { KeyCache } from "./keyCache.js";
 import { getHead, getSignedPath, type OwnerNote } from "./indexerClient.js";
 import { pollUntil, type PollForActionOptions } from "./refresh.js";
@@ -74,6 +76,13 @@ export interface SpendContext {
   pool: string;
   /** the explorer base URL the success link is built on (app config). */
   explorer: string;
+  /** the gas-sponsoring relayer base URL (app config; apps/relayer). Set => the
+   *  terminal WITHDRAW leg is submitted through it — no wallet popup, the
+   *  relayer pays gas, and it cannot redirect the payout because the recipient
+   *  is proof-bound (pub[26]). Absent/empty => wallet self-submit, the
+   *  pre-relayer behavior. Transfer and merge legs NEVER relay: they carry no
+   *  proof-bound recipient, so there is nothing a relayer could safely offer. */
+  relayerUrl?: string;
   notes: OwnerNote[];
   /** the logged-in session's compressed bjj pubkey — what the just-in-time
    *  derivation must reproduce before any of these notes may be spent, and the payee
@@ -107,6 +116,9 @@ export interface RunSpendDeps {
   submitTransfer: typeof submitTransfer;
   submitTransfer10x2: typeof submitTransfer10x2;
   submitWithdraw: typeof submitWithdraw;
+  /** reached only when ctx carries a relayerUrl, and only by the terminal
+   *  withdraw leg (relayerClient.ts). */
+  submitWithdrawRelayed: typeof submitWithdrawRelayed;
   /** interval/cap/sleep for the between-legs wait — the wallet's one bounded-poll
    *  policy (refresh.ts), so tests can run a chain without real seconds. */
   poll: PollForActionOptions;
@@ -124,6 +136,7 @@ const DEFAULT_DEPS: Omit<RunSpendDeps, "keyCache" | "prove"> = {
   submitTransfer,
   submitTransfer10x2,
   submitWithdraw,
+  submitWithdrawRelayed,
   poll: {},
 };
 
@@ -149,16 +162,19 @@ async function fetchMemberships(
   return memberships;
 }
 
-// Each circuit's builder gets exactly the witness its `main` takes; withdraw has no
-// payee, and transfer10x2 serves both the 3–10-note payment and the merge legs.
+// Each circuit's builder gets exactly the witness its `main` takes; withdraw's
+// payee is an L1 address (the proof-bound payout target), and transfer10x2
+// serves both the 3–10-note payment and the merge legs.
 function buildRequest(
   action: SpendAction,
   identity: WalletIdentity,
   memberships: MembershipWitness[],
   crypto: SpendCrypto,
+  withdrawRecipient: string,
 ) {
+  // (withdrawRecipient is ignored by the transfer builders.)
   const { circuit, inputs, to, amount } = action;
-  if (circuit === "withdraw") return buildWithdrawRequest(identity, inputs, memberships, amount, crypto);
+  if (circuit === "withdraw") return buildWithdrawRequest(identity, inputs, memberships, amount, crypto, withdrawRecipient);
   if (circuit === "transfer10x2") {
     return buildTransfer10x2Request(identity, inputs, memberships, to, amount, crypto);
   }
@@ -204,10 +220,19 @@ async function runLeg(
   action: SpendAction,
   onStage: OnSpendStage,
   leg: LegProgress,
+  stealth?: StealthDerivation,
+  withdrawTo?: string,
 ): Promise<{ outcome: SpendOutcome; payeeSalt: string }> {
   const memberships = await fetchMemberships(io, ctx.indexerUrl, identity, action.inputs);
   const crypto = freshSpendCrypto(randField);
-  const built = buildRequest(action, identity, memberships, crypto);
+  // Withdraw pays the CONNECTED account by default — byte-for-byte the old
+  // money movement, now proof-bound instead of msg.sender-implied. A user-typed
+  // destination (withdrawTo) substitutes theirs through the SAME proof-bound
+  // param; a stealth run substitutes its freshly derived one-time address.
+  const built = buildRequest(
+    action, identity, memberships, crypto,
+    stealth?.address ?? withdrawTo ?? ctx.connection.address,
+  );
   if (!built.meta.membershipOk) {
     throw new Error("Your balance just changed. Go back and try again.");
   }
@@ -219,18 +244,28 @@ async function runLeg(
   // The tx carries the SAME encapsulation the proof's kemBinding committed to
   // (crypto.kemCiphertext) — a different ct would decapsulate to mismatching
   // limbs at the arbiter and burn the envelope into an alarm.
-  const submitFor = {
-    transfer: io.submitTransfer,
-    transfer10x2: io.submitTransfer10x2,
-    withdraw: io.submitWithdraw,
-  }[action.circuit];
-  const res = await submitFor(
-    ctx.connection,
-    ctx.pool,
-    calldata,
-    crypto.kemCiphertext,
-    ctx.explorer,
-  );
+  // Withdraw alone may go through the gas-sponsoring relayer (ctx.relayerUrl):
+  // its payout target is proof-bound (pub[26]), so a third-party submitter can
+  // pay the gas without being able to redirect it. A configured-but-failing
+  // relayer THROWS here rather than falling back to the wallet — silently
+  // paying gas from the user's own account is the promise the relayer breaks
+  // (relayerClient.ts owns that WHY). Merge legs are transfer10x2 and take the
+  // non-withdraw branch, so they can never relay by construction.
+  const res =
+    action.circuit === "withdraw"
+      ? ctx.relayerUrl
+        ? await io.submitWithdrawRelayed(
+            ctx.relayerUrl, calldata, crypto.kemCiphertext, ctx.explorer, stealth,
+          )
+        : await io.submitWithdraw(
+            // The derivation travels WHOLE: connection.ts maps its announcement
+            // half to calldata, and splitting it here is exactly the seam where
+            // the pays-what-it-announces invariant could silently break.
+            ctx.connection, ctx.pool, calldata, crypto.kemCiphertext, ctx.explorer, stealth,
+          )
+      : await (action.circuit === "transfer" ? io.submitTransfer : io.submitTransfer10x2)(
+          ctx.connection, ctx.pool, calldata, crypto.kemCiphertext, ctx.explorer,
+        );
   return {
     outcome: { txHash: res.txHash, explorerUrl: res.explorerUrl },
     payeeSalt: crypto.payeeSalt ?? "",
@@ -312,7 +347,13 @@ export const CHAIN_FAILURE_REASSURANCE =
 export async function runSpendChain(
   kind: SpendKind,
   ctx: SpendContext,
-  args: { to?: string; amount: string },
+  // `stealth` is the core derivation from prepareStealthDestination
+  // (stealthKeys.ts), consumed only by the terminal withdraw leg. `withdrawTo`
+  // is a user-specified L1 payout address for a plain withdraw (undefined pays
+  // the connected account): it rides the same proof-bound recipient param, and
+  // because no derivation reaches submitWithdraw, the announcement fields stay
+  // the plain-withdraw sentinel (core ZERO_EPHEMERAL) exactly as the default.
+  args: { to?: string; amount: string; stealth?: StealthDerivation; withdrawTo?: string },
   onStage: OnSpendStage,
   deps: SpendIo,
 ): Promise<SpendOutcome> {
@@ -322,15 +363,21 @@ export async function runSpendChain(
   const plan = planSpendChain(kind, ctx.notes, args.amount);
   const count = plan.length;
   const merged: (WalletInputNote | undefined)[] = [];
-  let last: SpendOutcome | null = null;
+  const outcomes: SpendOutcome[] = [];
 
-  for (let index = 0; index < count; index++) {
+  for (const index of Array(count).keys()) {
     const leg: LegProgress = { index, count };
     const step = plan[index];
     try {
       const identity = await openSpendSession(io, ctx, onStage, leg);
-      const run = await runLeg(io, ctx, identity, legAction(step, ctx, args, merged), onStage, leg);
-      last = run.outcome;
+      // Only the terminal leg is the withdraw the stealth destination is for;
+      // a merge pays the wallet itself and must never consume it.
+      const run = await runLeg(
+        io, ctx, identity, legAction(step, ctx, args, merged), onStage, leg,
+        step.leg === "merge" ? undefined : args.stealth,
+        step.leg === "merge" ? undefined : args.withdrawTo,
+      );
+      outcomes.push(run.outcome);
       if (step.leg === "merge") {
         onStage("waiting", leg);
         merged[index] = await awaitMergedNote(io, ctx, identity, step.mergedValue, run.payeeSalt);
@@ -344,7 +391,7 @@ export async function runSpendChain(
   }
   // The terminal leg is the transaction the user asked for: it is what the success
   // screen links and what the post-action refresh polls for.
-  return last as SpendOutcome;
+  return outcomes[outcomes.length - 1] as SpendOutcome;
 }
 
 /** What runMergeChain hands back: the single note that now covers the amount —
@@ -384,7 +431,7 @@ export async function runMergeChain(
   const merged: (WalletInputNote | undefined)[] = [];
   const mergeTxs: SpendOutcome[] = [];
 
-  for (let index = 0; index < plan.merges.length; index++) {
+  for (const index of Array(plan.merges.length).keys()) {
     const leg: LegProgress = { index, count };
     const step = plan.merges[index];
     try {

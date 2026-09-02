@@ -14,7 +14,7 @@ proxy/ownership util. How to build and test the folder is owned by
 | `transfer(a,b,c,pub,kemCiphertext)` | `uint[37]` | permissionless | spends 2 nullifiers, appends 2 leaves |
 | `transfer10(a,b,c,pub,kemCiphertext)` | `uint[141]` | permissionless | spends 10 nullifiers, appends 10 leaves |
 | `transfer10x2(a,b,c,pub,kemCiphertext)` | `uint[68]` | permissionless | spends 10 nullifiers, appends 2 leaves |
-| `withdraw(a,b,c,pub,kemCiphertext)` | `uint[26]` | permissionless | spends 2 nullifiers, appends 1 change leaf, pushes `pub[0]` tokens |
+| `withdraw(a,b,c,pub,kemCiphertext,stealthEphemeralPub,stealthViewTag)` | `uint[27]` | permissionless (relayable) | spends 2 nullifiers, appends 1 change leaf, pushes `pub[0]` tokens to the proof-bound `pub[26]` recipient (never msg.sender); emits a paired `WithdrawAnnouncement` |
 | `disburseWithCiphertexts(a,b,c,pub,receiverCiphertexts,kemCiphertext)` | `uint[11]` + `uint256[]` | anyone (allowlist retired 2026-07-28) | spends 1 nullifier, attaches a `B`-leaf subtree |
 
 Every op takes the ML-KEM-768 `kemCiphertext` as a trailing `bytes calldata` argument and reverts

@@ -95,6 +95,19 @@ touch — the other verifiers, the arbiter key material, the epoch, and the IMT 
 `nextLeafIndex` — is unchanged from the values pinned before broadcasting. The tree pair is the
 check that catches a layout mistake.
 
+The first live upgrade shipped this way on **2026-09-01**: the stealth-exit withdraw
+(`recipient` at pub[26], uint[27]) via `deploy/forge/UpgradeV2.s.sol` — new
+`WithdrawVerifier` + implementation + `reinitializeV2` in one broadcast, with two
+pre-broadcast guards (the key must be the recorded owner; the version slot must
+still read 1) so a misconfigured live run cannot strand orphan contracts after
+paying their gas. `deploy/gates/test_upgrade_v2.sh` is the drill: it proves the
+v1→v2 transition on a fresh anvil deploy, storage intact, second run refused.
+The addresses live in `deploy/addresses.84532.json` (one owner; this file does
+not restate them). One operational observation worth keeping: the public
+`sepolia.base.org` RPC is load-balanced, and the first read after the broadcast
+returned a MIXED view (new initializer slot, old verifier) from a lagging
+replica — post-upgrade verification must re-read until consecutive reads agree.
+
 ## The hybrid PQ authority envelope
 
 Epoch 0 carries an ML-KEM-768 encapsulation-key hash alongside the bjj arbiter key, so every

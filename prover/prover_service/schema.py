@@ -134,7 +134,14 @@ class Transfer10x2Input(_SpendInput):
 
 
 class WithdrawInput(_SpendInput):
-    """withdraw (2-in / 1-out): single change output, no distinctness needed."""
+    """withdraw (2-in / 1-out): single change output, no distinctness needed.
+
+    `recipient` is the proof-bound L1 payout address (decimal uint160) — the
+    public input that makes relayer submission redirection-proof
+    (proving.ts WithdrawInput, docs/circuits.md).
+    """
+
+    recipient: str
 
 
 class DisburseInput(_SpendInput):

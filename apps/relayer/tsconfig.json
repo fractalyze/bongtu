@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "// note": "Extends the shared bongtu base (NodeNext ESM, strict). The cross-tree gate lives in ../tsconfig.json (root), which also includes these globs.",
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

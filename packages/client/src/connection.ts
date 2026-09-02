@@ -34,6 +34,7 @@ import {
   isPreKemProbeError,
 } from "@bongtu/core/network";
 import { liveChain } from "./chain.js";
+import { ZERO_EPHEMERAL, type StealthDerivation } from "@bongtu/core/stealth";
 
 // The shared per-function ABI fragments (@bongtu/core/network) — only the pool
 // functions the wallet touches, parsed once for viem. deposit is the 0-in/2-out
@@ -154,15 +155,15 @@ export interface WatchedAccount {
 export function accountWatchHandler(
   handlers: WalletWatchHandlers,
 ): (account: WatchedAccount, prev: WatchedAccount) => void {
-  let last: string | null = null;
+  const seen: { last: string | null } = { last: null };
   return (account, prev) => {
     // Seed from `prev` when the watcher attached after the connect happened (the
     // first event it sees may already be the disconnect).
-    if (last === null && prev.address) last = prev.address.toLowerCase();
+    if (seen.last === null && prev.address) seen.last = prev.address.toLowerCase();
     if (account.address) {
       const now = account.address.toLowerCase();
-      if (last !== null && now !== last) handlers.accountsChanged?.();
-      last = now;
+      if (seen.last !== null && now !== seen.last) handlers.accountsChanged?.();
+      seen.last = now;
     }
     if (prev.status === "connected" && account.status === "disconnected") {
       handlers.disconnected?.();
@@ -265,7 +266,7 @@ export interface SubmitResult {
 // One successful verification per pool address is enough for the session: the
 // epoch hash only changes on an arbiter key rotation, which ships as a new
 // wallet bundle anyway (ARBITER_KEM_PK is a build-time deployment fact).
-let kemVerifiedPool: string | null = null;
+const kemVerified: { pool: string | null } = { pool: null };
 
 /** viem's shape of "the getter is missing / reverted": a pre-KEM V1 pool probe.
  *  Transport failures (HttpRequestError etc.) carry none of these names and fall
@@ -288,18 +289,19 @@ function isViemPreKemProbeError(e: unknown): boolean {
  * call this BEFORE drawing KEM material / proving.
  */
 export async function assertPoolKemEpoch(connection: Connection, poolAddr: string): Promise<void> {
-  if (kemVerifiedPool === poolAddr) return;
+  if (kemVerified.pool === poolAddr) return;
   const pool = { address: poolAddr as Address, abi: POOL_ABI } as const;
-  let onchainHash: string | null;
-  try {
-    const epoch = await connection.publicClient.readContract({ ...pool, functionName: "currentEpoch" });
-    onchainHash = String(
-      await connection.publicClient.readContract({ ...pool, functionName: "arbiterKemPkHash", args: [epoch] }),
-    );
-  } catch (e) {
-    if (!isViemPreKemProbeError(e) && !isPreKemProbeError(e)) throw e;
-    onchainHash = null;
-  }
+  const onchainHash = await (async (): Promise<string | null> => {
+    try {
+      const epoch = await connection.publicClient.readContract({ ...pool, functionName: "currentEpoch" });
+      return String(
+        await connection.publicClient.readContract({ ...pool, functionName: "arbiterKemPkHash", args: [epoch] }),
+      );
+    } catch (e) {
+      if (!isViemPreKemProbeError(e) && !isPreKemProbeError(e)) throw e;
+      return null;
+    }
+  })();
   const err = arbiterKemPkGuardError(onchainHash);
   if (err) {
     // The technical verdict (which key, which epoch) goes to the console for
@@ -307,7 +309,7 @@ export async function assertPoolKemEpoch(connection: Connection, poolAddr: strin
     console.error(err);
     throw new Error("This wallet version doesn't match the network yet. Try again in a moment.");
   }
-  kemVerifiedPool = poolAddr;
+  kemVerified.pool = poolAddr;
 }
 
 // Every pool op carries the op's raw ML-KEM-768 encapsulation ciphertext
@@ -360,17 +362,31 @@ async function submit(
   calldata: Calldata,
   kemCiphertext: string,
   explorerBase: string,
+  stealth?: StealthDerivation,
 ): Promise<SubmitResult> {
   assertKemCiphertext(kemCiphertext);
   const { a, b, c, pub } = asProofArgs(calldata);
+  // withdraw alone carries the stealth announcement pair after the KEM ct
+  // (zeros = "no announcement"). Only the derivation's announcement half goes
+  // to calldata: its `address` is deliberately NOT read here — the payout
+  // target already rides proof-bound inside pub[26], which is what makes the
+  // announced R rediscover exactly the address the proof paid.
+  const args =
+    fn === "withdraw"
+      ? [
+          a, b, c, pub, kemCiphertext,
+          (stealth?.ephemeralPub ?? ZERO_EPHEMERAL) as `0x${string}`,
+          stealth?.viewTag ?? 0,
+        ]
+      : [a, b, c, pub, kemCiphertext];
   const hash = await connection.walletClient.writeContract({
     address: poolAddr as Address,
     abi: POOL_ABI,
     functionName: fn,
-    // The pub vector's length is per-circuit (19/37/68/26) and checked by the ABI
+    // The pub vector's length is per-circuit (19/37/68/27) and checked by the ABI
     // encoder at runtime; a plain bigint[] cannot satisfy the per-function tuple
     // type statically, hence the one cast.
-    args: [a, b, c, pub, kemCiphertext as `0x${string}`] as never,
+    args: args as never,
     account: connection.address as Address,
     chain: liveChain,
     nonce: await nextNonce(connection),
@@ -403,15 +419,19 @@ export function submitTransfer10x2(
   return submit(connection, poolAddr, "transfer10x2", calldata, kemCiphertext, explorerBase);
 }
 
-/** Submit a proven withdraw. */
+/** Submit a proven withdraw. A stealth payout hands the WHOLE core derivation
+ *  (@bongtu/core/stealth StealthDerivation); submit maps its (ephemeralPub,
+ *  viewTag) half to the calldata announcement pair the recipient discovers the
+ *  funds by. Omitted = plain withdraw, zeros on the wire. */
 export function submitWithdraw(
   connection: Connection,
   poolAddr: string,
   calldata: Calldata,
   kemCiphertext: string,
   explorerBase: string,
+  stealth?: StealthDerivation,
 ): Promise<SubmitResult> {
-  return submit(connection, poolAddr, "withdraw", calldata, kemCiphertext, explorerBase);
+  return submit(connection, poolAddr, "withdraw", calldata, kemCiphertext, explorerBase, stealth);
 }
 
 /** Submit a proven deposit/shield: the 0-in/2-out mint `(a, b, c, pub, kemCiphertext)`

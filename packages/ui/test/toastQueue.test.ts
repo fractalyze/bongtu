@@ -14,11 +14,11 @@ function fakeTimers(): {
   fire: (ms: number) => void;
   pending: () => number;
 } {
-  let seq = 0;
+  const seq = { next: 0 };
   const timers = new Map<number, { fn: () => void; ms: number }>();
   return {
     schedule: (fn, ms) => {
-      const id = seq++;
+      const id = seq.next++;
       timers.set(id, { fn, ms });
       return () => timers.delete(id);
     },
@@ -85,17 +85,17 @@ test("a non-finite duration is sticky: manual dismiss only", () => {
 test("subscribe: notified on show and dismiss; snapshot identity changes per update", () => {
   const t = fakeTimers();
   const q = new ToastQueue({ schedule: t.schedule });
-  let fires = 0;
-  const unsub = q.subscribe(() => fires++);
+  const fires = { n: 0 };
+  const unsub = q.subscribe(() => fires.n++);
   const before = q.snapshot();
   const id = q.show("hello");
-  assert.equal(fires, 1);
+  assert.equal(fires.n, 1);
   assert.notEqual(q.snapshot(), before, "new array identity so useSyncExternalStore repaints");
   q.dismiss(id);
-  assert.equal(fires, 2);
+  assert.equal(fires.n, 2);
   unsub();
   q.show("after unsub");
-  assert.equal(fires, 2, "unsubscribed listeners stay quiet");
+  assert.equal(fires.n, 2, "unsubscribed listeners stay quiet");
 });
 
 test("clear drops everything and cancels every timer", () => {

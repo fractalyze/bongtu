@@ -79,14 +79,15 @@ contract EnforcementTest is Base {
     function testZeroOutputCommitmentWithdrawReverts() public {
         pool = _stubPool();
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = dummyABC();
-        uint[26] memory pub;
+        uint[27] memory pub;
         pub[19] = pool.root(); // known (empty-tree) root
         pub[17] = 333; // fresh real nullifiers
         pub[18] = 444;
         pub[22] = 0; // zero change commitment
+        pub[26] = uint160(address(0xBEEF)); // valid recipient — the zero-change guard is under test
 
         vm.expectRevert(BongtuPool.ZeroOutputCommitment.selector);
-        pool.withdraw(a, b, c, pub, dummyKemCt());
+        pool.withdraw(a, b, c, pub, dummyKemCt(), bytes32(0), 0);
         assertEq(pool.nextLeafIndex(), 0, "no leaf must be appended on a rejected withdraw");
     }
 }

@@ -8,7 +8,7 @@ import tailwindcss from "@tailwindcss/vite";
 // are owned once at the repo root (vite.shared.ts) and shared with the admin app —
 // Vite bundles this config with esbuild, so the relative import above the app dir
 // resolves at bundle time. Only wallet-specific knobs live below.
-import { resolveIndexerProxy, tsJsResolve, type ProxyRule } from "../../vite.shared.js";
+import { resolveIndexerProxy, resolveRelayerProxy, tsJsResolve, type ProxyRule } from "../../vite.shared.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..", "..");
@@ -38,7 +38,7 @@ const circuitsProxy: ProxyRule = {
  */
 export function resolveWalletProxy(mode: string): Record<string, ProxyRule> | undefined {
   const indexer = resolveIndexerProxy(mode);
-  return indexer && { ...indexer, "/circuits": circuitsProxy };
+  return indexer && { ...indexer, ...resolveRelayerProxy(mode), "/circuits": circuitsProxy };
 }
 
 export default defineConfig(({ mode }) => {

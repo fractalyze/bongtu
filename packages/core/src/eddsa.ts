@@ -149,9 +149,7 @@ export function viewTokenHostBinding(url: string): string {
   const pageOrigin = (globalThis as { location?: { origin?: string } }).location?.origin;
   const u = new URL(url.replace(/\/$/, ""), pageOrigin ?? "http://localhost");
   const digest = sha256(new TextEncoder().encode(u.origin.toLowerCase()));
-  let x = 0n;
-  for (const b of digest.slice(0, HOST_BINDING_BYTES)) x = (x << 8n) | BigInt(b);
-  return x.toString();
+  return digest.slice(0, HOST_BINDING_BYTES).reduce<bigint>((x, b) => (x << 8n) | BigInt(b), 0n).toString();
 }
 
 /** Sign a field-element message with a BabyJubJub private scalar. Deterministic. */
@@ -216,4 +214,45 @@ export function parseSignature(hex: string): Signature {
   if (R8x >= P || R8y >= P) throw new Error("parseSignature: R8 coordinate not reduced mod P");
   if (S >= SUBGROUP_ORDER) throw new Error("parseSignature: S not reduced mod L");
   return { R8: [R8x, R8y], S };
+}
+
+// ---- name-directory registration auth (indexer /names) ----------------------
+//
+// Same EdDSA-Poseidon primitive as the reads above, domain-separated so a name
+// registration can never be redeemed as a /notes query or a view-token
+// challenge (and vice versa). The binding digests the FULL payload, so one
+// signature authorises exactly one (name -> stealth meta) mapping.
+
+/** How many digest bytes fold into the binding field element — 31 bytes is
+ *  < 2^248, always a valid bn254 field element. */
+const NAME_BINDING_BYTES = 31;
+
+// Fixed tag: sha256("bongtu/name-auth-v1") folded the same way as the binding.
+const NAME_DOMAIN_TAG: bigint = (() => {
+  const digest = sha256(new TextEncoder().encode("bongtu/name-auth-v1"));
+  return digest.slice(0, NAME_BINDING_BYTES).reduce<bigint>((x, b) => (x << 8n) | BigInt(b), 0n);
+})();
+
+/** Field element binding a registration payload: name + both stealth meta keys
+ *  (case-normalised hex, so client and server digest identical bytes). */
+export function nameBindingField(name: string, viewPub: string, spendPub: string): bigint {
+  const digest = sha256(
+    new TextEncoder().encode(`${name}|${viewPub.toLowerCase()}|${spendPub.toLowerCase()}`),
+  );
+  return digest.slice(0, NAME_BINDING_BYTES).reduce<bigint>((x, b) => (x << 8n) | BigInt(b), 0n);
+}
+
+/** The message an owner signs to (re)register a name (routes/names.ts). */
+export function nameAuthMessage(
+  ownerPub: PointInput,
+  binding: FieldInput,
+  timestamp: FieldInput,
+): bigint {
+  return poseidonN([
+    BigInt(ownerPub[0]),
+    BigInt(ownerPub[1]),
+    BigInt(binding),
+    BigInt(timestamp),
+    NAME_DOMAIN_TAG,
+  ]);
 }

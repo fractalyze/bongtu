@@ -60,8 +60,7 @@ function randomScalar(): bigint {
   for (;;) {
     const bytes = new Uint8Array(31);
     crypto.getRandomValues(bytes);
-    let scalar = 0n;
-    for (const b of bytes) scalar = (scalar << 8n) | BigInt(b);
+    const scalar = bytes.reduce<bigint>((s, b) => (s << 8n) | BigInt(b), 0n);
     if (scalar !== 0n) return scalar;
   }
 }
@@ -83,10 +82,9 @@ function splitAmounts(total: bigint, n: number): bigint[] {
   const weights = Array.from(raw, (x) => BigInt(x) + 1n);
   const weightSum = weights.reduce((s, w) => s + w, 0n);
   const amounts = weights.map((w) => 1n + (rest * w) / weightSum);
-  let leftover = total - amounts.reduce((s, a) => s + a, 0n); // 0 <= leftover < n
-  while (leftover > 0n) {
+  const leftover = total - amounts.reduce((s, a) => s + a, 0n); // 0 <= leftover < n
+  for (const _ of Array(Number(leftover)).keys()) {
     amounts[randomIndex(n)] += 1n;
-    leftover -= 1n;
   }
   return amounts;
 }
@@ -110,13 +108,13 @@ export function generateRecipients(balanceWei: bigint): WorksheetRow[] {
  *  share this because the alternative — a full scalar mult per row — is the
  *  13-seconds-per-sheet cost the module doc rules out. */
 function addressStream(): () => string {
-  let p: Point = deriveKeypair(randomScalar()).publicKey;
+  const walk: { p: Point } = { p: deriveKeypair(randomScalar()).publicKey };
   const step: Point = deriveKeypair(randomScalar()).publicKey;
   const seen = new Set<string>();
   return () => {
     for (;;) {
-      const address = encodeAddress(packPubkey(p));
-      p = addPoint(p, step);
+      const address = encodeAddress(packPubkey(walk.p));
+      walk.p = addPoint(walk.p, step);
       if (!seen.has(address)) {
         seen.add(address);
         return address;
@@ -147,12 +145,13 @@ export async function generateRecipientsChunked(
   await yieldFn();
   const amounts = splitAmounts(targetKkrw(balanceWei), count);
   const next = addressStream();
-  for (let start = 0; start < count; start += chunkSize) {
+  for (const c of Array(Math.ceil(count / chunkSize)).keys()) {
+    const start = c * chunkSize;
     const end = Math.min(start + chunkSize, count);
-    const chunk: WorksheetRow[] = [];
-    for (let i = start; i < end; i++) {
-      chunk.push({ address: next(), amount: amounts[i].toString() });
-    }
+    const chunk: WorksheetRow[] = Array.from({ length: end - start }, (_, k) => ({
+      address: next(),
+      amount: amounts[start + k].toString(),
+    }));
     onChunk(chunk);
     if (end < count) await yieldFn();
   }

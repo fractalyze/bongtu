@@ -118,7 +118,7 @@ def test_all_four_circuit_tags_parse():
         # transfer10x2 reuses the 2-in shape here: schema.py deliberately does
         # not pin arity (wrong arity fails witness generation with a 400)
         ("transfer10x2", spend_input),
-        ("withdraw", {**spend_input, "outputCommitments": ["7"], "outputValues": ["100"],
+        ("withdraw", {**spend_input, "recipient": "999", "outputCommitments": ["7"], "outputValues": ["100"],
                       "outputSalts": ["9"], "outputOwnerPublicKeys": [["1", "2"]]}),
         ("disburse", minimal_disburse_input()),
     ]:

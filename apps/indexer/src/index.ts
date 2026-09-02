@@ -83,10 +83,10 @@ async function main(): Promise<void> {
   // Graceful shutdown: stop the tail, close the HTTP server, and end the Postgres
   // pool so in-flight clients drain instead of being severed. The unref'd failsafe
   // force-exits if any close hangs, so a SIGTERM always terminates the process.
-  let closing = false;
+  const shutdownState = { closing: false };
   const shutdown = async (): Promise<void> => {
-    if (closing) return;
-    closing = true;
+    if (shutdownState.closing) return;
+    shutdownState.closing = true;
     setTimeout(() => process.exit(0), 3000).unref();
     stopTail?.();
     try {

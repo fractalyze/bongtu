@@ -74,66 +74,72 @@ export function checkWorksheet(rows: WorksheetRow[], selfAddress?: string): Work
   const issues: RowIssue[] = [];
   const recipients: RecipientRow[] = [];
   const seen = new Map<string, number>(); // canonical address -> first row index
-  let totalWei = 0n;
-  let filledCount = 0;
   // Compared in canonical form, so the employer's own address is caught whichever
   // way either side spells it (hex or base58check).
-  let self: string | null = null;
-  if (selfAddress !== undefined && selfAddress.trim() !== "") {
+  const self: string | null = (() => {
+    if (selfAddress === undefined || selfAddress.trim() === "") return null;
     try {
-      self = decodeAddress(selfAddress);
+      return decodeAddress(selfAddress);
     } catch {
-      self = null; // an unreadable session address only disables this one check
+      return null; // an unreadable session address only disables this one check
     }
-  }
+  })();
 
-  rows.forEach((row, index) => {
-    const address = row.address.trim();
-    const amount = row.amount.trim();
-    if (address === "" && amount === "") return; // blank row — not data
-    filledCount++;
+  const { totalWei, filledCount } = rows.reduce(
+    (acc, row, index) => {
+      const address = row.address.trim();
+      const amount = row.amount.trim();
+      if (address === "" && amount === "") return acc; // blank row — not data
 
-    let canonical: string | null = null;
-    if (address === "") {
-      issues.push({ index, field: "address", message: "Enter a recipient address." });
-    } else {
-      try {
-        canonical = decodeAddress(address);
-      } catch {
-        issues.push({ index, field: "address", message: "Not a valid bongtu address." });
+      const canonical: string | null = (() => {
+        if (address === "") {
+          issues.push({ index, field: "address", message: "Enter a recipient address." });
+          return null;
+        }
+        try {
+          return decodeAddress(address);
+        } catch {
+          issues.push({ index, field: "address", message: "Not a valid bongtu address." });
+          return null;
+        }
+      })();
+      if (canonical !== null && canonical === self) {
+        issues.push({ index, field: "address", message: SELF_PAY_MESSAGE });
       }
-    }
-    if (canonical !== null && canonical === self) {
-      issues.push({ index, field: "address", message: SELF_PAY_MESSAGE });
-    }
-    if (canonical !== null) {
-      const first = seen.get(canonical);
-      if (first !== undefined) {
-        issues.push({ index, field: "address", message: `Same address as row ${first + 1}.` });
-      } else {
-        seen.set(canonical, index);
+      if (canonical !== null) {
+        const first = seen.get(canonical);
+        if (first !== undefined) {
+          issues.push({ index, field: "address", message: `Same address as row ${first + 1}.` });
+        } else {
+          seen.set(canonical, index);
+        }
       }
-    }
 
-    let wei: bigint | null = null;
-    if (amount === "") {
-      issues.push({ index, field: "amount", message: "Enter an amount." });
-    } else {
-      const parsed = parseKkrw(amount);
-      if (!parsed.ok) {
-        issues.push({ index, field: "amount", message: "Enter a valid amount, like 1000 or 1.5." });
-      } else if (parsed.wei <= 0n) {
-        issues.push({ index, field: "amount", message: "Enter an amount above zero." });
-      } else {
-        wei = parsed.wei;
+      const wei: bigint | null = (() => {
+        if (amount === "") {
+          issues.push({ index, field: "amount", message: "Enter an amount." });
+          return null;
+        }
+        const parsed = parseKkrw(amount);
+        if (!parsed.ok) {
+          issues.push({ index, field: "amount", message: "Enter a valid amount, like 1000 or 1.5." });
+          return null;
+        }
+        if (parsed.wei <= 0n) {
+          issues.push({ index, field: "amount", message: "Enter an amount above zero." });
+          return null;
+        }
+        return parsed.wei;
+      })();
+
+      if (canonical !== null && wei !== null) {
+        recipients.push({ pubkey: canonical, amount: wei.toString() });
+        return { totalWei: acc.totalWei + wei, filledCount: acc.filledCount + 1 };
       }
-    }
-
-    if (canonical !== null && wei !== null) {
-      recipients.push({ pubkey: canonical, amount: wei.toString() });
-      totalWei += wei;
-    }
-  });
+      return { totalWei: acc.totalWei, filledCount: acc.filledCount + 1 };
+    },
+    { totalWei: 0n, filledCount: 0 },
+  );
 
   if (filledCount > MAX_ROWS) {
     issues.push({

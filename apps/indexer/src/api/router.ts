@@ -16,6 +16,13 @@
 //                                alarms (disclosure+envelope count), lastSuccessAt,
 //                                lastError, lastErrorAt, consecutiveFailures }
 //   GET /nullifiers          -> string[]  (spent nullifier set; PUBLIC, key-free)
+//   GET /announcements       -> [WithdrawAnnouncementRecord]  (PUBLIC cursor
+//                               feed; with ?owner= — ARBITER MODE, /notes
+//                               read-auth — only the caller's own)
+//   GET  /names/:name        -> NameRecord  (PUBLIC name directory: owner bjj
+//                               pubkey + stealth meta-address; names.ts)
+//   POST /names {name,owner,viewPub,spendPub,ts,sig} -> NameRecord  (PUBLIC;
+//                               owner-signed, payload-bound — routes/names.ts)
 //   GET /notes?owner=x,y     -> [{ value, salt, leafIndex, commitment, txHash,
 //                               spent }]  (ARBITER MODE ONLY — registered only when
 //                               the indexer holds the arbiter key; else 404)
@@ -55,6 +62,8 @@ import { path } from "./routes/path.js";
 import { alarms } from "./routes/alarms.js";
 import { health } from "./routes/health.js";
 import { nullifiers } from "./routes/nullifiers.js";
+import { nameRegister, nameResolve } from "./routes/names.js";
+import { announcements } from "./routes/announcements.js";
 import { notes } from "./routes/notes.js";
 import { history } from "./routes/history.js";
 import { authChallenge, authRedeem } from "./routes/auth.js";
@@ -81,7 +90,7 @@ export interface RouteResult {
 export interface Route {
   method: string;
   pattern: string | RegExp; // exact pathname (string) or a capture regex
-  handle(ctx: RouteContext): RouteResult;
+  handle(ctx: RouteContext): RouteResult | Promise<RouteResult>;
 }
 
 // Ordered match table. The patterns are disjoint, so order is not correctness-
@@ -89,7 +98,7 @@ export interface Route {
 // is public (always on); `/notes` + `/history` are ARBITER-ONLY and composed in
 // per-indexer by makeHandler, so public mode returns 404 for them (the endpoints
 // do not exist).
-export const routes: Route[] = [head, events, path, alarms, health, nullifiers];
+export const routes: Route[] = [head, events, path, alarms, health, nullifiers, nameResolve, nameRegister, announcements];
 
 function writeJson(res: ServerResponse, status: number, body: unknown, headers?: Record<string, string>): void {
   const s = JSON.stringify(body, null, 2);
@@ -103,11 +112,10 @@ const MAX_BODY_BYTES = 64 * 1024;
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
-  let size = 0;
   for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > MAX_BODY_BYTES) throw new Error(`request body exceeds ${MAX_BODY_BYTES} bytes`);
     chunks.push(chunk as Buffer);
+    const size = chunks.reduce((n, c) => n + c.length, 0);
+    if (size > MAX_BODY_BYTES) throw new Error(`request body exceeds ${MAX_BODY_BYTES} bytes`);
   }
   const text = Buffer.concat(chunks).toString("utf8").trim();
   if (text === "") return undefined;
@@ -130,25 +138,27 @@ export function makeHandler(ix: Indexer, tokens: ViewTokenService | null) {
       const pathname = url.pathname;
       for (const route of activeRoutes) {
         if (route.method !== req.method) continue;
-        let params: string[] | null = null;
-        if (typeof route.pattern === "string") {
-          if (route.pattern === pathname) params = [];
-        } else {
-          const m = route.pattern.exec(pathname);
-          if (m) params = m.slice(1);
-        }
+        const params: string[] | null =
+          typeof route.pattern === "string"
+            ? route.pattern === pathname ? [] : null
+            : (route.pattern.exec(pathname)?.slice(1) ?? null);
         if (params === null) continue;
         // Only a matched POST route pays the body read; a malformed body is the
         // CALLER's error (400), never the catch-all 500.
-        let body: unknown;
-        if (req.method === "POST") {
-          try {
-            body = await readJsonBody(req);
-          } catch (e) {
-            return writeJson(res, 400, { error: `bad request body: ${(e as Error).message}` });
-          }
+        const bodyRead: { body?: unknown; err?: Error } = req.method === "POST"
+          ? await (async () => {
+              try {
+                return { body: await readJsonBody(req) };
+              } catch (e) {
+                return { err: e as Error };
+              }
+            })()
+          : {};
+        if (bodyRead.err) {
+          return writeJson(res, 400, { error: `bad request body: ${bodyRead.err.message}` });
         }
-        const { status, body: resBody, headers } = route.handle({ ix, tokens, params, query: url.searchParams, body });
+        const body = bodyRead.body;
+        const { status, body: resBody, headers } = await route.handle({ ix, tokens, params, query: url.searchParams, body });
         return writeJson(res, status, resBody, headers);
       }
       return writeJson(res, 404, { error: "not found", path: pathname });
@@ -166,14 +176,14 @@ export function startApi(
   ix: Indexer,
   port: number,
 ): Promise<{ port: number; publicUrls: string[]; stop: () => Promise<void> }> {
-  let handler: ReturnType<typeof makeHandler> | null = null;
-  const server = createServer((req, res) => void handler?.(req, res));
+  const handlerRef: { current: ReturnType<typeof makeHandler> | null } = { current: null };
+  const server = createServer((req, res) => void handlerRef.current?.(req, res));
   return new Promise((resolve) => {
     server.listen(port, () => {
       const addr = server.address();
       const actual = typeof addr === "object" && addr ? addr.port : port;
       const publicUrls = resolvePublicUrls(process.env, actual);
-      handler = makeHandler(
+      handlerRef.current = makeHandler(
         ix,
         ix.arbiterMode ? new ViewTokenService(resolveTokenSecret(), { publicUrls }) : null,
       );

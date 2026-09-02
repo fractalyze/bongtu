@@ -11,10 +11,10 @@
 import { disclosureChain } from "@bongtu/core/envelope";
 import { verifyDisclosure } from "../src/disclosure.js";
 
-let failures = 0;
+const failures = { count: 0 };
 function ok(cond: unknown, msg: string): void {
   const pass = !!cond;
-  if (!pass) failures++;
+  if (!pass) failures.count++;
   console.log(`   ${pass ? "PASS" : "FAIL"}  ${msg}`);
   if (!pass) throw new Error(`assertion failed: ${msg}`);
 }
@@ -62,5 +62,5 @@ ok(w.recomputed === "0", "withheld recomputed == the chain seed (0)");
 const short = verifyDisclosure(full.slice(0, 3), dh, B, TX, 0);
 ok(short.status === "mismatch", "short nonzero publish (< B*4) → mismatch");
 
-console.log(`\n${failures === 0 ? "DISCLOSURE TEST PASS — all four DisclosureStatus branches + branch ordering pinned" : `DISCLOSURE TEST FAIL — ${failures} assertion(s)`}`);
-process.exit(failures === 0 ? 0 : 1);
+console.log(`\n${failures.count === 0 ? "DISCLOSURE TEST PASS — all four DisclosureStatus branches + branch ordering pinned" : `DISCLOSURE TEST FAIL — ${failures.count} assertion(s)`}`);
+process.exit(failures.count === 0 ? 0 : 1);

@@ -14,7 +14,14 @@ import { KEY_DERIVATION } from "@bongtu/client/identity";
 import { keyDerivationTypedData, deriveIdentityFromSignature } from "@bongtu/client/derive";
 
 test("KEY_DERIVATION is exactly the deployment facts both apps share", () => {
-  assert.deepEqual(KEY_DERIVATION, { chainId: CHAIN_ID, pool: POOL_ADDRESS, keyVersion: "1" });
+  assert.deepEqual(KEY_DERIVATION, {
+    chainId: CHAIN_ID,
+    pool: POOL_ADDRESS,
+    keyVersion: "1",
+    // The stealth KDF version shares the one config home (U-* stealth scoping):
+    // both apps see the same pinned value, like keyVersion.
+    stealthKeyVersion: "1",
+  });
 });
 
 test("the console signs the same struct the wallet signs, so the same key falls out", () => {

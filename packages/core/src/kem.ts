@@ -66,16 +66,12 @@ export function kemHexToBytes(hex: string): Uint8Array {
   if (h.length % 2 !== 0 || /[^0-9a-fA-F]/.test(h)) {
     throw new Error(`kemHexToBytes: not an even-length hex string (${h.length} chars)`);
   }
-  const out = new Uint8Array(h.length / 2);
-  for (let i = 0; i < out.length; i++) out[i] = parseInt(h.slice(2 * i, 2 * i + 2), 16);
-  return out;
+  return Uint8Array.from({ length: h.length / 2 }, (_, i) => parseInt(h.slice(2 * i, 2 * i + 2), 16));
 }
 
 /** Bytes -> "0x…" hex — the tx-calldata form of a kemCiphertext. */
 export function kemBytesToHex(bytes: Uint8Array): string {
-  let s = "0x";
-  for (const b of bytes) s += b.toString(16).padStart(2, "0");
-  return s;
+  return "0x" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /** Split the 32-byte ML-KEM shared secret into two little-endian 128-bit limbs
@@ -84,11 +80,8 @@ export function kemSsToLimbs(ss: Uint8Array): [bigint, bigint] {
   if (ss.length !== KEM_SHARED_SECRET_BYTES) {
     throw new Error(`kemSsToLimbs: expected ${KEM_SHARED_SECRET_BYTES} bytes, got ${ss.length}`);
   }
-  const le = (bytes: Uint8Array): bigint => {
-    let v = 0n;
-    for (let i = bytes.length - 1; i >= 0; i--) v = (v << 8n) | BigInt(bytes[i]);
-    return v;
-  };
+  const le = (bytes: Uint8Array): bigint =>
+    bytes.reduceRight<bigint>((v, b) => (v << 8n) | BigInt(b), 0n);
   return [le(ss.subarray(0, 16)), le(ss.subarray(16, 32))];
 }
 

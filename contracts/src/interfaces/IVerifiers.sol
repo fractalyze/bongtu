@@ -18,7 +18,7 @@ interface IDepositVerifier {
 }
 
 interface IWithdrawVerifier {
-    function verifyProof(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[26] calldata pub)
+    function verifyProof(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[27] calldata pub)
         external
         view
         returns (bool);

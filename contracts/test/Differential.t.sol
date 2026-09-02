@@ -101,14 +101,15 @@ contract DifferentialTest is Base {
 
         // withdraw(1) with a PADDED slot: nullifier[1]=0 => enabled[1]=0.
         {
-            uint[26] memory pub;
+            uint[27] memory pub;
             pub[0] = 50; // withdrawn amount (pushes tokens)
             pub[17] = 444; // real nullifier
             pub[18] = 0; // padded input (enabled derived to 0)
             pub[19] = pool.root();
             pub[22] = withdrawChange;
+            pub[26] = uint160(address(this)); // proof-bound payout target
             (uint[2] memory a, uint[2][2] memory b, uint[2] memory c) = dummyABC();
-            pool.withdraw(a, b, c, pub, dummyKemCt());
+            pool.withdraw(a, b, c, pub, dummyKemCt(), bytes32(0), 0);
         }
 
         // Collect every emitted insert root, in order, and compare 1:1.

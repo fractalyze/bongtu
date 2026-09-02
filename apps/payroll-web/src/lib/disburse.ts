@@ -95,9 +95,7 @@ export interface DisburseEntropy {
 function randBytes(n: number): bigint {
   const b = new Uint8Array(n);
   crypto.getRandomValues(b);
-  let x = 0n;
-  for (const byte of b) x = (x << 8n) | BigInt(byte);
-  return x;
+  return b.reduce<bigint>((x, byte) => (x << 8n) | BigInt(byte), 0n);
 }
 
 /** The platform-CSPRNG entropy used in the browser (wallet spend.ts:randField
@@ -198,37 +196,35 @@ export function buildDisburseRequest(
     kind: "recipient" | "change" | "pad";
   }
   const outs: Out[] = [];
-  let disbursed = 0n;
   const ledger: LedgerRow[] = [];
-  recipients.forEach((r, i) => {
+  const disbursed = recipients.reduce<bigint>((sum, r, i) => {
     // Rows may arrive as base58check (pasted address) or legacy hex; decodeAddress
     // is the one normalization point, so the witness AND the ledger both see
     // canonical hex (the admin console is an operator tool — it displays hex).
-    let owner: Point;
-    let canonical: string;
-    try {
-      canonical = decodeAddress(r.pubkey);
-      owner = unpackPubkey(canonical);
-    } catch (e) {
-      throw new Error(`recipient #${i + 1} pubkey invalid: ${(e as Error).message}`);
-    }
+    const { owner, canonical } = (() => {
+      try {
+        const hex = decodeAddress(r.pubkey);
+        return { owner: unpackPubkey(hex), canonical: hex };
+      } catch (e) {
+        throw new Error(`recipient #${i + 1} pubkey invalid: ${(e as Error).message}`);
+      }
+    })();
     const amt = BigInt(r.amount);
     if (amt <= 0n) throw new Error(`recipient #${i + 1} amount must be positive, got ${amt}`);
-    disbursed += amt;
     outs.push({ owner, value: amt, kind: "recipient" });
     ledger.push({ pubkey: canonical, amount: amt.toString(), kind: "recipient" });
-  });
+    return sum + amt;
+  }, 0n);
   if (disbursed > V) {
     throw new Error(`recipients sum ${disbursed} exceeds input note value ${V} (nothing to over-spend)`);
   }
 
   // Change back to the employer for the remainder keeps sum(outputs) == inputValue.
   const changeValue = V - disbursed;
-  let changeCount = 0;
+  const changeCount = changeValue > 0n ? 1 : 0;
   if (changeValue > 0n) {
     outs.push({ owner: employer.publicKey, value: changeValue, kind: "change" });
     ledger.push({ pubkey: "(employer change)", amount: changeValue.toString(), kind: "change" });
-    changeCount = 1;
   }
 
   // Pad to exactly B with zero-value notes to DISTINCT dummy owner keys. Each pad
@@ -237,11 +233,10 @@ export function buildDisburseRequest(
   // on-chain ciphertext, and count the reals. Distinct keys are still required by
   // the two-time-pad guard even though the value is 0 (random collision negligible).
   const realCount = recipients.length;
-  let padCount = 0;
-  for (let i = outs.length; i < B; i++) {
+  const padCount = Math.max(0, B - outs.length);
+  for (const _ of Array(padCount).keys()) {
     const dummy = deriveKeypair(entropy.randScalar()).publicKey;
     outs.push({ owner: dummy, value: 0n, kind: "pad" });
-    padCount++;
   }
 
   // A FRESH CSPRNG salt per output — sequential `saltSeed + i` would let any one
@@ -254,7 +249,7 @@ export function buildDisburseRequest(
   // ciphertexts, and the authority-plaintext outputs) is permuted the SAME way, or
   // the proof breaks.
   const order = outs.map((_, i) => i);
-  for (let i = order.length - 1; i > 0; i--) {
+  for (const i of Array.from({ length: order.length - 1 }, (_, k) => order.length - 1 - k)) {
     const j = Number(BigInt(entropy.randField()) % BigInt(i + 1));
     const t = order[i];
     order[i] = order[j];

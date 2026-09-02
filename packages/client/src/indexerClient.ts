@@ -15,7 +15,11 @@
 //     arbiter indexer only opens a batch slot to its proven owner;
 //   - paged `GET /history` (`fetchHistoryPage`) for the activity feed — the app
 //     holds one page at a time and asks for the next by cursor, so a long-lived
-//     account does not download its entire history to render four Home rows.
+//     account does not download its entire history to render four Home rows;
+//   - the `/names` directory (`resolveName` + the shared `normalizeName` grammar)
+//     for pay-by-name: the Send form turns a registered name into the owner's
+//     canonical address before the user confirms (`registerName` /
+//     `buildNameRegistration` cover the wallet's own registration side).
 
 export {
   getHead,
@@ -28,11 +32,19 @@ export {
   fetchHistoryPage,
   HISTORY_PAGE_LIMIT,
   fetchHealth,
+  getAnnouncements,
+  buildAnnouncementsUrl,
+  fetchAnnouncements,
   obtainViewToken,
   buildNotesTokenUrl,
   buildHistoryTokenUrl,
+  resolveName,
+  registerName,
+  buildNameRegistration,
+  normalizeName,
   type OwnerNote,
   type FeedEvent,
+  type WithdrawAnnouncementRecord,
   type Head,
   type PathResult,
   type HistoryItem,
@@ -40,4 +52,6 @@ export {
   type HistoryPage,
   type Health,
   type ViewToken,
+  type NameRecord,
+  type NameRegistration,
 } from "@bongtu/core/indexerApi";

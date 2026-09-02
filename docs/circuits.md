@@ -11,7 +11,7 @@ commands are in [toolchain.md](toolchain.md).
 | `transfer.circom` | `ZetoTransferSmall(2,2,32)` | 2-in / 2-out | 64,394 | 37 | 2^16 |
 | `transfer10.circom` | `ZetoTransferSmall(10,10,32)` | 10-in / 10-out | 261,683 | 141 | 2^18 |
 | `transfer10x2.circom` | `ZetoTransferSmall(10,2,32)` | 10-in / 2-out | 212,386 | 68 | 2^18 |
-| `withdraw.circom` | `CheckNullifiersInputsOutputsValueIMT(2,1,32)` | 2-in / 1-out | 54,319 | 26 | 2^16 |
+| `withdraw.circom` | `BongtuWithdraw(2,1,32)` (wraps `CheckNullifiersInputsOutputsValueIMT`, adds public `recipient`) | 2-in / 1-out | 54,320 | 27 | 2^16 |
 | `disburse.circom` | `Zeto(1,16,32)` | 1-in / 16-out | 208,719 | 11 | 2^18 |
 | `disburse256.circom` | `Zeto(1,256,32)` | 1-in / 256-out | 2,796,719 | 11 | 2^22 |
 
@@ -127,7 +127,7 @@ The authority run is 31 rather than a multiple of 3 plus one by accident: the pl
 `2 + 2*10 + 4*2 = 30`, already a multiple of 3, so the sponge adds no padding and only the final
 squeeze.
 
-**withdraw — `uint[26]`**
+**withdraw — `uint[27]`**
 
 | idx | signal |
 |---|---|
@@ -141,6 +141,7 @@ squeeze.
 | 22 | `outputCommitments[0]` (the change note) |
 | 23 | `encryptionNonce` |
 | 24..25 | `authorityPublicKey[2]` |
+| 26 | `recipient` (L1 payout address as a field element; the contract range-checks uint160 and pays it instead of msg.sender — the relayable stealth exit) |
 
 **disburse / disburse256 — `uint[11]`**
 

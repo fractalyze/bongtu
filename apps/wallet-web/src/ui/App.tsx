@@ -263,12 +263,12 @@ export function App(): ReactNode {
   // post-action poll (`syncing`).
   useEffect(() => {
     if (!session) return;
-    let inflight = false;
+    const inflight = { current: false };
     const id = setInterval(() => {
-      if (document.visibilityState !== "visible" || inflight || syncing) return;
-      inflight = true;
+      if (document.visibilityState !== "visible" || inflight.current || syncing) return;
+      inflight.current = true;
       void refresh(false, true).finally(() => {
-        inflight = false;
+        inflight.current = false;
       });
     }, AUTO_REFRESH_MS);
     return () => clearInterval(id);

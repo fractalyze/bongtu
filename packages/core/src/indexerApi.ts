@@ -27,7 +27,7 @@ import {
   viewTokenHostBinding,
 } from "./eddsa.js";
 import { unpackPubkey } from "./pubkey.js";
-import type { FieldInput } from "./babyjub.js";
+import type { FieldInput, Point } from "./babyjub.js";
 
 // The view-token signing contract (challenge width + validity, host binding) lives
 // with the signature primitives in eddsa.ts, because the SERVER needs it too and
@@ -74,6 +74,22 @@ export interface FeedEvent {
   slices: FeedSlice[];
   ciphertext: string[];
   disclosure?: DisclosureStatus; // present for `disburse`
+  /** present for `withdraw` since the stealth upgrade (see WithdrawAnnouncementRecord). */
+  announcement?: { recipient: string; ephemeralPub: string; viewTag: number };
+}
+
+/** One `GET /announcements` entry — the stealth-withdraw discovery feed a
+ *  wallet scans with its view key (`@bongtu/core/stealth` scanStealthAnnouncement).
+ *  `ephemeralPub`/`viewTag` are zero when the withdraw announced nothing. */
+export interface WithdrawAnnouncementRecord {
+  seq: number;
+  txHash: string;
+  blockNumber: number;
+  /** "0x" + 20-byte hex — the proof-bound payout address. */
+  recipient: string;
+  /** "0x" + 32-byte hex — the packed bjj ephemeral pubkey R. */
+  ephemeralPub: string;
+  viewTag: number;
 }
 
 /** One owner note as the arbiter-mode `GET /notes` serves it (no private key, ever). */
@@ -194,6 +210,30 @@ async function getJson<T>(url: string, fetchFn: typeof fetch = fetch): Promise<T
   return JSON.parse(text) as T;
 }
 
+/** getJson for a JSON POST — same transport and the same thrown-message shape
+ *  (`<url> -> <status>: <body-slice>`), which errors.ts classifyIndexerRead
+ *  parses for the status code, so POSTs classify identically to reads. */
+async function postJson<T>(url: string, body: unknown, fetchFn: typeof fetch = fetch): Promise<T> {
+  const res = await fetchFn(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`${url} -> ${res.status}: ${text.slice(0, 300)}`);
+  return JSON.parse(text) as T;
+}
+
+/** getJson, except a 404 resolves to null — for lookups where absence is an
+ *  answer, not a failure. Every other error keeps getJson's message shape. */
+async function getJsonOr404<T>(url: string, fetchFn: typeof fetch = fetch): Promise<T | null> {
+  const res = await fetchFn(url);
+  if (res.status === 404) return null;
+  const text = await res.text();
+  if (!res.ok) throw new Error(`${url} -> ${res.status}: ${text.slice(0, 300)}`);
+  return JSON.parse(text) as T;
+}
+
 const trim = (u: string): string => u.replace(/\/$/, "");
 
 export function getHead(indexerUrl: string): Promise<Head> {
@@ -240,7 +280,7 @@ export function getAlarms(indexerUrl: string): Promise<Alarm[]> {
 
 /** The two arbiter-mode owner feeds. They share one read-auth (api/readAuth.ts on
  *  the server), so they share one URL builder here — only the path differs. */
-export type OwnerReadRoute = "notes" | "history";
+export type OwnerReadRoute = "notes" | "history" | "announcements";
 
 /**
  * Build the signed read URL for an owner feed (SPEC §6b v2 read-auth) — the ONE
@@ -258,15 +298,33 @@ export function signedReadUrl(
   return `${trim(indexerUrl)}/${route}?${signedAuthQuery(ownerCompressed, ownerPrivateKey)}`;
 }
 
+/**
+ * The ONE "draw ts, build message, sign, pack" step behind every owner-signed
+ * proof this client emits — the query-shaped reads (signedAuthQuery) and the
+ * payload-bound name registration (buildNameRegistration) differ ONLY in the
+ * message the owner signs, so `messageOf` is the whole difference. Mirrors the
+ * server's readAuth split (authorizeOwner / authorizeSignedPayload) primitive
+ * for primitive, and keeps the wire bytes what they always were: same trim,
+ * same unpack-validation, same unix-seconds ts, same packSignature encoding.
+ */
+function signedOwnerProof(
+  ownerCompressed: string,
+  ownerPrivateKey: FieldInput,
+  messageOf: (ownerPub: Point, ts: number) => bigint,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): { owner: string; ts: number; sig: string } {
+  const owner = ownerCompressed.trim();
+  const pub = unpackPubkey(owner); // validates the compressed pubkey
+  const ts = nowSeconds; // unix seconds; server allows |now-ts| <= 300
+  const sig = signNotesAuth(ownerPrivateKey, messageOf(pub, ts));
+  return { owner, ts, sig: packSignature(sig) };
+}
+
 /** The `owner=&ts=&sig=` auth triple every signed read carries (SPEC §6b v2) —
  *  one implementation, shared by the owner feeds and the gated /path read. */
 function signedAuthQuery(ownerCompressed: string, ownerPrivateKey: FieldInput): string {
-  const owner = ownerCompressed.trim();
-  const pub = unpackPubkey(owner); // validates the compressed pubkey
-  const ts = Math.floor(Date.now() / 1000); // unix seconds; server allows |now-ts| <= 300
-  const msg = notesAuthMessage(pub, ts);
-  const sig = signNotesAuth(ownerPrivateKey, msg);
-  return `owner=${encodeURIComponent(owner)}&ts=${ts}&sig=${packSignature(sig)}`;
+  const { owner, ts, sig } = signedOwnerProof(ownerCompressed, ownerPrivateKey, notesAuthMessage);
+  return `owner=${encodeURIComponent(owner)}&ts=${ts}&sig=${sig}`;
 }
 
 /** The signed `GET /notes` URL — the owner's decrypted note list. */
@@ -429,4 +487,120 @@ export function fetchHistoryPage(
   fetchFn: typeof fetch = fetch,
 ): Promise<HistoryPage> {
   return getJson<HistoryPage>(buildHistoryPageUrl(indexerUrl, ownerCompressed, token, page), fetchFn);
+}
+
+// --- name directory (public /names endpoints) ------------------------------------
+//
+// The stealth/payment directory: a human name resolving to the owner's bjj
+// pubkey (the in-pool receive identity) and stealth meta-address (the pool-edge
+// one). Server half: apps/indexer src/names.ts + api/routes/names.ts.
+
+import { nameAuthMessage, nameBindingField } from "./eddsa.js";
+import type { StealthMetaAddress } from "./stealth.js";
+
+// Lowercase label, 3–32 chars, alnum with interior hyphens — a deliberately
+// DNS-label-shaped grammar so a name can later become an ENS/CCIP subname
+// without a migration. The grammar lives HERE, beside the wire shapes, so the
+// server's registry and the wallet's pay-by-name form judge input with the ONE
+// function — a form that accepted what the registry rejects (or vice versa)
+// would be wire drift by another name.
+const NAME_PATTERN = /^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/;
+
+/** Canonical form of a requested name, or null when no canonical form exists. */
+export function normalizeName(raw: string): string | null {
+  const name = raw.trim().toLowerCase();
+  return NAME_PATTERN.test(name) ? name : null;
+}
+
+/** One directory record, as served by GET /names/:name. */
+export interface NameRecord {
+  name: string;
+  /** compressed bjj pubkey — the owner's in-pool receive address. */
+  owner: string;
+  /** compressed bjj stealth VIEW pubkey (see stealth.ts). */
+  viewPub: string;
+  /** compressed secp256k1 stealth SPEND pubkey (see stealth.ts). */
+  spendPub: string;
+  /** unix seconds of the last accepted registration (server clock). */
+  updatedAt: number;
+}
+
+/** The signed POST /names body. */
+export interface NameRegistration {
+  name: string;
+  owner: string;
+  viewPub: string;
+  spendPub: string;
+  ts: number;
+  sig: string;
+}
+
+/**
+ * Build a registration the indexer will accept: the owner key signs the
+ * payload-binding tuple (eddsa.ts nameAuthMessage), so the signature authorises
+ * exactly this (name -> meta) mapping and nothing else. `nowSeconds` is
+ * injectable for deterministic tests; the server allows |now - ts| <= 300s.
+ */
+export function buildNameRegistration(
+  name: string,
+  ownerCompressed: string,
+  ownerPrivateKey: FieldInput,
+  meta: StealthMetaAddress,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): NameRegistration {
+  const { owner, ts, sig } = signedOwnerProof(
+    ownerCompressed,
+    ownerPrivateKey,
+    (pub, at) => nameAuthMessage(pub, nameBindingField(name, meta.viewPub, meta.spendPub), at),
+    nowSeconds,
+  );
+  return { name, owner, viewPub: meta.viewPub, spendPub: meta.spendPub, ts, sig };
+}
+
+/** POST a registration; resolves to the accepted record, throws on any error
+ *  status (the server's error body text is included). */
+export function registerName(
+  indexerUrl: string,
+  reg: NameRegistration,
+  fetchFn: typeof fetch = fetch,
+): Promise<NameRecord> {
+  return postJson<NameRecord>(`${trim(indexerUrl)}/names`, reg, fetchFn);
+}
+
+/** Resolve a name to its directory record; null when it is not registered. */
+export function resolveName(
+  indexerUrl: string,
+  name: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<NameRecord | null> {
+  return getJsonOr404<NameRecord>(`${trim(indexerUrl)}/names/${encodeURIComponent(name)}`, fetchFn);
+}
+
+/** The public announcement feed (seq > cursor, capped). The trustless scan-all
+ *  path — pair each record with scanStealthAnnouncement to find your own. */
+export function getAnnouncements(
+  indexerUrl: string,
+  cursor = -1,
+  limit = 5000,
+  fetchFn: typeof fetch = fetch,
+): Promise<WithdrawAnnouncementRecord[]> {
+  return getJson<WithdrawAnnouncementRecord[]>(
+    `${trim(indexerUrl)}/announcements?cursor=${cursor}&limit=${limit}`,
+    fetchFn,
+  );
+}
+
+/** The signed arbiter-mode `GET /announcements?owner=` URL — only the caller's
+ *  own announcements, no scanning (same read-auth as /notes). */
+export function buildAnnouncementsUrl(
+  indexerUrl: string,
+  ownerCompressed: string,
+  ownerPrivateKey: FieldInput,
+): string {
+  return signedReadUrl(indexerUrl, "announcements", ownerCompressed, ownerPrivateKey);
+}
+
+/** Fetch a signed /announcements URL (from `buildAnnouncementsUrl`). */
+export function fetchAnnouncements(url: string): Promise<WithdrawAnnouncementRecord[]> {
+  return getJson<WithdrawAnnouncementRecord[]>(url);
 }

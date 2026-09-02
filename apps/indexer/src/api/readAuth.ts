@@ -40,7 +40,11 @@ export const AUTH_HEADER = {
     "ENFORCED (bjj EdDSA-Poseidon sig over Poseidon(ownerPub.x,ownerPub.y,ts), |now-ts|<=300s replay window, OR a /auth view token; SPEC §6b v2). Arbiter holds all notes and activity by design.",
 };
 
-const WINDOW_SECONDS = 300; // replay window: |now - ts| must be within this
+// Replay window: |now - ts| must be within this. ONE constant for every
+// owner-signed proof this server accepts — the query-shaped reads below AND the
+// payload-bound POST bodies (authorizeSignedPayload), so the two protocols can
+// never drift apart on how stale a signature may be.
+const WINDOW_SECONDS = 300;
 
 const bad = (body: unknown): RouteResult => ({ status: 400, body });
 const unauthorized = (reason: string): RouteResult => ({ status: 401, body: { error: reason } });
@@ -66,12 +70,17 @@ export function authorizeOwner(
     return { ok: false, denied: bad({ error: "owner query param required: a compressed bjj pubkey (32-byte hex)" }) };
   }
   // owner is a COMPRESSED pubkey — unpack to [x,y]. Malformed → 400.
-  let pub: Point;
-  try {
-    pub = unpackPubkey(owner);
-  } catch (e) {
-    return { ok: false, denied: bad({ error: `malformed compressed owner pubkey: ${(e as Error).message}`, owner }) };
+  const unpacked = ((): { pub: Point } | { err: string } => {
+    try {
+      return { pub: unpackPubkey(owner) };
+    } catch (e) {
+      return { err: (e as Error).message };
+    }
+  })();
+  if ("err" in unpacked) {
+    return { ok: false, denied: bad({ error: `malformed compressed owner pubkey: ${unpacked.err}`, owner }) };
   }
+  const pub = unpacked.pub;
 
   // Auth path (b): a view token from POST /auth. Presence of `token` selects
   // this path exclusively — a bad token is a 401, never a silent fall-through
@@ -97,12 +106,17 @@ export function authorizeOwner(
   if (!Number.isInteger(ts)) {
     return { ok: false, denied: bad({ error: "ts must be an integer number of unix seconds", ts: tsRaw }) };
   }
-  let sig;
-  try {
-    sig = parseSignature(sigHex);
-  } catch (e) {
-    return { ok: false, denied: bad({ error: `malformed sig: ${(e as Error).message}` }) };
+  const parsedSig = ((): { sig: ReturnType<typeof parseSignature> } | { err: string } => {
+    try {
+      return { sig: parseSignature(sigHex) };
+    } catch (e) {
+      return { err: (e as Error).message };
+    }
+  })();
+  if ("err" in parsedSig) {
+    return { ok: false, denied: bad({ error: `malformed sig: ${parsedSig.err}` }) };
   }
+  const sig = parsedSig.sig;
 
   // Replay window (server clock, in the ROUTE only — never in workflow scripts).
   const now = nowSeconds;
@@ -115,6 +129,71 @@ export function authorizeOwner(
   const msg = notesAuthMessage(pub, ts);
   if (!verifyNotesAuth(pub, msg, sig)) {
     return { ok: false, denied: unauthorized("signature does not verify against the queried owner pubkey") };
+  }
+  return { ok: true, pub };
+}
+
+/** The owner-signed proof a POST body carries: same triple as the signed query,
+ *  but already JSON-typed by the route's body-shape validation. */
+export interface SignedOwnerPayload {
+  owner: string; // compressed bjj pubkey (32-byte hex)
+  ts: number; // unix seconds
+  sig: string; // packed EdDSA-Poseidon signature hex
+}
+
+/**
+ * Authorise an owner-signed PAYLOAD (a POST body) — the same protocol as
+ * `authorizeOwner`'s signed query (one WINDOW_SECONDS, unpack -> window ->
+ * parse -> verify, malformed-request 400 vs failed-auth 401) except the signed
+ * message binds the request payload, not just (owner, ts): the route supplies
+ * `messageOf`, which folds its payload digest into the tuple, so a captured
+ * signature authorises exactly one payload and nothing else.
+ *
+ * Two deliberate differences from the query path, both wire-pinned by
+ * test/names.test.ts:
+ *   - no token alternative: a mutation must re-hold the key, a view token is
+ *     view-only by construction;
+ *   - a malformed signature ENCODING is a 401, not a 400 — it fails closed
+ *     exactly like a wrong signature, so a probe learns nothing about how far
+ *     its forgery parsed.
+ *
+ * `nowSeconds` is injectable for the same reason as in `authorizeOwner`: the
+ * replay-window boundary is only testable against a pinned clock. Routes use
+ * the default.
+ */
+export function authorizeSignedPayload(
+  { owner, ts, sig }: SignedOwnerPayload,
+  messageOf: (ownerPub: Point, ts: number) => bigint,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): OwnerAuth {
+  const unpacked = ((): { pub: Point } | { err: string } => {
+    try {
+      return { pub: unpackPubkey(owner) };
+    } catch (e) {
+      return { err: (e as Error).message };
+    }
+  })();
+  if ("err" in unpacked) {
+    return { ok: false, denied: bad({ error: `malformed compressed owner pubkey: ${unpacked.err}` }) };
+  }
+  const pub = unpacked.pub;
+
+  // A non-integer ts (NaN, a float) folds into the stale-ts 401 rather than a
+  // 400: the JSON layer already guaranteed a number, and Math.abs(NaN) > W is
+  // false, so the explicit integer check keeps the window airtight.
+  if (!Number.isInteger(ts) || Math.abs(nowSeconds - ts) > WINDOW_SECONDS) {
+    return { ok: false, denied: unauthorized(`stale ts (|now - ts| must be <= ${WINDOW_SECONDS}s)`) };
+  }
+
+  const sigOk = ((): boolean => {
+    try {
+      return verifyNotesAuth(pub, messageOf(pub, ts), parseSignature(sig));
+    } catch {
+      return false; // malformed signature encoding fails like a wrong one
+    }
+  })();
+  if (!sigOk) {
+    return { ok: false, denied: unauthorized("signature does not verify for this payload") };
   }
   return { ok: true, pub };
 }
