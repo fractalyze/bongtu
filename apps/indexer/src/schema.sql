@@ -94,6 +94,39 @@ CREATE TABLE IF NOT EXISTS names (
   updated_at BIGINT NOT NULL   -- unix seconds, server clock at acceptance
 );
 CREATE INDEX IF NOT EXISTS names_owner_idx ON names (owner);
+-- Consumer registry triple (OPMOD §6.1): the note-layer view pubkey + ML-KEM ek,
+-- set only by v2-signed writes (v1 writes leave them untouched; NULL = unset).
+ALTER TABLE names ADD COLUMN IF NOT EXISTS note_view_pub TEXT;
+ALTER TABLE names ADD COLUMN IF NOT EXISTS kem_ek TEXT;
+
+-- The op-module registry mirror (src/modules.ts, OPMOD §1.4): derived from the
+-- pool's balanced ModuleRegistered/ModuleRemoved stream. Removed modules keep
+-- their row (registered = FALSE) — the chunk watch-set may still need them.
+CREATE TABLE IF NOT EXISTS modules (
+  address    TEXT    PRIMARY KEY,  -- lowercase 0x-hex
+  registered BOOLEAN NOT NULL
+);
+
+-- Consumer-disburse kem chunk transport (src/kemchunks.ts, OPMOD §5): one row
+-- per batch (its K keccak commitments) + one per ACCEPTED chunk (data NULL when
+-- the submission tx's calldata was not directly decodable).
+CREATE TABLE IF NOT EXISTS kem_batches (
+  batch_id        BIGINT PRIMARY KEY,  -- == startLeafIndex (unique forever)
+  module          TEXT   NOT NULL,     -- lowercase module address
+  tx_hash         TEXT   NOT NULL,
+  chunk_hashes    TEXT   NOT NULL,     -- JSON array of 0x-hex keccak256
+  batch_timestamp BIGINT NOT NULL,     -- unix seconds (the kem-withheld grace anchor)
+  outputs         INTEGER NOT NULL     -- B: per-output kem cts the chunks carry
+);
+CREATE TABLE IF NOT EXISTS kem_chunks (
+  batch_id    BIGINT  NOT NULL,
+  chunk_index INTEGER NOT NULL,
+  data        TEXT,                    -- 0x-hex chunk bytes, or NULL (undecodable)
+  tx_hash     TEXT,                    -- the accepting submit tx — what boot re-fetches
+                                       -- when data is NULL (accepted-unassembled)
+  PRIMARY KEY (batch_id, chunk_index)
+);
+ALTER TABLE kem_chunks ADD COLUMN IF NOT EXISTS tx_hash TEXT;
 
 -- Portal-deposit issuance records (src/portal.ts): announcements the resolver
 -- writes at POST /pay/{name} time (indexer-owned like names — issuance has no

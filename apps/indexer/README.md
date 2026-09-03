@@ -25,17 +25,17 @@ response bodies against them.
 | endpoint | returns |
 |---|---|
 | `GET /head` | `{ root, nextLeafIndex }` — ingested mirror state |
-| `GET /events?cursor=&limit=` | the ciphertext feed a wallet trial-decrypts: `[{ seq, txHash, blockNumber, kind, epoch, ecdhPublicKey, encryptionNonce, slices:[{offset, elts, leafIndex}], ciphertext[], disclosure? }]` |
-| `GET /path/{leafIndex}` | `{ leafIndex, siblings[], pathIndices[], root }`; 404 out-of-range; **422** for a disburse-batch interior leaf in public mode (served in arbiter mode — to the leaf's proven owner only: `/notes` read-auth + ownership, else 400/401/403) |
-| `GET /alarms` | one discriminated feed: every non-passing disclosure (`{type:"disclosure"}`, status `mismatch` / `unverifiable` / `withheld`) plus, arbiter mode only, envelope cross-check failures (`{type:"envelope"}`) |
+| `GET /events?cursor=&limit=` | the ciphertext feed a wallet trial-decrypts: `[{ seq, txHash, blockNumber, kind, epoch, ecdhPublicKey, encryptionNonce, slices:[{offset, elts, leafIndex}], ciphertext[], disclosure? }]`. Consumer (op-module) entries — kinds `depositPriv`/`transferPriv`/`transfer10x2Priv`/`withdrawPriv`/`disbursePriv` — additionally carry `viewTags[]` (the OPMOD §3.2 pre-filter), per-output `kemCiphertexts[]` (small ops), and for `disbursePriv` the `batchId`, the published `outputCommitments[]`, and `kem: { status: complete\|pending\|withheld\|accepted-unassembled, chunkCount, acceptedCount, kemCiphertexts? }` — the §5 chunk-transport state (grace window `KEM_GRACE_SECONDS`, default 3600) |
+| `GET /path/{leafIndex}` | `{ leafIndex, siblings[], pathIndices[], root }`; 404 out-of-range; **422** for an ENTERPRISE disburse-batch interior leaf in public mode (served in arbiter mode — to the leaf's proven owner only: `/notes` read-auth + ownership, else 400/401/403). A CONSUMER (`disbursePriv`) batch interior serves **auth-free in both modes**: its commitments were published as calldata and fold-checked against the proof's `subtreeRoot` before the fill (OPMOD §4.4), the same privacy class as single-append leaves |
+| `GET /alarms` | one discriminated feed: every non-passing disclosure (`{type:"disclosure"}`, status `mismatch` / `unverifiable` / `withheld` — the consumer §4.4 checks, incl. the canonical-form and fold-to-subtreeRoot failures, classify into the same statuses) plus, arbiter mode only, envelope cross-check failures (`{type:"envelope"}`). kem-`pending`/`withheld` is NOT an alarm (nothing on-chain-provable was violated) — it rides `/events` |
 | `GET /nullifiers` | `string[]` — the spent-nullifier set from events (public, key-free) |
 | `GET /health` | `{ ok, lastBlock, nextLeafIndex, batchSize, alarms, lastSuccessAt, lastError, lastErrorAt, consecutiveFailures }` — `ok` is false when the tail poll is persistently failing |
 | `GET /announcements?cursor=&limit=` | PUBLIC (both modes): the stealth-withdraw discovery feed `[{ seq, txHash, blockNumber, recipient, ephemeralPub, viewTag }]` — scan-all with your view key (`@bongtu/core/stealth`). With `?owner=&ts=&sig=` or `token=` (ARBITER MODE, `/notes` read-auth): only the caller's own announcements, no scanning |
 | `POST /pay/{name}` | PUBLIC (both modes; **404 unless `PORTAL_FACTORY` is set**): resolve-time portal issuance — derives a fresh stealth address for the name's meta-address, eth_calls `factory.addressOf(portalSalt(addr))` for the CREATE2 sweeper destination, records the announcement, returns `{ destination, ephemeralPub, viewTag, stealthAddr, factory }`. Unauthenticated by design (recorded PoC spam surface — see `src/api/routes/portal.ts`) |
 | `GET /portal/announcements?cursor=&limit=` | PUBLIC (both modes; 404 unless `PORTAL_FACTORY`): every portal issuance record `[{ kind:"portal", seq, name, owner, ephemeralPub, viewTag, stealthAddr, destination, createdAt, swept, sweptTxHash, sweptAmount }]` — the recipient's scan path |
 | `GET /portal/unswept?cursor=&limit=` | PUBLIC (both modes; 404 unless `PORTAL_FACTORY`): the unswept subset — the sweeper bot's work feed. Records flip `swept` when the factory's `Swept(salt, sweeper, amount)` log is ingested (salt = `portalSalt(stealthAddr)`) |
-| `GET /names/{name}` | PUBLIC (both modes): one name-directory record `{ name, owner, viewPub, spendPub, updatedAt }` — the owner's in-pool receive pubkey + stealth meta-address (`@bongtu/core/stealth`); 404 unknown, 400 non-canonical name |
-| `POST /names` `{name, owner, viewPub, spendPub, ts, sig}` | PUBLIC (both modes): owner-signed registration (`@bongtu/core/eddsa` `nameAuthMessage` — payload-bound, `|now−ts| ≤ 300s`); first-come per name, same-owner update allowed; 401 bad sig/ts, 409 taken by another owner |
+| `GET /names/{name}` | PUBLIC (both modes): one name-directory record `{ name, owner, viewPub, spendPub, noteViewPub?, kemEk?, updatedAt }` — the owner's in-pool receive pubkey + stealth meta-address (`@bongtu/core/stealth`) + optionally the consumer triple (note-layer bjj view pubkey + ML-KEM-768 ek, OPMOD §6.1); 404 unknown, 400 non-canonical name |
+| `POST /names` `{name, owner, viewPub, spendPub, [noteViewPub, kemEk,] ts, sig}` | PUBLIC (both modes): owner-signed registration, payload-bound, `\|now−ts\| ≤ 300s`. Form selection is deterministic by payload shape (OPMOD §6.4): the consumer pair present (required together, else 400) → the 5-segment v2 binding under `bongtu/name-auth-v2` (zero-sentinels = a signed CLEAR); absent → legacy v1, which can never set/change/clear the consumer columns. First-come per name, same-owner update allowed; 401 bad sig/ts/cross-form, 409 taken by another owner |
 | `GET /notes?owner=&ts=&sig=` | **arbiter mode only** (the route does not exist otherwise → 404): one owner's decrypted notes `[{ value, salt, leafIndex, commitment, txHash, spent }]` |
 | `GET /history?owner=&ts=&sig=` | **arbiter mode only** (else 404): one owner's activity feed `[{ kind, counterparty, amount, txHash, blockTimestamp, seq }]`, newest-first. `kind` ∈ `received`/`sent`/`withdraw`/`deposit`/`self` — a pure self-send (every nonzero output back to the sender) emits a `sent` **and** a `received` row, both counterpartied to the sender's own key; `self` is read-only legacy, still served for rows stored before that pair landed. `counterparty` is a compressed pubkey (or null); derived from the same decrypted envelopes as `/notes` — same bjj read-auth |
 | `GET /auth/challenge?owner=` | **arbiter mode only**: `{ challenge, expiresAt }` — a single-use random field element (~2 min TTL) the owner signs to obtain a view token |
@@ -63,6 +63,28 @@ Routing is a plain ordered table (`src/api/router.ts`): each route is a pure fun
 of the indexer + parsed params returning `{status, body}`; arbiter mode composes the
 `/notes` route in at build time, so a public indexer cannot serve it even by request
 path.
+
+## Consumer op family (op-module, OPMOD §4.4/§5)
+
+The consumer (no-auditor) ops arrive as MODULE-emitted events, so ingest keeps a
+**registry mirror** (`src/modules.ts`) of the pool's balanced
+`ModuleRegistered`/`ModuleRemoved` stream and scans a second, registry-derived
+address set per poll (a REMOVED disburse module stays watched until every batch
+of its has all kem chunks accepted — `submitDisburseKemChunk` outlives
+deregistration). `OpApplied` is the per-applyOp audit anchor: every consumer op
+event is cross-checked against its tx's `OpApplied` (module attribution, shape,
+resulting root), the same posture as the Appended commitment cross-check. For a
+`disbursePriv` the indexer — ANY indexer, **no arbiter key involved** — verifies
+the published `disclosure` (canonical form, the §4.2 extended fold vs the
+proof's `disclosureHash`, the commitment run folded to `subtreeRoot`) and on
+success fills the batch in PUBLIC mode, which is what makes consumer-batch
+`GET /path` auth-free. Kem ct bytes ride K calldata-only chunk txs
+(`src/kemchunks.ts`): each accept is fetched via `eth_getTransactionByHash`,
+keccak-rechecked, and assembled into the per-output ct array `/events` serves;
+a batch with chunks missing on-chain reads `kem-pending`, then `kem-withheld`
+past `KEM_GRACE_SECONDS`; all-accepted but bytes undecodable from calldata reads
+`accepted-unassembled` (boot re-attempts the fetch) — operational states, never
+alarms.
 
 ## Mirror invariant
 
@@ -125,6 +147,7 @@ Env knobs (`src/index.ts`):
 | `DATABASE_URL` | **required** | Postgres connection string (persist + boot-resume). Unset → the service refuses to boot |
 | `PORTAL_FACTORY` | unset | PortalFactory address → portal deposits live (`POST /pay/{name}` + `/portal/*`, Swept-log ingest). Unset → those routes 404 and boot logs one line saying so |
 | `LOG_CHUNK` | `50000` | getLogs chunk size in blocks — the one read-side tuning knob (auto-bisects on RPC range caps; `10000` suits rate-capped public RPC tail scanning) |
+| `KEM_GRACE_SECONDS` | `3600` | seconds an incomplete consumer-disburse chunk set reads kem-`pending` on `/events` before kem-`withheld` (OPMOD §5). Parsed once at boot — a non-numeric value refuses to boot |
 
 Workspace install and shared tooling: root [`README.md`](../../README.md). Loading the
 pool ABI and ethers goes through the external-`node_modules` seam (`BONGTU_NODE_MODULES`,

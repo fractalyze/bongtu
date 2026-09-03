@@ -26,6 +26,7 @@ import {
   ContractFunctionZeroDataError,
   createPublicClient,
   decodeEventLog,
+  decodeFunctionData,
   http,
   keccak256,
   toBytes,
@@ -40,12 +41,14 @@ import { isPreKemProbeError } from "@bongtu/core/network";
 import { isStealthAnnouncement } from "@bongtu/core/stealth";
 
 import { MirrorTree } from "./tree.js";
-import { poolAbi, abiKnowsKem, kemBootGuardError, staleOpAbiError, portalFactoryAbi, type ChainConfig } from "./chain.js";
+import { poolAbi, abiKnowsKem, kemBootGuardError, staleOpAbiError, portalFactoryAbi, consumerModuleAbi, type ChainConfig } from "./chain.js";
 import { type FeedEntry, InMemoryStore, type StorePort, type Slice } from "./store.js";
-import { verifyDisclosure } from "./disclosure.js";
+import { verifyDisclosure, verifyConsumerDisclosure } from "./disclosure.js";
 import { connect, PostgresStore, PostgresLedger } from "./postgres.js";
 import { NameRegistry } from "./names.js";
 import { PortalRegistry } from "./portal.js";
+import { ModuleRegistry } from "./modules.js";
+import { KemChunkStore } from "./kemchunks.js";
 
 // A block pin for readContract: viem takes a bigint blockNumber or a named
 // blockTag, where ethers took a single `{ blockTag }` override.
@@ -95,6 +98,27 @@ function isTransientHeadRaceError(e: unknown): boolean {
 
 const H = 32; // IMT height — a system-wide constant (SPEC §4)
 
+// The dispatch gate's emitter→handler map (OPMOD §1.4 mirror invariant):
+// decodeEventLog dispatches on topic0 across the COMBINED ABI, so a watched
+// module can emit a log that DECODES as any pool/factory event name (and vice
+// versa). Which handler a log may reach is therefore decided by its EMITTER,
+// never by its name alone. Pool-family events apply only from the pool — the
+// registry mirror in particular is driven by POOL-emitted ModuleRegistered/
+// ModuleRemoved alone; Swept only from the PortalFactory; the consumer op
+// family only from the module watch-set. WithdrawAnnouncement is in BOTH sets:
+// the module emits the byte-identical pair for withdrawPriv.
+const POOL_EVENT_NAMES = new Set([
+  "Appended", "SubtreeAppended", "OpApplied",
+  "Deposited", "Transferred", "Transferred10", "Transferred10x2",
+  "Withdrawn", "WithdrawAnnouncement", "Disbursed", "DisburseCiphertexts",
+  "ModuleRegistered", "ModuleRemoved",
+]);
+const MODULE_EVENT_NAMES = new Set([
+  "DepositedPriv", "TransferredPriv", "Transferred10x2Priv", "WithdrawnPriv",
+  "DisbursedPriv", "DisbursePrivDisclosure", "DisburseKemChunkAccepted",
+  "WithdrawAnnouncement",
+]);
+
 // A parsed pool log with its chain position, ordered globally by (block, logIndex).
 // Exported so the anvil-free unit test (test/ingest.test.ts) can drive
 // `applyLogs` with synthetic sequences.
@@ -103,6 +127,10 @@ export interface ParsedLog {
   blockNumber: number;
   logIndex: number;
   txHash: string;
+  // Lowercase emitter address. Consumer-module events dispatch on it (the
+  // registry mirror pins OpApplied.module against the emitting module);
+  // optional because pre-op-module synthetic sequences never needed it.
+  address?: string;
   // Unix-seconds timestamp of the block this log landed in — fetched per distinct
   // block (deduped) in getLogsChunked and threaded onto the arbiter history feed
   // (each activity item carries its blockTimestamp). See getLogsChunked below.
@@ -187,6 +215,19 @@ export class Indexer {
   // can answer in every mode; bootPostgres swaps in the pool-backed one. The
   // routes themselves 404 when cfg.portalFactory is unset.
   portal: PortalRegistry = new PortalRegistry(null);
+  // The op-module registry mirror (modules.ts, OPMOD §1.4): derived from the
+  // pool's balanced ModuleRegistered/ModuleRemoved stream, it drives the
+  // module-address log watch-set. bootPostgres swaps in the pool-backed one.
+  modules: ModuleRegistry = new ModuleRegistry(null);
+  // Consumer-disburse kem chunk assembly (kemchunks.ts, OPMOD §5): batch
+  // hashes + accepted chunk bytes, the /events kem projection, and the
+  // pending-module set the removed-module watch rule keys on.
+  kem: KemChunkStore = new KemChunkStore(null);
+  // The kem-pending → kem-withheld grace window in seconds (OPMOD §5) — parsed
+  // ONCE at boot (chain.ts KEM_GRACE_SECONDS); routes read it here, never
+  // process.env. Mutable on purpose: the conformance test flips it mid-run to
+  // project the same incomplete batch as withheld deterministically.
+  kemGraceSeconds: number;
   // The shared Postgres pool (set by bootPostgres; null only before first ingest).
   // Store and ledger are built on this ONE pool, so `persist` can acquire a single
   // client and commit the store rows, ledger rows, and cursor in ONE transaction.
@@ -208,14 +249,17 @@ export class Indexer {
 
   constructor(cfg: ChainConfig) {
     this.cfg = cfg;
-    // Pool ABI ++ the PortalFactory fragments: decodeEventLog dispatches on
-    // topic0 across the set, so Swept logs (scanned only when PORTAL_FACTORY
-    // is configured — see getLogsChunked's address filter) decode through the
-    // same path as pool events. Extra fragments are inert for pool reads.
-    this.abi = [...poolAbi(), ...portalFactoryAbi];
+    // Pool ABI ++ the PortalFactory fragments ++ the consumer op-module
+    // fragments: decodeEventLog dispatches on topic0 across the set, so Swept
+    // logs (scanned only when PORTAL_FACTORY is configured) and module-emitted
+    // consumer op logs (scanned from the registry-derived watch-set) decode
+    // through the same path as pool events. Extra fragments are inert for pool
+    // reads.
+    this.abi = [...poolAbi(), ...portalFactoryAbi, ...consumerModuleAbi];
     this.publicClient = createPublicClient({ transport: http(cfg.rpc) });
     this.arbiterPriv = cfg.authorityKey ?? null;
     this.arbiterMode = this.arbiterPriv !== null;
+    this.kemGraceSeconds = cfg.kemGraceSeconds ?? 3600;
   }
 
   /** A pinned readContract against the pool (the ONE place the address+ABI meet). */
@@ -307,17 +351,14 @@ export class Indexer {
     return { root: bn(root), nextLeafIndex: Number(bn(nli)) };
   }
 
-  /** getLogs over [from,to], splitting the range on provider limits (RPC-agnostic). */
-  private async getLogsChunked(from: number, to: number): Promise<ParsedLog[]> {
+  /** getLogs for one address set over [from,to], splitting the range on
+   *  provider limits (RPC-agnostic). Raw: unsorted, timestamps unstamped. */
+  private async scanRange(addresses: Address[], from: number, to: number): Promise<ParsedLog[]> {
     const out: ParsedLog[] = [];
     const walk = async (lo: number, hi: number): Promise<void> => {
       try {
         const raw = await this.publicClient.getLogs({
-          // One scan covers the pool AND (when configured) the PortalFactory,
-          // so Swept marks ride the same ordered range + cursor as pool events.
-          address: this.cfg.portalFactory
-            ? ([this.cfg.pool, this.cfg.portalFactory] as Address[])
-            : (this.cfg.pool as Address),
+          address: addresses.length === 1 ? addresses[0] : addresses,
           fromBlock: BigInt(lo),
           toBlock: BigInt(hi),
         });
@@ -339,7 +380,8 @@ export class Indexer {
             blockNumber: Number(log.blockNumber),
             logIndex: log.logIndex,
             txHash: log.transactionHash,
-            blockTimestamp: 0, // filled below, once per distinct block
+            address: String(log.address).toLowerCase(),
+            blockTimestamp: 0, // filled by getLogsChunked, once per distinct block
             args: ev.args,
           });
         }
@@ -361,7 +403,52 @@ export class Indexer {
       await walkChunks(lo + CHUNK);
     };
     await walkChunks(from);
+    return out;
+  }
+
+  /**
+   * The full ordered log range for [from,to]: a base scan over the pool (+
+   * PortalFactory when configured), THEN a second scan for the module
+   * WATCH-SET over the SAME range — the registered-module set persisted so
+   * far, addresses registered INSIDE this range (a module registered at block
+   * N can emit op logs at N+1, still inside the range), and removed modules
+   * that still owe kem chunk accepts (OPMOD §4.4: `submitDisburseKemChunk`
+   * outlives deregistration). Two phases because a getLogs address filter is
+   * fixed per call and the watch-set is itself derived from the base scan.
+   */
+  private async getLogsChunked(from: number, to: number): Promise<ParsedLog[]> {
+    const baseAddrs = (this.cfg.portalFactory
+      ? [this.cfg.pool, this.cfg.portalFactory]
+      : [this.cfg.pool]) as Address[];
+    const base = await this.scanRange(baseAddrs, from, to);
+    const watch = new Set(this.modules.watchAddresses(this.kem.pendingModules()));
+    for (const l of base) {
+      if (l.name === "ModuleRegistered") watch.add(String(l.args.module).toLowerCase());
+    }
+    const moduleLogs = watch.size > 0 ? await this.scanRange([...watch] as Address[], from, to) : [];
+    const out = [...base, ...moduleLogs];
     out.sort((a, b) => (a.blockNumber - b.blockNumber) || (a.logIndex - b.logIndex));
+
+    // Consumer-disburse chunk DATA is calldata-only (no event re-emit, OPMOD
+    // §5): fetch each accepted chunk's tx and decode the submit calldata here,
+    // in the I/O shell, so applyLogs stays pure and the unit suite can inject
+    // `chunkData` synthetically. A wrapped submission (multicall) defeats the
+    // direct decode — the accept still counts (the chain enforced the keccak),
+    // but the bytes stay unassemblable and the batch eventually reads
+    // kem-withheld; one warning line names it.
+    for (const l of out) {
+      if (l.name !== "DisburseKemChunkAccepted" || l.args.chunkData !== undefined) continue;
+      const tx = await this.publicClient.getTransaction({ hash: l.txHash as `0x${string}` });
+      l.args.chunkData = ((): string | null => {
+        try {
+          const d = decodeFunctionData({ abi: consumerModuleAbi, data: tx.input });
+          return d.functionName === "submitDisburseKemChunk" ? String(d.args[2]) : null;
+        } catch {
+          console.warn(`kem chunk tx ${l.txHash} calldata is not a direct submitDisburseKemChunk call — chunk bytes unrecoverable from this submission`);
+          return null;
+        }
+      })();
+    }
     // Block timestamps: the ledger's per-owner history feed stamps each activity
     // item with its block time. Fetch getBlock ONCE per distinct block in the
     // range (a poll batch usually spans a handful of blocks, and one disburse tx
@@ -430,7 +517,12 @@ export class Indexer {
     }
     // `toBlock` bounds the replay (used for phased ingest / conformance); default
     // is the live head. The head invariant below is asserted at exactly this block.
-    const head = toBlock ?? Number(await this.publicClient.getBlockNumber());
+    // cacheTime: 0 — viem caches getBlockNumber for ~pollingInterval, so a tail
+    // poll running inside that window reads a STALE head and early-returns
+    // `fromBlock > head`, silently skipping a block that already landed (the
+    // same cache hazard the rig's `settle` documents). Chunk-completion txs
+    // touch no pool state, so nothing else forces a re-scan of their block.
+    const head = toBlock ?? Number(await this.publicClient.getBlockNumber({ cacheTime: 0 }));
     if (fromBlock > head) return;
     const logs = await this.getLogsChunked(fromBlock, head);
 
@@ -476,6 +568,8 @@ export class Indexer {
       await this.store.flushInto!(client);
       await this.ledger?.flushInto(client);
       await this.portal.flushInto(client);
+      await this.modules.flushInto(client);
+      await this.kem.flushInto(client);
       await this.store.persistCursorInto!(client, head);
       // TEST-ONLY fault injection: crash at the pre-COMMIT point (every row + the
       // cursor staged but not yet durable) so the atomicity window is exercised
@@ -500,6 +594,8 @@ export class Indexer {
     this.store.commitFlush?.();
     this.ledger?.commitFlush();
     this.portal.commitFlush();
+    this.modules.commitFlush();
+    this.kem.commitFlush();
     this.store.lastBlock = head;
   }
 
@@ -534,6 +630,33 @@ export class Indexer {
     const portal = new PortalRegistry(pool);
     await portal.boot();
     this.portal = portal;
+    const modules = new ModuleRegistry(pool);
+    await modules.boot();
+    this.modules = modules;
+    const kem = new KemChunkStore(pool);
+    await kem.boot();
+    this.kem = kem;
+    // Accepted-unassembled recovery: an accepted chunk whose submit-tx calldata
+    // could not be decoded at ingest time persisted with NULL bytes. Boot
+    // re-attempts the fetch+decode once per such chunk — an RPC that failed or
+    // lagged then usually serves the tx now; a still-undecodable submission
+    // stays accepted-unassembled (warn, never a wedge).
+    await this.refetchKemChunkData();
+    // Consumer public batch re-fill (OPMOD §4.4): each fold-checked
+    // consumer-disburse entry persisted its published commitment run — hand
+    // those back to the tree so /path keeps serving consumer batch interiors
+    // auth-free after a restart. The fold ran at first ingest;
+    // MirrorTree.path's fold-to-root assert is the backstop.
+    for (const e of this.store.allEvents()) {
+      if (
+        e.kind === "disbursePriv" &&
+        e.disclosure?.status === "verified" &&
+        e.batchId !== undefined &&
+        e.outputCommitments !== undefined
+      ) {
+        this.tree.fillBatch(e.batchId, e.outputCommitments.map(BigInt), "public");
+      }
+    }
     const cursor = this.store.lastBlock;
     if (cursor >= 0) {
       // A rebuild bug must fail the boot loudly, not serve a wrong root/path: the
@@ -552,6 +675,38 @@ export class Indexer {
     }
     console.log(`postgres backend: fresh ingest from block ${fromBlock} (no cursor)`);
     return fromBlock;
+  }
+
+  /**
+   * The boot half of accepted-unassembled recovery (OPMOD §5): for every
+   * accepted chunk whose bytes are missing, fetch the accepting tx and decode
+   * the submit calldata again. A fetch/decode failure warns and moves on (the
+   * batch keeps reading accepted-unassembled; the next boot retries); a keccak
+   * mismatch on successfully FETCHED bytes throws — the chain enforced that
+   * hash at acceptance, so a mismatch means the RPC lied, and boot must fail
+   * loudly rather than serve it. Recovered bytes reach the read model
+   * immediately and land durably with the next persist.
+   */
+  private async refetchKemChunkData(): Promise<void> {
+    for (const c of this.kem.unassembledAccepted()) {
+      if (c.txHash === null) continue; // pre-tx_hash row: nothing to re-fetch
+      const data = await (async (): Promise<string | null> => {
+        try {
+          const tx = await this.publicClient.getTransaction({ hash: c.txHash as `0x${string}` });
+          const d = decodeFunctionData({ abi: consumerModuleAbi, data: tx.input });
+          if (d.functionName !== "submitDisburseKemChunk") return null;
+          return String(d.args[2]);
+        } catch (e) {
+          console.warn(`kem chunk re-fetch failed for batch ${c.batchId} chunk ${c.chunkIndex} (tx ${c.txHash}): ${(e as Error).message.split("\n", 1)[0]}`);
+          return null;
+        }
+      })();
+      if (data === null) {
+        console.warn(`kem chunk batch ${c.batchId} chunk ${c.chunkIndex} stays accepted-unassembled (tx ${c.txHash} not directly decodable)`);
+        continue;
+      }
+      this.kem.attachChunkData(c.batchId, c.chunkIndex, data);
+    }
   }
 
   /**
@@ -604,29 +759,60 @@ export class Indexer {
    * stateful module it feeds (MirrorTree, store, ledger) guards its own
    * replay invariant, so the same range can arrive twice and must converge.
    */
-  applyLogs(logs: ParsedLog[]): void {
+  applyLogs(rawLogs: ParsedLog[]): void {
+    // Pass 0 — the ADDRESS GATE (see POOL_EVENT_NAMES above): every handler
+    // below runs only for a log its emitter is entitled to. The module
+    // watch-set is tracked in RANGE order off pool-emitted ModuleRegistered
+    // logs (a module registered at block N emits ops at N+1, inside the same
+    // range); a module removed mid-range stays acceptable — the two-phase
+    // retention rule (kem chunk accepts outlive deregistration) governs the
+    // getLogs filter, and this gate never widens past what that filter
+    // admitted. Non-matching logs are not ours: dropped silently. A log with
+    // no address at all is a pre-op-module synthetic sequence (unit tests) and
+    // counts as pool-emitted.
+    const poolAddr = this.cfg.pool.toLowerCase();
+    const factoryAddr = this.cfg.portalFactory ? this.cfg.portalFactory.toLowerCase() : null;
+    const logs = ((): ParsedLog[] => {
+      const watched = new Set(this.modules.watchAddresses(this.kem.pendingModules()));
+      const kept: ParsedLog[] = [];
+      for (const l of rawLogs) {
+        const from = l.address?.toLowerCase();
+        if (from === undefined || from === poolAddr) {
+          if (l.name === "ModuleRegistered") watched.add(String(l.args.module).toLowerCase());
+          if (POOL_EVENT_NAMES.has(l.name)) kept.push(l);
+        } else if (factoryAddr !== null && from === factoryAddr) {
+          if (l.name === "Swept") kept.push(l);
+        } else if (watched.has(from) && MODULE_EVENT_NAMES.has(l.name)) {
+          kept.push(l);
+        }
+      }
+      return kept;
+    })();
+
     // Pass 1: drive the mirror on the low-level tree events (order-sensitive) and
     // collect the authoritative (leafIndex, leaf) pairs + batch attach points per
     // tx for pass-2 correlation. Replay-safe: an insert already below the mirror
     // frontier was applied by an earlier (partially failed) call and is skipped —
     // the poll loop retries from an unadvanced cursor after any throw, so the
     // same log range can arrive twice and must converge, not double-apply.
-    const appendedByTx = new Map<string, { leafIndex: number; leaf: bigint }[]>();
-    const subtreesByTx = new Map<string, { startLeafIndex: number; subtreeRoot: bigint }[]>();
+    const appendedByTx = new Map<string, { leafIndex: number; leaf: bigint; root: bigint }[]>();
+    const subtreesByTx = new Map<string, { startLeafIndex: number; subtreeRoot: bigint; root: bigint }[]>();
     for (const l of logs) {
       if (l.name === "Appended") {
         const leafIndex = Number(bn(l.args.leafIndex));
         const leaf = bn(l.args.leaf);
-        this.tree.applyAppend(leafIndex, leaf, bn(l.args.root));
+        const root = bn(l.args.root);
+        this.tree.applyAppend(leafIndex, leaf, root);
         const arr = appendedByTx.get(l.txHash) ?? [];
-        arr.push({ leafIndex, leaf });
+        arr.push({ leafIndex, leaf, root });
         appendedByTx.set(l.txHash, arr);
       } else if (l.name === "SubtreeAppended") {
         const startLeafIndex = Number(bn(l.args.startLeafIndex));
         const subtreeRoot = bn(l.args.subtreeRoot);
-        this.tree.applyAttach(startLeafIndex, subtreeRoot, bn(l.args.root));
+        const root = bn(l.args.root);
+        this.tree.applyAttach(startLeafIndex, subtreeRoot, root);
         const arr = subtreesByTx.get(l.txHash) ?? [];
-        arr.push({ startLeafIndex, subtreeRoot });
+        arr.push({ startLeafIndex, subtreeRoot, root });
         subtreesByTx.set(l.txHash, arr);
       }
     }
@@ -640,14 +826,74 @@ export class Indexer {
     // 10, Withdrawn 1, and each Disbursed the next SubtreeAppended. Every
     // consumed pair is cross-checked against the event's own commitment
     // argument — a correlation slip throws instead of recording a wrong leaf.
-    const takeAppend = (txHash: string, expected: bigint, what: string): number => {
+    const takeAppend = (txHash: string, expected: bigint, what: string): { leafIndex: number; leaf: bigint; root: bigint } => {
       const pair = appendedByTx.get(txHash)?.shift();
       if (!pair) throw new Error(`ingest: ${what} in tx ${txHash} has no matching Appended log`);
       if (pair.leaf !== expected) {
         throw new Error(`ingest: ${what} commitment != Appended leaf @${pair.leafIndex} in tx ${txHash}`);
       }
-      return pair.leafIndex;
+      return pair;
     };
+    // OpApplied (OPMOD §1.5) is the per-applyOp audit anchor consumer module
+    // events correlate against: each consumer op consumes the tx's next
+    // OpApplied (the pool emits it inside applyOp, BEFORE the module's own
+    // event) and pins module attribution + shape + resulting root against what
+    // the op's tree events actually did — the same mirror-invariant posture as
+    // the takeAppend commitment cross-check.
+    const opAppliedByTx = new Map<string, { module: string; startLeafIndex: number; nullifierCount: number; leafCount: number; subtreeRoot: bigint; root: bigint }[]>();
+    for (const l of logs) {
+      if (l.name === "OpApplied") {
+        const arr = opAppliedByTx.get(l.txHash) ?? [];
+        arr.push({
+          module: String(l.args.module).toLowerCase(),
+          startLeafIndex: Number(bn(l.args.startLeafIndex)),
+          nullifierCount: Number(bn(l.args.nullifierCount)),
+          leafCount: Number(bn(l.args.leafCount)),
+          subtreeRoot: bn(l.args.subtreeRoot),
+          root: bn(l.args.root),
+        });
+        opAppliedByTx.set(l.txHash, arr);
+      }
+    }
+    const takeOpApplied = (
+      l: ParsedLog,
+      expect: { startLeafIndex: number; nullifierCount: number; leafCount: number; subtreeRoot: bigint; root: bigint },
+    ): void => {
+      const op = opAppliedByTx.get(l.txHash)?.shift();
+      if (!op) throw new Error(`ingest: ${l.name} in tx ${l.txHash} has no matching OpApplied log`);
+      if (l.address !== undefined && op.module !== l.address.toLowerCase()) {
+        throw new Error(`ingest: ${l.name} emitted by ${l.address} but OpApplied names module ${op.module} in tx ${l.txHash}`);
+      }
+      if (!this.modules.isKnown(op.module)) {
+        throw new Error(`ingest: OpApplied names module ${op.module} the registry stream never registered (tx ${l.txHash})`);
+      }
+      if (
+        op.startLeafIndex !== expect.startLeafIndex ||
+        op.nullifierCount !== expect.nullifierCount ||
+        op.leafCount !== expect.leafCount ||
+        op.subtreeRoot !== expect.subtreeRoot ||
+        op.root !== expect.root
+      ) {
+        throw new Error(
+          `ingest: OpApplied disagrees with ${l.name} in tx ${l.txHash} ` +
+            `(start ${op.startLeafIndex}/${expect.startLeafIndex}, nfs ${op.nullifierCount}/${expect.nullifierCount}, ` +
+            `leaves ${op.leafCount}/${expect.leafCount}, subtree ${op.subtreeRoot}/${expect.subtreeRoot}, root ${op.root}/${expect.root})`,
+        );
+      }
+    };
+    // A consumer disburse spans DisbursedPriv (nullifier/subtreeRoot/dh/kem
+    // chunk hashes) + DisbursePrivDisclosure (the 6B fill material) in the same
+    // tx — pre-index the disclosure halves by (tx, startLeafIndex) like the
+    // enterprise DisburseCiphertexts below.
+    const privDisclosureByTx = new Map<string, Map<number, ParsedLog>>();
+    for (const l of logs) {
+      if (l.name === "DisbursePrivDisclosure") {
+        const start = Number(bn(l.args.startLeafIndex));
+        const m = privDisclosureByTx.get(l.txHash) ?? new Map<number, ParsedLog>();
+        m.set(start, l);
+        privDisclosureByTx.set(l.txHash, m);
+      }
+    }
     // A disburse spans Disbursed (epoch/ecdh/nonce/disclosureHash) + optionally
     // DisburseCiphertexts (the bytes; absent for plain disburse()). Both land in
     // the same tx, so pre-index the ciphertext logs by (tx, startLeafIndex) and
@@ -671,8 +917,8 @@ export class Indexer {
       if (l.name === "Deposited") {
         const oc0 = bn(l.args.oc0);
         const oc1 = bn(l.args.oc1);
-        const i0 = takeAppend(l.txHash, oc0, "Deposited#oc0");
-        const i1 = takeAppend(l.txHash, oc1, "Deposited#oc1");
+        const i0 = takeAppend(l.txHash, oc0, "Deposited#oc0").leafIndex;
+        const i1 = takeAppend(l.txHash, oc1, "Deposited#oc1").leafIndex;
         this.tree.recordLeaf(i0, oc0);
         this.tree.recordLeaf(i1, oc1);
         // Public feed shape is unchanged (deposit envelope bytes are NOT added to
@@ -698,8 +944,8 @@ export class Indexer {
       } else if (l.name === "Transferred") {
         const oc0 = bn(l.args.outputCommitments[0]);
         const oc1 = bn(l.args.outputCommitments[1]);
-        const i0 = takeAppend(l.txHash, oc0, "Transferred#out0");
-        const i1 = takeAppend(l.txHash, oc1, "Transferred#out1");
+        const i0 = takeAppend(l.txHash, oc0, "Transferred#out0").leafIndex;
+        const i1 = takeAppend(l.txHash, oc1, "Transferred#out1").leafIndex;
         this.tree.recordLeaf(i0, oc0);
         this.tree.recordLeaf(i1, oc1);
         // ciphertext layout: receiver0[4] ++ receiver1[4] ++ authority[16]
@@ -747,7 +993,7 @@ export class Indexer {
         const kind = l.name === "Transferred10" ? ("transfer10" as const) : ("transfer10x2" as const);
         const ocs = (l.args.outputCommitments as unknown[]).map(bn);
         const leaves = ocs.map((oc, i) => ({
-          leafIndex: takeAppend(l.txHash, oc, `${l.name}#out${i}`),
+          leafIndex: takeAppend(l.txHash, oc, `${l.name}#out${i}`).leafIndex,
           commitment: oc,
         }));
         for (const lf of leaves) this.tree.recordLeaf(lf.leafIndex, lf.commitment);
@@ -780,7 +1026,7 @@ export class Indexer {
         }
       } else if (l.name === "Withdrawn") {
         const chg = bn(l.args.changeCommitment);
-        const ci = takeAppend(l.txHash, chg, "Withdrawn#change");
+        const ci = takeAppend(l.txHash, chg, "Withdrawn#change").leafIndex;
         this.tree.recordLeaf(ci, chg);
         // Public feed shape unchanged; the arbiter ledger reads the raw Withdrawn
         // authority envelope directly. Both input nullifiers join the public set.
@@ -873,8 +1119,197 @@ export class Indexer {
             });
           }
         }
+      } else if (l.name === "ModuleRegistered") {
+        // The registry mirror (OPMOD §4.4 obligation 1). Applied inside the
+        // ordered pass so a module registered earlier in the range is already
+        // mirrored when its first op's OpApplied is cross-checked.
+        this.modules.applyRegistered(l.txHash, l.logIndex, String(l.args.module));
+      } else if (l.name === "ModuleRemoved") {
+        this.modules.applyRemoved(l.txHash, l.logIndex, String(l.args.module));
+      } else if (l.name === "DepositedPriv") {
+        const oc0 = bn(l.args.oc0);
+        const oc1 = bn(l.args.oc1);
+        const p0 = takeAppend(l.txHash, oc0, "DepositedPriv#oc0");
+        const p1 = takeAppend(l.txHash, oc1, "DepositedPriv#oc1");
+        takeOpApplied(l, { startLeafIndex: p0.leafIndex, nullifierCount: 0, leafCount: 2, subtreeRoot: 0n, root: p1.root });
+        this.tree.recordLeaf(p0.leafIndex, oc0);
+        this.tree.recordLeaf(p1.leafIndex, oc1);
+        // Consumer feed shape (OPMOD §3.6): receiver cts ++ viewTags ++ per-
+        // output kem cts — everything a scanner needs, and NOTHING for a
+        // ledger: consumer ops carry no authority envelope by construction, so
+        // the arbiter ledger never sees them (no arbiter key involved).
+        const ct = [
+          ...(l.args.ctReceiver0 as unknown[]).map(bn),
+          ...(l.args.ctReceiver1 as unknown[]).map(bn),
+        ];
+        this.store.addEvent({
+          txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
+          kind: "depositPriv", epoch: null,
+          ecdhPublicKey: [dec(bn(l.args.ecdhPublicKey[0])), dec(bn(l.args.ecdhPublicKey[1]))],
+          encryptionNonce: dec(bn(l.args.encryptionNonce)),
+          slices: [
+            { offset: 0, elts: 4, leafIndex: p0.leafIndex },
+            { offset: 4, elts: 4, leafIndex: p1.leafIndex },
+          ],
+          ciphertext: ct.map(dec),
+          viewTags: (l.args.viewTags as unknown[]).map((x) => dec(bn(x))),
+          kemCiphertexts: (l.args.kemCiphertexts as unknown[]).map(String),
+        });
+      } else if (l.name === "TransferredPriv") {
+        const oc0 = bn(l.args.outputCommitments[0]);
+        const oc1 = bn(l.args.outputCommitments[1]);
+        const p0 = takeAppend(l.txHash, oc0, "TransferredPriv#out0");
+        const p1 = takeAppend(l.txHash, oc1, "TransferredPriv#out1");
+        const nfs = (l.args.nullifiers as unknown[]).map(bn);
+        // nullifierCount counts NONZERO slots: the module strips padded zeros
+        // before crossing the applyOp boundary (OPMOD §1.3 #3).
+        takeOpApplied(l, { startLeafIndex: p0.leafIndex, nullifierCount: nfs.filter((x) => x !== 0n).length, leafCount: 2, subtreeRoot: 0n, root: p1.root });
+        this.tree.recordLeaf(p0.leafIndex, oc0);
+        this.tree.recordLeaf(p1.leafIndex, oc1);
+        const ct = [
+          ...(l.args.ctReceiver0 as unknown[]).map(bn),
+          ...(l.args.ctReceiver1 as unknown[]).map(bn),
+        ];
+        const entry = this.store.addEvent({
+          txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
+          kind: "transferPriv", epoch: null,
+          ecdhPublicKey: [dec(bn(l.args.ecdhPublicKey[0])), dec(bn(l.args.ecdhPublicKey[1]))],
+          encryptionNonce: dec(bn(l.args.encryptionNonce)),
+          slices: [
+            { offset: 0, elts: 4, leafIndex: p0.leafIndex },
+            { offset: 4, elts: 4, leafIndex: p1.leafIndex },
+          ],
+          ciphertext: ct.map(dec),
+          viewTags: (l.args.viewTags as unknown[]).map((x) => dec(bn(x))),
+          kemCiphertexts: (l.args.kemCiphertexts as unknown[]).map(String),
+        });
+        if (entry) this.store.addNullifiers(nfs);
+      } else if (l.name === "Transferred10x2Priv") {
+        const oc0 = bn(l.args.outputCommitments[0]);
+        const oc1 = bn(l.args.outputCommitments[1]);
+        const p0 = takeAppend(l.txHash, oc0, "Transferred10x2Priv#out0");
+        const p1 = takeAppend(l.txHash, oc1, "Transferred10x2Priv#out1");
+        const nfs = (l.args.nullifiers as unknown[]).map(bn);
+        takeOpApplied(l, { startLeafIndex: p0.leafIndex, nullifierCount: nfs.filter((x) => x !== 0n).length, leafCount: 2, subtreeRoot: 0n, root: p1.root });
+        this.tree.recordLeaf(p0.leafIndex, oc0);
+        this.tree.recordLeaf(p1.leafIndex, oc1);
+        const ct = (l.args.ctReceivers as unknown[]).map(bn); // flat [2][4], leaf order
+        const entry = this.store.addEvent({
+          txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
+          kind: "transfer10x2Priv", epoch: null,
+          ecdhPublicKey: [dec(bn(l.args.ecdhPublicKey[0])), dec(bn(l.args.ecdhPublicKey[1]))],
+          encryptionNonce: dec(bn(l.args.encryptionNonce)),
+          slices: [
+            { offset: 0, elts: 4, leafIndex: p0.leafIndex },
+            { offset: 4, elts: 4, leafIndex: p1.leafIndex },
+          ],
+          ciphertext: ct.map(dec),
+          viewTags: (l.args.viewTags as unknown[]).map((x) => dec(bn(x))),
+          kemCiphertexts: (l.args.kemCiphertexts as unknown[]).map(String),
+        });
+        if (entry) this.store.addNullifiers(nfs);
+      } else if (l.name === "WithdrawnPriv") {
+        const chg = bn(l.args.changeCommitment);
+        const pc = takeAppend(l.txHash, chg, "WithdrawnPriv#change");
+        const nfs = (l.args.nullifiers as unknown[]).map(bn);
+        takeOpApplied(l, { startLeafIndex: pc.leafIndex, nullifierCount: nfs.filter((x) => x !== 0n).length, leafCount: 1, subtreeRoot: 0n, root: pc.root });
+        this.tree.recordLeaf(pc.leafIndex, chg);
+        const entry = this.store.addEvent({
+          txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
+          kind: "withdrawPriv", epoch: null,
+          ecdhPublicKey: [dec(bn(l.args.ecdhPublicKey[0])), dec(bn(l.args.ecdhPublicKey[1]))],
+          encryptionNonce: dec(bn(l.args.encryptionNonce)),
+          slices: [{ offset: 0, elts: 4, leafIndex: pc.leafIndex }],
+          ciphertext: (l.args.ctChange as unknown[]).map(bn).map(dec),
+          viewTags: [dec(bn(l.args.viewTag))],
+          kemCiphertexts: (l.args.kemCiphertexts as unknown[]).map(String),
+        });
+        if (entry) {
+          // The module emits the same WithdrawAnnouncement pair as the pool —
+          // the existing announcement branch attaches it via this queue.
+          const wq = withdrawEntriesByTx.get(l.txHash) ?? [];
+          wq.push(entry);
+          withdrawEntriesByTx.set(l.txHash, wq);
+          this.store.addNullifiers(nfs);
+        }
+      } else if (l.name === "DisbursedPriv") {
+        const st = subtreesByTx.get(l.txHash)?.shift();
+        if (!st) throw new Error(`ingest: DisbursedPriv in tx ${l.txHash} has no matching SubtreeAppended log`);
+        if (st.subtreeRoot !== bn(l.args.subtreeRoot)) {
+          throw new Error(`ingest: DisbursedPriv subtreeRoot != SubtreeAppended @start ${st.startLeafIndex} in tx ${l.txHash}`);
+        }
+        takeOpApplied(l, { startLeafIndex: st.startLeafIndex, nullifierCount: 1, leafCount: 0, subtreeRoot: st.subtreeRoot, root: st.root });
+        const start = st.startLeafIndex;
+        const B = this.batchSize;
+        const dLog = privDisclosureByTx.get(l.txHash)?.get(start);
+        const disclosure = dLog ? (dLog.args.disclosure as unknown[]).map(bn) : [];
+        // OPMOD §4.4: canonical form + the §4.2 extended fold vs the proof's
+        // disclosureHash + the commitment run folded to the SubtreeAppended
+        // subtreeRoot. All three green => the PUBLIC batch fill below.
+        const verdict = verifyConsumerDisclosure(disclosure, bn(l.args.disclosureHash), st.subtreeRoot, B, l.txHash, start);
+        if (verdict.result.status !== "verified") {
+          console.error(`ALARM disclosure ${verdict.result.status.toUpperCase()} (consumer) tx=${l.txHash} start=${start} recomputed=${verdict.result.recomputed} expected=${verdict.result.expected}`);
+        }
+        const full = disclosure.length === 6 * B;
+        const entry = this.store.addEvent({
+          txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
+          kind: "disbursePriv", epoch: null,
+          ecdhPublicKey: [dec(bn(l.args.ecdhPublicKey[0])), dec(bn(l.args.ecdhPublicKey[1]))],
+          encryptionNonce: dec(bn(l.args.encryptionNonce)),
+          slices: full
+            ? Array.from({ length: B }, (_, i) => ({ offset: i * 4, elts: 4, leafIndex: start + i }))
+            : [],
+          ciphertext: disclosure.slice(0, 4 * B).map(dec),
+          disclosure: verdict.result,
+          ...(full
+            ? {
+                viewTags: disclosure.slice(4 * B, 5 * B).map(dec),
+                outputCommitments: disclosure.slice(5 * B, 6 * B).map(dec),
+              }
+            : {}),
+          batchId: start,
+        });
+        if (entry) {
+          this.store.addNullifiers([bn(l.args.nullifier)]);
+          this.kem.recordBatch({
+            batchId: start,
+            module: (l.address ?? "").toLowerCase(),
+            txHash: l.txHash,
+            logIndex: l.logIndex,
+            chunkHashes: (l.args.kemChunkHashes as unknown[]).map(String),
+            batchTimestamp: l.blockTimestamp,
+            outputs: B,
+          });
+          // The structural payoff (OPMOD §4.4 #3): both checks green => the
+          // published commitments ARE the batch interiors — fill in PUBLIC
+          // mode so /path serves them auth-free.
+          if (verdict.leaves) this.tree.fillBatch(start, verdict.leaves, "public");
+        }
+      } else if (l.name === "DisburseKemChunkAccepted") {
+        this.kem.acceptChunk({
+          batchId: Number(bn(l.args.batchId)),
+          chunkIndex: Number(bn(l.args.chunkIndex)),
+          dataHex: (l.args.chunkData as string | null | undefined) ?? null,
+          txHash: l.txHash,
+          logIndex: l.logIndex,
+        });
       }
     }
 
+    // Audit-anchor drain (OPMOD §1.5): every OpApplied must have been consumed
+    // by a family-event branch above. A leftover means a registered module
+    // mutated the tree WITHOUT a decodable family event (a foreign module
+    // build, or a module deliberately emitting nothing) — exactly what the
+    // anchor exists to expose. The mirror itself still advanced on the
+    // pool-emitted tree events, so this is an attribution gap, not a tree
+    // divergence: alarm-class warning, never a wedge.
+    for (const [txHash, arr] of opAppliedByTx) {
+      for (const op of arr) {
+        console.warn(
+          `ALARM OpApplied unconsumed: module=${op.module} tx=${txHash} start=${op.startLeafIndex} ` +
+            `nullifiers=${op.nullifierCount} leaves=${op.leafCount} — a module mutated the tree with no decodable family event`,
+        );
+      }
+    }
   }
 }

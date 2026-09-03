@@ -227,19 +227,23 @@ export function parseSignature(hex: string): Signature {
  *  < 2^248, always a valid bn254 field element. */
 const NAME_BINDING_BYTES = 31;
 
+const foldDigest = (digest: Uint8Array): bigint =>
+  digest.slice(0, NAME_BINDING_BYTES).reduce<bigint>((x, b) => (x << 8n) | BigInt(b), 0n);
+
 // Fixed tag: sha256("bongtu/name-auth-v1") folded the same way as the binding.
-const NAME_DOMAIN_TAG: bigint = (() => {
-  const digest = sha256(new TextEncoder().encode("bongtu/name-auth-v1"));
-  return digest.slice(0, NAME_BINDING_BYTES).reduce<bigint>((x, b) => (x << 8n) | BigInt(b), 0n);
-})();
+const NAME_DOMAIN_TAG: bigint = foldDigest(sha256(new TextEncoder().encode("bongtu/name-auth-v1")));
+
+// The v2 (consumer-triple) domain tag — sha256("bongtu/name-auth-v2") folded the
+// same way as v1's, so no v1 signature can verify as v2 or vice versa,
+// regardless of what characters a name contains (OPMOD §6.4).
+const NAME_DOMAIN_TAG_V2: bigint = foldDigest(sha256(new TextEncoder().encode("bongtu/name-auth-v2")));
 
 /** Field element binding a registration payload: name + both stealth meta keys
  *  (case-normalised hex, so client and server digest identical bytes). */
 export function nameBindingField(name: string, viewPub: string, spendPub: string): bigint {
-  const digest = sha256(
-    new TextEncoder().encode(`${name}|${viewPub.toLowerCase()}|${spendPub.toLowerCase()}`),
+  return foldDigest(
+    sha256(new TextEncoder().encode(`${name}|${viewPub.toLowerCase()}|${spendPub.toLowerCase()}`)),
   );
-  return digest.slice(0, NAME_BINDING_BYTES).reduce<bigint>((x, b) => (x << 8n) | BigInt(b), 0n);
 }
 
 /** The message an owner signs to (re)register a name (routes/names.ts). */
@@ -254,5 +258,53 @@ export function nameAuthMessage(
     BigInt(binding),
     BigInt(timestamp),
     NAME_DOMAIN_TAG,
+  ]);
+}
+
+// ---- v2: the consumer registry triple (OPMOD §6.4) --------------------------
+//
+// Post-op-module, a registration may carry the note-layer consumer identity —
+// (noteViewPub, kemEk) — beside the legacy stealth meta. The v2 digest is
+// ALWAYS five segments, with explicit full-width zero-sentinels when the
+// consumer pair is absent, so absence is a signed statement rather than an
+// encoding ambiguity; and it is wrapped under the SEPARATE v2 domain tag.
+
+/** The v2 zero-sentinel for an absent/cleared `noteViewPub` (32 zero bytes). */
+export const NOTE_VIEW_PUB_ZERO = "0x" + "0".repeat(64);
+/** The v2 zero-sentinel for an absent/cleared `kemEk` (1184 zero bytes). */
+export const KEM_EK_ZERO = "0x" + "0".repeat(2368);
+
+/** Field element binding a v2 registration payload — five segments ALWAYS
+ *  (pass the zero-sentinels for an absent consumer pair). */
+export function nameBindingFieldV2(
+  name: string,
+  viewPub: string,
+  spendPub: string,
+  noteViewPub: string,
+  kemEk: string,
+): bigint {
+  return foldDigest(
+    sha256(
+      new TextEncoder().encode(
+        `${name}|${viewPub.toLowerCase()}|${spendPub.toLowerCase()}|${noteViewPub.toLowerCase()}|${kemEk.toLowerCase()}`,
+      ),
+    ),
+  );
+}
+
+/** The message an owner signs for a v2 (consumer-triple) registration. Same
+ *  tuple shape as v1's, under the v2 domain tag — the two can never verify as
+ *  each other. */
+export function nameAuthMessageV2(
+  ownerPub: PointInput,
+  binding: FieldInput,
+  timestamp: FieldInput,
+): bigint {
+  return poseidonN([
+    BigInt(ownerPub[0]),
+    BigInt(ownerPub[1]),
+    BigInt(binding),
+    BigInt(timestamp),
+    NAME_DOMAIN_TAG_V2,
   ]);
 }

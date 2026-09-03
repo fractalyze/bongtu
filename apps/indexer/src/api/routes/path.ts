@@ -39,7 +39,13 @@ export const path: Route = {
         },
       };
     }
-    const gated = ix.tree.isBatch(Math.floor(leafIndex / ix.tree.B));
+    // A CONSUMER batch's interiors were published as calldata and fold-checked
+    // against the proof's subtreeRoot before the fill (OPMOD §4.4) — the same
+    // privacy class as single-append leaves, so they serve auth-free. Only an
+    // ARBITER-filled (enterprise) batch keeps the owner gate: there the
+    // interiors exist off-chain solely because the arbiter decrypted them.
+    const block = Math.floor(leafIndex / ix.tree.B);
+    const gated = ix.tree.isBatch(block) && !ix.tree.isPublicBatch(block);
     if (gated) {
       const auth = authorizeOwner(ctx);
       if (!auth.ok) return auth.denied;

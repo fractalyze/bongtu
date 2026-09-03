@@ -151,6 +151,9 @@ function sweptLog(salt: string, txHash: string, amount: bigint, logIndex = 0): P
     blockNumber: 7,
     logIndex,
     txHash,
+    // The dispatch gate admits Swept only from the factory (address-gated
+    // ingest) — stamp the emitter the way scanRange does.
+    address: FACTORY.toLowerCase(),
     blockTimestamp: NOW,
     args: { salt, sweeper: "0x" + "ee".repeat(20), amount },
   };

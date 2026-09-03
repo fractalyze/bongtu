@@ -122,6 +122,31 @@ for (const idx of [bA.start + 1, bB.start + 2, bC.start]) {
   ok("batchLeaf" in p && p.batchLeaf === true, `path(${idx}) (batch interior) → { batchLeaf: true }`);
 }
 
+// (public batch fill, OPMOD §4.4) A consumer disburse publishes its commitment
+// run, so ANY indexer can fill the batch: after fillBatch(…, "public") every
+// interior path folds to root() and the block reads isPublicBatch — the flag
+// routes/path.ts keys the auth-free serve on. An ARBITER fill (the default
+// source) fills without the public tag, so the owner gate stays keyed.
+step("PUBLIC FILL: consumer batch interiors fold to root(); fill source is tagged");
+{
+  const leavesB = [200n, 201n, 202n, 203n];
+  ok("batchLeaf" in mt.path(bB.start + 1), "pre-fill: batchB interior is the sentinel");
+  mt.fillBatch(bB.start, leavesB, "public");
+  ok(mt.isPublicBatch(bB.start / B), "public-filled block reads isPublicBatch");
+  for (const k of Array(B).keys()) {
+    const p = mt.path(bB.start + k);
+    ok(!("batchLeaf" in p), `path(${bB.start + k}) is a real interior path after the public fill`);
+    if ("batchLeaf" in p) continue;
+    ok(foldToRoot(leavesB[k], p.siblings, p.pathIndices) === mt.root(),
+      `interior leaf ${bB.start + k} folds to root()`);
+  }
+  // Arbiter-source fill on a DIFFERENT batch: filled but NOT public.
+  mt.fillBatch(bC.start, [300n, 301n, 302n, 303n]);
+  ok(!mt.isPublicBatch(bC.start / B), "arbiter-filled block is NOT tagged public (owner gate stays)");
+  ok(!("batchLeaf" in mt.path(bC.start + 2)), "arbiter fill still serves the interior path");
+  expectAgree("post-fill roots unchanged (fills recorded the leaves the attach already committed to)");
+}
+
 // (per-insert assert is live) A wrong carried root on a fresh, un-replayed insert
 // throws — this is the guard that lets /path drop its old root-agreement 500.
 step("GUARD: applyAppend with a wrong event root throws");

@@ -65,6 +65,25 @@ export const portalFactoryAbi = parseAbi([
   "function addressOf(bytes32 salt) view returns (address)",
 ]);
 
+/** The consumer op-module fragments (OPMOD §2/§4/§5): the six module-emitted
+ *  event families the registry-driven watch-set scans, plus the chunk-submit
+ *  function whose calldata carries the kem ct bytes (calldata-only transport —
+ *  ingest decodes the chunk tx with this fragment). Inline (not a Foundry
+ *  artifact load) because modules are separate contracts whose whole indexer
+ *  surface is these fragments; the pool-side OpApplied / ModuleRegistered /
+ *  ModuleRemoved ride the built pool ABI. The module's WithdrawAnnouncement is
+ *  byte-identical to the pool's (same topic0), so the pool fragment decodes it. */
+export const consumerModuleAbi = parseAbi([
+  "event DepositedPriv(uint256 firstLeafIndex, uint256 oc0, uint256 oc1, uint256 amount, uint256[2] ecdhPublicKey, uint256[4] ctReceiver0, uint256[4] ctReceiver1, uint256[2] viewTags, uint256 encryptionNonce, uint256 root, bytes[] kemCiphertexts)",
+  "event TransferredPriv(uint256[2] nullifiers, uint256[2] outputCommitments, uint256[2] ecdhPublicKey, uint256[4] ctReceiver0, uint256[4] ctReceiver1, uint256[2] viewTags, uint256 encryptionNonce, uint256 root, bytes[] kemCiphertexts)",
+  "event Transferred10x2Priv(uint256[10] nullifiers, uint256[2] outputCommitments, uint256[2] ecdhPublicKey, uint256[8] ctReceivers, uint256[2] viewTags, uint256 encryptionNonce, uint256 root, bytes[] kemCiphertexts)",
+  "event WithdrawnPriv(uint256[2] nullifiers, uint256 amount, uint256 changeCommitment, uint256[2] ecdhPublicKey, uint256[4] ctChange, uint256 viewTag, uint256 encryptionNonce, uint256 root, bytes[] kemCiphertexts)",
+  "event DisbursedPriv(uint256 indexed batchId, uint256 nullifier, uint256 subtreeRoot, uint256 disclosureHash, uint256[2] ecdhPublicKey, uint256 encryptionNonce, uint256 root, bytes32[] kemChunkHashes)",
+  "event DisbursePrivDisclosure(uint256 indexed startLeafIndex, uint256[] disclosure)",
+  "event DisburseKemChunkAccepted(uint256 indexed batchId, uint256 chunkIndex)",
+  "function submitDisburseKemChunk(uint256 batchId, uint256 chunkIndex, bytes chunkData)",
+]);
+
 /** Op-event fragments the ingest dispatches on that postdate the V2 artifact
  *  vintage. Unlike the KEM axis (conditioned on chain state), these ship
  *  in-repo, so a build missing one is stale UNCONDITIONALLY — and a stale
@@ -73,10 +92,12 @@ export const portalFactoryAbi = parseAbi([
  *  /health green (the same lagging-indexer failure of pq-envelope-design.md §7,
  *  one axis over). Takes the viem ABI array and checks the event names are
  *  present. Returns the one-line fatal error, else null. Pure, like
- *  kemBootGuardError. */
+ *  kemBootGuardError. The op-module pool events (OPMOD §1.5) join the wanted
+ *  list: a pre-V3 pool artifact would silently drop the registry stream — and
+ *  with it the whole consumer watch-set — while the mirror stays green. */
 export function staleOpAbiError(abi: Abi): string | null {
   const names = new Set(abi.filter((x): x is AbiEvent => x.type === "event").map((ev) => ev.name));
-  for (const wanted of ["Transferred10", "Transferred10x2", "WithdrawAnnouncement"]) {
+  for (const wanted of ["Transferred10", "Transferred10x2", "WithdrawAnnouncement", "OpApplied", "ModuleRegistered", "ModuleRemoved"]) {
     if (!names.has(wanted)) {
       return `FATAL: this build's ABI lacks the ${wanted} event — a stale contracts/out (or apps/indexer/abi/BongtuPool.abi.json) silently skips every ${wanted} op while /health stays green. Rebuild the pool ABI (recipe: apps/indexer/abi/README.md).`;
     }
@@ -108,6 +129,11 @@ export interface ChainConfig {
   // addressOf, and ingest also scans the factory's Swept logs. Unset => the
   // /pay + /portal routes 404 with a clear body (index.ts logs one boot line).
   portalFactory?: string | null;
+  // Seconds an incomplete consumer-disburse chunk set reads kem-"pending"
+  // before kem-"withheld" (env KEM_GRACE_SECONDS, default 3600, OPMOD §5).
+  // Parsed ONCE here at boot — garbage refuses to boot like every other knob;
+  // routes read it off the Indexer, never process.env.
+  kemGraceSeconds?: number;
   // Postgres connection string (env DATABASE_URL) — REQUIRED at runtime (U-I4
   // Postgres-only): the indexer persists its derived state (events / nullifiers /
   // leaves / notes / history + a block cursor) to Postgres and boot-RESUMES from
@@ -132,6 +158,20 @@ export function parseScalar(s: string): bigint {
   return BigInt(s.trim());
 }
 
+/** Parse KEM_GRACE_SECONDS (default 3600). Non-numeric garbage throws HERE, at
+ *  boot — the same fail-fast posture as parseKemKey — instead of `Number()`
+ *  silently yielding NaN and every incomplete batch comparing as "pending"
+ *  forever. Any finite number is accepted (a negative grace is the tests'
+ *  deterministic everything-is-withheld dial). */
+export function parseKemGraceSeconds(raw: string | undefined): number {
+  if (raw === undefined || raw === "") return 3600;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) {
+    throw new Error(`KEM_GRACE_SECONDS must be a number of seconds (got "${raw}")`);
+  }
+  return n;
+}
+
 export function resolveConfig(): ChainConfig {
   const rpc = process.env.RPC || process.env.LIVE_RPC || process.env.E2E_RPC || "http://127.0.0.1:8545";
   const startBlock = process.env.START_BLOCK ? Number(process.env.START_BLOCK) : 0;
@@ -148,7 +188,8 @@ export function resolveConfig(): ChainConfig {
   const databaseUrl = process.env.DATABASE_URL || null;
   // Portal deposits are opt-in per deployment: no factory address, no /pay.
   const portalFactory = process.env.PORTAL_FACTORY || null;
-  return { rpc, pool, startBlock, authorityKey, authorityKemKey, databaseUrl, portalFactory };
+  const kemGraceSeconds = parseKemGraceSeconds(process.env.KEM_GRACE_SECONDS);
+  return { rpc, pool, startBlock, authorityKey, authorityKemKey, databaseUrl, portalFactory, kemGraceSeconds };
 }
 
 /** Parse AUTHORITY_KEM_KEY (the 2400-byte ML-KEM-768 decapsulation key) from

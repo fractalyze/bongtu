@@ -20,14 +20,22 @@ import type { DisclosureResult } from "./disclosure.js";
 
 /** Kind of note-bearing pool operation a feed entry came from. Mirrors the wire
  *  vocabulary in @bongtu/core/indexerApi; `transfer10` and `transfer10x2` are
- *  the two 10-input transfer circuits (10 outputs, or payment + change). */
+ *  the two 10-input transfer circuits (10 outputs, or payment + change); the
+ *  `*Priv` kinds are the consumer (no-auditor) op-module family (OPMOD §2) —
+ *  `disbursePriv` covers both the 1x16 dev twin and the 1x256 production batch
+ *  (one module, B read from the pool). */
 export type EventKind =
   | "deposit"
   | "transfer"
   | "transfer10"
   | "transfer10x2"
   | "disburse"
-  | "withdraw";
+  | "withdraw"
+  | "depositPriv"
+  | "transferPriv"
+  | "transfer10x2Priv"
+  | "withdrawPriv"
+  | "disbursePriv";
 
 /**
  * A contiguous run of ciphertext field elements inside a feed entry's
@@ -53,11 +61,25 @@ export interface FeedEntry {
   encryptionNonce: string | null; // decimal string
   slices: Slice[];
   ciphertext: string[]; // decimal strings; the bytes a wallet trial-decrypts
-  disclosure?: DisclosureResult; // present for `disburse`
-  /** present for `withdraw` since the stealth upgrade: the proof-bound payout
-   *  address + the discovery announcement (routes/announcements.ts serves the
-   *  projection). Absent on pre-upgrade history. */
+  disclosure?: DisclosureResult; // present for `disburse` / `disbursePriv`
+  /** present for `withdraw`/`withdrawPriv` since the stealth upgrade: the
+   *  proof-bound payout address + the discovery announcement
+   *  (routes/announcements.ts serves the projection). Absent on pre-upgrade
+   *  history. */
   announcement?: { recipient: string; ephemeralPub: string; viewTag: number };
+  /** consumer ops only (OPMOD §3.2): one canonical [0,256) view tag per output
+   *  slice, decimal strings in slice order — the S3.6 pre-filter. */
+  viewTags?: string[];
+  /** consumer SMALL ops only (§3.4): the per-output 1088-byte ML-KEM cts as
+   *  0x-hex, in output order. A consumer disburse's ride the chunk transport
+   *  instead (KemChunkStore; projected onto /events once assembled). */
+  kemCiphertexts?: string[];
+  /** consumer disburse only: the batch's startLeafIndex — the batchId the
+   *  chunk transport and the /events kem projection key on. */
+  batchId?: number;
+  /** consumer disburse only (§4.1): the published commitment run (decimal, leaf
+   *  order) — what boot re-fills the public batch from. */
+  outputCommitments?: string[];
 }
 
 /**
@@ -142,7 +164,7 @@ export class InMemoryStore implements StorePort {
   announcements(cursor = -1, limit = Infinity): WithdrawAnnouncementRecord[] {
     const out: WithdrawAnnouncementRecord[] = [];
     for (const e of this.feed) {
-      if (e.kind !== "withdraw" || !e.announcement || e.seq <= cursor) continue;
+      if ((e.kind !== "withdraw" && e.kind !== "withdrawPriv") || !e.announcement || e.seq <= cursor) continue;
       if (out.length >= limit) break;
       out.push({
         seq: e.seq,

@@ -9,7 +9,8 @@
 //   node --import tsx test/disclosure.test.ts   # (== npm run test:disclosure)
 
 import { disclosureChain } from "@bongtu/core/envelope";
-import { verifyDisclosure } from "../src/disclosure.js";
+import { poseidon2, FIELD_PRIME } from "@bongtu/core/poseidon";
+import { verifyDisclosure, verifyConsumerDisclosure } from "../src/disclosure.js";
 
 const failures = { count: 0 };
 function ok(cond: unknown, msg: string): void {
@@ -62,5 +63,52 @@ ok(w.recomputed === "0", "withheld recomputed == the chain seed (0)");
 const short = verifyDisclosure(full.slice(0, 3), dh, B, TX, 0);
 ok(short.status === "mismatch", "short nonzero publish (< B*4) → mismatch");
 
-console.log(`\n${failures.count === 0 ? "DISCLOSURE TEST PASS — all four DisclosureStatus branches + branch ordering pinned" : `DISCLOSURE TEST FAIL — ${failures.count} assertion(s)`}`);
+// ---- consumer disburse (OPMOD §4.4): the three-check verdict --------------
+// disclosure = receiverCts[4B] ++ viewTags[B] ++ outputCommitments[B], with an
+// INDEPENDENT commitment-run fold to the on-chain subtreeRoot — the check that
+// makes the public batch FILL safe (a bad publish alarms instead of 500ing).
+
+const CB = 4;
+const cCts = Array.from({ length: 4 * CB }, (_, i) => BigInt(9000 + i));
+const cTags = [1n, 2n, 3n, 4n];
+const cCommits = [11n, 22n, 33n, 44n];
+const cDisclosure = [...cCts, ...cTags, ...cCommits];
+const cDh = disclosureChain(cDisclosure);
+const cSub = poseidon2(poseidon2(11n, 22n), poseidon2(33n, 44n));
+
+step("consumer: all three checks green → verified + the fill material");
+const cv = verifyConsumerDisclosure(cDisclosure, cDh, cSub, CB, TX, 16);
+ok(cv.result.status === "verified", "full checks → verified");
+ok(cv.leaves !== null && cv.leaves.join(",") === cCommits.join(","), "leaves == the commitment run (the fill material)");
+ok(cv.result.receiverCount === 4 * CB && cv.result.startLeafIndex === 16, "receiverCount/startLeafIndex reported");
+
+step("consumer: publication gaps map onto the enterprise classes");
+ok(verifyConsumerDisclosure([], cDh, cSub, CB, TX, 16).result.status === "withheld", "absent publish → withheld");
+ok(verifyConsumerDisclosure(cDisclosure.slice(0, 10), cDh, cSub, CB, TX, 16).result.status === "unverifiable",
+  "truncated publish → unverifiable");
+
+step("consumer: canonical-form binding — an element >= p is a mismatch alarm");
+const nonCanon = [...cDisclosure];
+nonCanon[3] = nonCanon[3] + FIELD_PRIME; // mod-p alias of the proven element
+const cnc = verifyConsumerDisclosure(nonCanon, cDh, cSub, CB, TX, 16);
+ok(cnc.result.status === "mismatch" && cnc.leaves === null, "aliased element → mismatch, no fill material");
+
+step("consumer: fold mismatch vs disclosureHash → mismatch");
+const cTampered = [...cDisclosure];
+cTampered[0] = cTampered[0] + 1n;
+const ctm = verifyConsumerDisclosure(cTampered, cDh, cSub, CB, TX, 16);
+ok(ctm.result.status === "mismatch" && ctm.result.recomputed !== ctm.result.expected, "dh-diverging publish → mismatch");
+ok(ctm.leaves === null, "no fill material on a dh mismatch");
+
+step("consumer: BAD FOLD — dh matches the array, commitments don't fold to subtreeRoot");
+const badCommits = [11n, 22n, 33n, 45n];
+const badArray = [...cCts, ...cTags, ...badCommits];
+const bf = verifyConsumerDisclosure(badArray, disclosureChain(badArray), cSub, CB, TX, 16);
+ok(bf.result.status === "mismatch", "check-3 failure → mismatch alarm, never a fill");
+ok(bf.result.recomputed === poseidon2(poseidon2(11n, 22n), poseidon2(33n, 45n)).toString()
+  && bf.result.expected === cSub.toString(),
+  "check-3 alarm carries (fold, subtreeRoot) as (recomputed, expected)");
+ok(bf.leaves === null, "no fill material on a bad fold");
+
+console.log(`\n${failures.count === 0 ? "DISCLOSURE TEST PASS — all four DisclosureStatus branches + branch ordering pinned + the consumer three-check verdict" : `DISCLOSURE TEST FAIL — ${failures.count} assertion(s)`}`);
 process.exit(failures.count === 0 ? 0 : 1);
