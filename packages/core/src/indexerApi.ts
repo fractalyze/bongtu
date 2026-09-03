@@ -156,7 +156,10 @@ export interface HistoryItem {
   counterparty: string | null; // compressed bjj pubkey hex, or null
   amount: string;
   txHash: string;
-  blockTimestamp: number; // unix seconds
+  /** unix seconds. ABSENT when the item's source has no timestamps — the
+   *  selfscan public-feed derivation; the arbiter /history always stamps it,
+   *  and the display edge suppresses the time element when it is missing. */
+  blockTimestamp?: number;
   seq: number; // newest-first: the feed is sorted by seq desc
 }
 
@@ -304,6 +307,13 @@ export function getSignedPath(
 
 export function getEvents(indexerUrl: string, limit = 5000): Promise<FeedEvent[]> {
   return getJson<FeedEvent[]>(`${trim(indexerUrl)}/events?limit=${limit}`);
+}
+
+/** Cursor-paged `GET /events` (seq > cursor, chain order) — the incremental
+ *  read the OPMOD §3.6 self-scan resumes on. `cursor = -1` reads from the
+ *  start; the caller's next cursor is the highest `seq` it processed. */
+export function getEventsFrom(indexerUrl: string, cursor: number, limit = 5000): Promise<FeedEvent[]> {
+  return getJson<FeedEvent[]>(`${trim(indexerUrl)}/events?cursor=${cursor}&limit=${limit}`);
 }
 
 /** The spent nullifier set (PUBLIC, key-free), as decimal strings. */

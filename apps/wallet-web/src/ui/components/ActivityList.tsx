@@ -70,9 +70,14 @@ function Row({ item, explorerBase }: { item: HistoryItem; explorerBase: string }
           {/* muted symbol beside a colored number — the balance hero's idiom */}
           <span className="text-muted font-semibold text-[0.72rem] ml-1">kKRW</span>
         </span>
-        <span className="text-xs text-muted leading-[1.2]">
-          {relativeTime(item.blockTimestamp)}
-        </span>
+        {/* A selfscan row carries no timestamp (the public feed has none):
+            render nothing rather than an epoch date — the calm-surface rule
+            (docs/errors.md): quiet absence, never a fabricated value. */}
+        {item.blockTimestamp !== undefined && (
+          <span className="text-xs text-muted leading-[1.2]">
+            {relativeTime(item.blockTimestamp)}
+          </span>
+        )}
       </span>
       <a
         className="inline-flex text-muted flex-none p-1 -m-1 rounded-md hover:text-primary focus-visible:text-primary"

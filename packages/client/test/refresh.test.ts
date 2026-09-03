@@ -151,6 +151,35 @@ test("refreshPlan: a token reads, a tokenless session only gets a notice", () =>
   assert.deepEqual(refreshPlan(null), { kind: "notice", message: RECONNECT_NOTICE });
 });
 
+test("refreshPlan authFree (selfscan): reads without a token; logged out is still a notice", () => {
+  // The selfscan profile's reads are PUBLIC — the plan itself owns the
+  // read-or-notice decision, so the shell needs no token shim and no
+  // per-call-site mode gates.
+  assert.deepEqual(refreshPlan({ token: "" }, { authFree: true }), { kind: "read" });
+  assert.deepEqual(refreshPlan({ token: "v1.abc" }, { authFree: true }), { kind: "read" });
+  assert.deepEqual(refreshPlan(null, { authFree: true }), { kind: "notice", message: RECONNECT_NOTICE });
+});
+
+test("runRefresh authFree: a tokenless selfscan session loads instead of noticing", async () => {
+  const applied: OwnerSnapshot[] = [];
+  const notices: (string | null)[] = [];
+  const empty: OwnerSnapshot = { notes: [], history: [], historyNextBefore: null };
+  await runRefresh(
+    { token: "", compressedPubkey: "p" },
+    async () => empty,
+    {
+      applySnapshot: (s) => applied.push(s),
+      setBanner: () => {},
+      toast: () => assert.fail("must not toast"),
+      signOut: () => assert.fail("must not sign out"),
+      setNotice: (m) => notices.push(m),
+    },
+    { indexerUrl: "http://x", authFree: true },
+  );
+  assert.deepEqual(applied, [empty], "the public read lands despite the empty token");
+  assert.deepEqual(notices, [null], "no tokenless notice under authFree");
+});
+
 test("classifyReadFailure: 401 is a dead login, everything else is retryable", () => {
   const url = "http://localhost:8600";
   const failure = classifyReadFailure(new Error(`${url}/notes -> 401: view token invalid or expired`), url);
