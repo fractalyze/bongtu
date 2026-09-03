@@ -80,10 +80,10 @@ python3 circuits/build/wtns_compare.py /tmp/ref.wtns /tmp/new.bin
 ```
 
 Substitute `transfer10x2` / `deposit` (and their `circuits/fixtures/inputs/*.json`) for
-the other two registry circuits. Boot enforces the weaker half of this
+the other registry circuits (disbursePriv256 included). Boot enforces the weaker half of this
 automatically: `engine.py` refuses to serve a circuit whose .so witness length
 disagrees with its zkey's `num_vars`, the drift a stale half of the artifact
-pair produces (measured: 2796497 / 212695 / 14132 for the three circuits).
+pair produces (measured: 2796497 / 212695 / 14132 / 3049668 for the four registry circuits).
 
 **Why the calculator runs in a resident WORKER process, not the service
 process** (the U-P5 decision record): a circom constraint failure inside the
@@ -253,7 +253,7 @@ consumed by `run.sh`); the rest default in `prover_service/config.py` —
 `disburse256,transfer10x2,deposit`), `PROVER_ALLOWED_ORIGINS` (unset = allow all),
 `PROVER_AUTH_SHA256` (hex sha256 of "id:password"; unset = no auth),
 `BONGTU_CIRCUITS_OUT`, per-circuit path overrides
-(`BONGTU_DISBURSE_ZKEY`/`_SO`/`_W2S` + the legacy-named
+(`BONGTU_DISBURSE_ZKEY`/`_SO`/`_W2S`, `BONGTU_DISBURSEPRIV_ZKEY`/`_SO`/`_W2S`/`_WARMUP_INPUT` for the opt-in consumer circuit, + the legacy-named
 `BONGTU_WARMUP_INPUT`; `BONGTU_TRANSFER10X2_ZKEY`/`_SO`/`_W2S`/
 `_WARMUP_INPUT`; same family under `BONGTU_DEPOSIT_*`),
 `BONGTU_WITNESS_TIMEOUT` (seconds, default 300), `PROVER_DETERMINISTIC` (=1

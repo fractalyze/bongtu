@@ -7,7 +7,7 @@
 #
 # The service is a CIRCUIT REGISTRY: CIRCUITS holds one entry per GPU-served
 # circuit (zkey + witness-calculator pair + warm-up input + the public-signal
-# count the zkey must expose), and BONGTU_CIRCUITS (comma list, default: all)
+# count the zkey must expose), and BONGTU_CIRCUITS (comma list, default: the enterprise trio)
 # selects which entries boot resident. Each registered circuit gets its own
 # CircuitProver (engine.py); /prove routes by the request's wire tag (app.py).
 
@@ -70,6 +70,7 @@ def _path(env_key: str, default: Path) -> Path:
 # num_public values are pinned from the snarkjs vkey `nPublic` of the committed
 # builds (circuits/out/<name>.vkey.json == len(<name>.public.json)):
 #   disburse256  11  (also the committed contracts/test/fixtures/disburse256.public.json)
+#   disbursePriv256  8  (the consumer 1x256 batch, OPMOD §2)
 #   transfer10x2 68
 #   deposit      19
 # tests/test_registry.py cross-checks these against circuits/out when the
@@ -172,6 +173,47 @@ CIRCUITS: dict[str, CircuitConfig] = {
         warmup_input=_path("BONGTU_DEPOSIT_WARMUP_INPUT", INPUTS_DIR / "deposit.json"),
         num_public=19,
     ),
+    "disbursePriv256": CircuitConfig(
+        name="disbursePriv256",
+        wire_tag="disbursePriv",
+        env_prefix="BONGTU_DISBURSEPRIV",
+        # The 1.44GB CONSUMER (no-auditor) 1x256 batch zkey (OPMOD §2/§4,
+        # .dev/op-module-design.md) — 3,049,889 constraints, GPU-proven like
+        # its enterprise twin above (same regen recipe + .so pair build).
+        zkey=_path("BONGTU_DISBURSEPRIV_ZKEY", CIRCUITS_OUT / "disbursePriv256.zkey"),
+        so=_path("BONGTU_DISBURSEPRIV_SO", CIRCUITS_OUT / "libdisbursePriv256.so"),
+        w2s=_path("BONGTU_DISBURSEPRIV_W2S", CIRCUITS_OUT / "disbursePriv256_w2s.json"),
+        # Signal declaration order (publics first) of BongtuConsumerDisburse
+        # (circuits/lib/consumer_disburse_imt_base.circom): the enterprise
+        # disburse256 order minus authorityPublicKey, plus the trailing
+        # per-output outputViewPublicKeys — pinned by the byte-identity gate
+        # (prover/README.md) against the WASM calculator's .wtns.
+        input_order=(
+            "nullifiers",
+            "root",
+            "enabled",
+            "encryptionNonce",
+            "inputCommitments",
+            "inputValues",
+            "inputSalts",
+            "inputOwnerPrivateKey",
+            "ecdhPrivateKey",
+            "kemSs",
+            "pathElements",
+            "leafIndices",
+            "outputCommitments",
+            "outputValues",
+            "outputSalts",
+            "outputOwnerPublicKeys",
+            "outputViewPublicKeys",
+        ),
+        # The committed satisfying input used for the boot warm-up proof
+        # (circuits/fixtures/gen_disbursePriv256_input.ts writes it).
+        warmup_input=_path(
+            "BONGTU_DISBURSEPRIV_WARMUP_INPUT", INPUTS_DIR / "disbursePriv256.json"
+        ),
+        num_public=8,
+    ),
 }
 
 # wire tag -> registry name, for /prove routing (every tag maps to exactly one
@@ -196,7 +238,11 @@ def _parse_enabled_circuits(raw: str) -> list[str]:
 
 # Which registry entries boot resident (comma list; default: every circuit).
 ENABLED_CIRCUITS: list[str] = _parse_enabled_circuits(
-    os.environ.get("BONGTU_CIRCUITS", ",".join(CIRCUITS))
+    # Default = the enterprise trio, NOT the whole registry: an enterprise box
+    # boots without the consumer artifacts (the 1.44GB disbursePriv256 zkey is
+    # not part of its deploy), so registering a circuit must never silently
+    # grow the served set. Consumer circuits are opt-in via BONGTU_CIRCUITS.
+    os.environ.get("BONGTU_CIRCUITS", "disburse256,transfer10x2,deposit")
 )
 
 

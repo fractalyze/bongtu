@@ -241,3 +241,27 @@ export function outputSide(sealed: SealedPlanOutput[]): {
     kemSs: sealed.map((s) => [s.seal.kemSs[0], s.seal.kemSs[1]]),
   };
 }
+
+/** disbursePriv256 (1-in / 256-out): the PRODUCTION consumer batch — 250
+ *  funded outputs to distinct recipients plus 6 value-0 PAD slots with
+ *  distinct throwaway identities (OPMOD §4.5). Pad identity indices are
+ *  disjoint from the 1×16 fixture's (pads are never reused across batches),
+ *  and salts sit in their own 1000+ range so no note collides with another
+ *  fixture's. Shared here (not local to the generator) because the U3
+ *  consumer realproof export re-derives the same seals to emit the module's
+ *  `disclosure` calldata and per-output kem cts (OPMOD §4.1/§3.4). */
+export const DISBURSE_PRIV256_B = 256;
+export const DISBURSE_PRIV256_FUNDED = 250;
+export function disbursePriv256Plan(): OutputPlan[] {
+  const funded = Array.from({ length: DISBURSE_PRIV256_FUNDED }, (_, i) => ({
+    value: 100n + BigInt(i),
+    salt: salt(1000 + i),
+    id: consumerReceiver(i),
+  }));
+  const pads = Array.from({ length: DISBURSE_PRIV256_B - DISBURSE_PRIV256_FUNDED }, (_, i) => ({
+    value: 0n,
+    salt: salt(1000 + DISBURSE_PRIV256_FUNDED + i),
+    id: padIdentity(100 + i),
+  }));
+  return [...funded, ...pads];
+}

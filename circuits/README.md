@@ -83,7 +83,7 @@ recommitting its verifier fails the build).
   [`prover/`](../prover/README.md).
 - `build/build_witness_so.sh` builds the **compiled witness calculators** the prover
   service loads (`out/lib<name>.so` + `out/<name>_w2s.json`, gitignored) for
-  the three GPU-served circuits via the circom MLIR backend — ~7x faster
+  the four registry circuits (disbursePriv256 included) via the circom MLIR backend — ~7x faster
   witness-gen than the WASM pair. `build/witness_rt/` is the vendored (patched)
   r1cs-solver runtime MLIR it links; toolchain caveats are in the script
   header. Rebuild after any circuit change, alongside the zkey.
@@ -102,6 +102,7 @@ helpers through `fixtures/fixture_lib.ts`, and write committed JSON into `fixtur
 |---|---|
 | `fixtures/gen_inputs.ts` | the satisfying inputs (`deposit/disburse/transfer/withdraw.json`, plus the four 10-input fixtures: `transfer10{,x2}.json` — 4 real + 6 padded inputs — and `transfer10_consolidate.json` / `transfer10x2_merge.json` — all 10 real, merged into one self-owned note) from real `ImtTree` membership witnesses |
 | `fixtures/gen_disburse256_input.ts` | `disburse256.json` — the production 1×256 input; also the prover service's boot warm-up proof |
+| `fixtures/gen_disbursePriv256_input.ts` | `disbursePriv256.json` — the consumer 1×256 input (250 funded + 6 §4.5 pads); also the opt-in consumer boot warm-up |
 | `fixtures/gen_attack_inputs.ts` | `withdraw_mint/attack/padded.json` + `transfer10{,x2}_attack.json` — the §5.2 value-belt attack vectors |
 | `fixtures/gen_zero_leaf_inputs.ts` / `gen_disburse_zero_leaf.ts` | the zero-commitment-belt attack vectors for transfer/transfer10/transfer10x2/withdraw and the disburse base |
 | `fixtures/gen_consumer_inputs.ts` | the five consumer honest fixtures (`depositPriv/transferPriv/transfer10x2Priv/withdrawPriv/disbursePriv.json` — disbursePriv is 12 funded + 4 pad outputs per OPMOD §4.5); output plans + per-output deterministic ML-KEM material live in `fixtures/consumer_lib.ts`, SHARED with the consumer gates |
