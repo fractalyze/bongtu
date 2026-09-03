@@ -525,6 +525,29 @@
     },
     {
       "type": "function",
+      "name": "initializeConsumerOnly",
+      "inputs": [
+        {
+          "name": "_poseidon",
+          "type": "address",
+          "internalType": "contract IPoseidon2"
+        },
+        {
+          "name": "_token",
+          "type": "address",
+          "internalType": "contract IERC20"
+        },
+        {
+          "name": "_batchSize",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
       "name": "initialized",
       "inputs": [],
       "outputs": [

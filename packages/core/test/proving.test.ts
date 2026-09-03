@@ -16,6 +16,7 @@ import type {
   Calldata,
   DepositInput,
   DisburseInput,
+  DisbursePrivInput,
   ProvingRequest,
   Transfer10Input,
   Transfer10x2Input,
@@ -161,6 +162,47 @@ test("a transfer10x2 ProvingRequest keeps ten input slots against only two outpu
   assert.deepEqual(wire.input.outputOwnerPublicKeys[1], wire.input.outputOwnerPublicKeys[0]);
   assert.equal(wire.input.outputValues[1], "0");
   assert.equal(BigInt(wire.input.inputCommitments[0] as string), input.inputCommitments[0]);
+});
+
+test("a disbursePriv ProvingRequest keeps per-output kemSs pairs and view-key runs through JSON", () => {
+  const H = 32;
+  const kp = deriveKeypair(616161616161616161n);
+  const view = deriveKeypair(717171717171717171n);
+  const many = <T>(f: (i: number) => T): T[] => Array.from({ length: 256 }, (_, i) => f(i));
+  const input: DisbursePrivInput = {
+    nullifiers: [11n],
+    inputCommitments: [22n],
+    inputValues: [100n],
+    inputSalts: [3n],
+    inputOwnerPrivateKey: 4n,
+    ecdhPrivateKey: 5n,
+    root: 6n,
+    pathElements: [new Array<bigint>(H).fill(0n)],
+    leafIndices: [1n],
+    enabled: [1n],
+    outputCommitments: many((i) => 1000n + BigInt(i)),
+    outputValues: many((i) => (i < 2 ? 50n : 0n)),
+    outputSalts: many((i) => 2000n + BigInt(i)),
+    // duplicate owners are LEGAL in this family (per-output hybrid key +
+    // nonce+i, OPMOD §3.3/§3.5) — a batch may pay one person twice.
+    outputOwnerPublicKeys: many(() => kp.publicKey),
+    outputViewPublicKeys: many(() => view.publicKey),
+    kemSs: many((i) => [3000n + BigInt(i), 4000n + BigInt(i)]),
+    encryptionNonce: 12n,
+  };
+  const req: ProvingRequest = { circuit: "disbursePriv", input, backend: "gpu" };
+  const wire = JSON.parse(JSON.stringify(toWire(req))) as ProvingRequest;
+  assert.equal(wire.circuit, "disbursePriv");
+  if (wire.circuit !== "disbursePriv") throw new Error("unreachable"); // narrows the union
+  // the family's shape deltas: NO authorityPublicKey, per-output kemSs limb
+  // pairs, and the note-layer view-key run beside the spend-key run.
+  assert.ok(!("authorityPublicKey" in wire.input));
+  assert.equal(wire.input.kemSs.length, 256);
+  assert.deepEqual(wire.input.kemSs[1], ["3001", "4001"]);
+  assert.equal(wire.input.outputViewPublicKeys.length, 256);
+  assert.equal(wire.input.pathElements.length, 1);
+  assert.equal(wire.input.pathElements[0].length, H);
+  assert.deepEqual(wire.input.outputOwnerPublicKeys[1], wire.input.outputOwnerPublicKeys[0]);
 });
 
 test("Calldata is the exportSolidityCallData shape the pool submitters splat", () => {

@@ -7,10 +7,11 @@
 #
 # One deliberate omission: the TS `Circuit` union also has "transfer10" (10-in /
 # 10-out). This service registers only the circuits in config.CIRCUITS
-# (disburse256 + transfer10x2 + deposit), and transfer10 proves in-browser on
-# CPU like transfer/withdraw, so there is no variant for it here — an unknown
-# tag is rejected at validation, which is the right answer for a circuit this
-# service cannot prove. Add one only if it ever joins the registry.
+# (disburse256 + transfer10x2 + deposit + the consumer disbursePriv256, wire
+# tag "disbursePriv"), and transfer10 proves in-browser on CPU like
+# transfer/withdraw, so there is no variant for it here — an unknown tag is
+# rejected at validation, which is the right answer for a circuit this service
+# cannot prove. Add one only if it ever joins the registry.
 #
 # Field elements arrive as decimal strings (JSON has no bigint; the TS side
 # stringifies) or small ints; points are [x, y] pairs. The §11-8 two-time-pad
@@ -161,6 +162,50 @@ class DisburseInput(_SpendInput):
         return self
 
 
+class DisbursePrivInput(_StrictModel):
+    """disbursePriv (1-in / B-out, the CONSUMER no-auditor batch — OPMOD §2/§4).
+
+    Mirror of proving.ts DisbursePrivInput. NO authorityPublicKey, and `kemSs`
+    is PER-OUTPUT ([B][2] limb pairs — the hybrid receiver key is per output,
+    OPMOD §3.3), plus the note-layer `outputViewPublicKeys` run. NO
+    distinct-owner guard: every receiver ct is encrypted under its own hybrid
+    key at `encryptionNonce + i` (OPMOD §3.5), so a duplicate recipient never
+    reuses a keystream — the §11-8 two-time pad the enterprise disburse guards
+    against cannot arise here.
+    """
+
+    nullifiers: list[FieldInput]
+    inputCommitments: list[FieldInput]
+    inputValues: list[FieldInput]
+    inputSalts: list[FieldInput]
+    inputOwnerPrivateKey: FieldInput
+    ecdhPrivateKey: FieldInput
+    root: FieldInput
+    pathElements: list[list[FieldInput]]
+    leafIndices: list[FieldInput]
+    enabled: list[FieldInput]
+    outputCommitments: list[FieldInput]
+    outputValues: list[FieldInput]
+    outputSalts: list[FieldInput]
+    outputOwnerPublicKeys: list[PointInput]
+    outputViewPublicKeys: list[PointInput]
+    kemSs: list[KemSs]
+    encryptionNonce: FieldInput
+
+    @model_validator(mode="after")
+    def _shape_guard(self) -> "DisbursePrivInput":
+        for name in ("nullifiers", "inputCommitments", "inputValues", "inputSalts",
+                     "pathElements", "leafIndices", "enabled"):
+            if len(getattr(self, name)) != 1:
+                raise ValueError(f"disbursePriv takes exactly one input: len({name}) != 1")
+        n_out = len(self.outputCommitments)
+        for name in ("outputValues", "outputSalts", "outputOwnerPublicKeys",
+                     "outputViewPublicKeys", "kemSs"):
+            if len(getattr(self, name)) != n_out:
+                raise ValueError(f"output arrays must agree in length: len({name}) != {n_out}")
+        return self
+
+
 class DepositRequest(_StrictModel):
     circuit: Literal["deposit"]
     input: DepositInput
@@ -191,9 +236,16 @@ class DisburseRequest(_StrictModel):
     backend: Literal["cpu", "gpu"] | None = None
 
 
+class DisbursePrivRequest(_StrictModel):
+    circuit: Literal["disbursePriv"]
+    input: DisbursePrivInput
+    backend: Literal["cpu", "gpu"] | None = None
+
+
 ProvingRequest = Annotated[
     Union[
-        DepositRequest, TransferRequest, Transfer10x2Request, WithdrawRequest, DisburseRequest
+        DepositRequest, TransferRequest, Transfer10x2Request, WithdrawRequest, DisburseRequest,
+        DisbursePrivRequest,
     ],
     Field(discriminator="circuit"),
 ]

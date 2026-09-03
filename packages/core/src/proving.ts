@@ -10,9 +10,11 @@
 // the request.
 //
 // Two provers consume these types today:
-//   - prover/ (top-level, Python FastAPI over rabbitsnark GPU): serves disburse
-//     (1×256) over HTTP; prover/prover_service/schema.py MIRRORS this file and
-//     must be kept in sync with it.
+//   - prover/ (top-level, Python FastAPI over rabbitsnark GPU): serves the
+//     four-circuit config.CIRCUITS registry — disburse (1×256) + transfer10x2
+//     + deposit + the consumer disbursePriv (1×256, artifact stem
+//     disbursePriv256) — over HTTP; prover/prover_service/schema.py MIRRORS
+//     this file and must be kept in sync with it.
 //   - apps/wallet-web browser snarkjs: proves transfer/withdraw in-page (a
 //     self-custody wallet never sends spending-key witnesses to a server).
 //
@@ -26,19 +28,24 @@
 import type { FieldInput, PointInput } from "./babyjub.js";
 
 /** Proving backend. deposit/transfer/transfer10/transfer10x2/withdraw prove on
- *  CPU (snarkjs); disburse (1×256, ~2.79M constraints) proves on GPU
- *  (rabbitsnark, via the prover/ service). */
+ *  CPU (snarkjs); disburse (1×256, ~2.79M constraints) and disbursePriv
+ *  (1×256 consumer batch, 3,049,889 constraints) prove on GPU (rabbitsnark,
+ *  via the prover/ service). */
 export type Backend = "cpu" | "gpu";
 
 /** The v1 circuits (SPEC §4) plus the two 10-input instantiations of the transfer
- *  base, `transfer10` (10-out) and `transfer10x2` (2-out). */
+ *  base, `transfer10` (10-out) and `transfer10x2` (2-out), plus the consumer
+ *  (no-auditor) circuits the prover service serves — today `disbursePriv`, the
+ *  wire tag of the 1x256 consumer batch (OPMOD §2; the artifact stem is
+ *  disbursePriv256, prover/prover_service/config.py owns the mapping). */
 export type Circuit =
   | "deposit"
   | "transfer"
   | "transfer10"
   | "transfer10x2"
   | "withdraw"
-  | "disburse";
+  | "disburse"
+  | "disbursePriv";
 
 // ---------------------------------------------------------------------------
 // Per-circuit witness inputs (the exact circom `main` input objects).
@@ -191,6 +198,37 @@ export interface DisburseInput {
   authorityPublicKey: PointInput;
 }
 
+/** disbursePriv (1-in / 256-out, the CONSUMER no-auditor batch — OPMOD §2/§4):
+ *  IMT membership + one nullifier; subtree gadget + the EXTENDED
+ *  disclosureHash fold (receiver cts ++ viewTags ++ output commitments). NO
+ *  authority material: receiver ciphertexts encrypt to per-output note-layer
+ *  VIEW keys under the hybrid per-output key (ECDH point + per-output ML-KEM
+ *  limbs), each at `encryptionNonce + i` (OPMOD §3.3/§3.5) — which is why,
+ *  unlike the enterprise disburse, DUPLICATE output owners are legal here (no
+ *  keystream is ever shared). The single input is always real (enabled=[1] —
+ *  the module injects it after its ZeroNullifier check). The wire tag serves
+ *  the disbursePriv256 artifacts (prover/prover_service/config.py owns the
+ *  tag -> artifact mapping). */
+export interface DisbursePrivInput {
+  nullifiers: FieldInput[]; // length 1
+  inputCommitments: FieldInput[]; // length 1
+  inputValues: FieldInput[]; // length 1
+  inputSalts: FieldInput[]; // length 1
+  inputOwnerPrivateKey: FieldInput;
+  ecdhPrivateKey: FieldInput;
+  root: FieldInput;
+  pathElements: FieldInput[][]; // [1][H]
+  leafIndices: FieldInput[]; // [1]
+  enabled: FieldInput[]; // [1] == [1]
+  outputCommitments: FieldInput[]; // length 256
+  outputValues: FieldInput[]; // length 256
+  outputSalts: FieldInput[]; // length 256
+  outputOwnerPublicKeys: PointInput[]; // length 256 — SPEND keys (commitment binding)
+  outputViewPublicKeys: PointInput[]; // length 256 — note-layer VIEW keys (receiver cts)
+  kemSs: FieldInput[][]; // [256][2] per-output LE-uint128 ML-KEM-768 limbs (hybrid receiver key, @bongtu/core/consumer)
+  encryptionNonce: FieldInput;
+}
+
 // ---------------------------------------------------------------------------
 // The tagged request union + the calldata result.
 // ---------------------------------------------------------------------------
@@ -203,7 +241,8 @@ export type ProvingRequest =
   | { circuit: "transfer10"; input: Transfer10Input; backend?: Backend }
   | { circuit: "transfer10x2"; input: Transfer10x2Input; backend?: Backend }
   | { circuit: "withdraw"; input: WithdrawInput; backend?: Backend }
-  | { circuit: "disburse"; input: DisburseInput; backend?: Backend };
+  | { circuit: "disburse"; input: DisburseInput; backend?: Backend }
+  | { circuit: "disbursePriv"; input: DisbursePrivInput; backend?: Backend };
 
 /** The map from a circuit tag to the shape of its `input`. */
 export interface CircuitInputs {
@@ -213,6 +252,7 @@ export interface CircuitInputs {
   transfer10x2: Transfer10x2Input;
   withdraw: WithdrawInput;
   disburse: DisburseInput;
+  disbursePriv: DisbursePrivInput;
 }
 
 /** Groth16 proof in snarkjs `exportSolidityCallData` form (the G2 inner-swap on `b`

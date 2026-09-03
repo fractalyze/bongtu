@@ -1180,3 +1180,14 @@ The dominant unchanged term everywhere is the Poseidon tree work (~0.93M/leaf,
   distribution.
 - **Enterprise entrypoints ever routing through `applyOp`.** DEFAULT: never — locked. Noted
   only so no future refactor "simplifies" the hybrid split away.
+- **Consumer-only initialize (issue #6 "initializes with no arbiter key at all").**
+  RESOLVED (U7): `initializeConsumerOnly(poseidon, token, batchSize)` on the core —
+  no arbiter epoch is ever minted, no KEM pk hash stored, no enterprise verifier wired;
+  the module family is the pool's whole op surface (`registerModule` follows deployment).
+  It shares the `initializer` version slot with the enterprise `initialize` (a pool is one
+  profile forever), the enterprise `initialize` stays byte-identical, and on such a pool
+  every enterprise entrypoint reverts (arbiter-key injection panics on the empty epoch
+  list) — pinned in `contracts/test/ConsumerOnly.t.sol`. A NUMS/burn-key deploy was
+  rejected per the issue's honesty argument ("no key exists" vs "key is burned").
+  Profile script: `deploy/forge/DeployConsumerOnly.s.sol` (records
+  `deploy/addresses.consumer.<chainid>.json` + `deploy/modules.consumer.<chainid>.json`).

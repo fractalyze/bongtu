@@ -24,6 +24,7 @@ import {Transfer10x2Verifier} from "bongtu-src/verifiers/Transfer10x2Verifier.so
 import {MockERC20} from "bongtu-test/mocks/MockERC20.sol";
 
 import {AddressBook, AddressRecord} from "./AddressBook.sol";
+import {ConsumerModuleKit, ConsumerModuleRecord} from "./ConsumerModuleKit.sol";
 
 /// @title Deploy — reusable Foundry deploy of the full PRODUCTION B=256 BongtuPool
 ///        stack (M1 Done#2 / U6, SPEC §5/§9).
@@ -94,6 +95,37 @@ contract Deploy is Script {
         _selfCheck(d);
         _writeAddresses(d);
         _log(d);
+        _deployModuleProfile(deployerKey, d);
+    }
+
+    /// @dev MODULE_PROFILE (OPMOD §7/§9 deploy profiles):
+    ///        none (default)  register no consumer modules — the audited-only
+    ///                        posture, byte-identical to the pre-profile deploy;
+    ///        consumer        deploy the five consumer verifiers + modules
+    ///                        (ConsumerModuleKit) and register each through the
+    ///                        event-logged onlyOwner registerModule.
+    ///      (The no-arbiter consumer-only profile is its own script,
+    ///      DeployConsumerOnly.s.sol — it needs a different initializer.)
+    function _deployModuleProfile(uint256 deployerKey, AddressRecord memory d) internal {
+        string memory profile = vm.envOr("MODULE_PROFILE", string("none"));
+        bytes32 h = keccak256(bytes(profile));
+        if (h == keccak256("none")) return;
+        require(h == keccak256("consumer"), "MODULE_PROFILE must be 'consumer' or 'none'");
+
+        BongtuPool pool = BongtuPool(d.pool);
+        uint256 chunkArity = vm.envOr("MODULE_CHUNK_ARITY", ConsumerModuleKit.defaultChunkArity(d.batchSize));
+        vm.startBroadcast(deployerKey);
+        ConsumerModuleRecord memory mods = ConsumerModuleKit.deploySet(pool, chunkArity);
+        address[] memory list = ConsumerModuleKit.modulesArray(mods);
+        for (uint256 i = 0; i < list.length; i++) {
+            pool.registerModule(list[i]);
+        }
+        vm.stopBroadcast();
+        for (uint256 i = 0; i < list.length; i++) {
+            require(pool.registeredModules(list[i]), "module not registered");
+        }
+        ConsumerModuleKit.write(ConsumerModuleKit.path(), mods);
+        console2.log("consumer modules ->", ConsumerModuleKit.path());
     }
 
     /// @dev The full production stack, all inside one broadcast window so each

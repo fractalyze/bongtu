@@ -392,6 +392,42 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         emit ArbiterKemPkHashSet(0, arbiterKemPkHash_);
     }
 
+    /// @notice The CONSUMER-ONLY initializer (OPMOD §7/§9 resolved default;
+    ///         issue #6: "a consumer-only profile initializes with no arbiter
+    ///         key at all"). Brings up the core WITHOUT any arbiter material —
+    ///         no arbiter epoch is ever minted, no KEM pk hash stored, and no
+    ///         enterprise verifier wired — so no auditor key exists rather
+    ///         than being burned. Consumer ops arrive exclusively through
+    ///         registered modules ({registerModule} is live immediately: the
+    ///         caller becomes owner, and modules need the proxy address, so
+    ///         registration follows deployment rather than riding an init
+    ///         payload).
+    ///
+    ///         Deliberate consequences on such a pool, pinned by tests:
+    ///         - every enterprise entrypoint REVERTS (each injects
+    ///           `currentArbiterKey()`, which panics on the empty epoch list) —
+    ///           the enterprise family does not exist here, which is the
+    ///           profile's whole meaning;
+    ///         - `currentEpoch()` / `currentArbiterKey()` revert; the six
+    ///           enterprise verifier getters read zero.
+    ///
+    ///         Shares the `initializer` version slot with {initialize}: a pool
+    ///         is one profile or the other, never both, and neither can run
+    ///         after the other. The enterprise {initialize} is byte-untouched.
+    function initializeConsumerOnly(IPoseidon2 _poseidon, IERC20 _token, uint256 _batchSize) external initializer {
+        if (_batchSize <= 1 || (_batchSize & (_batchSize - 1)) != 0) revert BatchSizeNotPowerOfTwo(_batchSize);
+
+        __Ownable2Step_init(msg.sender);
+        __UUPSUpgradeable_init();
+        _locked = 1;
+
+        poseidon = _poseidon;
+        token = _token;
+        B = _batchSize;
+        _initTreeAndParams(_batchSize);
+        initialized = true;
+    }
+
     /// @dev Wire every verifier the pool will ever call, rejecting the zero
     ///      address on each: a zeroed verifier turns its entry point into a call
     ///      into nothing — reachable, always reverting, and unfixable short of an
