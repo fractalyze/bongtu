@@ -604,3 +604,93 @@ export function buildAnnouncementsUrl(
 export function fetchAnnouncements(url: string): Promise<WithdrawAnnouncementRecord[]> {
   return getJson<WithdrawAnnouncementRecord[]>(url);
 }
+
+// --- portal deposits (public /pay + /portal endpoints) ----------------------------
+//
+// The Curvy-style stealth front door (Slice ⑤): POST /pay/{name} makes the
+// INDEXER derive a fresh stealth address for the name's meta-address and record
+// the announcement at issuance time (a CEX sender can never announce), returning
+// the CREATE2 sweeper `destination` the payer funds with a plain transfer.
+// Server half: apps/indexer src/portal.ts + api/routes/portal.ts.
+
+/** What POST /pay/{name} returns: everything the payer (and a paranoid
+ *  recipient re-deriving it) needs. `destination` is the CREATE2 sweeper
+ *  address to fund; `stealthAddr` is the underlying DKSAP one-time EOA whose
+ *  bytes32 left-pad is the CREATE2 salt (stealth.ts portalSalt — the one rule);
+ *  `factory` names the PortalFactory the wrap was computed against. */
+export interface PortalIssuance {
+  /** the CREATE2 sweeper address the payer actually funds (EIP-55). */
+  destination: string;
+  /** "0x" + 32-byte hex — the packed bjj ephemeral pubkey R (the announcement). */
+  ephemeralPub: string;
+  viewTag: number;
+  /** "0x" + 20-byte hex — the DKSAP-derived one-time EOA (the CREATE2 salt's address). */
+  stealthAddr: string;
+  /** the PortalFactory address the destination was derived against. */
+  factory: string;
+}
+
+/** One issuance-time portal announcement, as served by /portal/announcements and
+ *  /portal/unswept. All fields are PUBLIC data: the announcement half mirrors
+ *  WithdrawAnnouncementRecord (ephemeralPub, viewTag, seq cursor), and the
+ *  attribution half is the resolved name record (name, owner) — public because
+ *  the name directory itself is. `swept` flips when the factory's Swept event
+ *  lands, carrying the sweep tx + amount. */
+export interface PortalRecord {
+  kind: "portal";
+  /** issuance-order cursor key (the portal feed's own seq space, NOT the
+   *  chain-event feed's — issuance has no tx to sequence by). */
+  seq: number;
+  name: string;
+  /** compressed bjj pubkey of the name's owner (the recipient's in-pool identity). */
+  owner: string;
+  ephemeralPub: string;
+  viewTag: number;
+  stealthAddr: string;
+  destination: string;
+  /** unix seconds of issuance (server clock). */
+  createdAt: number;
+  swept: boolean;
+  sweptTxHash: string | null;
+  /** decimal; the swept deposit amount (the proof's public amount). */
+  sweptAmount: string | null;
+}
+
+/** Resolve `name` into a fresh portal destination (the pay-by-name front door).
+ *  Every call mints a NEW record server-side — call once per intended payment.
+ *  404: unknown name, or portal deposits not configured on this indexer. */
+export function payPortal(
+  indexerUrl: string,
+  name: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<PortalIssuance> {
+  return postJson<PortalIssuance>(`${trim(indexerUrl)}/pay/${encodeURIComponent(name)}`, {}, fetchFn);
+}
+
+/** The sweeper bot's work feed: unswept portal records (seq > cursor, capped). */
+export function fetchUnswept(
+  indexerUrl: string,
+  cursor = -1,
+  limit = 5000,
+  fetchFn: typeof fetch = fetch,
+): Promise<PortalRecord[]> {
+  return getJson<PortalRecord[]>(
+    `${trim(indexerUrl)}/portal/unswept?cursor=${cursor}&limit=${limit}`,
+    fetchFn,
+  );
+}
+
+/** The full portal announcement feed (swept and not) — the recipient's scan-all
+ *  path: pair each record with scanStealthAnnouncement, then map the matched
+ *  address through portalSalt/create2Address to confirm `destination`. */
+export function getPortalAnnouncements(
+  indexerUrl: string,
+  cursor = -1,
+  limit = 5000,
+  fetchFn: typeof fetch = fetch,
+): Promise<PortalRecord[]> {
+  return getJson<PortalRecord[]>(
+    `${trim(indexerUrl)}/portal/announcements?cursor=${cursor}&limit=${limit}`,
+    fetchFn,
+  );
+}

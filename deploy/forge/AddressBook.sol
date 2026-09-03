@@ -36,6 +36,11 @@ struct AddressRecord {
     address token;
     address poolImpl;
     address pool;
+    /// OPTIONAL like `arbiterKemPk`: the portal factory is an add-on deployed
+    /// after the pool; records from before it exist legitimately, and a zero
+    /// here means "not deployed on this chain", so the field is ABSENT rather
+    /// than a zero-address claim.
+    address portalFactory;
 }
 
 /// @title AddressBook — read/merge-write of `deploy/addresses.<chainid>.json`.
@@ -87,6 +92,7 @@ library AddressBook {
         r.token = vm.parseJsonAddress(j, ".token");
         r.poolImpl = vm.parseJsonAddress(j, ".poolImpl");
         r.pool = vm.parseJsonAddress(j, ".pool");
+        if (vm.keyExists(j, ".portalFactory")) r.portalFactory = vm.parseJsonAddress(j, ".portalFactory");
     }
 
     /// @notice Write the record back. An unset `arbiterKemPk` stays ABSENT: a
@@ -120,6 +126,7 @@ library AddressBook {
         vm.serializeAddress(o, "transfer10x2Verifier", r.transfer10x2Verifier);
         vm.serializeAddress(o, "token", r.token);
         vm.serializeAddress(o, "poolImpl", r.poolImpl);
+        if (r.portalFactory != address(0)) vm.serializeAddress(o, "portalFactory", r.portalFactory);
         string memory js = vm.serializeAddress(o, "pool", r.pool);
         vm.writeJson(js, p);
     }

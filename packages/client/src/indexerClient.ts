@@ -19,7 +19,11 @@
 //   - the `/names` directory (`resolveName` + the shared `normalizeName` grammar)
 //     for pay-by-name: the Send form turns a registered name into the owner's
 //     canonical address before the user confirms (`registerName` /
-//     `buildNameRegistration` cover the wallet's own registration side).
+//     `buildNameRegistration` cover the wallet's own registration side);
+//   - `POST /pay/{name}` (`payPortal`) for the Receive panel's one-time deposit
+//     address: the indexer derives a fresh CREATE2 portal destination for the
+//     session's registered name and records the announcement at issuance time
+//     (Slice ⑤ — the payer then needs nothing but a plain kKRW transfer).
 
 export {
   getHead,
@@ -42,6 +46,7 @@ export {
   registerName,
   buildNameRegistration,
   normalizeName,
+  payPortal,
   type OwnerNote,
   type FeedEvent,
   type WithdrawAnnouncementRecord,
@@ -54,4 +59,5 @@ export {
   type ViewToken,
   type NameRecord,
   type NameRegistration,
+  type PortalIssuance,
 } from "@bongtu/core/indexerApi";

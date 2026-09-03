@@ -20,6 +20,15 @@
 //   GET /announcements       -> [WithdrawAnnouncementRecord]  (PUBLIC cursor
 //                               feed; with ?owner= — ARBITER MODE, /notes
 //                               read-auth — only the caller's own)
+//   POST /pay/:name          -> PortalIssuance  (PUBLIC portal issuance: derive
+//                               a fresh stealth destination for the name and
+//                               record the announcement — routes/portal.ts;
+//                               404 when PORTAL_FACTORY is unset)
+//   GET /portal/announcements -> [PortalRecord]  (PUBLIC cursor feed: every
+//                               issuance-time portal announcement — the
+//                               recipient's scan path)
+//   GET /portal/unswept      -> [PortalRecord]  (PUBLIC cursor feed: unswept
+//                               records only — the sweeper bot's work feed)
 //   GET  /names/:name        -> NameRecord  (PUBLIC name directory: owner bjj
 //                               pubkey + stealth meta-address; names.ts)
 //   POST /names {name,owner,viewPub,spendPub,ts,sig} -> NameRecord  (PUBLIC;
@@ -65,6 +74,7 @@ import { health } from "./routes/health.js";
 import { nullifiers } from "./routes/nullifiers.js";
 import { nameRegister, nameResolve } from "./routes/names.js";
 import { announcements } from "./routes/announcements.js";
+import { payPortal, portalAnnouncements, portalUnswept } from "./routes/portal.js";
 import { notes } from "./routes/notes.js";
 import { history } from "./routes/history.js";
 import { authChallenge, authRedeem } from "./routes/auth.js";
@@ -99,7 +109,7 @@ export interface Route {
 // is public (always on); `/notes` + `/history` are ARBITER-ONLY and composed in
 // per-indexer by makeHandler, so public mode returns 404 for them (the endpoints
 // do not exist).
-export const routes: Route[] = [head, events, path, alarms, health, nullifiers, nameResolve, nameRegister, announcements];
+export const routes: Route[] = [head, events, path, alarms, health, nullifiers, nameResolve, nameRegister, announcements, payPortal, portalAnnouncements, portalUnswept];
 
 function writeJson(res: ServerResponse, status: number, body: unknown, headers?: Record<string, string>): void {
   const s = JSON.stringify(body, null, 2);

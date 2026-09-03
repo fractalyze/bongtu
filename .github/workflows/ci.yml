@@ -123,6 +123,8 @@ jobs:
         run: npm test -w @bongtu/client
       - name: relayer tests
         run: npm test -w @bongtu/relayer
+      - name: sweeper tests
+        run: npm test -w @bongtu/sweeper
       - name: payroll-web tests
         run: npm test -w @bongtu/payroll-web
       - name: wallet-web tests

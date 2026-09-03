@@ -268,3 +268,92 @@ export function validateStealthMetaAddress(meta: StealthMetaAddress): void {
     throw new Error(`spendPub: ${(e as Error).message}`);
   }
 }
+
+// --- portal deposits (Slice ⑤): the CREATE2 leg of the derivation ------------
+//
+// A stealth EOA cannot receive a *shielded* deposit directly — the payer may be
+// a CEX that can only do a plain transfer. The portal path therefore points the
+// payer at a CREATE2-precomputed PortalSweeper address whose salt IS the
+// DKSAP-derived stealth address, so the resolver, the sweeping bot, and the
+// recipient all recompute the same destination from the announcement alone.
+// The Solidity mirror is contracts/src/PortalFactory.sol `addressOf`; parity is
+// pinned by a committed vector in test/stealth.test.ts.
+
+/**
+ * The ONE definition of the salt-padding rule (restated in PortalFactory's
+ * header): the 20-byte stealth address left-padded with 12 zero bytes to
+ * bytes32 — Solidity's `bytes32(uint256(uint160(addr)))`. Every consumer
+ * (derivation, tests, the sweeper bot) must call this rather than re-pad.
+ */
+export function portalSalt(stealthAddress: string): string {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(stealthAddress)) {
+    throw new Error("stealth: portalSalt expects a 0x + 20-byte hex address");
+  }
+  return "0x" + "00".repeat(12) + stealthAddress.slice(2).toLowerCase();
+}
+
+// EIP-55 checksum: uppercase each hex letter whose keccak(lowercase-ascii-hex)
+// nibble is >= 8. Local (not a new dependency) because @noble carries no
+// address codec and this package deliberately has no viem.
+function toChecksumAddress(lower: string): string {
+  const body = lower.slice(2);
+  const digest = bytesToHex(keccak_256(new TextEncoder().encode(body)));
+  const chars = [...body].map((ch, i) =>
+    parseInt(digest[i], 16) >= 8 ? ch.toUpperCase() : ch,
+  );
+  return "0x" + chars.join("");
+}
+
+function parseHexBytes(name: string, value: string, byteLen: number): Uint8Array {
+  if (!new RegExp(`^0x[0-9a-fA-F]{${2 * byteLen}}$`).test(value)) {
+    throw new Error(`stealth: ${name} must be 0x + ${byteLen}-byte hex`);
+  }
+  return hexToBytes(value.slice(2));
+}
+
+/**
+ * EIP-1014: keccak256(0xff ‖ deployer ‖ salt ‖ initCodeHash)[12..], returned
+ * EIP-55-checksummed. Mirrors PortalFactory.addressOf — `initCodeHash` is the
+ * factory's `sweeperInitCodeHash()` (constant per build: the sweeper takes no
+ * constructor args precisely so this stays a pure three-input function).
+ */
+export function create2Address(
+  factory: string,
+  salt: string,
+  initCodeHash: string,
+): string {
+  const digest = keccak_256(
+    concatBytes(
+      Uint8Array.of(0xff),
+      parseHexBytes("factory", factory, 20),
+      parseHexBytes("salt", salt, 32),
+      parseHexBytes("initCodeHash", initCodeHash, 32),
+    ),
+  );
+  return toChecksumAddress("0x" + bytesToHex(digest.subarray(12)));
+}
+
+/** A stealth derivation plus its portal (CREATE2 sweeper) destination. */
+export interface PortalDerivation extends StealthDerivation {
+  /** the checksummed CREATE2 address the payer actually funds. */
+  portalAddress: string;
+}
+
+/**
+ * Resolver side: the full portal issuance — derive the stealth address for
+ * `meta` (the announcement stays (ephemeralPub, viewTag), identical to the
+ * withdraw path), then map it through portalSalt/create2Address to the
+ * sweeper destination the payer is told to fund.
+ */
+export function portalAddress(
+  factory: string,
+  initCodeHash: string,
+  meta: StealthMetaAddress,
+  ephemeralPriv: FieldInput,
+): PortalDerivation {
+  const derived = deriveStealthAddress(meta, ephemeralPriv);
+  return {
+    ...derived,
+    portalAddress: create2Address(factory, portalSalt(derived.address), initCodeHash),
+  };
+}

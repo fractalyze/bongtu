@@ -11,6 +11,11 @@
 //   DATABASE_URL               REQUIRED — Postgres connection string (the indexer
 //                              is Postgres-only; it refuses to boot without it)
 //   LOG_CHUNK                  getLogs chunk size in blocks (default 50000)
+//   PORTAL_FACTORY             PortalFactory address => portal deposits live:
+//                              POST /pay/{name} issues stealth destinations and
+//                              ingest scans the factory's Swept logs. UNSET =>
+//                              the /pay + /portal routes 404 (one boot line
+//                              says so).
 //   AUTHORITY_KEY              arbiter PRIVATE key (bjj scalar) => ARBITER MODE:
 //                              decrypt every op's authority envelope, build the
 //                              note ledger, serve /notes + within-batch /path.
@@ -54,6 +59,13 @@ async function main(): Promise<void> {
   // are NEVER printed.
   const mode = cfg.authorityKey != null ? "ARBITER" : "public";
   console.log(`bongtu indexer: rpc=${cfg.rpc} pool=${cfg.pool} startBlock=${cfg.startBlock} mode=${mode} backend=postgres`);
+  // One line either way: a missing PORTAL_FACTORY is a configuration CHOICE the
+  // operator should be able to read off the boot log, not discover via a 404.
+  console.log(
+    cfg.portalFactory
+      ? `portal deposits: factory=${cfg.portalFactory} (POST /pay/{name}, /portal/*)`
+      : "portal deposits not configured (PORTAL_FACTORY unset) — POST /pay/{name} and /portal/* will 404",
+  );
   const ix = new Indexer(cfg);
   // KEM boot guard (pq-envelope-design.md §7): a KEM-epoch pool served by a
   // V1-ABI build or a KEM-keyless arbiter fails SILENTLY (envelopes skipped /

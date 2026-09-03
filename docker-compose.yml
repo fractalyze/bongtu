@@ -66,6 +66,9 @@ services:
       START_BLOCK: ${START_BLOCK:-45342038}
       POLL_MS: ${POLL_MS:-5000}
       LOG_CHUNK: ${LOG_CHUNK:-50000}
+      # Portal issuance/swept-tracking (slice ⑤): unset => the /pay + /portal
+      # routes 404 and ingest skips the factory log scan.
+      PORTAL_FACTORY: ${PORTAL_FACTORY:-}
       # AUTHORITY_KEY set => ARBITER MODE (institution-internal; holds every
       # owner's decrypted notes). Leave empty for a public indexer.
       AUTHORITY_KEY: ${AUTHORITY_KEY:-}
