@@ -232,6 +232,9 @@ System guarantees and inter-component contracts live in [`docs/`](docs/), one fi
   third-party submission safe, its API, and the no-silent-fallback client contract.
 - [Portal](docs/portal.md): stealth deposits — how a plain transfer from any wallet becomes a shielded
   note: CREATE2 destinations, issuance-time announcements, the bot sweep, and the v1 trust concession.
+- [Consumer family](docs/consumer.md): the no-auditor op family — the op-module core (`applyOp` +
+  registry), the five consumer circuits with hybrid receiver ciphertexts and viewTags, self-scan
+  discovery, the public batch path, deploy profiles, and the op-level audit semantics.
 - [Error surfaces](docs/errors.md): the five consequence classes and their surfaces (toast = event,
   banner = state), the money-state line, and the no-telemetry stance.
 - [Security model](docs/security-model.md): who sees what, the enforced-auditor-disclosure invariant, the

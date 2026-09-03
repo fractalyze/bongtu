@@ -1,10 +1,11 @@
 # Contracts
 
 `contracts/src/BongtuPool.sol` is the whole consensus surface: one shielded pool holding the
-single-frontier IMT, the nullifier set, ERC-20 custody, the arbiter epoch list, and six Groth16
-verifier calls. Everything else in `contracts/src/` is a generated verifier, an interface, or a
-proxy/ownership util. How to build and test the folder is owned by
-[`contracts/README.md`](../contracts/README.md).
+single-frontier IMT, the nullifier set, ERC-20 custody, the arbiter epoch list, six Groth16
+verifier calls, and the `applyOp` gate the consumer op modules drive. Everything else in
+`contracts/src/` is a generated verifier, an interface, a proxy/ownership util, the portal pair
+([portal.md](portal.md)), or a consumer op module ([below](#the-op-module-layer)). How to build
+and test the folder is owned by [`contracts/README.md`](../contracts/README.md).
 
 ## Entry points
 
@@ -144,10 +145,138 @@ live epoch would have no way to tell an un-keyed epoch from an unallocated index
 material against nothing. The full 1184-byte key is distributed off-chain and verified by clients
 against this hash ([deployment.md](deployment.md#the-arbiter-key-is-fixed-at-deploy-and-the-fixtures-are-bound-to-it)).
 
+## The op-module layer
+
+The consumer (no-auditor) op family enters the pool through registered **module contracts**, not
+new entrypoints; the six enterprise entry points above are byte-untouched and never route through
+this layer. Rationale, budgets and rejected alternatives: `.dev/op-module-design.md` §1/§4/§5;
+the family narrative: [consumer.md](consumer.md). This section states the contract duties.
+
+### `applyOp` — the invariant gate
+
+Three externals over one `OpEffects` struct (`root`, `nullifiers[]`, `leaves[]`, `subtreeRoot`),
+split by escrow motion:
+
+| function | escrow motion |
+|---|---|
+| `applyOp(fx)` | none |
+| `applyOpWithPull(fx, from, amount)` | pulls exactly `amount` from `from` (the deposit shape) |
+| `applyOpWithPush(fx, to, amount)` | pushes exactly `amount` to `to` (the withdraw shape); `to != 0` or `InvalidRecipient` |
+
+All three run `whenInitialized nonReentrant onlyRegisteredModule` — the pool's ONE `_locked`
+latch, so an ERC-777-style token callback cannot reenter any op of either family; modules are
+deliberately latch-free (they hold no state worth guarding, and their pre-`applyOp` verifier
+call is `view`). Each returns `startLeafIndex` (the first appended leaf, or the batch start for
+a subtree attach) and emits `OpApplied(module, startLeafIndex, nullifierCount, leafCount,
+subtreeRoot, root)` — the per-op audit anchor the indexer cross-checks every module event
+against ([indexer.md](indexer.md#consumer-op-family-the-module-event-stream)).
+
+The gate enforces, in execution order, on whatever a registered module passes — the core
+re-derives nothing from proofs:
+
+1. **non-empty effects** — no nullifiers, no leaves, no subtree is `EmptyOp` (a zero-effect op
+   would emit an ambiguous `OpApplied`);
+2. **known root iff spending** — `knownRoots[fx.root]` when nullifiers are present; `fx.root ==
+   0` when none (a mint claims no membership) — else `UnknownRoot`;
+3. **every nullifier nonzero and unused** — `ZeroNullifier` / `NullifierAlreadyUsed`, marked
+   sequentially and completely so an in-transaction duplicate reverts on its second occurrence.
+   Unlike `_spendNullifier`, a zero entry here is a revert, not a skip: padding is a
+   circuit-layout concern and modules strip zero slots before crossing the boundary;
+4. **shape exclusivity** — `fx.subtreeRoot != 0` requires empty `leaves` (`MixedAppendShape`);
+   the attach runs at level `LOG_B` through the same internals as disburse;
+5. **every leaf nonzero** — `ZeroOutputCommitment`, appended in order;
+6. **escrow motion last** — CEI, `SafeERC20`, after all tree/nullifier writes, only in the two
+   suffixed variants and exactly `amount`. The core never sees the proof, so `amount == pub[0]`
+   is a module obligation reviewed at registration.
+
+`Appended` / `SubtreeAppended` keep firing from the shared internals — the indexer's tree feed
+is family-blind.
+
+### The module registry
+
+`registeredModules` (one mapping, appended at the storage tail; `__gap` 47 → 46) gates the three
+`applyOp*`. Management: `registerModule` / `removeModule`, both `onlyOwner whenInitialized`,
+plus `reinitializeV3(modules)` — the one-shot `upgradeToAndCall` payload (`onlyOwner
+reinitializer(3)`; no verifier swap rides in it, so unlike the v2 upgrade there is no
+old-proof/new-verifier atomicity constraint).
+
+- **No-op transitions revert** (`ModuleAlreadyRegistered` / `ModuleNotRegistered`; `ZeroModule`
+  on the zero address; `reinitializeV3` rejects duplicate entries the same way). Why: there is
+  no on-chain enumerable array — the `ModuleRegistered`/`ModuleRemoved` event stream is the
+  canonical registry reconstruction source, so it must stay a balanced add/remove log; a mirror
+  may treat a spurious double-add or remove-of-unknown as ingest corruption, never as state to
+  tolerate.
+- **Registration is upgrade-equivalent power.** Users approve the core, so a registered module
+  can spend any approval made to the core and mint into the shared tree. The trust boundary is
+  the owner key, same as `_authorizeUpgrade`; there is no weaker registration tier.
+- **Removal takes effect immediately and strands nothing consensus-side**: notes are untyped,
+  proofs bind no module address, and a pending user tx re-proves against a replacement module
+  unchanged. One non-consensus tail survives removal: `submitDisburseKemChunk` (below) never
+  crosses `applyOp`, so a removed disburse module still accepts chunk submissions from its
+  deregistered address — indexers keep watching removed disburse-module addresses until every
+  pending batch of theirs completes.
+
+### The consumer modules
+
+Six contracts in `contracts/src/modules/`, each plain (non-proxied), holding no funds and no
+consensus state, constructed over (core, verifier). `ConsumerOpModule` is the shared base:
+`KEM_CIPHERTEXT_LEN = 1088` with per-entry length and count checks
+(`WrongKemCiphertextLength(index, got, want)`, `WrongKemCiphertextCount` — the count equals the
+circuit's output arity, or the scanner's per-output slicing desyncs), zero-slot stripping before
+the `applyOp` boundary, and `InvalidProof` / `ZeroPool` / `ZeroVerifier`.
+
+| module | entrypoint | duties beyond the base |
+|---|---|---|
+| `DepositPrivModule` | `depositPriv(a,b,c, uint[16] pub, bytes[] kemCiphertexts)` | no injection (a 0-in mint has no `enabled` run); verify, then `applyOpWithPull(msg.sender, pub[0])` — the proof-bound pull; emits `DepositedPriv` |
+| `TransferPrivModule` | `transferPriv(…, uint[20] pub, …)` | injects `enabled[i] = nullifier[i] != 0` before verify; `applyOp`; emits `TransferredPriv` |
+| `Transfer10x2PrivModule` | `transfer10x2Priv(…, uint[36] pub, …)` | the same at input arity 10; emits `Transferred10x2Priv` |
+| `WithdrawPrivModule` | `withdrawPriv(…, uint[16] pub, …, stealthEphemeralPub, stealthViewTag)` | range-checks `pub[15]` to a nonzero uint160 (`InvalidRecipient` — the circuit binds a field element and cannot range-check an address); injects `enabled`; `applyOpWithPush(recipient, pub[0])` — relayable, never msg.sender; emits `WithdrawnPriv` plus the calldata-carried `WithdrawAnnouncement` pair |
+| `ConsumerDisburseModule` | `disbursePriv256(…, uint[8] pub, uint256[] disclosure, bytes32[] kemChunkHashes)` and `submitDisburseKemChunk(batchId, chunkIndex, chunkData)` | see below |
+
+Every ciphertext field in a module event is copied from **verified** public signals; only
+`kemCiphertexts` (and the withdraw announcement pair) are free calldata, with the same "can only
+break discovery" property. No `epoch` field: consumer events carry no arbiter coupling.
+
+`ConsumerDisburseModule` is parameterized over the pool's own `B` (read at construction, so a
+wiring mismatch is unrepresentable); one code path serves the 1×16 dev twin and the 1×256 batch:
+
+- **Disclosure length and canonical form, before verify**: `disclosure.length == 6·B`
+  (`WrongCiphertextLength` — 1536 at B = 256) and every element `< p`
+  (`NonCanonicalDisclosureElement`). Poseidon folds reduce mod p silently, so an `x + p` element
+  would pass the off-chain fold while its raw bytes disagree with the proven element; rejecting
+  `>= p` upgrades the fold's elementwise equality from mod-p equivalence to byte equality.
+- **The `ZeroNullifier`-then-inject obligation**: the disburse base omits the enabled boolean
+  and value belt, so the module MUST revert `ZeroNullifier` first and only then inject
+  `enabled = 1` unconditionally, then verify — injecting without the revert would hand a
+  zero-leaf spend full trust ([circuits.md](circuits.md#soundness-invariants)).
+- `kemChunkHashes.length == K` (`WrongKemChunkHashCount`), stored under `batchId =
+  startLeafIndex` (unique forever in an append-only tree); `applyOp` with `subtreeRoot =
+  pub[3]`; emits `DisbursedPriv` (everything consensus-relevant is final in this transaction)
+  and `DisbursePrivDisclosure(startLeafIndex, disclosure)`.
+- **`submitDisburseKemChunk` is permissionless chunk delivery** — anyone holding the bytes can
+  complete a batch. Checks in order: `UnknownBatch`, `BadChunkIndex`, `ChunkAlreadyAccepted`,
+  exact byte length (`chunkArityOf(chunkIndex) × 1088`, `WrongKemCiphertextLength`), and
+  `keccak256(chunkData)` against the batch-time commitment (`ChunkHashMismatch`) — so a late
+  chunk is verifiably THE bytes the sender chose. On pass it emits
+  `DisburseKemChunkAccepted(batchId, chunkIndex)`; the chunk DATA stays calldata-only (no
+  re-emit). Chunk bookkeeping is discovery-transport state, not consensus state; a missing chunk
+  leaves its outputs hash-committed but undiscoverable-by-scan — funds intact and spendable.
+
+### `initializeConsumerOnly`
+
+The consumer-only profile initializer: poseidon, token and batch size, nothing else — **no
+arbiter epoch is ever minted, no KEM pk hash stored, no enterprise verifier wired**. It shares
+the `initializer` version slot with `initialize` (a pool is one profile forever). On such a pool
+every enterprise entrypoint reverts (the arbiter-key injection has no epoch to read) and the
+registered modules are the whole op surface. "No key exists" was chosen over a burned
+placeholder key. Pinned by `contracts/test/ConsumerOnly.t.sol`; deploy profile:
+[deployment.md](deployment.md#deploy-profiles-and-the-consumer-module-family).
+
 ## One initializer
 
-`initialize` is the pool's only initializer, and it brings the pool up in its complete production
-shape: Poseidon and the token, **all six verifiers**, the IMT parameters, the reentrancy latch, the
+`initialize` is the enterprise profile's one-call initializer (`initializeConsumerOnly` above is
+its consumer-only sibling on the same version slot), and it brings the pool up in its complete
+production shape: Poseidon and the token, **all six verifiers**, the IMT parameters, the reentrancy latch, the
 owner, and arbiter epoch 0 carrying both halves of the hybrid authority key. A deployed pool has
 every entry point it will ever serve already backed by a real verifier, so no operation is ever
 reachable-but-unbacked and a deploy is one transaction with no sequencing to get wrong.
@@ -159,9 +288,11 @@ Two rules make that shape enforceable rather than merely intended:
 | every verifier argument must be non-zero (`ZeroVerifier`) | a zeroed verifier turns its entry point into a call into `address(0)`: live, always reverting, unfixable short of an upgrade |
 | the arbiter key must be non-zero and the KEM pk hash must be non-zero | `(0,0)` is the key foot-gun (§5.3 Q9); a zero hash is reserved to mean "this epoch was never minted", so minting one would make epoch 0 indistinguishable from an unallocated index |
 
-The `initializer` modifier leaves the ERC-7201 version slot at **1**. A future circuit change ships
-as `upgradeToAndCall` carrying its own `reinitializer(2)` payload, written at that time against the
-state it actually needs to move; nothing is reserved for it in advance.
+The `initializer` modifier leaves the ERC-7201 version slot at **1**. Upgrades ship as
+`upgradeToAndCall` carrying their own `reinitializer(n)` payload, written at that time against
+the state each actually needs to move — versions **2** (the PQ envelope upgrade,
+`reinitializeV2`) and **3** (the module layer, `reinitializeV3`,
+[above](#the-op-module-layer)) are consumed; nothing is reserved in advance.
 
 ## Proxy and wiring
 
