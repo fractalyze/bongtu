@@ -92,6 +92,149 @@
     },
     {
       "type": "function",
+      "name": "applyOp",
+      "inputs": [
+        {
+          "name": "fx",
+          "type": "tuple",
+          "internalType": "struct BongtuPool.OpEffects",
+          "components": [
+            {
+              "name": "root",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "nullifiers",
+              "type": "uint256[]",
+              "internalType": "uint256[]"
+            },
+            {
+              "name": "leaves",
+              "type": "uint256[]",
+              "internalType": "uint256[]"
+            },
+            {
+              "name": "subtreeRoot",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "name": "startLeafIndex",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "applyOpWithPull",
+      "inputs": [
+        {
+          "name": "fx",
+          "type": "tuple",
+          "internalType": "struct BongtuPool.OpEffects",
+          "components": [
+            {
+              "name": "root",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "nullifiers",
+              "type": "uint256[]",
+              "internalType": "uint256[]"
+            },
+            {
+              "name": "leaves",
+              "type": "uint256[]",
+              "internalType": "uint256[]"
+            },
+            {
+              "name": "subtreeRoot",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ]
+        },
+        {
+          "name": "from",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "amount",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "startLeafIndex",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "applyOpWithPush",
+      "inputs": [
+        {
+          "name": "fx",
+          "type": "tuple",
+          "internalType": "struct BongtuPool.OpEffects",
+          "components": [
+            {
+              "name": "root",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "nullifiers",
+              "type": "uint256[]",
+              "internalType": "uint256[]"
+            },
+            {
+              "name": "leaves",
+              "type": "uint256[]",
+              "internalType": "uint256[]"
+            },
+            {
+              "name": "subtreeRoot",
+              "type": "uint256",
+              "internalType": "uint256"
+            }
+          ]
+        },
+        {
+          "name": "to",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "amount",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "startLeafIndex",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
       "name": "arbiterEpochs",
       "inputs": [
         {
@@ -517,12 +660,70 @@
     },
     {
       "type": "function",
+      "name": "registerModule",
+      "inputs": [
+        {
+          "name": "module",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "registeredModules",
+      "inputs": [
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "bool",
+          "internalType": "bool"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
       "name": "reinitializeV2",
       "inputs": [
         {
           "name": "_withdrawVerifier",
           "type": "address",
           "internalType": "contract IWithdrawVerifier"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "reinitializeV3",
+      "inputs": [
+        {
+          "name": "modules",
+          "type": "address[]",
+          "internalType": "address[]"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "removeModule",
+      "inputs": [
+        {
+          "name": "module",
+          "type": "address",
+          "internalType": "address"
         }
       ],
       "outputs": [],
@@ -1059,6 +1260,75 @@
     },
     {
       "type": "event",
+      "name": "ModuleRegistered",
+      "inputs": [
+        {
+          "name": "module",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "ModuleRemoved",
+      "inputs": [
+        {
+          "name": "module",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "OpApplied",
+      "inputs": [
+        {
+          "name": "module",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "startLeafIndex",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "nullifierCount",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "leafCount",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "subtreeRoot",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "root",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
       "name": "OwnershipTransferStarted",
       "inputs": [
         {
@@ -1472,6 +1742,11 @@
     },
     {
       "type": "error",
+      "name": "EmptyOp",
+      "inputs": []
+    },
+    {
+      "type": "error",
       "name": "FailedCall",
       "inputs": []
     },
@@ -1500,6 +1775,33 @@
       "type": "error",
       "name": "MisalignedInsert",
       "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "MixedAppendShape",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "ModuleAlreadyRegistered",
+      "inputs": [
+        {
+          "name": "module",
+          "type": "address",
+          "internalType": "address"
+        }
+      ]
+    },
+    {
+      "type": "error",
+      "name": "ModuleNotRegistered",
+      "inputs": [
+        {
+          "name": "module",
+          "type": "address",
+          "internalType": "address"
+        }
+      ]
     },
     {
       "type": "error",
@@ -1632,6 +1934,11 @@
     {
       "type": "error",
       "name": "ZeroKemPkHash",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "ZeroModule",
       "inputs": []
     },
     {

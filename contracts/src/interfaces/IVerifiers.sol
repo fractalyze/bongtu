@@ -61,3 +61,47 @@ interface ITransfer10x2Verifier {
         view
         returns (bool);
 }
+
+// --- consumer (no-auditor) family (OPMOD §2) --------------------------------
+// Same one-interface-per-circuit rule at the consumer arities (depositPriv 16,
+// transferPriv 20, transfer10x2Priv 36, withdrawPriv 16, disbursePriv 8). The
+// consumer circuits strip every authority signal (no cipherTextAuthority, no
+// kemBinding, no authorityPublicKey) and add receiver ciphertexts + viewTags,
+// so no consumer arity equals its enterprise twin's. Like the enterprise
+// disburse pair, the 1x16 dev twin and the 1x256 production disburse verifier
+// share one interface: the batch size changes the subtree, not the vector.
+
+interface IDepositPrivVerifier {
+    function verifyProof(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[16] calldata pub)
+        external
+        view
+        returns (bool);
+}
+
+interface ITransferPrivVerifier {
+    function verifyProof(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[20] calldata pub)
+        external
+        view
+        returns (bool);
+}
+
+interface ITransfer10x2PrivVerifier {
+    function verifyProof(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[36] calldata pub)
+        external
+        view
+        returns (bool);
+}
+
+interface IWithdrawPrivVerifier {
+    function verifyProof(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[16] calldata pub)
+        external
+        view
+        returns (bool);
+}
+
+interface IDisbursePrivVerifier {
+    function verifyProof(uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c, uint[8] calldata pub)
+        external
+        view
+        returns (bool);
+}

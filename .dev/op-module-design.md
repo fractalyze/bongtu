@@ -732,6 +732,22 @@ independent assertion because it is what makes the *fill* safe: a fill is guarde
 `MirrorTree.path`'s internal fold-to-root assert either way (`tree.ts` backstop), and folding
 before filling turns a bad publish into an alarm instead of a 500.
 
+**U5 indexer obligations (U4 review).** Two contract-side facts the U5 indexer work must
+build on:
+
+1. **Registry mirror = the event log, now guaranteed balanced.** The indexer's
+   `registeredModules` mirror derives from `ModuleRegistered`/`ModuleRemoved` alone (S1.4 —
+   no enumerable array on-chain). Since the U4 review, `registerModule`/`removeModule`
+   revert on no-op transitions (`ModuleAlreadyRegistered` / `ModuleNotRegistered`), so the
+   stream is a balanced add/remove log by construction — the mirror may treat a spurious
+   double-add or remove-of-unknown as ingest corruption, not as a state to tolerate.
+2. **Chunk watch-set outlives module removal.** `submitDisburseKemChunk` never crosses the
+   applyOp gate, so a REMOVED disburse module still accepts chunk submissions and emits
+   `DisburseKemChunkAccepted` from its deregistered address (consensus-contained — chunks
+   touch no pool state — but real for discovery). The indexer's chunk watch-set MUST keep
+   including removed disburse-module addresses until every pending batch of theirs has all
+   chunks accepted; only then may the address be dropped from the filter.
+
 ### 4.5 Pad slots and count-hiding
 
 A pad slot is a full, well-formed output note: `value = 0`, `salt` drawn fresh at random,

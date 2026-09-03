@@ -12,10 +12,19 @@ folder's layout, tests, and fixtures.
 
 ```
 src/
-  BongtuPool.sol       the pool (Initializable + Ownable2StepUpgradeable + UUPSUpgradeable)
+  BongtuPool.sol       the pool (Initializable + Ownable2StepUpgradeable + UUPSUpgradeable),
+                       plus the op-module core: the applyOp* invariant gate + module registry (OPMOD §1)
+  modules/             the consumer (no-auditor) op modules — DepositPriv, TransferPriv,
+                       Transfer10x2Priv, WithdrawPriv, ConsumerDisburse (B-parameterized,
+                       serves the 1x16 dev twin and the 1x256 batch + kem chunk delivery),
+                       all extending the shared abstract base ConsumerOpModule;
+                       each wires one verifier, owns one public layout, and routes every
+                       state effect through BongtuPool.applyOp*
   verifiers/           snarkjs-generated Groth16 verifiers, contract-renamed only:
                        Deposit, Transfer, Transfer10, Transfer10x2, Withdraw,
-                       Disburse (1x16 dev), Disburse256 (prod)
+                       Disburse (1x16 dev), Disburse256 (prod), and the consumer family
+                       DepositPriv, TransferPriv, Transfer10x2Priv, WithdrawPriv,
+                       DisbursePriv (1x16 dev), DisbursePriv256 (prod)
                        (byte-identical otherwise to the committed circuits/verifiers/*.sol —
                         test/VerifierDrift.t.sol gates that)
   interfaces/          IPoseidon2, IVerifiers
@@ -32,16 +41,22 @@ test/
   Arbiter.t.sol        arbiter epoch lifecycle (initialize, rotateArbiter)
   Enforcement.t.sol    disclosure enforcement (ciphertext-length rule, self-burn defense)
   Disburse256.t.sol    the real GPU 1x256 disburse proof on-chain at production arity
-  Upgrade.t.sol        UUPS upgrade gate (state survives an implementation swap; initializer runs once)
+  OpModule.t.sol       the applyOp invariant gate: module registry lifecycle, the OPMOD §1.3
+                       list, escrow motion + CEI, the shared reentrancy latch
+  ConsumerModules.t.sol the five consumer modules vs the real verifiers + committed consumer
+                       fixtures: accepts, disburse chunk lifecycle, canonical-form binding,
+                       cross-family note interop, module-level negatives
+  Upgrade.t.sol        UUPS upgrade gate (state survives an implementation swap; initializer
+                       runs once; the V3 module payload + applyOp gate post-upgrade)
   GasReport.t.sol      per-operation gas via gasleft() deltas
-  mocks/               MockERC20, StubVerifiers
+  mocks/               MockERC20, StubVerifiers, OpModuleMocks (StubModule + reentrancy probe)
   fixtures/            committed test fixtures + their generators (below)
 ```
 
 ## Test
 
 ```sh
-forge test    # 77 tests, all committed-fixture-driven — no network, no GPU
+forge test    # 132 tests, all committed-fixture-driven — no network, no GPU
 ```
 
 `foundry.toml`: solc 0.8.24, `ffi = true`, and `fs_permissions` granting read on
