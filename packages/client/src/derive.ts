@@ -24,19 +24,50 @@
 // EOA + deterministic ECDSA only (MetaMask pinned); 4337 accounts need a different
 // derivation (v1.1).
 
-import { keccak256 } from "viem";
+import { hexToBytes, keccak256 } from "viem";
 import { deriveKeypair } from "@bongtu/core/note";
 import type { Keypair } from "@bongtu/core/note";
 import { packPubkey } from "@bongtu/core/pubkey";
 import { SUBGROUP_ORDER } from "@bongtu/core/babyjub";
+import { ml_kem768 } from "@bongtu/core/kem";
 
-/** The derived wallet identity: the bjj keypair plus its compressed public key —
- *  the RECEIVE identifier a payer types into their wallet to pay this user. */
+/** The wallet's deterministic ML-KEM-768 keypair — the PQ leg of the consumer
+ *  view identity (OPMOD §3.1). `ek` is registered/published (1184 B); `dk`
+ *  decapsulates consumer receiver cts (2400 B) and never leaves memory. */
+export interface KemKeypair {
+  ek: Uint8Array;
+  dk: Uint8Array;
+}
+
+/** The derived wallet identity: the bjj SPEND keypair, plus — for consumer
+ *  wallets — the note-layer VIEW identity (OPMOD §3.1). Commitments and
+ *  nullifiers keep using `keypair` (spend) exclusively — the untyped-note
+ *  invariant. The view fields are OPTIONAL because enterprise flows (e.g. the
+ *  sweeper's synthetic portal identity) never carry or read view material;
+ *  consumer code takes `ConsumerWalletIdentity`, where they are required. */
 export interface WalletIdentity {
-  /** the bjj spending keypair (formattedPrivateKey + publicKey point). */
+  /** the bjj spending keypair (formattedPrivateKey + publicKey point) — unchanged. */
   keypair: Keypair;
   /** compressed bjj pubkey ("0x" + 32-byte hex) — the wallet's receive address. */
   compressedPubkey: string;
+  /** the bjj VIEW keypair (viewPriv, viewPub = viewPriv·Base8) — consumer
+   *  receiver cts ECDH against viewPub, never the spend key. Absent on
+   *  enterprise-only identities. */
+  viewKeypair?: Keypair;
+  /** compressed bjj view pubkey ("0x" + 32-byte hex) — the registry's noteViewPub leg. */
+  compressedViewPubkey?: string;
+  /** deterministic ML-KEM-768 keypair — the registry's kemEk leg + its dk. */
+  kemKeypair?: KemKeypair;
+}
+
+/** A wallet identity whose consumer view identity is present — what the
+ *  signature derivation always produces. The view identity =
+ *  (viewKeypair.formattedPrivateKey, kemKeypair.dk) as a pair: both are needed
+ *  to decrypt consumer receiver cts, neither can spend. */
+export interface ConsumerWalletIdentity extends WalletIdentity {
+  viewKeypair: Keypair;
+  compressedViewPubkey: string;
+  kemKeypair: KemKeypair;
 }
 
 /** An EIP-712 typed-data payload ready for `signer._signTypedData(domain, types, message)`
@@ -108,12 +139,75 @@ export function scalarFromSignature(signature: string): bigint {
   return s;
 }
 
+// ── Consumer view identity (OPMOD §3.1) ────────────────────────────────────────
+//
+// One seed, three derivations. The same 65-byte signature that yields spendPriv
+// also yields the note-layer view scalar and the ML-KEM keypair, each behind
+// keccak under a DISTINCT ascii suffix tag appended to the raw signature BYTES:
+//
+//   spendPriv = keccak256(sig)                                    mod L   (UNCHANGED)
+//   viewPriv  = keccak256(bytes(sig) ‖ ascii("bongtu/view-key/v1")) mod L
+//   kemSeed   = keccak256(bytes(sig) ‖ ascii("bongtu/consumer-kem/v1/d"))
+//             ‖ keccak256(bytes(sig) ‖ ascii("bongtu/consumer-kem/v1/z"))  (64 B)
+//   (ek, dk)  = ML-KEM-768.keygen(kemSeed)
+//
+// Recovery stays "re-sign the same struct", and viewPriv/dk are not computable
+// FROM spendPriv (they hang off the raw signature, behind keccak), so handing
+// the view pair to a delegated scanner never leaks spend authority. These are
+// the note-layer keys — DISTINCT from the stealth meta-address pair
+// (stealthKeys.ts), which signs a different EIP-712 struct entirely.
+
+const VIEW_KEY_TAG = "bongtu/view-key/v1";
+const KEM_SEED_TAG_D = "bongtu/consumer-kem/v1/d";
+const KEM_SEED_TAG_Z = "bongtu/consumer-kem/v1/z";
+
+/** keccak256 over the decoded signature bytes with an ascii tag appended. */
+function taggedSignatureDigest(signature: string, tag: string): Uint8Array {
+  const sig = hexToBytes(signature as `0x${string}`);
+  const tagBytes = new TextEncoder().encode(tag);
+  const preimage = new Uint8Array(sig.length + tagBytes.length);
+  preimage.set(sig, 0);
+  preimage.set(tagBytes, sig.length);
+  return hexToBytes(keccak256(preimage));
+}
+
+/** The view-scalar KDF: keccak256(bytes(sig) ‖ VIEW_KEY_TAG) mod L, with the
+ *  same canonical reduction and (~2^-252) zero rejection as the spend path. */
+export function viewScalarFromSignature(signature: string): bigint {
+  const digest = taggedSignatureDigest(signature, VIEW_KEY_TAG);
+  const s = digest.reduce<bigint>((v, b) => (v << 8n) | BigInt(b), 0n) % SUBGROUP_ORDER;
+  if (s === 0n) {
+    throw new Error("viewScalarFromSignature: signature hashed to 0 mod L (astronomically rare). Re-sign");
+  }
+  return s;
+}
+
+/** The 64-byte (d ‖ z) ML-KEM-768 keygen seed, tag-derived from the signature. */
+export function kemSeedFromSignature(signature: string): Uint8Array {
+  const d = taggedSignatureDigest(signature, KEM_SEED_TAG_D);
+  const z = taggedSignatureDigest(signature, KEM_SEED_TAG_Z);
+  const seed = new Uint8Array(64);
+  seed.set(d, 0);
+  seed.set(z, 32);
+  return seed;
+}
+
 /**
  * Full derivation: a MetaMask signature over the domain struct -> the wallet
- * identity (bjj keypair + compressed receive pubkey). Deterministic in `signature`.
+ * identity (bjj spend keypair + compressed receive pubkey + the consumer view
+ * identity: bjj view keypair + deterministic ML-KEM-768 keypair).
+ * Deterministic in `signature`.
  */
-export function deriveIdentityFromSignature(signature: string): WalletIdentity {
+export function deriveIdentityFromSignature(signature: string): ConsumerWalletIdentity {
   const scalar = scalarFromSignature(signature);
   const keypair = deriveKeypair(scalar);
-  return { keypair, compressedPubkey: packPubkey(keypair.publicKey) };
+  const viewKeypair = deriveKeypair(viewScalarFromSignature(signature));
+  const kem = ml_kem768.keygen(kemSeedFromSignature(signature));
+  return {
+    keypair,
+    compressedPubkey: packPubkey(keypair.publicKey),
+    viewKeypair,
+    compressedViewPubkey: packPubkey(viewKeypair.publicKey),
+    kemKeypair: { ek: kem.publicKey, dk: kem.secretKey },
+  };
 }

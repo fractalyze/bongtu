@@ -2,9 +2,13 @@
 # §5.2 CRITICAL-correction security regression (SPEC §5.2, docs/zeto-derivation.md).
 #
 # Proves the zero-commitment belt `enabled[i] * IsZero(inputCommitments[i]) === 0`
-# closes the SMT->IMT zero-leaf mint-from-nothing at the CIRCUIT level, for ALL
-# FIVE spending circuits (all permissionless — the disburse caller allowlist
-# retired 2026-07-28), while leaving honest spends provable.
+# closes the SMT->IMT zero-leaf mint-from-nothing at the CIRCUIT level, for all
+# NINE spending circuits — the five enterprise ones (all permissionless — the
+# disburse caller allowlist retired 2026-07-28) AND the four consumer spenders
+# (transferPriv, transfer10x2Priv, withdrawPriv, and the consumer disburse base
+# via its 1x16 dev twin disbursePriv; disbursePriv256 instantiates the SAME
+# BongtuConsumerDisburse template — OPMOD §2.1 gate obligation) — while leaving
+# honest spends provable.
 # The two 10-input circuits put their exploit in a middle slot (7 of 10), where a
 # per-slot belt is easiest to get wrong.
 #
@@ -41,6 +45,8 @@ echo "== regenerating honest + zero-leaf exploit input fixtures =="
 $NODE --import tsx fixtures/gen_inputs.ts            || { echo "FATAL: honest input gen failed"; exit 1; }
 $NODE --import tsx fixtures/gen_zero_leaf_inputs.ts  || { echo "FATAL: transfer/withdraw zero-leaf input gen failed"; exit 1; }
 $NODE --import tsx fixtures/gen_disburse_zero_leaf.ts || { echo "FATAL: disburse zero-leaf input gen failed"; exit 1; }
+$NODE --import tsx fixtures/gen_consumer_inputs.ts    || { echo "FATAL: consumer honest input gen failed"; exit 1; }
+$NODE --import tsx fixtures/gen_consumer_zero_leaf.ts || { echo "FATAL: consumer zero-leaf input gen failed"; exit 1; }
 
 compile_if_missing() {
   local name="$1"
@@ -72,10 +78,16 @@ declare -A TEMPLATE=(
   [transfer10x2]="ZetoTransferSmall"
   [withdraw]="CheckNullifiersInputsOutputsValueIMT"
   [disburse]="Zeto"
+  # consumer bases (OPMOD §2.1): transferPriv and transfer10x2Priv share the
+  # consumer transfer base; disbursePriv shares its template with disbursePriv256.
+  [transferPriv]="BongtuConsumerTransfer"
+  [transfer10x2Priv]="BongtuConsumerTransfer"
+  [withdrawPriv]="BongtuConsumerWithdrawBase"
+  [disbursePriv]="BongtuConsumerDisburse"
 )
 failures=0
 
-for name in transfer transfer10 transfer10x2 withdraw disburse; do
+for name in transfer transfer10 transfer10x2 withdraw disburse transferPriv transfer10x2Priv withdrawPriv disbursePriv; do
   compile_if_missing "$name"
   tmpl="${TEMPLATE[$name]}"
 
@@ -111,7 +123,8 @@ echo ""
 echo "======================================================================"
 if [ "$failures" -eq 0 ]; then
   echo "ZERO-LEAF BELT GATE: PASS — the zero-commitment mint-from-nothing is"
-  echo "unsatisfiable at witness-gen for transfer, transfer10, transfer10x2, withdraw AND disburse; honest spends prove."
+  echo "unsatisfiable at witness-gen for transfer, transfer10, transfer10x2, withdraw, disburse"
+  echo "AND the consumer spenders transferPriv, transfer10x2Priv, withdrawPriv, disbursePriv; honest spends prove."
   exit 0
 else
   echo "ZERO-LEAF BELT GATE: FAIL ($failures)"

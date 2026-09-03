@@ -35,7 +35,7 @@ const genwitOf = (c: string): string => join(OUT, `${c}_js`, "generate_witness.j
 const inp = (n: string): string => join(CIRCUITS, "fixtures", "inputs", `${n}.json`);
 const wtns = (n: string): string => join(OUT, `${n}.wtns`);
 
-for (const c of ["withdraw", "transfer10", "transfer10x2"]) {
+for (const c of ["withdraw", "transfer10", "transfer10x2", "withdrawPriv", "transferPriv", "transfer10x2Priv"]) {
   if (!existsSync(wasmOf(c))) {
     console.error(`FATAL: ${wasmOf(c)} missing — compile ${c} first (bash build/prove_all.sh).`);
     process.exit(1);
@@ -51,6 +51,11 @@ writeFileSync(join(OUT, "package.json"), '{ "type": "commonjs" }\n');
 execFileSync(process.execPath, ["--import", "tsx", join(CIRCUITS, "fixtures", "gen_attack_inputs.ts")], {
   stdio: "inherit",
 });
+execFileSync(
+  process.execPath,
+  ["--import", "tsx", join(CIRCUITS, "fixtures", "gen_consumer_attack_inputs.ts")],
+  { stdio: "inherit" },
+);
 
 interface WitnessResult {
   ok: boolean;
@@ -78,6 +83,14 @@ const MUST_THROW: [circuit: string, fixture: string, belt: string][] = [
   ["withdraw", "withdraw_attack", "CheckNullifiersInputsOutputsValueIMT"],
   ["transfer10", "transfer10_attack", "ZetoTransferSmall"],
   ["transfer10x2", "transfer10x2_attack", "ZetoTransferSmall"],
+  // consumer re-target (OPMOD §2.1): every consumer top that carries the belt.
+  // The consumer disburse base deliberately omits it (module-obligation
+  // compensates), so disbursePriv has no entry here — its zero-leaf guard is
+  // covered by test_zero_leaf_unsat.sh.
+  ["withdrawPriv", "withdrawPriv_mint", "BongtuConsumerWithdrawBase"],
+  ["withdrawPriv", "withdrawPriv_attack", "BongtuConsumerWithdrawBase"],
+  ["transferPriv", "transferPriv_attack", "BongtuConsumerTransfer"],
+  ["transfer10x2Priv", "transfer10x2Priv_attack", "BongtuConsumerTransfer"],
 ];
 
 for (const [circuit, name, belt] of MUST_THROW) {
@@ -98,6 +111,8 @@ for (const [circuit, name] of [
   ["withdraw", "withdraw_padded"],
   ["transfer10", "transfer10"],
   ["transfer10x2", "transfer10x2"],
+  ["withdrawPriv", "withdrawPriv_padded"],
+  ["transfer10x2Priv", "transfer10x2Priv"], // 6 zero-value disabled pads (committed honest fixture)
 ]) {
   const r = witness(circuit, name);
   if (!r.ok) {
@@ -112,6 +127,10 @@ for (const [circuit, name] of [
 // kemBinding public-signal index per proof fixture (pq-envelope-design.md §3
 // layouts), with the circuit whose vkey verifies it — transfer10 and
 // transfer10x2 each carry two fixtures against one vkey.
+// ENTERPRISE-ONLY by design: no consumer circuit has a kemBinding public
+// (OPMOD §2.1 — this half is N/A for the consumer family and superseded by
+// the consumer-specific gates: consumer_receiver_decrypt_check.ts,
+// consumer_disclosure_binding_check.ts, consumer_viewtag_canonicality_check.ts).
 const KEM_BINDING_AT: [fixture: string, circuit: string, at: number][] = [
   ["deposit", "deposit", 13],
   ["withdraw", "withdraw", 16],

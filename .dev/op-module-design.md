@@ -609,7 +609,9 @@ Justification:
 3. **Uniformity.** One rule across all five circuits, versus the enterprise family's
    two-regime split that U-X3 had to document per-base.
 
-The 128-bit clamp carries over: `encryptionNonce < 2^128` (client-side `toEncryptionNonce`),
+The 128-bit clamp carries over: `encryptionNonce < 2^128` (client-side `toEncryptionNonce`;
+the vendored SymmetricEncrypt's in-circuit `LessThan(252)` is alias-prone on a free field
+element and must be treated as advisory — no soundness argument may rest on it),
 and `nonce + i` overflows the packing slot only at `nonce ≥ 2^128 − 255` — excluded by the
 clamp, same argument as the U-X3 header comment.
 
@@ -715,6 +717,15 @@ For every `DisbursePrivDisclosure` the indexer (ANY indexer — no arbiter key i
    public calldata — the same privacy class as single-append leaves, which are already served
    ungated. The 422 sentinel and the arbiter-mode owner gate remain in force for ENTERPRISE
    batches, distinguished by which event filled the block.
+
+**Canonical-form binding (requirement for the module and this verifier).** `poseidon-lite`
+reduces every input mod p silently, so a publisher could emit `x + p` in place of the
+circuit's canonical element `x` and still pass both folds after implicit reduction, while the
+raw calldata bytes disagree with the proven elements (a byte-comparing consumer — e.g. a
+scanner matching a published viewTag slot as uint256 — would silently drop the event: the
+same self-sabotage discoverability class §3.2 closes). The §4.3 module and/or this fold
+verifier MUST reject any disclosure element `>= p` before folding, upgrading "elementwise
+equal" from mod-p equivalence to byte equality.
 
 Check 2 is technically implied by check 1 plus circuit soundness (§4.2), but it is kept as an
 independent assertion because it is what makes the *fill* safe: a fill is guarded by
