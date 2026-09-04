@@ -41,6 +41,8 @@ import {
   type SelfScanState,
 } from "@bongtu/client/selfscan";
 import { clearScanState, loadScanState, saveScanState, scanNotice } from "../lib/scanStore.js";
+import { accountGuard, forgetDevice } from "../lib/accountGuard.js";
+import { autoTickAllowed } from "../lib/refreshGate.js";
 import { IndexerClient, type OwnerNote, type HistoryItem } from "@bongtu/client/indexerClient";
 import { SessionStore, type StoredSession } from "@bongtu/client/session";
 import {
@@ -199,13 +201,23 @@ export function App(): ReactNode {
     scanRef.current = null;
     setScannedNextLeafIndex(null);
     if (forget) {
-      keyBindings.clearKeyBindings();
-      // A clean device keeps no decrypted amounts either (scanStore).
-      if (scanOwnerRef.current !== null) clearScanState(scanOwnerRef.current);
-      // wagmi drops + forgets the connector (for WalletConnect that ends the
-      // session, so the wallet app stops showing bongtu as connected).
-      void endWalletConnection();
+      // The clean-device trio, sequenced as one pure plan (lib/accountGuard.ts
+      // forgetDevice, gated headlessly): the determinism bindings, the stored
+      // scan (a clean device keeps no decrypted amounts either — scanStore),
+      // and the wagmi connector (for WalletConnect that ends the session, so
+      // the wallet app stops showing bongtu as connected).
+      forgetDevice({
+        clearKeyBindings: () => keyBindings.clearKeyBindings(),
+        clearStoredScan: () => {
+          if (scanOwnerRef.current !== null) clearScanState(scanOwnerRef.current);
+        },
+        endWalletLink: () => void endWalletConnection(),
+      });
     }
+    // The owner stamp dies with the session: the forget sink above resolves
+    // scanOwnerRef at call time, and a stamp that outlived its session once
+    // let a later owner's Disconnect clear the PREVIOUS owner's stored row.
+    scanOwnerRef.current = null;
     setConnection(null);
     setSession(null);
     setBalance(null);
@@ -263,7 +275,10 @@ export function App(): ReactNode {
     if (!session) return;
     const inflight = { current: false };
     const id = setInterval(() => {
-      if (document.visibilityState !== "visible" || inflight.current) return;
+      // The gate is pure (lib/refreshGate.ts): hidden tab → no pass, and a tick
+      // never overlaps itself. The pass reads the lock with keyCache.peek only
+      // (loadSelfScan) — a background read must never extend the idle deadline.
+      if (!autoTickAllowed(document.visibilityState, inflight.current)) return;
       inflight.current = true;
       void refresh(false, true).finally(() => {
         inflight.current = false;
@@ -277,20 +292,27 @@ export function App(): ReactNode {
   // Copy details.
   useEffect(() => installGlobalErrorSurface(), []);
 
-  // A held spending key belongs to ONE wallet account, so a switch drops it at the
-  // moment it happens — the flows re-check anyway, this just makes the header
-  // honest. `disconnected` signs out for WalletConnect ONLY (there it is the phone
-  // ending the session; an extension's disconnect can be a mere provider hiccup).
+  // The switch/disconnect sequences are fixed in lib/accountGuard.ts (pure,
+  // gated): any accountsChanged locks the key AND detaches the in-memory scan
+  // ref — the next pass resumes from the per-owner store, never from a ref
+  // whose owner the live wallet no longer vouches for — while the screen keeps
+  // its last snapshot under the calm locked notice; `disconnected` signs out
+  // for WalletConnect only (there it is the phone ending the session; an
+  // extension's disconnect can be a mere provider hiccup).
   useEffect(
     () =>
-      watchWallet({
-        accountsChanged: () => keyCache.lock(),
-        disconnected: () => {
-          if (connection?.transport === "walletconnect") {
-            endSession("Your wallet ended the connection. Connect again to continue.");
-          }
-        },
-      }),
+      watchWallet(
+        accountGuard(
+          {
+            lock: () => keyCache.lock(),
+            detachScan: () => {
+              scanRef.current = null;
+            },
+            signOut: (notice) => endSession(notice),
+          },
+          () => connection?.transport ?? null,
+        ),
+      ),
     [connection, endSession],
   );
 

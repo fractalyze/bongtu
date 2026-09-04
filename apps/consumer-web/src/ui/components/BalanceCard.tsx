@@ -2,10 +2,12 @@
 // bongtu receive ID directly under it. The ID is the receive surface — tapping it
 // opens the receive modal, the copy icon copies the FULL id (shortened text alone
 // would propagate truncated addresses), and a custom hover/focus tooltip reveals the
-// full id in place. Values are raw wei; formatKkrw is the one UI edge (never Number).
+// full id in place. What the hero shows is the PURE balanceHero fold (homeView.ts,
+// gated as a table): loading ellipsis or dash until the first completed pass —
+// never a fabricated zero — and formatKkrw as the one number edge (never Number).
 
 import type { ReactNode } from "react";
-import { formatKkrw } from "@bongtu/client/money";
+import { balanceHero } from "../homeView.js";
 import { shortenPubkey } from "../format.js";
 import { useCopyFeedback } from "../hooks.js";
 import { IconButton } from "./controls.js";
@@ -23,16 +25,17 @@ export function BalanceCard({
   onOpenReceive: () => void;
 }): ReactNode {
   const { copied, copy } = useCopyFeedback(pubkey);
+  const hero = balanceHero(balance, loading);
   return (
     <section className="bg-surface border border-border rounded-xl pt-6.5 px-5 pb-5 text-center flex flex-col gap-1.5">
       <div className="text-[0.8rem] text-muted font-semibold">Private balance</div>
       <div className="flex items-baseline justify-center gap-1 flex-wrap">
-        {balance === null ? (
-          <span className="text-[2.1rem] text-muted">{loading ? "…" : "—"}</span>
+        {hero.kind !== "amount" ? (
+          <span className="text-[2.1rem] text-muted">{hero.kind === "loading" ? "…" : "—"}</span>
         ) : (
           <>
             <span className="text-[2.1rem] [font-weight:750] tracking-[-0.02em] tabular-nums">
-              {formatKkrw(balance)}
+              {hero.text}
             </span>
             <span className="text-muted font-semibold">kKRW</span>
           </>
