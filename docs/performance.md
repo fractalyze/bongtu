@@ -1,5 +1,9 @@
 # Performance
 
+> The measuring chain below — Base Sepolia (84532) — is retired; nothing has been re-measured on
+> the live Maroo testnet (450815), whose x/feemarket base-fee floor (~8000 gwei) changes the cost
+> framing. Every measurement stands as the history it is.
+
 Measured numbers only. Each row says when and how it was taken; anything not reproducible from this
 tree or from chain is not here.
 

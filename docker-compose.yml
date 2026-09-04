@@ -57,18 +57,19 @@ services:
       # Read-side knobs — override via --env-file .env.compose or the shell.
       RPC: ${RPC:-http://host.docker.internal:8545}
       # Empty POOL => the indexer falls back to deploy/addresses.<CHAIN_ID>.json
-      # (every record is baked into the image; 84532 = the live Base Sepolia pool).
+      # (every record is baked into the image; 450815 = the live Maroo testnet pool).
       POOL: ${POOL:-}
-      CHAIN_ID: ${CHAIN_ID:-84532}
+      CHAIN_ID: ${CHAIN_ID:-450815}
       # The live pool's deploy block. NOT 0: this chain's genesis is tens of
       # millions of blocks back, so a from-genesis default would replay the whole
       # chain in LOG_CHUNK-sized getLogs windows against a rate-limited public RPC.
-      START_BLOCK: ${START_BLOCK:-45342038}
+      START_BLOCK: ${START_BLOCK:-17241972}
       POLL_MS: ${POLL_MS:-5000}
       LOG_CHUNK: ${LOG_CHUNK:-50000}
-      # Portal issuance/swept-tracking (slice ⑤): unset => the /pay + /portal
-      # routes 404 and ingest skips the factory log scan.
-      PORTAL_FACTORY: ${PORTAL_FACTORY:-}
+      # Portal issuance/swept-tracking (slice ⑤): defaults to the live Maroo
+      # factory (deploy/addresses.450815.json `portalFactory`). Set empty to
+      # turn the /pay + /portal routes off (404) and skip the factory log scan.
+      PORTAL_FACTORY: ${PORTAL_FACTORY:-0xa6720b7E95B7c6db33405ac19553954506394B23}
       # AUTHORITY_KEY set => ARBITER MODE (institution-internal; holds every
       # owner's decrypted notes). Leave empty for a public indexer.
       AUTHORITY_KEY: ${AUTHORITY_KEY:-}

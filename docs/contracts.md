@@ -303,7 +303,7 @@ initializer](#one-initializer) above). No `immutable` or constructor state carri
 meaning.
 
 ```
-        deploy/addresses.84532.json
+        deploy/addresses.<chainid>.json
                   |
    pool  ────────────────>  ERC1967Proxy (canonical, upgrade-stable address)
                                  |  delegatecall

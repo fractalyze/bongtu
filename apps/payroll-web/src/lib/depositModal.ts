@@ -18,14 +18,14 @@ import type { Connection, SubmitResult } from "@bongtu/client/connection";
 import { mintTestToken, readGasBalance, readTokenState } from "@bongtu/client/connection";
 import type { DepositStage } from "@bongtu/client/depositFlow";
 import { formatKkrw } from "@bongtu/client/money";
-import { GAS_TOKEN_PHRASE } from "@bongtu/core/network";
+import { GAS_TOKEN_PHRASE, NATIVE_CURRENCY } from "@bongtu/core/network";
 import { parseDepositAmount } from "./errors.js";
 
 /** What the dialog says when the connected account cannot pay for either tx. The
  *  faucet link is rendered next to it (config gasFaucet), so the next step is one
  *  click away rather than a search. */
 export const NO_GAS_MESSAGE =
-  `This account has no ${GAS_TOKEN_PHRASE} to pay gas. Get a little ETH first, then continue.`;
+  `This account has no ${GAS_TOKEN_PHRASE} to pay gas. Get a little ${NATIVE_CURRENCY.symbol} first, then continue.`;
 
 /** The gas verdict. `unknown` is a read that has not landed (or failed) — it never
  *  blocks: guessing "none" would lock a funded operator out of their own deposit. */

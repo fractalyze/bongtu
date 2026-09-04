@@ -1,0 +1,19 @@
+{
+  "chainId": 450815,
+  "chunkArity": 86,
+  "depositPrivModule": "0xaA7778c778C83cE5655d5F217bDfE7782e01Bc50",
+  "depositPrivVerifier": "0x9a677D7D6CaB850b489CB94EA453AEEd5CeBeF89",
+  "deregistered": {
+    "consumerDisburseModule": "0x594408F216d096E8BCB21cdceb58a14186895892",
+    "txHash": "0x41dc6e9b85ad4dd6d98f353db27d7cf36acb82c0e4101e31d8bc6df9e1dd0db2",
+    "note": "removeModule 2026-09-04 — mass disbursement is an institution-managed-pool (enterprise-path) feature by product decision; disbursePrivVerifier stays deployed but unused"
+  },
+  "disbursePrivVerifier": "0xDB33157B18259527e6A83e02A1f19F09620DbFf4",
+  "pool": "0x3B6238f522a08f08169643cD315e9C44209F1aD6",
+  "transfer10x2PrivModule": "0xaA581CFB50F69144C6a9B6380193858E8f4B00Db",
+  "transfer10x2PrivVerifier": "0xafcBFC91A95468dE8A548d1Af04B0D0fa26A90Ab",
+  "transferPrivModule": "0xF3b5D0eb5558B9427Fe599792E728b9B2bD20B2E",
+  "transferPrivVerifier": "0x07487E26c939b0CC0be022A9B34E9e552E03CFD4",
+  "withdrawPrivModule": "0xD030602597CC7F47107e6F96d0d1D6b73a71698F",
+  "withdrawPrivVerifier": "0x2b1BcA434Ebe0C9Ee7cc32368d349b6E96DE8CE3"
+}

@@ -40,6 +40,7 @@ import {
   GAS_PRICE_PIN_GWEI,
   NATIVE_CURRENCY,
   RPC_URL,
+  WS_URL,
 } from "@bongtu/core/network";
 
 /** The live chain as a viem object, derived field-for-field from
@@ -50,7 +51,7 @@ export const liveChain: Chain = defineChain({
   id: CHAIN_ID,
   name: CHAIN_NAME,
   nativeCurrency: NATIVE_CURRENCY,
-  rpcUrls: { default: { http: [RPC_URL] } },
+  rpcUrls: { default: { http: [RPC_URL], webSocket: [WS_URL] } },
   blockExplorers: { default: { name: `${CHAIN_NAME} Explorer`, url: EXPLORER_BASE } },
   testnet: true,
 });

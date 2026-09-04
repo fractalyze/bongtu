@@ -20,7 +20,7 @@ There is no seed and no persisted private key. The spending key is a pure functi
 signature over a domain-separated EIP-712 struct (`@bongtu/client` `derive.ts` + `connection.ts` — the engine package both web apps share):
 
 ```
-domain  = { name: "bongtu", version: keyVersion, chainId: 84532, verifyingContract: <pool> }
+domain  = { name: "bongtu", version: keyVersion, chainId: 450815, verifyingContract: <pool> }
 types   = { BongtuSpendingKey: [ statement: string, warning: string ] }
 
 sig  = eth_signTypedData_v4(account, domain, types, message)

@@ -10,7 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { CHAIN_NAME } from "@bongtu/core/network";
+import { CHAIN_NAME, GAS_TOKEN_PHRASE } from "@bongtu/core/network";
 import { errorDetails, parseDepositAmount, payrollErrorMessage } from "../src/lib/errors.js";
 
 // ---------------------------- wallet / RPC failures -------------------------------
@@ -18,7 +18,7 @@ import { errorDetails, parseDepositAmount, payrollErrorMessage } from "../src/li
 test("the failures an operator hits each name their fix", () => {
   const cases: [unknown, RegExp][] = [
     [Object.assign(new Error("User rejected the request"), { code: 4001 }), /rejected in your wallet/],
-    [new Error("insufficient funds for gas"), /ETH to pay gas/],
+    [new Error("insufficient funds for gas"), new RegExp(`${GAS_TOKEN_PHRASE} to pay gas`)],
     [Object.assign(new Error("switch chain failed"), { name: "SwitchChainError" }), new RegExp(CHAIN_NAME)],
     [Object.assign(new Error("request timed out"), { name: "TimeoutError" }), /timed out/],
     [Object.assign(new Error("Failed to fetch"), { name: "HttpRequestError" }), /Check your connection/],

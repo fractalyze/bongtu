@@ -1,18 +1,28 @@
 # Deployment
 
-The live bongtu stack runs on **Base Sepolia, chain 84532**. Source of truth for every address is
-`deploy/addresses.84532.json`, written by the deploy script and mirrored (with an equality test)
-into `packages/core/src/network.ts` so both web apps read one set of constants.
+The live bongtu stack runs on **Maroo Testnet, chain 450815** — deployed fresh on 2026-09-04,
+dual-mode from genesis: `Deploy.s.sol MODULE_PROFILE=consumer` registered the five consumer
+modules inside the deploy broadcast, so there is no V3 upgrade on this chain. Source of truth for
+every address is `deploy/addresses.450815.json`, written by the deploy script and mirrored (with
+an equality test) into `packages/core/src/network.ts` so both web apps read one set of constants.
+The retired Base Sepolia stack (chain 84532) stays recorded in `deploy/addresses.84532.json` as a
+historical record; it is no longer a live target.
 
 ## Live addresses
 
-`deploy/addresses.84532.json` is canonical. Read an address out of it **by field name** and do not
+`deploy/addresses.450815.json` is canonical. Read an address out of it **by field name** and do not
 transcribe one from anywhere else — the deployer replayed the same CREATE nonce sequence it had used
-on the project's previous chain, so several addresses are byte-identical across the two while naming
-**different contracts** (the previous deployment's pool address is this deployment's *token*). An
-address that merely looks familiar is the failure mode this warning exists for.
+on the previous chains, so several addresses are byte-identical across deployments while naming
+**different contracts** (Base Sepolia's *poseidon* address is this deployment's *depositPrivModule*;
+its *depositVerifier* is now *transferPrivModule*). An address that merely looks familiar is the
+failure mode this warning exists for. The consumer module set registered at genesis is recorded in
+`deploy/modules.450815.json`. The pool registered five consumer modules at genesis, then
+deregistered the consumer disburse module on 2026-09-04 (`removeModule`, tx
+`0x41dc6e9b85ad4dd6d98f353db27d7cf36acb82c0e4101e31d8bc6df9e1dd0db2`) by product decision — mass
+payout is an institution-managed-pool feature, enterprise-path only. The live family is the four
+consumer P2P modules plus the full enterprise surface.
 
-| role | field in `addresses.84532.json` |
+| role | field in `addresses.450815.json` |
 |---|---|
 | BongtuPool — ERC-1967 proxy, the canonical pool | `pool` |
 | BongtuPool implementation | `poolImpl` |
@@ -30,10 +40,12 @@ address that merely looks familiar is the failure mode this warning exists for.
 stale copy in `network.ts` fails in milliseconds instead of at on-chain proof rejection. When the
 two disagree, the JSON is right.
 
-The contracts are **not** source-verified on the explorer. Reading them there shows bytecode only;
-audit against this repo at the commit that deployed them. Poseidon additionally has no Solidity
-source at all — it is deployed from circomlibjs *creation bytecode*
-(`contracts/test/fixtures/poseidon2.hex`).
+The pool implementation, the proxy and `DepositVerifier` are source-verified on the Blockscout
+explorer (`forge verify-contract --verifier blockscout`, 2026-09-04); the other verifiers and the
+mock token are bytecode-only — verify them the same way if needed. Poseidon has no Solidity source
+at all — it is deployed from circomlibjs *creation bytecode*
+(`contracts/test/fixtures/poseidon2.hex`). Audit everything against this repo at the commit that
+deployed it.
 
 Externally, call the proxy address simply "the pool contract"; "proxy" is plumbing vocabulary.
 
@@ -118,8 +130,10 @@ profiles exist; the env knob and script per profile live in
 - **audited-only / enterprise** — `Deploy.s.sol` with `MODULE_PROFILE=none` (the default;
   byte-identical to the pre-profile deploy). No consumer module is registered, so the
   pool-level audit guarantee holds: every op that exists is arbiter-disclosable.
-- **consumer on the shared pool** — the live-pool path. Order per OPMOD §7.3, all of it
-  drilled by `deploy/gates/test_upgrade_v3.sh`:
+- **consumer on the shared pool** — the live 450815 pool took the fresh-deploy form of this
+  profile (`Deploy.s.sol MODULE_PROFILE=consumer` at genesis); the migration form below is the
+  path an existing pool would take — drilled on anvil by `deploy/gates/test_upgrade_v3.sh`, never
+  run on the retired 84532 pool, which stayed audited-only. Order per OPMOD §7.3:
   1. deploy the five consumer verifiers + five module contracts
      (`deploy/forge/ConsumerModuleKit.sol`; modules are inert until registered, so this
      carries no sequencing risk);
@@ -155,8 +169,8 @@ envelope is hybrid from the pool's first operation.
 | `KEM_CIPHERTEXT_LEN()` | 1088 |
 
 The key itself is a **public** value distributed off-chain in three places that are equality-tested
-against each other: `deploy/arbiter-kem-pk.84532.hex` (the committed material), the `arbiterKemPk`
-field of `deploy/addresses.84532.json`, and `ARBITER_KEM_PK` in `packages/core/src/network.ts`,
+against each other: `deploy/arbiter-kem-pk.450815.hex` (the committed material), the `arbiterKemPk`
+field of `deploy/addresses.450815.json`, and `ARBITER_KEM_PK` in `packages/core/src/network.ts`,
 which ships it to both web apps. The addresses file also records `arbiterKemPkHash` alongside
 `arbiterKeyX` / `arbiterKeyY`.
 
@@ -181,15 +195,16 @@ move is that module plus the deploy record rather than another repo sweep.
 
 | fact | value | export |
 |---|---|---|
-| chain id | 84532 | `CHAIN_ID` |
-| chain name | Base Sepolia | `CHAIN_NAME` |
-| RPC | `https://sepolia.base.org` | `RPC_URL` |
-| explorer | `https://sepolia.basescan.org` | `EXPLORER_BASE` |
-| faucet | `https://portal.cdp.coinbase.com/products/faucet` | `GAS_FAUCET_URL` |
-| gas token | ETH (OP Stack L2) | `NATIVE_CURRENCY` |
-| per-tx gas cap | 16,777,216 (EIP-7825) — asserted in `contracts/test/Disburse256.t.sol` | — |
-| BN254 precompiles | present, so Groth16 verification is native | — |
-| gas price the runners pin | `0.05` gwei | `GAS_PRICE_PIN_GWEI` |
+| chain id | 450815 | `CHAIN_ID` |
+| chain name | Maroo Testnet | `CHAIN_NAME` |
+| RPC | `https://rpc-testnet.maroo.io` | `RPC_URL` |
+| WebSocket | `wss://ws-testnet.maroo.io` | `WS_URL` |
+| explorer | `https://explorer-testnet.maroo.io` (Blockscout) | `EXPLORER_BASE` |
+| faucet | `https://faucet.maroo.io` | `GAS_FAUCET_URL` |
+| gas token | tOKRW, 18-dec (sovereign EVM L1; EIP-1559 via Cosmos x/feemarket) | `NATIVE_CURRENCY` |
+| per-tx gas cap | none published; every op fits the previous chain's 16,777,216 EIP-7825 cap (asserted in `contracts/test/Disburse256.t.sol`) | — |
+| BN254 precompiles | present — the smoke deposit's Groth16 proof verified natively on-chain | — |
+| gas price the runners pin | `18000` gwei (quote 9000 gwei = 8000 base + 1000 tip, 2026-09-04) | `GAS_PRICE_PIN_GWEI` |
 
 This is a testnet deployment; every address and measurement in these docs is testnet.
 
@@ -268,7 +283,7 @@ chain at zero alarms, skip the smoke deposit there and prove the wiring with the
 instead.
 
 The live pool's stored key is recorded as `arbiterKeyX` / `arbiterKeyY` in
-`deploy/addresses.84532.json` and re-exported as `ARBITER_PUBKEY_X` / `ARBITER_PUBKEY_Y` from
+`deploy/addresses.450815.json` and re-exported as `ARBITER_PUBKEY_X` / `ARBITER_PUBKEY_Y` from
 `packages/core/src/network.ts`. It is a **public** key — shipping it in the browser bundle is
 required, since the wallet encrypts every envelope to it. The same holds for `ARBITER_KEM_PK`. The
 matching private halves (the bjj scalar and the ML-KEM-768 decapsulation key) are the arbiter's
