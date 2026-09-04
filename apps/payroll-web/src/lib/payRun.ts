@@ -24,7 +24,8 @@ import {
   type SpendOutcome,
 } from "@bongtu/client/spendFlow";
 import { assertPoolKemEpoch, ensureChain } from "@bongtu/client/connection";
-import { getHead, getSignedPath } from "@bongtu/client/indexerClient";
+import { getHead, getSignedPath, IndexerClient } from "@bongtu/client/indexerClient";
+import type { FieldInput } from "@bongtu/core/babyjub";
 import { DEFAULTS } from "../config.js";
 import { buildDisburseRequest, freshDisburseKem, type RecipientRow } from "./disburse.js";
 import { submitDisburse } from "./chain.js";
@@ -101,7 +102,13 @@ export async function runPayRun(
     ensureChain: deps.ensureChain ?? ensureChain,
     assertPoolKemEpoch: deps.assertPoolKemEpoch ?? assertPoolKemEpoch,
     getHead: deps.getHead ?? getHead,
-    getSignedPath: deps.getSignedPath ?? getSignedPath,
+    // The default rides asOwner's TRANSIENT key-mode binding (the custody
+    // invariant): same signed /path URL, same errors — while the `typeof`-shaped
+    // deps seam stays injectable for the headless suite.
+    getSignedPath:
+      deps.getSignedPath ??
+      ((indexerUrl: string, leafIndex: number, ownerCompressed: string, ownerPrivateKey: FieldInput) =>
+        new IndexerClient(indexerUrl).asOwner(ownerCompressed, { key: ownerPrivateKey }).signedPath(leafIndex)),
     submitDisburse: deps.submitDisburse ?? submitDisburse,
   };
 

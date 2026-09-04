@@ -42,21 +42,11 @@ import {
   SELF_SCAN_PENDING_NOTICE,
   isConsumerIdentity,
   runSelfScan,
-  selfScanIo,
   selfScanSnapshot,
   type SelfScanState,
 } from "@bongtu/client/selfscan";
 import { clearScanState, loadScanState, saveScanState } from "../lib/scanStore.js";
-import {
-  buildNotesUrl,
-  buildHistoryUrl,
-  buildNotesTokenUrl,
-  fetchNotes,
-  fetchHistory,
-  fetchHistoryPage,
-  type OwnerNote,
-  type HistoryItem,
-} from "@bongtu/client/indexerClient";
+import { IndexerClient, type OwnerNote, type HistoryItem } from "@bongtu/client/indexerClient";
 import { appendHistoryPage } from "@bongtu/client/activity";
 import { SessionStore, type StoredSession } from "@bongtu/client/session";
 import { markLockIntroSeen, shouldShowLockIntro } from "../lib/lockIntro.js";
@@ -157,6 +147,11 @@ const WalletContext = createContext<WalletContextValue | null>(null);
 // at another box (config.ts), and vite proxies the default relative `/indexer`.
 const INDEXER_URL = DEFAULTS.indexerUrl;
 
+// ONE bound client for the page — every indexer read below (public selfscan IO,
+// the token-mode session reads, and the transient key-mode binding) goes
+// through it, so the base URL and auth wiring exist in one place.
+const indexer = new IndexerClient(INDEXER_URL);
+
 // Which discovery engine feeds balance/activity (config.ts discoveryFromEnv):
 // "arbiter" = the token-authed /notes + /history reads below, byte-unchanged;
 // "selfscan" = the OPMOD §3.6 public-feed scan — no /notes, no /auth
@@ -219,7 +214,7 @@ export function App(): ReactNode {
     const identity = keyCache.peek(ownerCompressed);
     const state =
       identity !== null && isConsumerIdentity(identity)
-        ? await runSelfScan(selfScanIo(INDEXER_URL), identity, prev)
+        ? await runSelfScan(indexer, identity, prev)
         : prev;
     scanRef.current = state;
     scanOwnerRef.current = ownerCompressed;
@@ -235,13 +230,14 @@ export function App(): ReactNode {
    *  page and so cannot share this. In selfscan mode the token is unused —
    *  every read is public. */
   const loadFirstPage = useCallback(
-    (token: string, ownerCompressed: string): Promise<OwnerSnapshot> =>
-      SELFSCAN
-        ? loadSelfScan(ownerCompressed)
-        : loadOwnerSnapshot(
-            () => fetchNotes(buildNotesTokenUrl(INDEXER_URL, ownerCompressed, token)),
-            () => fetchHistoryPage(INDEXER_URL, ownerCompressed, token),
-          ),
+    (token: string, ownerCompressed: string): Promise<OwnerSnapshot> => {
+      if (SELFSCAN) return loadSelfScan(ownerCompressed);
+      // ONE token-mode binding for both reads (asOwner: token => paged history);
+      // `notes` tears off safely and `historyPage()` still always sends `limit`
+      // — the same URLs the hand-built branch hit.
+      const reads = indexer.asOwner(ownerCompressed, { token });
+      return loadOwnerSnapshot(reads.notes, () => reads.historyPage());
+    },
     [loadSelfScan],
   );
 
@@ -429,18 +425,16 @@ export function App(): ReactNode {
           // No token to read with later, so load ONCE now with a key-signed query,
           // while the key is still in hand.
           try {
+            // A key-mode binding is constructed TRANSIENTLY while the key
+            // is in hand (the asOwner custody invariant) — same signed URLs.
+            const reads = indexer.asOwner(id.compressedPubkey, { key: id.keypair.formattedPrivateKey });
             applySnapshot(
               await loadOwnerSnapshot(
-                () => fetchNotes(buildNotesUrl(INDEXER_URL, id.compressedPubkey, id.keypair.formattedPrivateKey)),
+                reads.notes,
                 // Unpaged on purpose: there is no token to fetch a second page
                 // with, so this one read must carry the whole feed. `nextBefore`
                 // null is therefore the truth, not a shortcut.
-                async () => ({
-                  items: await fetchHistory(
-                    buildHistoryUrl(INDEXER_URL, id.compressedPubkey, id.keypair.formattedPrivateKey),
-                  ),
-                  nextBefore: null,
-                }),
+                async () => ({ items: await reads.history(), nextBefore: null }),
               ),
             );
           } catch {
@@ -507,7 +501,7 @@ export function App(): ReactNode {
     if (!session || historyNextBefore === null || historyLoadingMore) return;
     setHistoryLoadingMore(true);
     try {
-      const page = await fetchHistoryPage(INDEXER_URL, session.compressedPubkey, session.token, {
+      const page = await indexer.asOwner(session.compressedPubkey, { token: session.token }).historyPage({
         before: historyNextBefore,
       });
       setHistory((cur) => appendHistoryPage(cur, page.items));
