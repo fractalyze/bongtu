@@ -11,6 +11,8 @@
     "./chain": "./src/chain.ts",
     "./connection": "./src/connection.ts",
     "./consumerBuild": "./src/consumerBuild.ts",
+    "./consumerFlows": "./src/consumerFlows.ts",
+    "./consumerSubmit": "./src/consumerSubmit.ts",
     "./deposit": "./src/deposit.ts",
     "./depositFlow": "./src/depositFlow.ts",
     "./derive": "./src/derive.ts",

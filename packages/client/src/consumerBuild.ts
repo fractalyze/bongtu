@@ -207,6 +207,16 @@ interface PlannedConsumerOutput {
 
 /** unpack with a message naming the field the caller supplied, not the curve
  *  math that rejected it (mirrors spend.ts parsePayee). */
+/** Cheap validity probe for a recipient triple — the SAME parses sealing will
+ *  do, run BEFORE any token motion so a corrupt hand-built triple cannot cost
+ *  an approve tx (the family rule depositFlow.ts states). Registry-resolved
+ *  triples already passed consumerRecipientOf; this guards the manual path. */
+export function assertConsumerRecipient(recipient: ConsumerRecipient): void {
+  parsePoint(recipient.owner, "recipient owner pubkey");
+  parsePoint(recipient.noteViewPub, "recipient noteViewPub");
+  kemHexToBytes(recipient.kemEk);
+}
+
 function parsePoint(hex: string, field: string): Point {
   try {
     return unpackPubkey(hex.trim());
