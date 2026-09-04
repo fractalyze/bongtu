@@ -35,6 +35,8 @@ import {
   ARBITER_PUBKEY_Y,
   B,
   CHAIN_ID,
+  CONSUMER_MODULES,
+  CONSUMER_MODULE_ABI_FRAGMENTS,
   EXPLORER_BASE,
   GAS_PRICE_PIN_GWEI,
   H,
@@ -67,6 +69,25 @@ interface Addresses {
 const addr = JSON.parse(
   readFileSync(join(REPO_ROOT, "deploy", "addresses.450815.json"), "utf8"),
 ) as Addresses;
+
+interface ModulesRecord {
+  chainId: number;
+  chunkArity: number;
+  depositPrivModule: string;
+  depositPrivVerifier: string;
+  deregistered: { consumerDisburseModule: string; txHash: string; note: string };
+  disbursePrivVerifier: string;
+  pool: string;
+  transfer10x2PrivModule: string;
+  transfer10x2PrivVerifier: string;
+  transferPrivModule: string;
+  transferPrivVerifier: string;
+  withdrawPrivModule: string;
+  withdrawPrivVerifier: string;
+}
+const mods = JSON.parse(
+  readFileSync(join(REPO_ROOT, "deploy", "modules.450815.json"), "utf8"),
+) as ModulesRecord;
 
 test("module facts equal deploy/addresses.450815.json field-for-field", () => {
   // JSON key -> module value, one row per fact the module owns. A redeploy
@@ -142,6 +163,82 @@ test("POOL_ABI_FRAGMENTS fragments match the hybrid (V2) BongtuPool signatures",
   assert.equal(
     POOL_ABI_FRAGMENTS.arbiterKemPkHash,
     "function arbiterKemPkHash(uint256 epoch) view returns (bytes32)",
+  );
+});
+
+test("CONSUMER_MODULES equals deploy/modules.450815.json field-for-field", () => {
+  // op key -> (module JSON field, verifier JSON field). Same conviction shape
+  // as the addresses suite above, against the module record — and the same
+  // CREATE-nonce collision belt: depositPrivModule is a REUSED address (the
+  // previous chain's poseidon), so only field-name equality proves it names
+  // the right contract here.
+  const rows = [
+    ["depositPriv", "depositPrivModule", "depositPrivVerifier"],
+    ["transferPriv", "transferPrivModule", "transferPrivVerifier"],
+    ["transfer10x2Priv", "transfer10x2PrivModule", "transfer10x2PrivVerifier"],
+    ["withdrawPriv", "withdrawPrivModule", "withdrawPrivVerifier"],
+  ] as const;
+  // The table must also COVER the constant: a later-added CONSUMER_MODULES
+  // entry without a row here would ship untested otherwise.
+  assert.deepEqual(
+    Object.keys(CONSUMER_MODULES).sort(),
+    rows.map(([op]) => op).sort(),
+    "every CONSUMER_MODULES entry needs a field-equality row",
+  );
+  for (const [op, moduleField, verifierField] of rows) {
+    assert.equal(
+      CONSUMER_MODULES[op].module,
+      mods[moduleField],
+      `CONSUMER_MODULES.${op}.module disagrees with modules.450815.json "${moduleField}"`,
+    );
+    assert.equal(
+      CONSUMER_MODULES[op].verifier,
+      mods[verifierField],
+      `CONSUMER_MODULES.${op}.verifier disagrees with modules.450815.json "${verifierField}"`,
+    );
+  }
+  // The module record must describe the SAME deployment the rest of this
+  // module pins — a modules file from another chain must not pass.
+  assert.equal(mods.pool, POOL_ADDRESS);
+  assert.equal(mods.chainId, CHAIN_ID);
+});
+
+test("deregistered consumerDisburse gets NO constant (enterprise-path only)", () => {
+  // Deregistered 2026-09-04 (product decision: mass disbursement is
+  // institution-managed-pool territory). Its address — and the deployed-but-
+  // unused DisbursePrivVerifier — must never resurface in the src constants:
+  // substring-scan the serialized exports case-blind so even an embedded or
+  // re-cased copy convicts.
+  const serialized = JSON.stringify({ CONSUMER_MODULES, CONSUMER_MODULE_ABI_FRAGMENTS }).toLowerCase();
+  for (const banned of [mods.deregistered.consumerDisburseModule, mods.disbursePrivVerifier]) {
+    assert.ok(
+      !serialized.includes(banned.toLowerCase().slice(2)),
+      `deregistered/unused address ${banned} appears in the consumer constants`,
+    );
+  }
+});
+
+test("CONSUMER_MODULE_ABI_FRAGMENTS match the registered module signatures", () => {
+  // Byte-pins of the deployed module entrypoints (contracts/src/modules/*,
+  // exercised end to end by deploy/gates/consumer_leg.ts): per-output bytes[]
+  // kemCiphertexts everywhere — this family has no single authority
+  // kemCiphertext — and pub arities include the enabled slots the module
+  // injects over before verify.
+  assert.equal(
+    CONSUMER_MODULE_ABI_FRAGMENTS.depositPriv,
+    "function depositPriv(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[16] pub, bytes[] kemCiphertexts)",
+  );
+  assert.equal(
+    CONSUMER_MODULE_ABI_FRAGMENTS.transferPriv,
+    "function transferPriv(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[20] pub, bytes[] kemCiphertexts)",
+  );
+  assert.equal(
+    CONSUMER_MODULE_ABI_FRAGMENTS.transfer10x2Priv,
+    "function transfer10x2Priv(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[36] pub, bytes[] kemCiphertexts)",
+  );
+  assert.equal(
+    CONSUMER_MODULE_ABI_FRAGMENTS.withdrawPriv,
+    "function withdrawPriv(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[16] pub, bytes[] kemCiphertexts, bytes32 stealthEphemeralPub, uint8 stealthViewTag)",
   );
 });
 
