@@ -12,7 +12,7 @@
 import { sumUnspent } from "@bongtu/client/balance";
 import { formatKkrw } from "@bongtu/client/money";
 import type { SelfScanState } from "@bongtu/client/selfscan";
-import type { Head } from "@bongtu/client/indexerClient";
+import type { Head } from "@bongtu/core/indexerApi";
 import { scanNotice } from "../lib/scanStore.js";
 import { selfScanSyncState, type SyncState } from "./components/SyncDot.js";
 

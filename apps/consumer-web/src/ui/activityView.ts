@@ -7,7 +7,7 @@
 // never re-sorts — an ordering bug upstream must surface, not be papered over.
 
 import { encodeAddress } from "@bongtu/core/pubkey";
-import type { HistoryItem, HistoryKind } from "@bongtu/client/indexerClient";
+import type { HistoryItem, HistoryKind } from "@bongtu/core/indexerApi";
 import { ACTIVITY_VERB, activityDirection, type ActivityDirection } from "@bongtu/client/activity";
 import { formatKkrw } from "@bongtu/client/money";
 import { relativeTime, shortenPubkey } from "./format.js";

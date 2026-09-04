@@ -196,7 +196,7 @@ Scope, stated honestly:
 - **Every envelope this pool has ever emitted is hybrid.** `initialize` mints epoch 0 carrying both
   halves, so there is no classical-only prefix to strand: `arbiterKemPkHash(0) != 0` is the
   on-chain, audit-facing statement of that. The client guard splits the two failures it can see
-  (`arbiterKemPkGuardError`, `packages/core/src/network.ts`): a getter that is absent or reverts —
+  (`arbiterKemPkGuardError`, `packages/core/src/chain/network.ts`): a getter that is absent or reverts —
   `isPreKemProbeError`, a `CALL_EXCEPTION` — is the pre-KEM pool this build refuses to produce
   proofs for, while any hash that is *present* but not this build's, a zero among them, is refused
   as a key mismatch. A zero on-chain never means "pre-KEM"; the pool refuses to store one, so it can

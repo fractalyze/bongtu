@@ -24,7 +24,7 @@ import {
   type SpendOutcome,
 } from "@bongtu/client/spendFlow";
 import { assertPoolKemEpoch, ensureChain } from "@bongtu/client/connection";
-import { getHead, getSignedPath, IndexerClient } from "@bongtu/client/indexerClient";
+import { getHead, getSignedPath, IndexerClient } from "@bongtu/core/indexerApi";
 import type { FieldInput } from "@bongtu/core/babyjub";
 import { DEFAULTS } from "../config.js";
 import { buildDisburseRequest, freshDisburseKem, type RecipientRow } from "./disburse.js";

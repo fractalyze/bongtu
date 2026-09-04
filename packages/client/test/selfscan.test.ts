@@ -34,7 +34,7 @@ import { packPubkey } from "@bongtu/core/pubkey";
 
 import { deriveIdentityFromSignature, type ConsumerWalletIdentity } from "@bongtu/client/derive";
 import { sumUnspent } from "@bongtu/client/balance";
-import type { FeedEvent, PathResult } from "@bongtu/client/indexerClient";
+import type { FeedEvent, PathResult } from "@bongtu/core/indexerApi";
 import {
   scanEventsPass,
   pathConfirmsLeaf,
@@ -621,7 +621,7 @@ test("scan-state codec: round trip, and anything malformed decodes to null (full
 
 // --- issue #15 C1: the real IO binding is the IndexerClient itself ----------------
 
-import { IndexerClient } from "@bongtu/client/indexerClient";
+import { IndexerClient } from "@bongtu/core/indexerApi";
 
 test("IndexerClient structurally satisfies SelfScanIo (no hand-built binding to drift)", () => {
   // The assignment IS the assertion: it compiles only while the class keeps the

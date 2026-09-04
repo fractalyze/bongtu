@@ -33,7 +33,7 @@ import {
 } from "@bongtu/client/connection";
 import { submitWithdrawRelayed } from "@bongtu/client/relayerClient";
 import type { KeyCache } from "@bongtu/client/keyCache";
-import { getHead, getSignedPath, type OwnerNote } from "@bongtu/client/indexerClient";
+import { getHead, getSignedPath, type OwnerNote } from "@bongtu/core/indexerApi";
 import { pollUntil, type PollForActionOptions } from "@bongtu/client/refresh";
 import {
   buildTransferRequest,

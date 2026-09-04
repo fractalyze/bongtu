@@ -16,7 +16,7 @@
 // public directory data), best-effort writes, unreadable storage == no claim.
 
 import type { StorageLike } from "@bongtu/client/session";
-import { normalizeName, payPortal, resolveName } from "@bongtu/client/indexerClient";
+import { normalizeName, payPortal, resolveName } from "@bongtu/core/indexerApi";
 
 export const PAY_NAME_KEY = "bongtu.payName.v1";
 

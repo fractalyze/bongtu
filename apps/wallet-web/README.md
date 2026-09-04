@@ -142,7 +142,7 @@ helper (c) are the documented alternatives.
 pool's **public** arbiter key (the authority-envelope target — public, safe to ship) — plus
 `keyVersion` (part of the EIP-712 domain; bumping it rotates every derived key). It
 transcribes none of them: `deploy/addresses.<chainId>.json` is the record and
-`packages/core/src/network.ts` is the one place the app reads them from. Quoting an
+`packages/core/src/chain/network.ts` is the one place the app reads them from. Quoting an
 address in prose is precisely how the cross-chain CREATE-nonce collision bites — the same
 deployer replayed the same nonces on both chains, so an address that named the pool on one
 names a *different* contract on the other. No private key ever lives in the wallet — the

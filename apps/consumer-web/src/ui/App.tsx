@@ -44,7 +44,7 @@ import {
 import { clearScanState, loadScanState, saveScanState, scanNotice } from "../lib/scanStore.js";
 import { accountGuard, forgetDevice } from "../lib/accountGuard.js";
 import { autoTickAllowed } from "../lib/refreshGate.js";
-import { IndexerClient, type OwnerNote, type HistoryItem } from "@bongtu/client/indexerClient";
+import { IndexerClient, type OwnerNote, type HistoryItem } from "@bongtu/core/indexerApi";
 import { SessionStore, type StoredSession } from "@bongtu/client/session";
 import {
   clearConsumerSession,

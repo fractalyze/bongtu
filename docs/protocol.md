@@ -114,7 +114,7 @@ reach of any block limit. The sub-`LOG_B` frontier is left stale on purpose: `ne
 
 Every operation encrypts one envelope to the pool's stored arbiter public key **inside the proof**.
 Encryption is a Poseidon sponge (`SymmetricEncrypt` in-circuit, `poseidonEncrypt` in
-`packages/core/src/note.ts`) under a two-element key. Given the arbiter's key material plus the
+`packages/core/src/notes/note.ts`) under a two-element key. Given the arbiter's key material plus the
 on-chain `(ecdhPublicKey, encryptionNonce, ciphertext, kemCiphertext)`, the auditor recovers the
 plaintext with no user key and no nullifier linkage.
 
@@ -124,12 +124,12 @@ client draws through the 128-bit clamp (`toEncryptionNonce` in `@bongtu/client/s
 unclamped draw shipped once and made console pay runs unprovable until `45601e9`.
 
 Plaintext field order is a consensus artifact — reordering passes a TypeScript round-trip and
-breaks decryption of live-chain envelopes. `packages/core/src/envelope.ts` owns both directions.
+breaks decryption of live-chain envelopes. `packages/core/src/crypto/envelope.ts` owns both directions.
 
 ### The hybrid envelope key
 
 The sponge key is a hybrid of a classical ECDH secret and an ML-KEM-768 shared secret, so opening an
-envelope requires breaking both. `packages/core/src/kem.ts` owns the tags and the fold; the circuits
+envelope requires breaking both. `packages/core/src/crypto/kem.ts` owns the tags and the fold; the circuits
 carry the same literals.
 
 ```
@@ -212,5 +212,5 @@ dh = 0;  for each ct element x:  dh = Poseidon(dh, x)
 emitted as a public signal. The chain enforces the *length*; the indexer recomputes the fold and
 raises an alarm on any mismatch. See [security-model.md](security-model.md) for what that buys and
 [indexer.md](indexer.md) for the alarm classes. The one implementation is
-`disclosureChain` in `packages/core/src/envelope.ts`, pinned byte-identical to the in-circuit gadget
+`disclosureChain` in `packages/core/src/crypto/envelope.ts`, pinned byte-identical to the in-circuit gadget
 by `packages/core/test/envelope.test.ts`.

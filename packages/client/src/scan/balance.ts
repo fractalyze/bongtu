@@ -24,7 +24,7 @@ import {
   ecdhSharedSecret,
 } from "@bongtu/core/note";
 import type { WalletIdentity } from "@bongtu/client/derive";
-import { type FeedEvent } from "@bongtu/client/indexerClient";
+import { type FeedEvent } from "@bongtu/core/indexerApi";
 
 /** Anything with a decimal value and a spent flag sums the same way. */
 export interface UnspentSummable {

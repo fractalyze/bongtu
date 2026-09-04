@@ -27,7 +27,7 @@ import { getAddress } from "viem";
 import { decodeAddress, encodeAddress } from "@bongtu/core/pubkey";
 import { DEFAULTS } from "../../config.js";
 import { runSpendChain, type SpendOutcome } from "@bongtu/client/spendFlow";
-import { resolveName, type NameRecord } from "@bongtu/client/indexerClient";
+import { resolveName, type NameRecord } from "@bongtu/core/indexerApi";
 import { previewSpend } from "@bongtu/client/spend";
 import { keyCache } from "../../lib/keyCache.js";
 import { proveInBrowser } from "../../lib/prove.js";

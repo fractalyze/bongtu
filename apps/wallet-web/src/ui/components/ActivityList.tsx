@@ -11,7 +11,7 @@
 
 import type { ReactNode } from "react";
 import { encodeAddress } from "@bongtu/core/pubkey";
-import type { HistoryItem, HistoryKind } from "@bongtu/client/indexerClient";
+import type { HistoryItem, HistoryKind } from "@bongtu/core/indexerApi";
 // verb + direction live in @bongtu/client/activity (pure, headlessly tested) — this file
 // only keeps what needs JSX: the icon mapping and the row layout.
 import { ACTIVITY_VERB, activityDirection } from "@bongtu/client/activity";

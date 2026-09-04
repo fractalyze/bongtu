@@ -11,7 +11,7 @@
 
 import type { WalletIdentity } from "@bongtu/client/derive";
 import type { LoginSignaturePlan } from "@bongtu/client/identity";
-import { obtainViewToken } from "@bongtu/client/indexerClient";
+import { obtainViewToken } from "@bongtu/core/indexerApi";
 import { assertKeyUnchanged, loginNeedsDeterminismCheck } from "@bongtu/client/loginGuard";
 import { ensureChain } from "@bongtu/client/connection";
 import type { Connection } from "@bongtu/client/connection";

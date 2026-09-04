@@ -4,7 +4,7 @@ The live bongtu stack runs on **Maroo Testnet, chain 450815** — deployed fresh
 dual-mode from genesis: `Deploy.s.sol MODULE_PROFILE=consumer` registered the five consumer
 modules inside the deploy broadcast, so there is no V3 upgrade on this chain. Source of truth for
 every address is `deploy/addresses.450815.json`, written by the deploy script and mirrored (with
-an equality test) into `packages/core/src/network.ts` so both web apps read one set of constants.
+an equality test) into `packages/core/src/chain/network.ts` so both web apps read one set of constants.
 The retired Base Sepolia stack (chain 84532) stays recorded in `deploy/addresses.84532.json` as a
 historical record; it is no longer a live target.
 
@@ -170,7 +170,7 @@ envelope is hybrid from the pool's first operation.
 
 The key itself is a **public** value distributed off-chain in three places that are equality-tested
 against each other: `deploy/arbiter-kem-pk.450815.hex` (the committed material), the `arbiterKemPk`
-field of `deploy/addresses.450815.json`, and `ARBITER_KEM_PK` in `packages/core/src/network.ts`,
+field of `deploy/addresses.450815.json`, and `ARBITER_KEM_PK` in `packages/core/src/chain/network.ts`,
 which ships it to both web apps. The addresses file also records `arbiterKemPkHash` alongside
 `arbiterKeyX` / `arbiterKeyY`.
 
@@ -189,7 +189,7 @@ envelope, and serving with the wrong one would stamp every honest operation as t
 
 ## Chain facts
 
-Every fact below has exactly one home — `packages/core/src/network.ts` — from which both apps, the
+Every fact below has exactly one home — `packages/core/src/chain/network.ts` — from which both apps, the
 indexer and the `deploy/live/` drivers read it. Nothing here is named after the chain, so a future
 move is that module plus the deploy record rather than another repo sweep.
 
@@ -284,7 +284,7 @@ instead.
 
 The live pool's stored key is recorded as `arbiterKeyX` / `arbiterKeyY` in
 `deploy/addresses.450815.json` and re-exported as `ARBITER_PUBKEY_X` / `ARBITER_PUBKEY_Y` from
-`packages/core/src/network.ts`. It is a **public** key — shipping it in the browser bundle is
+`packages/core/src/chain/network.ts`. It is a **public** key — shipping it in the browser bundle is
 required, since the wallet encrypts every envelope to it. The same holds for `ARBITER_KEM_PK`. The
 matching private halves (the bjj scalar and the ML-KEM-768 decapsulation key) are the arbiter's
 alone; see [security-model.md](security-model.md).

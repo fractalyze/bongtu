@@ -20,7 +20,7 @@ CIRCOMLIB="$ZETO/node_modules"
 ```
 
 The **node-side** scripts get `snarkjs` at runtime from `BONGTU_NODE_MODULES` via
-`packages/core/src/extern.ts` (`loadSnarkjs`) — no workspace declares it for that path, so on another
+`packages/core/src/chain/extern.ts` (`loadSnarkjs`) — no workspace declares it for that path, so on another
 machine set the env var. The call sites are the proving paths `deploy/live/lib/proof_toolbox.ts` and
 `deploy/live/transfer10x2_e2e.ts`, the two circuit gates
 `circuits/gates/assert_attacks_throw.ts` and `circuits/gates/auditor_decrypt_check.ts`, and

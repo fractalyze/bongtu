@@ -235,7 +235,7 @@ contract Deploy is Script {
     ///      (`circuits/fixtures/fixture_lib.ts`). The bjj half stays the fixture
     ///      key on every chain by design — every committed proof is bound to it,
     ///      and re-proving them to swap it buys nothing, BECAUSE the envelope key
-    ///      is `Poseidon(ecdhShared ++ kemSharedSecret)` (`packages/core/src/kem.ts`
+    ///      is `Poseidon(ecdhShared ++ kemSharedSecret)` (`packages/core/src/crypto/kem.ts`
     ///      {hybridEnvelopeKey}): it mixes both secrets, so one public half still
     ///      leaves the envelope sealed.
     ///

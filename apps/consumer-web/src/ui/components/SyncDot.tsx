@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { getHead, type Head } from "@bongtu/client/indexerClient";
+import { getHead, type Head } from "@bongtu/core/indexerApi";
 
 export type SyncState = "synced" | "syncing" | "stale";
 

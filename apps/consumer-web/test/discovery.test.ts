@@ -25,7 +25,7 @@ import { readFileSync } from "node:fs";
 
 import { encodeAddress } from "@bongtu/core/pubkey";
 import { deriveScanActivity, type PendingDiscovery, type ScanNote, type SelfScanState } from "@bongtu/client/selfscan";
-import type { HistoryItem, HistoryKind } from "@bongtu/client/indexerClient";
+import type { HistoryItem, HistoryKind } from "@bongtu/core/indexerApi";
 import { homeView } from "../src/ui/homeView.js";
 import { presentActivity, presentActivityRow } from "../src/ui/activityView.js";
 import { accountGuard, forgetDevice, WALLET_ENDED_NOTICE } from "../src/lib/accountGuard.js";

@@ -44,7 +44,7 @@ import {
   submitWithdrawPriv,
 } from "@bongtu/client/consumerSubmit";
 import type { KeyCache } from "@bongtu/client/keyCache";
-import { getHead, getPath } from "@bongtu/client/indexerClient";
+import { getHead, getPath } from "@bongtu/core/indexerApi";
 import { pollUntil, type PollForActionOptions } from "@bongtu/client/refresh";
 import {
   pendingLegOf,

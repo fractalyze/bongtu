@@ -12,7 +12,7 @@ import {PortalSweeper, IPortalPool} from "./PortalSweeper.sol";
 /// announcements) all recompute the SAME destination from the announcement
 /// alone — `addressOf` is a pure function of this factory's address, that salt,
 /// and the sweeper's constant initcode hash. The TS mirror is
-/// `packages/core/src/stealth.ts` (`portalSalt` + `create2Address`), pinned by
+/// `packages/core/src/notes/stealth.ts` (`portalSalt` + `create2Address`), pinned by
 /// a committed parity vector.
 ///
 /// TRUST (v1 concession, recorded in .dev/milestone-stealth.md Slice ⑤ — do not

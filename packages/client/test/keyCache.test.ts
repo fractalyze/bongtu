@@ -129,7 +129,7 @@ test("the login derives through identity.ts — there is ONE derivation recipe",
   // are not owned by. The seam is a source fact, so it is gated as one. (Each APP's
   // shell is gated the same way in that app's own suite — the package only vouches
   // for its own files.)
-  const login = readFileSync(new URL("../src/loginFlow.ts", import.meta.url).pathname, "utf8");
+  const login = readFileSync(new URL("../src/login/loginFlow.ts", import.meta.url).pathname, "utf8");
 
   // The flow takes `deriveIdentity` through its deps and holds no recipe of its own.
   for (const inlined of [

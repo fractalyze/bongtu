@@ -56,7 +56,7 @@ import { deriveIdentityFromSignature } from "@bongtu/client/derive";
 import { runDeposit, type DepositStage } from "@bongtu/client/depositFlow";
 import { KeyCache } from "@bongtu/client/keyCache";
 import { sumUnspent } from "@bongtu/client/balance";
-import { buildNotesUrl, fetchNotes, type OwnerNote } from "@bongtu/client/indexerClient";
+import { buildNotesUrl, fetchNotes, type OwnerNote } from "@bongtu/core/indexerApi";
 import type { LegProgress, SpendStage } from "@bongtu/client/spendFlow";
 import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
 

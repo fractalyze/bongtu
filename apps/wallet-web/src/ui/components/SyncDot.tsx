@@ -9,7 +9,7 @@
 
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { fetchHealth, getHead, type Head, type Health } from "@bongtu/client/indexerClient";
+import { fetchHealth, getHead, type Head, type Health } from "@bongtu/core/indexerApi";
 
 export type SyncState = "synced" | "syncing" | "stale";
 

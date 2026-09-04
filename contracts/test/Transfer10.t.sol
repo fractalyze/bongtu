@@ -304,7 +304,7 @@ contract Transfer10Test is Base {
     }
 
     /// The in-vector ciphertext runs are exactly what the envelope codec
-    /// computes for arity 10 (packages/core/src/envelope.ts: 10x4 receiver
+    /// computes for arity 10 (packages/core/src/crypto/envelope.ts: 10x4 receiver
     /// elements, and authorityCiphertextLen of transfer10 == 64) — pinned here so
     /// a layout change cannot pass by only moving the event.
     function testCiphertextRunsMatchTheArity10Layout() public pure {

@@ -46,7 +46,7 @@ import {
   type SelfScanState,
 } from "@bongtu/client/selfscan";
 import { clearScanState, loadScanState, saveScanState } from "../lib/scanStore.js";
-import { IndexerClient, type OwnerNote, type HistoryItem } from "@bongtu/client/indexerClient";
+import { IndexerClient, type OwnerNote, type HistoryItem } from "@bongtu/core/indexerApi";
 import { appendHistoryPage } from "@bongtu/client/activity";
 import { SessionStore, type StoredSession } from "@bongtu/client/session";
 import { markLockIntroSeen, shouldShowLockIntro } from "../lib/lockIntro.js";

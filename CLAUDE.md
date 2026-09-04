@@ -31,7 +31,7 @@ not re-derive what those files own.
   default 2-min Bash timeout — pass `timeout ≥ 300000`; after a run, confirm GPU memory
   returns to idle (~15 MiB) and kill stray prover PIDs.
 - **Live pool is canonical**: the pool recorded in `deploy/addresses.450815.json` — mirrored into
-  `packages/core/src/network.ts`, which `packages/core/test/network.test.ts` holds to that file
+  `packages/core/src/chain/network.ts`, which `packages/core/test/network.test.ts` holds to that file
   field-for-field — is the deployment everything runs against. Reuse it; do not redeploy for new
   work. A circuit change ships as a UUPS `upgradeToAndCall` carrying a fresh `reinitializer(2)`
   payload; there is no initializer ladder, `initialize()` alone produces the production shape.

@@ -169,7 +169,7 @@ test("a valid relay submits the EXACT withdraw tuple connection.ts submit() buil
   assert.equal(p.functionName, "withdraw");
   assert.equal(p.account, SUBMITTER);
   // THE tuple: [a, b, c, pub, kemCiphertext, ephemeralPub, viewTag] exactly as
-  // packages/client/src/connection.ts submit() assembles it for fn === "withdraw"
+  // packages/client/src/wallet/poolWrites.ts submit() assembles it for fn === "withdraw"
   // (asProofArgs bigints + the ZERO_EPHEMERAL/0 sentinel when no stealth
   // derivation rides along). Deep-equality — not shape-checking — because any
   // drift here is a different transaction than the wallet would have sent.

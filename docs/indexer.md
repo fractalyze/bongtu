@@ -306,7 +306,7 @@ full-width zero-sentinels. Rationale and the exact digest forms:
 Wire shapes + the client half (`buildNameRegistration`, `buildNameRegistrationV2`,
 `registerName`, `resolveName`): `@bongtu/core/indexerApi`; server half:
 `apps/indexer/src/names.ts` + `api/routes/names.ts`; stealth meta-address semantics:
-`packages/core/src/stealth.ts`.
+`packages/core/src/notes/stealth.ts`.
 
 ## Announcement feed
 

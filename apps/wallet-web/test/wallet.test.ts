@@ -42,7 +42,7 @@ import {
 import { sumUnspent, trialDecryptEvents } from "@bongtu/client/balance";
 import { KEY_DERIVATION } from "@bongtu/client/identity";
 import { walletErrorMessage } from "@bongtu/client/connection";
-import { resolveName, type FeedEvent, type NameRecord } from "@bongtu/client/indexerClient";
+import { resolveName, type FeedEvent, type NameRecord } from "@bongtu/core/indexerApi";
 import {
   buildTransferRequest,
   buildWithdrawRequest,
