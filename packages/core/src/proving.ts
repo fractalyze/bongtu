@@ -25,7 +25,7 @@
 // calculator, so a request deserialized from JSON (field elements as decimal
 // strings) is accepted as-is. Points are [x, y] pairs (PointInput).
 
-import type { FieldInput, PointInput } from "./babyjub.js";
+import type { FieldInput, PointInput } from "@bongtu/core/babyjub";
 
 /** Proving backend. deposit/transfer/transfer10/transfer10x2/withdraw prove on
  *  CPU (snarkjs); disburse (1×256, ~2.79M constraints) and disbursePriv

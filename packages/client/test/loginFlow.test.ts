@@ -10,11 +10,11 @@ import assert from "node:assert/strict";
 
 import { CHAIN_NAME } from "@bongtu/core/network";
 
-import { runLogin, type RunLoginDeps } from "../src/loginFlow.js";
-import { chainSwitchMessage, type Connection } from "../src/connection.js";
-import type { WalletIdentity } from "../src/derive.js";
-import { KEY_CHANGED_MESSAGE } from "../src/loginGuard.js";
-import { loadKeyBinding, saveKeyBinding, type StorageLike } from "../src/session.js";
+import { runLogin, type RunLoginDeps } from "@bongtu/client/loginFlow";
+import { chainSwitchMessage, type Connection } from "@bongtu/client/connection";
+import type { WalletIdentity } from "@bongtu/client/derive";
+import { KEY_CHANGED_MESSAGE } from "@bongtu/client/loginGuard";
+import { loadKeyBinding, saveKeyBinding, type StorageLike } from "@bongtu/client/session";
 
 const CONNECTION = { address: "0xabc", transport: "injected" } as unknown as Connection;
 const IDENTITY = {

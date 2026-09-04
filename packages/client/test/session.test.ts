@@ -30,7 +30,7 @@ import {
   saveSession,
   type StorageLike,
   type StoredSession,
-} from "../src/session.js";
+} from "@bongtu/client/session";
 
 function memStorage(): StorageLike & { map: Map<string, string> } {
   const map = new Map<string, string>();

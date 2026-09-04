@@ -25,15 +25,15 @@ import {
   packSignature,
   assertValidChallenge,
   viewTokenHostBinding,
-} from "./eddsa.js";
-import { unpackPubkey } from "./pubkey.js";
-import type { FieldInput, Point } from "./babyjub.js";
+} from "@bongtu/core/eddsa";
+import { unpackPubkey } from "@bongtu/core/pubkey";
+import type { FieldInput, Point } from "@bongtu/core/babyjub";
 
 // The view-token signing contract (challenge width + validity, host binding) lives
 // with the signature primitives in eddsa.ts, because the SERVER needs it too and
 // must not import a fetch client to get it. Re-exported here so every existing
 // `@bongtu/core/indexerApi` import of these keeps working.
-export { assertValidChallenge, viewTokenHostBinding, CHALLENGE_BYTES } from "./eddsa.js";
+export { assertValidChallenge, viewTokenHostBinding, CHALLENGE_BYTES } from "@bongtu/core/eddsa";
 
 // --- wire shapes (what the indexer serves; what the apps consume) ---------------
 
@@ -549,12 +549,12 @@ import {
   nameBindingFieldV2,
   NOTE_VIEW_PUB_ZERO,
   KEM_EK_ZERO,
-} from "./eddsa.js";
-import type { StealthMetaAddress } from "./stealth.js";
+} from "@bongtu/core/eddsa";
+import type { StealthMetaAddress } from "@bongtu/core/stealth";
 
 // The v2 zero-sentinels, re-exported so a client clearing its consumer pair
 // keeps one import path with the fetch builders below.
-export { NOTE_VIEW_PUB_ZERO, KEM_EK_ZERO } from "./eddsa.js";
+export { NOTE_VIEW_PUB_ZERO, KEM_EK_ZERO } from "@bongtu/core/eddsa";
 
 // Lowercase label, 3–32 chars, alnum with interior hyphens — a deliberately
 // DNS-label-shaped grammar so a name can later become an ENS/CCIP subname

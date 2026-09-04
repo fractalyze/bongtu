@@ -22,7 +22,7 @@
 import { commitment } from "@bongtu/core/note";
 import type { StealthDerivation } from "@bongtu/core/stealth";
 import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
-import type { Connection } from "./connection.js";
+import type { Connection } from "@bongtu/client/connection";
 import {
   assertPoolKemEpoch,
   ensureChain,
@@ -30,11 +30,11 @@ import {
   submitTransfer10x2,
   submitWithdraw,
   walletErrorMessage,
-} from "./connection.js";
-import { submitWithdrawRelayed } from "./relayerClient.js";
-import type { KeyCache } from "./keyCache.js";
-import { getHead, getSignedPath, type OwnerNote } from "./indexerClient.js";
-import { pollUntil, type PollForActionOptions } from "./refresh.js";
+} from "@bongtu/client/connection";
+import { submitWithdrawRelayed } from "@bongtu/client/relayerClient";
+import type { KeyCache } from "@bongtu/client/keyCache";
+import { getHead, getSignedPath, type OwnerNote } from "@bongtu/client/indexerClient";
+import { pollUntil, type PollForActionOptions } from "@bongtu/client/refresh";
 import {
   buildTransferRequest,
   buildTransfer10x2Request,
@@ -50,8 +50,8 @@ import {
   type SpendLeg,
   type WalletInputNote,
   type MembershipWitness,
-} from "./spend.js";
-import type { WalletIdentity } from "./derive.js";
+} from "@bongtu/client/spend";
+import type { WalletIdentity } from "@bongtu/client/derive";
 
 /** The coarse stages a spend leg passes through (no witness sub-stage — witness is
  *  ~150 ms and invisible; the multi-second cost is the proof). "unlock" is the

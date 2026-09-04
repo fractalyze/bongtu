@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { copyText } from "../src/clipboard.js";
+import { copyText } from "@bongtu/ui/clipboard";
 
 test("copyText: true when the injected clipboard accepts", async () => {
   const clip = { wrote: "" };

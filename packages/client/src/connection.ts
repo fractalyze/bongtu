@@ -18,8 +18,8 @@ import {
   type PublicClient,
 } from "viem";
 import { causeChain, classifyChainFailure, errorCode, fallbackText, type ChainFailure, failureCopy, type FailureCopyTable } from "@bongtu/core/errors";
-import type { KeyDerivationTypedData } from "./derive.js";
-import type { WalletTransport } from "./loginGuard.js";
+import type { KeyDerivationTypedData } from "@bongtu/client/derive";
+import type { WalletTransport } from "@bongtu/client/loginGuard";
 import type { Calldata } from "@bongtu/core/proving";
 import {
   CHAIN_ID,
@@ -34,7 +34,7 @@ import {
   explorerTxUrl,
   isPreKemProbeError,
 } from "@bongtu/core/network";
-import { liveChain } from "./chain.js";
+import { liveChain } from "@bongtu/client/chain";
 import { ZERO_EPHEMERAL, type StealthDerivation } from "@bongtu/core/stealth";
 
 // The shared per-function ABI fragments (@bongtu/core/network) — only the pool

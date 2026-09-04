@@ -28,9 +28,9 @@ import {
   type StealthDerivation,
   type StealthKeys,
 } from "@bongtu/core/stealth";
-import type { KeyDerivationTypedData } from "./derive.js";
-import { KEY_DERIVATION } from "./identity.js";
-import { signKeyDerivation, type Connection } from "./connection.js";
+import type { KeyDerivationTypedData } from "@bongtu/client/derive";
+import { KEY_DERIVATION } from "@bongtu/client/identity";
+import { signKeyDerivation, type Connection } from "@bongtu/client/connection";
 
 /** The EIP-712 struct the stealth popup signs. Distinct primary type from
  *  BongtuSpendingKey — see the module header. */

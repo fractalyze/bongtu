@@ -29,11 +29,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { deriveIdentityFromSignature } from "../src/derive.js";
-import { stealthKeysFromKdfSignature } from "../src/stealthKeys.js";
-import { ACCOUNT_MISMATCH_MESSAGE } from "../src/identity.js";
-import { IDLE_WIPE_MS, KeyCache, type KeyCacheWiring } from "../src/keyCache.js";
-import type { Connection } from "../src/connection.js";
+import { deriveIdentityFromSignature } from "@bongtu/client/derive";
+import { stealthKeysFromKdfSignature } from "@bongtu/client/stealthKeys";
+import { ACCOUNT_MISMATCH_MESSAGE } from "@bongtu/client/identity";
+import { IDLE_WIPE_MS, KeyCache, type KeyCacheWiring } from "@bongtu/client/keyCache";
+import type { Connection } from "@bongtu/client/connection";
 
 const SESSION_SIG = "0x" + "a1".repeat(32) + "b2".repeat(32) + "1c";
 const OTHER_SIG = "0x" + "c3".repeat(32) + "d4".repeat(32) + "1b";

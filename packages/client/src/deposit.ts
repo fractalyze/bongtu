@@ -21,8 +21,8 @@ import { ARBITER_PUBKEY_X, ARBITER_PUBKEY_Y } from "@bongtu/core/network";
 import type { Point } from "@bongtu/core/babyjub";
 import { toWire } from "@bongtu/core/proving";
 import type { DepositInput, ProvingRequest } from "@bongtu/core/proving";
-import type { WalletIdentity } from "./derive.js";
-import { toEncryptionNonce, freshKemMaterial, type KemDrawFn } from "./spend.js";
+import type { WalletIdentity } from "@bongtu/client/derive";
+import { toEncryptionNonce, freshKemMaterial, type KemDrawFn } from "@bongtu/client/spend";
 
 /** Fresh per-tx crypto material for one deposit. `ecdhPrivateKey`/`encryptionNonce`
  *  must never be reused across txs (a shared ephemeral key + nonce is a two-time pad);

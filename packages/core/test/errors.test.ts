@@ -16,7 +16,7 @@ import {
   describeThrown,
   errorCode,
   errorTexts,
-} from "../src/errors.js";
+} from "@bongtu/core/errors";
 
 // ========================= (a) indexer HTTP reads ================================
 

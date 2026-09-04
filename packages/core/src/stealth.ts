@@ -38,10 +38,10 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 
-import { Base8, mulPointEscalar, SUBGROUP_ORDER } from "./babyjub.js";
-import type { FieldInput, Point } from "./babyjub.js";
-import { ecdhSharedSecret } from "./note.js";
-import { packPubkey, unpackPubkey } from "./pubkey.js";
+import { Base8, mulPointEscalar, SUBGROUP_ORDER } from "@bongtu/core/babyjub";
+import type { FieldInput, Point } from "@bongtu/core/babyjub";
+import { ecdhSharedSecret } from "@bongtu/core/note";
+import { packPubkey, unpackPubkey } from "@bongtu/core/pubkey";
 
 // secp256k1 group order. Hardcoded (like babyjub.ts's curve constants) and
 // pinned against the library in the test suite ((N-1)·G + G == O).

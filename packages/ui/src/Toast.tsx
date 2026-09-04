@@ -13,8 +13,8 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
-import type { ToastItem, ToastQueue } from "./toastQueue.js";
-import { copyText } from "./clipboard.js";
+import type { ToastItem, ToastQueue } from "@bongtu/ui/toastQueue";
+import { copyText } from "@bongtu/ui/clipboard";
 
 const CARD: Record<ToastItem["variant"], string> = {
   error: "border-err-border bg-err-bg text-err",

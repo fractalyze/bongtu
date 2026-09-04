@@ -9,9 +9,9 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { ToastQueue } from "../src/toastQueue.js";
-import { ToastHost } from "../src/Toast.js";
-import { Banner } from "../src/Banner.js";
+import { ToastQueue } from "@bongtu/ui/toastQueue";
+import { ToastHost } from "@bongtu/ui/Toast";
+import { Banner } from "@bongtu/ui/Banner";
 
 const h = createElement;
 const noTimer = { schedule: () => () => {} };

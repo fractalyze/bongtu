@@ -15,7 +15,7 @@
 import type { Calldata } from "@bongtu/core/proving";
 import { explorerTxUrl } from "@bongtu/core/network";
 import type { StealthDerivation } from "@bongtu/core/stealth";
-import type { SubmitResult } from "./connection.js";
+import type { SubmitResult } from "@bongtu/client/connection";
 
 /**
  * Submit a proven withdraw THROUGH the relayer: POST /relay, map { txHash }

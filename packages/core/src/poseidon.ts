@@ -30,8 +30,8 @@ import {
 
 // A field element in a form the hash accepts (coerced to BigInt before hashing).
 // Declared once in babyjub.ts; re-exported so `@bongtu/core/poseidon` importers keep working.
-import type { FieldInput } from "./babyjub.js";
-export type { FieldInput } from "./babyjub.js";
+import type { FieldInput } from "@bongtu/core/babyjub";
+export type { FieldInput } from "@bongtu/core/babyjub";
 
 // The fixed-arity signature every poseidon-lite hash shares.
 type PoseidonFn = (input: FieldInput[]) => bigint;

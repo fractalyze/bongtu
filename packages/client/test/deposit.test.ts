@@ -21,13 +21,13 @@ import { ml_kem768, kemSsToLimbs, kemHexToBytes, kemBytesToHex } from "@bongtu/c
 import { ARBITER_KEM_PK } from "@bongtu/core/network";
 import type { Point } from "@bongtu/core/babyjub";
 
-import { deriveIdentityFromSignature } from "../src/derive.js";
+import { deriveIdentityFromSignature } from "@bongtu/client/derive";
 import {
   buildDepositRequest,
   freshDepositCrypto,
   type DepositCrypto,
-} from "../src/deposit.js";
-import type { KemMaterial } from "../src/spend.js";
+} from "@bongtu/client/deposit";
+import type { KemMaterial } from "@bongtu/client/spend";
 import { ARBITER_PUBKEY_X, ARBITER_PUBKEY_Y } from "@bongtu/core/network";
 
 /** the pool's stored arbiter PUBLIC key, from the ONE network module. */

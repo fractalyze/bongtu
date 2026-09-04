@@ -17,8 +17,8 @@
 
 import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
 
-import type { FieldInput, PointInput } from "./babyjub.js";
-import { poseidonN } from "./poseidon.js";
+import type { FieldInput, PointInput } from "@bongtu/core/babyjub";
+import { poseidonN } from "@bongtu/core/poseidon";
 
 export { ml_kem768 };
 

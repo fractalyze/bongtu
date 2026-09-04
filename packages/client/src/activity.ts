@@ -3,7 +3,7 @@
 // three gate headlessly, like the other lib edges (money, walletBrand). Copy stays
 // plain words (the U-TEXT principle): no note/UTXO jargon.
 
-import type { HistoryItem, HistoryKind } from "./indexerClient.js";
+import type { HistoryItem, HistoryKind } from "@bongtu/client/indexerClient";
 
 /** The row's main line: one plain-words phrase per /history kind. */
 export const ACTIVITY_VERB: Record<HistoryKind, string> = {

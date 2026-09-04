@@ -36,11 +36,11 @@
 //
 // Browser-safe: no node builtins.
 
-import type { FieldInput, Point, PointInput } from "./babyjub.js";
-import { disclosureChain } from "./envelope.js";
-import { kemSsToLimbs, ml_kem768 } from "./kem.js";
-import { ecdhSharedSecret, poseidonDecrypt, poseidonEncrypt } from "./note.js";
-import { FIELD_PRIME, poseidonN } from "./poseidon.js";
+import type { FieldInput, Point, PointInput } from "@bongtu/core/babyjub";
+import { disclosureChain } from "@bongtu/core/envelope";
+import { kemSsToLimbs, ml_kem768 } from "@bongtu/core/kem";
+import { ecdhSharedSecret, poseidonDecrypt, poseidonEncrypt } from "@bongtu/core/note";
+import { FIELD_PRIME, poseidonN } from "@bongtu/core/poseidon";
 
 // Domain-separation tags: sha256(ASCII) mod r (BN254 scalar field), frozen
 // 2026-09-03 (OPMOD §3.3). NEW strings — the arbiter tags

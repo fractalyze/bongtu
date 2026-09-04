@@ -25,7 +25,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
-import { deriveKeypair, ecdhSharedSecret, commitment } from "../src/note.js";
+import { deriveKeypair, ecdhSharedSecret, commitment } from "@bongtu/core/note";
 import {
   kemSsToLimbs,
   ml_kem768,
@@ -34,7 +34,7 @@ import {
   TAG_K1,
   TAG_BIND,
   KEM_CIPHERTEXT_BYTES,
-} from "../src/kem.js";
+} from "@bongtu/core/kem";
 import {
   TAG_RK0,
   TAG_RK1,
@@ -50,9 +50,9 @@ import {
   consumerDisclosureLen,
   consumerDisclosureElements,
   consumerDisclosureHash,
-} from "../src/consumer.js";
-import { disclosureChain } from "../src/envelope.js";
-import { FIELD_PRIME, poseidonN } from "../src/poseidon.js";
+} from "@bongtu/core/consumer";
+import { disclosureChain } from "@bongtu/core/envelope";
+import { FIELD_PRIME, poseidonN } from "@bongtu/core/poseidon";
 
 const P = FIELD_PRIME;
 

@@ -9,13 +9,13 @@
 // binding — the stored pubkey is the user's only pointer back to notes that a
 // randomised signature would otherwise strand (loginGuard.ts).
 
-import type { WalletIdentity } from "./derive.js";
-import type { LoginSignaturePlan } from "./identity.js";
-import { obtainViewToken } from "./indexerClient.js";
-import { assertKeyUnchanged, loginNeedsDeterminismCheck } from "./loginGuard.js";
-import { ensureChain } from "./connection.js";
-import type { Connection } from "./connection.js";
-import { loadKeyBinding, saveKeyBinding, saveSession, type StoredSession } from "./session.js";
+import type { WalletIdentity } from "@bongtu/client/derive";
+import type { LoginSignaturePlan } from "@bongtu/client/identity";
+import { obtainViewToken } from "@bongtu/client/indexerClient";
+import { assertKeyUnchanged, loginNeedsDeterminismCheck } from "@bongtu/client/loginGuard";
+import { ensureChain } from "@bongtu/client/connection";
+import type { Connection } from "@bongtu/client/connection";
+import { loadKeyBinding, saveKeyBinding, saveSession, type StoredSession } from "@bongtu/client/session";
 
 export interface LoginContext {
   indexerUrl: string;

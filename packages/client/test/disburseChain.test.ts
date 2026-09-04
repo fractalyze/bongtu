@@ -21,21 +21,21 @@ import { ImtTree } from "@bongtu/core/imt";
 import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
 import { H, B } from "@bongtu/core/network";
 
-import { deriveIdentityFromSignature } from "../src/derive.js";
-import { KeyCache } from "../src/keyCache.js";
+import { deriveIdentityFromSignature } from "@bongtu/client/derive";
+import { KeyCache } from "@bongtu/client/keyCache";
 import {
   runMergeChain,
   CHAIN_FAILURE_REASSURANCE,
   type RunSpendDeps,
   type SpendContext,
   type SpendIo,
-} from "../src/spendFlow.js";
-import type { OwnerNote } from "../src/indexerClient.js";
+} from "@bongtu/client/spendFlow";
+import type { OwnerNote } from "@bongtu/client/indexerClient";
 import {
   planDisburseChain,
   pendingLegOf,
   SpendSelectionError,
-} from "../src/spend.js";
+} from "@bongtu/client/spend";
 
 const SIG = "0x" + "c3".repeat(32) + "d4".repeat(32) + "1b";
 const WALLET = deriveIdentityFromSignature(SIG);

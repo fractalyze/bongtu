@@ -15,8 +15,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { ACTIVITY_VERB, activityDirection, appendHistoryPage } from "../src/activity.js";
-import type { HistoryItem, HistoryKind } from "../src/indexerClient.js";
+import { ACTIVITY_VERB, activityDirection, appendHistoryPage } from "@bongtu/client/activity";
+import type { HistoryItem, HistoryKind } from "@bongtu/client/indexerClient";
 
 const KINDS: HistoryKind[] = ["received", "sent", "withdraw", "deposit"];
 

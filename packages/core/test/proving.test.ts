@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { toWire } from "../src/proving.js";
+import { toWire } from "@bongtu/core/proving";
 import type {
   Calldata,
   DepositInput,
@@ -20,8 +20,8 @@ import type {
   ProvingRequest,
   Transfer10Input,
   Transfer10x2Input,
-} from "../src/proving.js";
-import { deriveKeypair, commitment } from "../src/note.js";
+} from "@bongtu/core/proving";
+import { deriveKeypair, commitment } from "@bongtu/core/note";
 
 test("a bigint-built deposit ProvingRequest JSON round-trips to the same decimal shape", () => {
   const kp = deriveKeypair(313131313131313131313131n);

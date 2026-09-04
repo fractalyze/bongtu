@@ -13,9 +13,9 @@ import {
   keyDerivationTypedData,
   deriveIdentityFromSignature,
   type WalletIdentity,
-} from "./derive.js";
-import { assertDeterministicSignatures } from "./loginGuard.js";
-import { signKeyDerivation, type Connection } from "./connection.js";
+} from "@bongtu/client/derive";
+import { assertDeterministicSignatures } from "@bongtu/client/loginGuard";
+import { signKeyDerivation, type Connection } from "@bongtu/client/connection";
 
 /** Whether this derivation has to prove the wallet is deterministic before trusting
  *  what it signed (loginGuard.loginNeedsDeterminismCheck decides). */
