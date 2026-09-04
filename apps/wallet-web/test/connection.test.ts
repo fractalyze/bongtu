@@ -30,6 +30,7 @@ import {
   createPublicClient,
   createWalletClient,
   custom,
+  defineChain,
   encodeFunctionData,
   parseAbi,
   parseGwei,
@@ -217,6 +218,34 @@ test("mintTestToken (dev faucet) submits at the same pinned gas price", async ()
   const tx = (sent.params as [Record<string, string>])[0];
   assert.equal(tx.to?.toLowerCase(), token);
   assert.equal(BigInt(tx.gasPrice), 0xf4610n * 3n, "mint pays the same 3x chain-quoted price");
+});
+
+test("submit signs against the walletClient's OWN chain binding, so a non-live rig (the e2e gate's anvil) submits without a mismatch", async () => {
+  // The apps bind their clients to liveChain, so this seam changes nothing for
+  // them; the heavy consumer e2e leg binds its rig to anvil and rides the same
+  // submitPoolWrite. viem's chain assert must check the client's binding, not a
+  // hardcoded liveChain pin.
+  const anvil = defineChain({
+    id: 31337,
+    name: "anvil",
+    nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    rpcUrls: { default: { http: ["http://127.0.0.1:8545"] } },
+  });
+  const { provider, calls } = fakeRpc({ eth_chainId: () => "0x7a69" });
+  const connection: Connection = {
+    address: ACCOUNT,
+    walletClient: createWalletClient({
+      account: ACCOUNT as `0x${string}`,
+      chain: anvil,
+      transport: custom(provider),
+    }),
+    publicClient: createPublicClient({ chain: anvil, transport: custom(provider) }) as PublicClient,
+    injected: provider,
+    transport: "injected",
+  };
+  const res = await submitTransfer(connection, POOL, TRANSFER_CALLDATA, KEM_CT, EXPLORER_BASE);
+  assert.equal(res.txHash, TX_HASH);
+  assert.ok(calls.some((c) => c.method === "eth_sendTransaction"), "the write went out under the anvil binding");
 });
 
 // ======================== (2) KEM EPOCH GUARD ===============================

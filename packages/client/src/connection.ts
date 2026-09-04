@@ -406,7 +406,12 @@ export async function submitPoolWrite(
     functionName: write.functionName,
     args: write.args as never,
     account: connection.address as Address,
-    chain: liveChain,
+    // The wallet client's own chain binding when it has one, so viem's chain
+    // assert checks the binding the client was built on: the apps bind wagmi
+    // clients to liveChain (identical behavior), while the heavy e2e gate binds
+    // its rig to the gate's anvil chain and must not trip a live-chain mismatch.
+    // An unbound client still gets the liveChain pin: the pool exists on one chain.
+    chain: connection.walletClient.chain ?? liveChain,
     nonce: await nextNonce(connection),
     gasPrice: await chainGasPrice(connection),
   });

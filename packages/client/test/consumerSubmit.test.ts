@@ -150,3 +150,11 @@ test("the kem-ct belt fails a wrong count or a wrong length BEFORE any wallet wr
   );
   assert.equal(w.writes.length, 0, "a malformed ct set never reaches the wallet");
 });
+
+test("an explicit moduleAddress retargets the write (the fresh-stack gate seam); the default stays the canonical record", async () => {
+  const w = world();
+  const fresh = "0x00000000000000000000000000000000000000f7";
+  await submitTransferPriv(w.connection, calldata(20), [...CTS], "https://x", fresh);
+  assert.equal(w.writes[0].address, fresh, "the override lands the SAME encode path on the gate's own module");
+  assert.equal(w.writes[0].functionName, "transferPriv");
+});
