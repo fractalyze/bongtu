@@ -22,7 +22,7 @@ import { connectorsForWallets } from "@rainbow-me/rainbowkit";
 import { walletConnectWallet } from "@rainbow-me/rainbowkit/wallets";
 import { createPublicClient, createWalletClient, custom, type PublicClient } from "viem";
 import { liveChain } from "@bongtu/client/chain";
-import { accountWatchHandler, type Connection, type WalletWatchHandlers } from "@bongtu/client/connection";
+import { accountWatchHandler, type Connection, type WalletEdge, type WalletWatchHandlers } from "@bongtu/client/connection";
 
 /**
  * The Reown Cloud project id, or null when this build has none. `import.meta.env`
@@ -188,3 +188,13 @@ export async function currentAccount(): Promise<string | null> {
 export function watchWallet(handlers: WalletWatchHandlers): () => void {
   return watchAccount(wagmiConfig, { onChange: accountWatchHandler(handlers) });
 }
+
+/** This app's WalletEdge — the wagmi implementations of the engine's adapter
+ *  quartet in one typed object, so falling out of step with the interface is a
+ *  tsc error here rather than a runtime surprise in the lock or the login. */
+export const walletEdge: WalletEdge = {
+  hasInjectedWallet,
+  openConnection: requireConnection,
+  currentAccount,
+  watchAccount: watchWallet,
+};

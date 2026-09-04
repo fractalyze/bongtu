@@ -12,11 +12,12 @@
 
 import {
   parseAbi,
+  type Abi,
   type Address,
   type WalletClient,
   type PublicClient,
 } from "viem";
-import { causeChain, classifyChainFailure, errorCode } from "@bongtu/core/errors";
+import { causeChain, classifyChainFailure, errorCode, fallbackText, type ChainFailure, failureCopy, type FailureCopyTable } from "@bongtu/core/errors";
 import type { KeyDerivationTypedData } from "./derive.js";
 import type { WalletTransport } from "./loginGuard.js";
 import type { Calldata } from "@bongtu/core/proving";
@@ -93,34 +94,29 @@ export interface Connection {
 }
 
 /**
- * A human-readable message from ANY wallet/RPC failure. Provider errors
- * (EIP-1193 ProviderRpcError) and viem's layered errors are plain objects or
- * deep cause chains, so the naive `String(e)` renders "[object Object]". The
- * structural digging (cause chain, conventional fields, viem's typed error names)
- * lives in the shared classifier (@bongtu/core/errors classifyChainFailure); this
- * function is only the wallet's WORDS for each verdict — the two failures every
- * tester hits (user rejection, no gas ETH) in plain language, viem's own best
- * text for everything else.
+ * The wallet's words per ChainFailure kind. The structural digging (cause chain,
+ * conventional fields, viem's typed error names) lives in the shared classifier
+ * (@bongtu/core/errors classifyChainFailure); this table is only the wallet's
+ * WORDS for each verdict. A Record over the full union, so a kind added to the
+ * classifier is a tsc error HERE rather than a silent fall-through to raw viem
+ * text. Only the failures every tester hits (user rejection, no gas ETH, a
+ * declined switch) get wallet wording; the rest keep viem's own best line via
+ * the shared fallbackText — a precise revert beats any paraphrase.
  */
+export const WALLET_FAILURE_COPY: FailureCopyTable = {
+  user_rejected: () => "Transaction rejected in your wallet.",
+  insufficient_gas: () =>
+    `Not enough ${GAS_TOKEN_PHRASE} to pay gas. This account needs a little ${NATIVE_CURRENCY.symbol} on ${CHAIN_NAME} first.`,
+  // an un-rejected switch failure reads best in viem's own words
+  chain_switch: (failure, e) =>
+    failure.rejected ? "Transaction rejected in your wallet." : fallbackText(failure, e),
+  timeout: fallbackText,
+  transport: fallbackText,
+  other: fallbackText,
+};
+
 export function walletErrorMessage(e: unknown): string {
-  const failure = classifyChainFailure(e);
-  switch (failure.kind) {
-    case "user_rejected":
-      return "Transaction rejected in your wallet.";
-    case "insufficient_gas":
-      return `Not enough ${GAS_TOKEN_PHRASE} to pay gas. This account needs a little ${NATIVE_CURRENCY.symbol} on ${CHAIN_NAME} first.`;
-    case "chain_switch":
-      if (failure.rejected) return "Transaction rejected in your wallet.";
-      break; // an un-rejected switch failure reads best in viem's own words below
-    default:
-      break;
-  }
-  if (failure.text !== null) return failure.text;
-  try {
-    return JSON.stringify(e);
-  } catch {
-    return String(e);
-  }
+  return failureCopy(WALLET_FAILURE_COPY, classifyChainFailure(e), e);
 }
 
 /** The connected account's native (gas) ETH balance on the live chain. */
@@ -169,6 +165,32 @@ export function accountWatchHandler(
       handlers.disconnected?.();
     }
   };
+}
+
+/**
+ * The app-side wallet adapter, as one named shape. wallet-web (wagmi + RainbowKit
+ * + WalletConnect) and payroll-web (the injected provider, directly) each reach a
+ * wallet their own way; naming the quartet keeps the two adapters from drifting
+ * apart (an edge that stops satisfying it is a tsc error in its app). Today the
+ * engine consumes only the live-account read (keyCache.ts createKeyCache takes
+ * exactly that slice); the other three members are the seam future engine
+ * threading (login, account watch) lands against — declared now so both apps
+ * already export the full shape.
+ */
+export interface WalletEdge {
+  /** Is an EIP-1193 provider present in this browser — the connect button's
+   *  precondition (false in a plain mobile browser). */
+  hasInjectedWallet(): boolean;
+  /** Open (or require) a live wallet as the engine's `Connection`. Throws readably
+   *  when nothing is connected/installed. */
+  openConnection(): Promise<Connection>;
+  /** The account the wallet has selected RIGHT NOW, lowercased; null when none.
+   *  `connection.address` is frozen at connect time, so this is the only honest
+   *  answer to "whose key would a derivation produce?" after a mid-session switch. */
+  currentAccount(): Promise<string | null>;
+  /** Subscribe to account transitions (switch, disconnect); returns the
+   *  unsubscribe. What the events should DO stays the caller's choice. */
+  watchAccount(handlers: WalletWatchHandlers): () => void;
 }
 
 // EIP-3085/3326 params for the live chain, derived from the ONE network module so
@@ -355,6 +377,38 @@ async function nextNonce(connection: Connection): Promise<number> {
   });
 }
 
+/**
+ * The ONE submit discipline for every write that touches the pool or its token,
+ * exported so payroll's disburse submit rides it too (apps/payroll-web/src/lib/
+ * chain.ts keeps only its ABI fragment and argument belts). Three rules, each
+ * bought with a live incident:
+ *   - gas from `chainGasPrice` (the node's floor quote x3) — never wallet-stack
+ *     estimation, which once overpaid ~1500x;
+ *   - nonce from `nextNonce` (the chain's pending view) — wallet trackers desync
+ *     after speed-up/cancel surgery and then assign stale nonces;
+ *   - resolve only after the receipt, so callers can sequence txs safely (which
+ *     is also what keeps the pending count a correct next nonce).
+ * Args are validated at ABI-encode time; the per-function tuple types cannot be
+ * expressed for a dynamic (abi, functionName) pair, hence unknown[] + one cast.
+ */
+export async function submitPoolWrite(
+  connection: Connection,
+  write: { address: string; abi: Abi; functionName: string; args: readonly unknown[] },
+): Promise<`0x${string}`> {
+  const hash = await connection.walletClient.writeContract({
+    address: write.address as Address,
+    abi: write.abi,
+    functionName: write.functionName,
+    args: write.args as never,
+    account: connection.address as Address,
+    chain: liveChain,
+    nonce: await nextNonce(connection),
+    gasPrice: await chainGasPrice(connection),
+  });
+  await connection.publicClient.waitForTransactionReceipt({ hash });
+  return hash;
+}
+
 async function submit(
   connection: Connection,
   poolAddr: string,
@@ -379,20 +433,12 @@ async function submit(
           stealth?.viewTag ?? 0,
         ]
       : [a, b, c, pub, kemCiphertext];
-  const hash = await connection.walletClient.writeContract({
-    address: poolAddr as Address,
+  const hash = await submitPoolWrite(connection, {
+    address: poolAddr,
     abi: POOL_ABI,
     functionName: fn,
-    // The pub vector's length is per-circuit (19/37/68/27) and checked by the ABI
-    // encoder at runtime; a plain bigint[] cannot satisfy the per-function tuple
-    // type statically, hence the one cast.
-    args: args as never,
-    account: connection.address as Address,
-    chain: liveChain,
-    nonce: await nextNonce(connection),
-    gasPrice: await chainGasPrice(connection),
+    args,
   });
-  await connection.publicClient.waitForTransactionReceipt({ hash });
   return { txHash: hash, explorerUrl: explorerTxUrl(hash, explorerBase) };
 }
 
@@ -460,26 +506,20 @@ export async function approveToken(
   spender: string,
   amount: bigint,
 ): Promise<string> {
-  const hash = await connection.walletClient.writeContract({
-    address: tokenAddr as Address,
+  return submitPoolWrite(connection, {
+    address: tokenAddr,
     abi: ERC20_ABI,
     functionName: "approve",
     args: [spender as Address, amount],
-    account: connection.address as Address,
-    chain: liveChain,
-    gasPrice: await chainGasPrice(connection),
-    nonce: await nextNonce(connection),
   });
-  await connection.publicClient.waitForTransactionReceipt({ hash });
-  return hash;
 }
 
 /**
  * DEV FAUCET: mint `amount` raw units of the mock kKRW ERC-20 at `tokenAddr` to `to`,
  * from the connected wallet. The deployed token is MockERC20 whose `mint` is
  * permissionless (no onlyOwner/cap), so the user self-funds test kKRW and pays their
- * OWN gas — there is no backend faucet service or operator key. Same submit shape
- * as approveToken/submit (chain-quoted gas, explicit nonce, receipt wait); returns the tx hash +
+ * OWN gas — there is no backend faucet service or operator key. Rides the same
+ * submitPoolWrite discipline as every other write; returns the tx hash +
  * explorer link so the Deposit screen can surface it. A production token has no mint.
  */
 export async function mintTestToken(
@@ -488,17 +528,12 @@ export async function mintTestToken(
   to: string,
   amount: bigint,
 ): Promise<SubmitResult> {
-  const hash = await connection.walletClient.writeContract({
-    address: tokenAddr as Address,
+  const hash = await submitPoolWrite(connection, {
+    address: tokenAddr,
     abi: ERC20_ABI,
     functionName: "mint",
     args: [to as Address, amount],
-    account: connection.address as Address,
-    chain: liveChain,
-    gasPrice: await chainGasPrice(connection),
-    nonce: await nextNonce(connection),
   });
-  await connection.publicClient.waitForTransactionReceipt({ hash });
   return { txHash: hash, explorerUrl: explorerTxUrl(hash) };
 }
 
