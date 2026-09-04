@@ -58,10 +58,13 @@ import { deriveLoginIdentity } from "../src/identity.js";
 // --- pinned derivation facts ------------------------------------------------------
 
 /** The EIP-712 digest of keyDerivationTypedData(CHAIN_ID, POOL_ADDRESS, "1") — what
- *  the wallet signs — for the CURRENT deployment (chain 84532, the Base pool).
- *  Recomputed 2026-08-11 for the chain move; see the identity-break note above
- *  before ever changing it. */
-const PIN_DIGEST = "0x64f5a878ad8289d299c1b4b2f1a75d7be70b40c1e5f98373c1791a9de5e95f36";
+ *  the wallet signs — for the CURRENT deployment (chain 450815, the Maroo pool).
+ *  Recomputed 2026-09-04 for the chain move, through the same viem hashTypedData
+ *  path this file uses (the old inputs — 84532, the Base pool — still reproduce
+ *  the old digest 0x64f5a878…, which is what makes this a computation rather
+ *  than a plausible hex string); see the identity-break note above before ever
+ *  changing it. */
+const PIN_DIGEST = "0x07ea59d7abef0cfaa34cb72a2d41ee008eb6e2ab08af9fa0f72e0824650d51b3";
 
 /** The live deployment's KDF domain facts — what wallet-web's config.ts
  *  KEY_DERIVATION threads into the engine (same one home: @bongtu/core/network). */

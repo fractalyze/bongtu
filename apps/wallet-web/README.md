@@ -136,7 +136,7 @@ The PoC takes option **(a): accept GPL for the public app.** `snarkjs` is dynami
 so it loads only when the user actually proves. A non-GPL WASM prover (b) or a local
 helper (c) are the documented alternatives.
 
-## Defaults (the live deployment — `deploy/addresses.84532.json`)
+## Defaults (the live deployment — `deploy/addresses.450815.json`)
 
 `src/config.ts` ships the live deployment's facts — the pool address, the chain id, the
 pool's **public** arbiter key (the authority-envelope target — public, safe to ship) — plus

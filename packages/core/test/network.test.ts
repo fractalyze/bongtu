@@ -5,7 +5,7 @@
 // only at on-chain proof rejection. This suite convicts any slip in
 // milliseconds instead:
 //
-//   1. Facts the deploy artifact carries (deploy/addresses.84532.json — the
+//   1. Facts the deploy artifact carries (deploy/addresses.450815.json — the
 //      canonical record, CLAUDE.md "live pool is canonical") are asserted
 //      EQUAL to it field-for-field, so a redeploy that edits the JSON turns
 //      this suite red until the module follows. This is ALSO the belt against
@@ -42,6 +42,7 @@ import {
   POOL_ADDRESS,
   RPC_URL,
   TOKEN_ADDRESS,
+  WS_URL,
   arbiterKemPkGuardError,
   explorerTxUrl,
   isPreKemProbeError,
@@ -64,12 +65,12 @@ interface Addresses {
   token: string;
 }
 const addr = JSON.parse(
-  readFileSync(join(REPO_ROOT, "deploy", "addresses.84532.json"), "utf8"),
+  readFileSync(join(REPO_ROOT, "deploy", "addresses.450815.json"), "utf8"),
 ) as Addresses;
 
-test("module facts equal deploy/addresses.84532.json field-for-field", () => {
+test("module facts equal deploy/addresses.450815.json field-for-field", () => {
   // JSON key -> module value, one row per fact the module owns. A redeploy
-  // (new addresses.84532.json) fails here naming the exact stale field.
+  // (new addresses.450815.json) fails here naming the exact stale field.
   const owned: Record<keyof Addresses, string | number> = {
     pool: POOL_ADDRESS,
     token: TOKEN_ADDRESS,
@@ -84,7 +85,7 @@ test("module facts equal deploy/addresses.84532.json field-for-field", () => {
     assert.deepEqual(
       moduleValue,
       addr[key as keyof Addresses],
-      `network.ts disagrees with addresses.84532.json on "${key}"`,
+      `network.ts disagrees with addresses.450815.json on "${key}"`,
     );
   }
   // The tuple form both app configs consume is the same two scalars.
@@ -95,16 +96,18 @@ test("facts outside the deploy artifact are pinned to the pre-module copies", ()
   // SPEC §4 IMT height — was re-declared per app config.
   assert.equal(H, 32);
   // The live drivers' HARD gas pin (never estimated — estimation once overpaid
-  // ~1500x). This chain quoted 0.006 gwei over a 0.005 gwei base fee, so 0.05
-  // gwei is ~8x headroom: pinning at or under the base fee is what strands a
-  // run, and overpaying testnet ETH is the cheap side of that trade. Lowering
-  // this toward the quote is the failure mode, not the saving.
-  assert.equal(GAS_PRICE_PIN_GWEI, "0.05");
+  // ~1500x). Maroo quoted 9000 gwei (8000 gwei x/feemarket base fee + 1000
+  // gwei tip) on 2026-09-04, so 18000 gwei is 2x headroom: pinning at or under
+  // the base fee is what strands a run, and overpaying testnet tOKRW is the
+  // cheap side of that trade. Lowering this toward the quote is the failure
+  // mode, not the saving.
+  assert.equal(GAS_PRICE_PIN_GWEI, "18000");
   // Chain endpoints, name and faucet — were copied in both app config.ts files.
-  assert.equal(CHAIN_NAME, "Base Sepolia");
-  assert.equal(RPC_URL, "https://sepolia.base.org");
-  assert.equal(EXPLORER_BASE, "https://sepolia.basescan.org");
-  assert.equal(GAS_FAUCET_URL, "https://portal.cdp.coinbase.com/products/faucet");
+  assert.equal(CHAIN_NAME, "Maroo Testnet");
+  assert.equal(RPC_URL, "https://rpc-testnet.maroo.io");
+  assert.equal(WS_URL, "wss://ws-testnet.maroo.io");
+  assert.equal(EXPLORER_BASE, "https://explorer-testnet.maroo.io");
+  assert.equal(GAS_FAUCET_URL, "https://faucet.maroo.io");
 });
 
 test("POOL_ABI_FRAGMENTS fragments match the hybrid (V2) BongtuPool signatures", () => {
@@ -143,13 +146,13 @@ test("POOL_ABI_FRAGMENTS fragments match the hybrid (V2) BongtuPool signatures",
 });
 
 test("ARBITER_KEM_PK is the deploy artifact's 1184-byte key and hashes to ARBITER_KEM_PK_HASH", () => {
-  // Also equality-tested field-for-field against addresses.84532.json above;
+  // Also equality-tested field-for-field against addresses.450815.json above;
   // this pins the internal consistency: length, the deploy/arbiter-kem-pk
   // artifact file, keccak256(pk) == the stored hash, and that the bytes ARE a
   // usable ML-KEM-768 encapsulation key (noble accepts them).
   const bytes = kemHexToBytes(ARBITER_KEM_PK);
   assert.equal(bytes.length, KEM_PUBLIC_KEY_BYTES);
-  const artifact = readFileSync(join(REPO_ROOT, "deploy", "arbiter-kem-pk.84532.hex"), "utf8").trim();
+  const artifact = readFileSync(join(REPO_ROOT, "deploy", "arbiter-kem-pk.450815.hex"), "utf8").trim();
   assert.equal(ARBITER_KEM_PK, artifact.startsWith("0x") ? artifact : `0x${artifact}`);
   // noble keccak, NOT loadEthers: the extern loader resolves via the dev-box
   // BONGTU_NODE_MODULES fallback, which hosted CI runners do not have.
@@ -160,7 +163,7 @@ test("ARBITER_KEM_PK is the deploy artifact's 1184-byte key and hashes to ARBITE
 });
 
 test("explorerTxUrl builds the live explorer link (trailing slash tolerated)", () => {
-  assert.equal(explorerTxUrl("0xabc"), "https://sepolia.basescan.org/tx/0xabc");
+  assert.equal(explorerTxUrl("0xabc"), "https://explorer-testnet.maroo.io/tx/0xabc");
   // metamask.ts trimmed a trailing slash off the base; behavior preserved.
   assert.equal(explorerTxUrl("0xabc", "https://x.example/"), "https://x.example/tx/0xabc");
   assert.equal(explorerTxUrl("0xabc", "https://x.example"), "https://x.example/tx/0xabc");

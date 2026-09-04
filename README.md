@@ -80,13 +80,13 @@ real recipient count stays hidden) and publishes all 256 ciphertexts on-chain fo
 bound by one aggregated disclosure hash the proof commits to.
 
 One such batch, measured live against the same circuits and the same hybrid ML-KEM envelope:
-**3,905,519 L2 gas** — **15,256 per recipient**. That measurement was taken on the project's
-previous chain and has not been re-run on Base Sepolia; it carries over because the move changed no
-executable line in any operation path, only the initializer
-([`docs/performance.md`](docs/performance.md) shows the check). The other four operations *have*
-been re-measured on Base and are in that file.
+**3,905,519 L2 gas** — **15,256 per recipient**. That measurement was taken two chains back and
+has not been re-run since (on Base Sepolia or on the current Maroo deployment); it carries over
+because no chain move changed an executable line in any operation path, only the initializer
+([`docs/performance.md`](docs/performance.md) shows the check). The other four operations were
+re-measured on Base Sepolia and are in that file.
 
-A **100,000-person payroll** is 391 of those batches, priced at the chain's own 0.006 gwei quote —
+A **100,000-person payroll** is 391 of those batches, priced at the measuring chain's own 0.006 gwei quote —
 not at the higher gas price our deploy scripts pin for themselves:
 
 | | per 256-batch | ×391 (100,000 people) |
@@ -105,10 +105,11 @@ are 391× one measured batch, not a single live 100k run.)*
 
 ## What is built
 
-Every surface below is built. The wallet path has run end to end against the pool in
-[Status](#status) — deposits, a `transfer10x2` merge and a `transfer10x2` payment all landed on Base
-Sepolia and the arbiter indexer surfaced the resulting notes. The 256-recipient disburse has run end
-to end, but on the previous deployment; it has not been re-run here:
+Every surface below is built. The wallet path has run end to end against the retired Base Sepolia
+deployment — deposits, a `transfer10x2` merge and a `transfer10x2` payment all landed there and
+the arbiter indexer surfaced the resulting notes. The fresh Maroo pool in [Status](#status) has
+passed its deploy smoke (a real proof-carrying deposit); the app flows and the 256-recipient
+disburse have not been re-run on it yet:
 
 | surface | what it is |
 |---|---|
@@ -116,26 +117,31 @@ to end, but on the previous deployment; it has not been re-run here:
 | [**Employer Payroll Test Console**](https://payroll.fractalyze.io) | The mass-payout console (testnet tool, access-gated): deposit public kKRW into the pool, generate a 255-recipient worksheet, and settle it as **one** private disburse, whose proof the GPU prover below returns in seconds when that service is up. |
 | **GPU prover service** | The employer-side proving box: three circuits held resident on one GPU, in-process witness workers, ~0.5 s warm proof for the 256-batch. Auth- and origin-gated, so only the employer's own console can reach it. Run on demand rather than kept up: it holds ~25 GB of GPU while resident, and the payroll console is the only surface that needs it — the wallet proves in the browser. |
 | **Indexer (arbiter mode)** | Mirrors the on-chain tree, decrypts every authority envelope, serves per-owner `/notes` + `/history` behind signature read-auth, and raises disclosure alarms when a batch's ciphertext disagrees with the chain. |
-| **BongtuPool on Base Sepolia** | The UUPS-proxied pool in [Status](#status): six Groth16 verifiers, the IMT, the kKRW escrow, and the enforced 2054-element disclosure on every disburse. |
+| **BongtuPool on Maroo Testnet** | The UUPS-proxied pool in [Status](#status): six Groth16 verifiers, the five consumer modules, the IMT, the kKRW escrow, and the enforced 2054-element disclosure on every disburse. |
 
 The two web apps are static; the only server-side pieces are the employer's own prover and the
 institution's arbiter indexer — exactly the two parties that hold those roles in the design.
 
 ## Status
 
-Live on **Base Sepolia** (chain 84532), behind a **UUPS proxy** carrying the security-hardened
-circuits and enforced four-op auditor disclosure. `initialize` produces that whole shape in one
-call, so the pool serves every entry point from its first block and `currentEpoch()` is 0.
+Live on **Maroo Testnet** (chain 450815), behind a **UUPS proxy** carrying the security-hardened
+circuits and enforced four-op auditor disclosure — and, dual-mode from genesis, the five consumer
+modules registered inside the deploy broadcast. `initialize` produces the whole enterprise shape
+in one call, so the pool serves every entry point from its first block and `currentEpoch()` is 0.
 
 | | address |
 |---|---|
-| BongtuPool (proxy, B=256) | [`0x2a72fea8e97fF79069B3D0165A5DB1Fef7F9322C`](https://sepolia.basescan.org/address/0x2a72fea8e97fF79069B3D0165A5DB1Fef7F9322C) |
-| BongtuPool implementation | [`0x960BDc691bB5F6BAfa45Ee9DD188BB4B925Bcc82`](https://sepolia.basescan.org/address/0x960BDc691bB5F6BAfa45Ee9DD188BB4B925Bcc82) |
+| BongtuPool (proxy, B=256) | [`0x3B6238f522a08f08169643cD315e9C44209F1aD6`](https://explorer-testnet.maroo.io/address/0x3B6238f522a08f08169643cD315e9C44209F1aD6) |
+| BongtuPool implementation | [`0x607Ab4DbC2C209C170C9E3ceBFEDD1322E8810ea`](https://explorer-testnet.maroo.io/address/0x607Ab4DbC2C209C170C9E3ceBFEDD1322E8810ea) |
 
-Every other address — verifiers, Poseidon, the kKRW token — is in
-[`deploy/addresses.84532.json`](deploy/addresses.84532.json), which is the source of truth; take
-them from it **by field name** rather than copying one that looks familiar. The contracts are not
-source-verified on the explorer; audit them against this repo at the deploying commit.
+Every other address — verifiers, Poseidon, the kKRW token, the consumer modules
+([`deploy/modules.450815.json`](deploy/modules.450815.json)) — is in
+[`deploy/addresses.450815.json`](deploy/addresses.450815.json), which is the source of truth; take
+them from it **by field name** rather than copying one that looks familiar. The retired Base
+Sepolia stack stays recorded in [`deploy/addresses.84532.json`](deploy/addresses.84532.json). The
+pool implementation, the proxy and `DepositVerifier` are source-verified on the Blockscout
+explorer; the remaining contracts are bytecode-only (Poseidon has no Solidity source at all) —
+audit them against this repo at the deploying commit.
 
 Verified on-chain through the proxy: `B()==256`, `disburseCiphertextLen==2054` (disclosure enforced),
 a real envelope-carrying `deposit`. Measured: warm 256-disburse GPU proof **~0.47s** (2.80M

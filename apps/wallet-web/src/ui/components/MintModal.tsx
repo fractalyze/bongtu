@@ -11,7 +11,7 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { DEFAULTS } from "../../config.js";
-import { GAS_TOKEN_PHRASE } from "@bongtu/core/network";
+import { GAS_TOKEN_PHRASE, NATIVE_CURRENCY } from "@bongtu/core/network";
 import {
   mintTestToken,
   readGasBalance,
@@ -88,7 +88,7 @@ export function MintModal({
         // gas-shortfall message and offers the faucet link.
         throw new Error(
           `This account has no ${GAS_TOKEN_PHRASE} to pay gas. ` +
-            `Get a little ETH onto ${DEFAULTS.chainName} first, then mint.`,
+            `Get a little ${NATIVE_CURRENCY.symbol} onto ${DEFAULTS.chainName} first, then mint.`,
         );
       }
       const res = await mintTestToken(connection, DEFAULTS.token, connection.address, parsed.wei);

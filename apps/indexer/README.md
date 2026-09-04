@@ -128,7 +128,7 @@ directly, point `DATABASE_URL` at any reachable Postgres:
 
 ```sh
 DATABASE_URL=postgres://… npm start                        # defaults: local anvil RPC, port 8600
-DATABASE_URL=postgres://… RPC=https://sepolia.base.org npm start   # the live pool (read-only)
+DATABASE_URL=postgres://… RPC=https://rpc-testnet.maroo.io npm start   # the live pool (read-only)
 ```
 
 Env knobs (`src/index.ts`):

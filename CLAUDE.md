@@ -27,7 +27,7 @@ not re-derive what those files own.
   nsys/command-buffers (leaked 30 GB once); cold zkey-compile is ~116 s, longer than the
   default 2-min Bash timeout — pass `timeout ≥ 300000`; after a run, confirm GPU memory
   returns to idle (~15 MiB) and kill stray prover PIDs.
-- **Live pool is canonical**: the pool recorded in `deploy/addresses.84532.json` — mirrored into
+- **Live pool is canonical**: the pool recorded in `deploy/addresses.450815.json` — mirrored into
   `packages/core/src/network.ts`, which `packages/core/test/network.test.ts` holds to that file
   field-for-field — is the deployment everything runs against. Reuse it; do not redeploy for new
   work. A circuit change ships as a UUPS `upgradeToAndCall` carrying a fresh `reinitializer(2)`

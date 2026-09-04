@@ -108,7 +108,7 @@ export function walletErrorMessage(e: unknown): string {
     case "user_rejected":
       return "Transaction rejected in your wallet.";
     case "insufficient_gas":
-      return `Not enough ${GAS_TOKEN_PHRASE} to pay gas. This account needs a little ETH on ${CHAIN_NAME} first.`;
+      return `Not enough ${GAS_TOKEN_PHRASE} to pay gas. This account needs a little ${NATIVE_CURRENCY.symbol} on ${CHAIN_NAME} first.`;
     case "chain_switch":
       if (failure.rejected) return "Transaction rejected in your wallet.";
       break; // an un-rejected switch failure reads best in viem's own words below

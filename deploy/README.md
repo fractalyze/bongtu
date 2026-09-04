@@ -50,7 +50,7 @@ registration is `onlyOwner` + event-logged, upgrade-equivalent power):
 | profile | how | arbiter key | what is registered |
 |---|---|---|---|
 | audited-only / enterprise | `Deploy.s.sol` with `MODULE_PROFILE=none` (the default — byte-identical to the pre-profile deploy), or `UpgradeV3.s.sol` with `MODULE_PROFILE=none` | required (epoch 0) | no consumer modules — the pool-level audit guarantee holds |
-| consumer (shared pool) | `Deploy.s.sol MODULE_PROFILE=consumer` (fresh), or `UpgradeV3.s.sol` (existing pool — the live-pool path) | required (enterprise family live) | the 5 consumer modules via `ConsumerModuleKit` (`deploy/modules.<chainid>.json`) |
+| consumer (shared pool) | `Deploy.s.sol MODULE_PROFILE=consumer` (fresh — how the live 450815 pool got them at genesis), or `UpgradeV3.s.sol` (the migration an existing pool would take — drilled on anvil only, never run on the retired 84532 pool, which stayed audited-only) | required (enterprise family live) | the 5 consumer modules via `ConsumerModuleKit` (`deploy/modules.<chainid>.json`). The shipped Maroo pool subsequently deregistered the disburse module (mass payout is enterprise-path only); a leaner p2p profile knob is follow-up work |
 | consumer-only | `DeployConsumerOnly.s.sol` | **none exists** — `initializeConsumerOnly` mints no arbiter epoch, wires no enterprise verifier; every enterprise entrypoint reverts | the 5 consumer modules (records `addresses.consumer.<chainid>.json` + `modules.consumer.<chainid>.json`) |
 
 `UpgradeV3.s.sol` is the OPMOD §7.3 migration for an EXISTING pool: consumer verifiers +
@@ -87,7 +87,8 @@ Overridable: `DEPLOY_PORT` (default 8550), `RPC`, `CHAINID`, `FORGE`/`ANVIL`/`CA
 ## Deploy to the live testnet (done — the live stack)
 
 The live B=256 stack is already deployed with this pipeline; its addresses are in
-the committed `deploy/addresses.84532.json`. **The live pool is canonical — do not
+the committed `deploy/addresses.450815.json` (the retired Base Sepolia stack stays
+recorded in `addresses.84532.json`). **The live pool is canonical — do not
 redeploy for new work**; a circuit change ships as a UUPS upgrade (repo
 [`CLAUDE.md`](../CLAUDE.md)). The runbook below is the recipe that produced it,
 kept for a from-scratch redeploy.
@@ -95,9 +96,9 @@ kept for a from-scratch redeploy.
 The live chain is the SAME `forge/Deploy.s.sol` with different env. Its facts —
 chain id, RPC, explorer, faucet, gas-price pin — have one home,
 `packages/core/src/network.ts`, and are tabulated in
-[`docs/deployment.md`](../docs/deployment.md#chain-facts). It is an OP-Stack L2:
-EIP-7825 caps a transaction at 16,777,216 gas (the disburse is well under it) and
-the BN254 precompiles are present, so Groth16 verification is native.
+[`docs/deployment.md`](../docs/deployment.md#chain-facts). It is a sovereign EVM
+L1 (Cosmos-SDK x/feemarket EIP-1559 fees, gas token tOKRW) with the BN254
+precompiles present — the smoke deposit's Groth16 proof verified natively on-chain.
 
 ```sh
 cd bongtu/contracts
@@ -133,21 +134,25 @@ Notes for the live run:
 - For a real token, set `TOKEN_ADDRESS=0x<erc20>` (no source edit needed); the
   smoke deposit then needs the deployer to actually hold + approve the deposit's
   `out` amount. With the default `MockERC20` the script mints it.
-- On an OP-Stack L2 an L1 data fee applies on top of L2 gas, so a receipt's
-  `gasUsed` is not the whole cost.
+- The chain is an L1, so a receipt's `gasUsed` × effective gas price is the whole
+  cost (no OP-Stack L1 data fee). The x/feemarket base fee floor is high (8000
+  gwei measured 2026-09-04) — budget deploys in whole tOKRW, not fractions.
 - solc is pinned to 0.8.24 here; deployment is permissionless and BN254 verify is
   native.
-- The deployed contracts are **not** source-verified on the explorer. If a future
-  redeploy wants verification, add the appropriate `--verify` flags for that
-  explorer — do not describe the current deployment as verified.
+- Source verification on the live chain's Blockscout works per contract:
+  `forge verify-contract <addr> <path>:<Name> --chain-id 450815 --verifier blockscout
+  --verifier-url https://explorer-testnet.maroo.io/blockscout/api` (constructor
+  args for the proxy). The pool implementation, proxy and DepositVerifier are
+  verified; Poseidon cannot be (no Solidity source).
 
 ## Layout
 
 Canonical data stays at the top; everything else is grouped by what runs it.
 
-- `addresses.31337.json` / `addresses.84532.json` — recorded deployments (local anvil / the live
-  testnet). Take an address from these **by field name**: the deployer replayed the same CREATE
-  nonces on the project's previous chain, so several addresses recur across deployments while
+- `addresses.31337.json` / `addresses.450815.json` — recorded deployments (local anvil / the live
+  testnet); `addresses.84532.json` is the retired Base Sepolia stack, kept as a historical record.
+  Take an address from these **by field name**: the deployer replays the same CREATE
+  nonces on every chain, so several addresses recur across deployments while
   naming different contracts.
 - `modules.<chainid>.json` — the consumer module set registered on the pool of
   `addresses.<chainid>.json` (written by `Deploy.s.sol MODULE_PROFILE=consumer` and
@@ -157,7 +162,8 @@ Canonical data stays at the top; everything else is grouped by what runs it.
   profile's record pair (`DeployConsumerOnly.s.sol`; tracked scratch at 31337).
   The **by field name** rule above covers the module records too: never take an address from any
   of these files by pattern-matching a remembered value.
-- `arbiter-kem-pk.84532.hex` — the live arbiter's ML-KEM-768 public key.
+- `arbiter-kem-pk.450815.hex` — the live arbiter's ML-KEM-768 public key (byte-identical to the
+  historical `arbiter-kem-pk.84532.hex`: the arbiter did not rotate on the chain move).
 
 `forge/` — the Solidity scripts, run through `forge script` from `contracts/`:
 

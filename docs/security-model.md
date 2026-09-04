@@ -279,7 +279,7 @@ Present-tense, deliberate, and not fixed by anything in the tree today.
   powers-of-tau file with no phase-2 ceremony. Whoever ran setup can forge proofs. A phase-2 MPC is
   a mainnet prerequisite, and it must come *after* circuit freeze — any circuit edit re-runs setup
   and redeploys the verifier.
-- **Demo arbiter keys.** The live pool's stored arbiter bjj key and the epoch-1 ML-KEM-768
+- **Demo arbiter keys.** The live pool's stored arbiter bjj key and the epoch-0 ML-KEM-768
   encapsulation key are both development keys whose private halves exist on a developer machine.
   They are fixed at deploy and coupled to the committed proof fixtures
   ([deployment.md](deployment.md#the-arbiter-key-is-fixed-at-deploy-and-the-fixtures-are-bound-to-it)).
@@ -287,9 +287,9 @@ Present-tense, deliberate, and not fixed by anything in the tree today.
   token must be non-fee-on-transfer and non-rebasing, or the pool is insolvent by construction.
 - **Single-key ownership.** The proxy owner, the upgrade authority and the arbiter-rotation
   authority are one testnet EOA. Mainnet calls for a multisig or timelock.
-- **The consumer family is not yet live.** The op-module upgrade and the consumer modules are
-  drilled on local anvil gates only; no module is registered on the Base Sepolia pool (there is
-  no `deploy/modules.84532.json`), so the live pool remains audited-only until the V3 upgrade
-  runs there.
-- **Testnet only.** The stack is deployed to Base Sepolia; every address and measurement here is
-  testnet. Nothing in this repo has been deployed to a mainnet.
+- **The consumer family is live at genesis.** The live Maroo pool (chain 450815) registered the
+  five consumer modules inside its deploy broadcast (`deploy/modules.450815.json`), so the pool
+  is dual-mode from its first block: the pool-level "every op is arbiter-disclosable" guarantee
+  applies to the enterprise family only, and the consumer family carries the OPMOD posture.
+- **Testnet only.** The stack is deployed to the Maroo testnet; every address and measurement here
+  is testnet. Nothing in this repo has been deployed to a mainnet.
