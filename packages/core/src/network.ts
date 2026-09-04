@@ -67,6 +67,42 @@ export const POOL_ADDRESS = "0x3B6238f522a08f08169643cD315e9C44209F1aD6";
 /** The wrapped mock kKRW ERC-20 the pool escrows (`token`). */
 export const TOKEN_ADDRESS = "0x18396AF3535cC1A26675bAE90379f1a90754A939";
 
+// The four REGISTERED consumer (no-auditor) op modules + their verifiers —
+// the P2P family's live entrypoints (docs/consumer.md). Record:
+// deploy/modules.450815.json, the module sibling of addresses.450815.json;
+// test/network.test.ts holds every field here to it BY FIELD NAME. The
+// CREATE-nonce collision warning above bites hardest in this table
+// (depositPrivModule IS the previous chain's poseidon address) — never
+// transcribe by pattern. Verifier addresses ride along because the engine's
+// preflight can cheaply confirm a module still wires the expected verifier
+// before spending a CPU proof on it.
+//
+// consumerDisburse is ABSENT by design: removeModule'd 2026-09-04 — mass
+// disbursement is enterprise-path (institution-managed pool) only, by product
+// decision. Its DisbursePrivVerifier stays deployed but unused, and the
+// record's chunkArity (86) parameterizes only that deregistered module's
+// chunk transport — so none of the three gets a constant (nothing in the
+// engine consumes them; the test convicts the deregistered address if it
+// ever reappears here).
+export const CONSUMER_MODULES = {
+  depositPriv: {
+    module: "0xaA7778c778C83cE5655d5F217bDfE7782e01Bc50",
+    verifier: "0x9a677D7D6CaB850b489CB94EA453AEEd5CeBeF89",
+  },
+  transferPriv: {
+    module: "0xF3b5D0eb5558B9427Fe599792E728b9B2bD20B2E",
+    verifier: "0x07487E26c939b0CC0be022A9B34E9e552E03CFD4",
+  },
+  transfer10x2Priv: {
+    module: "0xaA581CFB50F69144C6a9B6380193858E8f4B00Db",
+    verifier: "0xafcBFC91A95468dE8A548d1Af04B0D0fa26A90Ab",
+  },
+  withdrawPriv: {
+    module: "0xD030602597CC7F47107e6F96d0d1D6b73a71698F",
+    verifier: "0x2b1BcA434Ebe0C9Ee7cc32368d349b6E96DE8CE3",
+  },
+} as const;
+
 /**
  * The (chainId, pool) pair as ONE opaque string — the identity of this
  * deployment.
@@ -233,6 +269,28 @@ export const POOL_ABI_FRAGMENTS = {
   // indexer's boot guard refuses a V1-ABI/keyless-arbiter build on it.
   currentEpoch: "function currentEpoch() view returns (uint256)",
   arbiterKemPkHash: "function arbiterKemPkHash(uint256 epoch) view returns (bytes32)",
+} as const;
+
+// Consumer module fragments, one per CONSUMER_MODULES entry — submits target
+// the MODULE address, not the pool (the pool stays the escrow/approval target;
+// modules hold no funds). Shapes diverge from the pool fragments on purpose:
+// no authority envelope exists in this family, and the hybrid receiver
+// ciphertexts are a PER-OUTPUT `bytes[]` of raw ML-KEM-768 encapsulations
+// (length-checked on-chain: 2 for the two-output ops, 1 for withdraw's change
+// note) instead of the pool's single authority `bytes kemCiphertext`. pub
+// arities are each circuit's full public vector INCLUDING the enabled slots
+// the module overwrites before verify — callers pass them as proved and the
+// module injects. withdrawPriv keeps the enterprise op's trailing stealth
+// announcement pair (zeros when unused).
+export const CONSUMER_MODULE_ABI_FRAGMENTS = {
+  depositPriv:
+    "function depositPriv(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[16] pub, bytes[] kemCiphertexts)",
+  transferPriv:
+    "function transferPriv(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[20] pub, bytes[] kemCiphertexts)",
+  transfer10x2Priv:
+    "function transfer10x2Priv(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[36] pub, bytes[] kemCiphertexts)",
+  withdrawPriv:
+    "function withdrawPriv(uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[16] pub, bytes[] kemCiphertexts, bytes32 stealthEphemeralPub, uint8 stealthViewTag)",
 } as const;
 
 // Minimal ERC-20 fragments the public wallet needs for the deposit/shield flow: the
