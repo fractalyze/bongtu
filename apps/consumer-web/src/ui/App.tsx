@@ -38,6 +38,7 @@ import {
   isConsumerIdentity,
   runSelfScan,
   selfScanSnapshot,
+  type ScanNote,
   type SelfScanState,
 } from "@bongtu/client/selfscan";
 import { clearScanState, loadScanState, saveScanState, scanNotice } from "../lib/scanStore.js";
@@ -53,6 +54,7 @@ import {
 import { markLockIntroSeen, shouldShowLockIntro } from "../lib/lockIntro.js";
 import {
   skipBaseline,
+  pollForAction,
   runRefresh,
   AUTO_REFRESH_MS,
   type OwnerSnapshot,
@@ -65,6 +67,9 @@ import { LockIntro } from "./screens/LockIntro.js";
 import { Home } from "./screens/Home.js";
 import { Activity } from "./screens/Activity.js";
 import { Settings } from "./screens/Settings.js";
+import { Deposit } from "./screens/Deposit.js";
+import { SpendScreen } from "./screens/SpendScreen.js";
+import { Receive } from "./screens/Receive.js";
 
 // The engine store is kept ONLY for the account→pubkey determinism bindings that
 // runLogin's default deps write (loginGuard.ts) — the session record itself lives
@@ -88,6 +93,10 @@ export interface WalletContextValue {
   // self-scan-derived state (null until the first scan lands)
   balance: bigint | null;
   notes: OwnerNote[];
+  /** the same discovered notes in the SCAN shape (leafIndex + spent + seq) —
+   *  what the consumer spend flows plan and prove over (ConsumerSpendContext
+   *  is typed against ScanNote, not the arbiter OwnerNote view). */
+  scanNotes: ScanNote[];
   /** activity derived from the scan (selfScanSnapshot) — the whole feed, unpaged:
    *  the scan holds every row it can ever derive, so there is nothing to page. */
   history: HistoryItem[];
@@ -112,6 +121,14 @@ export interface WalletContextValue {
    *  invocation allowed to toast on failure. Background callers omit it — their
    *  only failure surface is the dataError banner (never a toast). */
   refresh: (manual?: boolean) => Promise<void>;
+  /** The between-legs read a spend chain waits on: a SELF-SCAN pass (consumer
+   *  notes have no oracle to reload from). Applies what it reads so the balance
+   *  on screen keeps up with a chain in flight. */
+  reloadNotes: () => Promise<ScanNote[]>;
+  /** Post-action refresh: the feed tails the chain on a poll, so the moment a
+   *  tx confirms a scan may still see the PRE-action state — poll (3s, ≤30s)
+   *  until the action is reflected, applying the freshest snapshot either way. */
+  refreshAfterAction: (txHash: string) => Promise<void>;
 }
 
 const WalletContext = createContext<WalletContextValue | null>(null);
@@ -142,6 +159,7 @@ export function App(): ReactNode {
 
   const [balance, setBalance] = useState<bigint | null>(null);
   const [notes, setNotes] = useState<OwnerNote[]>([]);
+  const [scanNotes, setScanNotes] = useState<ScanNote[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
@@ -180,6 +198,7 @@ export function App(): ReactNode {
     scanOwnerRef.current = ownerCompressed;
     saveScanState(ownerCompressed, state);
     setScannedNextLeafIndex(state.scannedNextLeafIndex);
+    setScanNotes(state.notes);
     setDataNotice(scanNotice(state, identity !== null));
     return selfScanSnapshot(state, ownerCompressed);
   }, []);
@@ -222,6 +241,7 @@ export function App(): ReactNode {
     setSession(null);
     setBalance(null);
     setNotes([]);
+    setScanNotes([]);
     setHistory([]);
     setDataError(reason);
     setDataNotice(null);
@@ -387,6 +407,42 @@ export function App(): ReactNode {
 
   const disconnect = useCallback((): void => endSession(null, true), [endSession]);
 
+  // The between-legs read a spend chain waits on. It applies what it reads (so
+  // the balance on screen keeps up with a chain in flight) but never clears
+  // anything on failure — the chain's own bounded poll decides when the wait
+  // has gone on too long.
+  const reloadNotes = useCallback(async (): Promise<ScanNote[]> => {
+    if (!session) throw new Error("Signed out mid-action. Reconnect and try again.");
+    // Fail fast on a locked key: mid-chain the lock only closes when the S5
+    // guard fired (account switch) or the key was wiped — a locked scan pass
+    // would serve the stale store and make the chain's merge poll run its full
+    // cap before blaming indexing lag, when the truth is the key is gone.
+    if (keyCache.peek(session.compressedPubkey) === null) {
+      throw new Error("The wallet key locked during this action. Start it again to continue.");
+    }
+    const snap = await loadSelfScan(session.compressedPubkey);
+    applySnapshot(snap);
+    return scanRef.current?.notes ?? [];
+  }, [session, loadSelfScan, applySnapshot]);
+
+  // Post-action refresh, polled rather than read once: the indexer tails the
+  // chain, so the first scan after a confirmed tx can still see the PRE-action
+  // state. The accept predicate is the shared actionReflected fold.
+  const refreshAfterAction = useCallback(
+    async (txHash: string): Promise<void> => {
+      if (!session) return;
+      const pre: OwnerSnapshot = { notes, history, historyNextBefore: null };
+      const { last } = await pollForAction(() => loadSelfScan(session.compressedPubkey), pre, txHash);
+      if (last) {
+        applySnapshot(last);
+        setDataError(null);
+      } else {
+        await refresh(); // every poll failed — fall back to the plain path + its error
+      }
+    },
+    [session, notes, history, loadSelfScan, applySnapshot, refresh],
+  );
+
   const value = useMemo<WalletContextValue>(
     () => ({
       connection,
@@ -395,6 +451,7 @@ export function App(): ReactNode {
       indexerUrl: INDEXER_URL,
       balance,
       notes,
+      scanNotes,
       history,
       loading,
       dataError,
@@ -405,10 +462,13 @@ export function App(): ReactNode {
       connectWallet,
       disconnect,
       refresh,
+      reloadNotes,
+      refreshAfterAction,
     }),
     [
-      connection, wallet, session, balance, notes, history, loading, dataError, dataNotice,
+      connection, wallet, session, balance, notes, scanNotes, history, loading, dataError, dataNotice,
       scannedNextLeafIndex, connecting, connectError, connectWallet, disconnect, refresh,
+      reloadNotes, refreshAfterAction,
     ],
   );
 
@@ -442,6 +502,14 @@ function Router({ route }: { route: string }): ReactNode {
       return <Activity />;
     case "settings":
       return <Settings />;
+    case "deposit":
+      return <Deposit />;
+    case "send":
+      return <SpendScreen kind="transfer" />;
+    case "withdraw":
+      return <SpendScreen kind="withdraw" />;
+    case "receive":
+      return <Receive />;
     default:
       return <Home />;
   }

@@ -14,9 +14,17 @@ import { readdirSync, readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { ActionStubs, ACTIONS_STUB_NOTICE } from "../src/ui/screens/Home.js";
+import { HomeActions } from "../src/ui/screens/Home.js";
 import { SyncDot } from "../src/ui/components/SyncDot.js";
 import { ActivityList } from "../src/ui/components/ActivityList.js";
+import { chainSteps, StagedProgress, WAITING_SCAN_LINE } from "../src/ui/components/StagedProgress.js";
+import { OP_IN_FLIGHT_MESSAGE } from "../src/ui/actionMachine.js";
+import { WITHDRAW_PROOF_BOUND_NOTE } from "../src/ui/screens/SpendScreen.js";
+import { DEPOSIT_RECIPIENT_HINT } from "../src/ui/screens/Deposit.js";
+import {
+  RECIPIENT_NOT_REGISTERED_MESSAGE,
+  RECIPIENT_V1_ONLY_MESSAGE,
+} from "../src/lib/payName.js";
 import {
   ACTIVITY_EMPTY_TEXT,
   ACTIVITY_LOADING_TEXT,
@@ -40,22 +48,13 @@ function appSources(): { file: string; text: string }[] {
   return out;
 }
 
-// ======================= (1) THE STUBBED ACTIONS =============================
-
-test("the action grid renders Send/Withdraw/Deposit DISABLED, with the honest notice", () => {
-  const html = renderToStaticMarkup(h(ActionStubs));
-  for (const label of ["Send", "Withdraw", "Deposit"]) {
+test("the action grid is live: Send/Receive/Withdraw/Deposit, every op behind a real screen", () => {
+  const html = renderToStaticMarkup(h(HomeActions));
+  for (const label of ["Send", "Receive", "Withdraw", "Deposit"]) {
     assert.match(html, new RegExp(`>${label}<`), `${label} renders`);
   }
-  // Three buttons, all disabled: nothing in this slice can start an op.
-  assert.equal((html.match(/<button/g) ?? []).length, 3);
-  assert.equal((html.match(/disabled=""/g) ?? []).length, 3);
-  assert.ok(html.includes(ACTIONS_STUB_NOTICE), "the notice renders under the grid");
-});
-
-test("the stub notice promises only what works: receive, not send", () => {
-  assert.match(ACTIONS_STUB_NOTICE, /arrive in the next update/);
-  assert.match(ACTIONS_STUB_NOTICE, /already receive/);
+  assert.equal((html.match(/<button/g) ?? []).length, 4);
+  assert.equal((html.match(/disabled=""/g) ?? []).length, 0, "nothing is stubbed anymore");
 });
 
 // ======================= (2) THE NOT-COMING-ALONG LIST =======================
@@ -152,6 +151,48 @@ test("the sync dot carries its status in a tooltip and stays a refresh button", 
   // the tap IS the recovery.
   assert.ok(dot("syncing").includes('disabled=""'));
   assert.ok(!dot("stale").includes('disabled=""'));
+});
+
+// ======================= (5) OP-SURFACE COPY PINS ============================
+
+test("the op-surface copy is pinned: the self-scan wait, the proof-bound payout, the one-op refusal", () => {
+  assert.equal(
+    WAITING_SCAN_LINE,
+    "Scanning the network for your combined note. This wallet finds its own money.",
+  );
+  assert.equal(
+    WITHDRAW_PROOF_BOUND_NOTE,
+    "The payout address is locked into your proof. Once you confirm, it cannot be redirected by anyone.",
+  );
+  assert.equal(
+    OP_IN_FLIGHT_MESSAGE,
+    "Another action is still running. Let it finish before starting a new one.",
+  );
+  assert.match(DEPOSIT_RECIPIENT_HINT, /payment name/);
+  // the waiting line renders under the active leg of a chained run
+  const html = renderToStaticMarkup(
+    h(StagedProgress, { stage: "leg0", describeKey: "waiting", elapsed: 0, steps: chainSteps(2, "Sending") }),
+  );
+  assert.ok(html.includes(WAITING_SCAN_LINE));
+});
+
+test("the registry-rule copy is pinned word-for-word", () => {
+  assert.equal(
+    RECIPIENT_NOT_REGISTERED_MESSAGE,
+    "That name isn't registered. Check the spelling with the recipient.",
+  );
+  assert.equal(
+    RECIPIENT_V1_ONLY_MESSAGE,
+    "This recipient can’t receive private payments yet. Ask them to register their payment name from their own consumer wallet first.",
+  );
+});
+
+test("sends are registry-name-only: no address grammar reaches the op screens, one resolve seam", () => {
+  const spend = readFileSync(`${SRC_DIR}ui/screens/SpendScreen.tsx`, "utf8");
+  const deposit = readFileSync(`${SRC_DIR}ui/screens/Deposit.tsx`, "utf8");
+  assert.doesNotMatch(spend, /decodeAddress/, "no pasteable address path exists in v1");
+  assert.match(spend, /resolveConsumerRecipient/);
+  assert.match(deposit, /resolveConsumerRecipient/);
 });
 
 test("the empty feed says loading while a scan runs, and 'No activity yet.' after", () => {
