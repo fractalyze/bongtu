@@ -336,7 +336,7 @@ test("walletErrorMessage classifies viem's layered errors like the plain provide
   (wrapped as { cause?: unknown }).cause = rejection;
   assert.equal(walletErrorMessage(wrapped), "Transaction rejected in your wallet.");
 
-  // "insufficient funds" surfacing anywhere in the chain gets the gas-ETH explainer.
+  // "insufficient funds" surfacing anywhere in the chain gets the gas-token explainer.
   const outOfGas = new Error("Transaction creation failed.");
   (outOfGas as { cause?: unknown }).cause = {
     name: "InsufficientFundsError",
