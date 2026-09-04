@@ -8,7 +8,8 @@
 // fresh signature at ACTION time. Losing this record loses nothing but a login.
 //
 // Pure + storage-injected so expiry/shape handling is unit-tested headlessly
-// (test/session.test.ts); the app passes the real window.localStorage.
+// (test/session.test.ts): the StorageLike is SessionStore's constructor dep, and
+// the app constructs over the real window.localStorage.
 
 import { DEPLOYMENT_TAG } from "@bongtu/core/network";
 
@@ -45,79 +46,6 @@ export interface StorageLike {
 // here. Under the tag it is simply not found, and the login re-derives cleanly.
 export const SESSION_KEY = `bongtu.session.${DEPLOYMENT_TAG}`;
 
-function defaultStorage(): StorageLike | null {
-  try {
-    return (globalThis as { localStorage?: StorageLike }).localStorage ?? null;
-  } catch {
-    return null; // storage blocked (private mode / hard privacy settings)
-  }
-}
-
-/** Persist the login record. Best-effort: a blocked/full storage just means the
- *  next visit reconnects normally. */
-export function saveSession(session: StoredSession, storage: StorageLike | null = defaultStorage()): void {
-  try {
-    storage?.setItem(SESSION_KEY, JSON.stringify(session));
-  } catch {
-    // quota/privacy-mode write failure — session persistence is a convenience only.
-  }
-}
-
-/**
- * Load the stored session, or null when absent, malformed, tokenless, or expired
- * (expired/broken records are removed so the next visit starts clean). `now` is
- * unix seconds, injectable for expiry tests.
- */
-export function loadSession(
-  now: number = Math.floor(Date.now() / 1000),
-  storage: StorageLike | null = defaultStorage(),
-): StoredSession | null {
-  if (!storage) return null;
-  const raw = ((): string | null => {
-    try {
-      return storage.getItem(SESSION_KEY);
-    } catch {
-      return null;
-    }
-  })();
-  if (!raw) return null;
-  try {
-    const s = JSON.parse(raw) as StoredSession;
-    if (
-      typeof s.eoaAddress !== "string" ||
-      typeof s.compressedPubkey !== "string" ||
-      typeof s.token !== "string" ||
-      typeof s.exp !== "number" ||
-      s.token === "" ||
-      s.exp <= now
-    ) {
-      storage.removeItem(SESSION_KEY);
-      return null;
-    }
-    return {
-      eoaAddress: s.eoaAddress,
-      compressedPubkey: s.compressedPubkey,
-      token: s.token,
-      exp: s.exp,
-      // An unrecognised transport is treated as absent rather than trusted: the restore
-      // would open a transport this build has no code for.
-      transport: s.transport === "walletconnect" ? "walletconnect" : "injected",
-    };
-  } catch {
-    storage.removeItem(SESSION_KEY);
-    return null;
-  }
-}
-
-/** Drop the stored login record (the Settings Disconnect button). */
-export function clearSession(storage: StorageLike | null = defaultStorage()): void {
-  try {
-    storage?.removeItem(SESSION_KEY);
-  } catch {
-    // nothing to clean if storage is unreachable
-  }
-}
-
 // --- which key an account derived here last time -----------------------------------
 //
 // A SECOND record, deliberately outliving the session one. The session is dropped the
@@ -146,6 +74,14 @@ const MAX_BINDINGS = 16;
 
 type Bindings = Record<string, string>;
 
+function defaultStorage(): StorageLike | null {
+  try {
+    return (globalThis as { localStorage?: StorageLike }).localStorage ?? null;
+  } catch {
+    return null; // storage blocked (private mode / hard privacy settings)
+  }
+}
+
 function readBindings(storage: StorageLike | null): Bindings {
   if (!storage) return {};
   try {
@@ -163,36 +99,110 @@ function readBindings(storage: StorageLike | null): Bindings {
   }
 }
 
-/** The compressed bjj pubkey `eoaAddress` derived here last time, or null. */
-export function loadKeyBinding(
-  eoaAddress: string,
-  storage: StorageLike | null = defaultStorage(),
-): string | null {
-  return readBindings(storage)[eoaAddress.trim().toLowerCase()] ?? null;
-}
+/**
+ * Both persisted records behind one receiver. The store itself holds NO state —
+ * the StorageLike IS the state, so two stores over the same storage see each
+ * other's writes and constructing one is free. The storage arrives once, as a
+ * constructor dep (the KeyCache wiring pattern: required deps up front, defaults
+ * for the rest), instead of trailing every call as a defaulted param. Methods are
+ * arrow properties so a caller (loginFlow's DEFAULT_DEPS) can pluck them off an
+ * instance without losing `this`.
+ */
+export class SessionStore {
+  private readonly storage: StorageLike | null;
 
-/** Remember what this account derives, so a later login can be checked against it. */
-export function saveKeyBinding(
-  eoaAddress: string,
-  compressedPubkey: string,
-  storage: StorageLike | null = defaultStorage(),
-): void {
-  if (!storage) return;
-  const current = readBindings(storage);
-  const bindings = Object.keys(current).length >= MAX_BINDINGS ? {} : current;
-  bindings[eoaAddress.trim().toLowerCase()] = compressedPubkey;
-  try {
-    storage.setItem(KEY_BINDING_KEY, JSON.stringify(bindings));
-  } catch {
-    // A browser that cannot store this just loses the check, not the login.
+  constructor(storage: StorageLike | null = defaultStorage()) {
+    this.storage = storage;
   }
-}
 
-/** Forget every remembered account (explicit Disconnect only). */
-export function clearKeyBindings(storage: StorageLike | null = defaultStorage()): void {
-  try {
-    storage?.removeItem(KEY_BINDING_KEY);
-  } catch {
-    // nothing to clean if storage is unreachable
-  }
+  /** Persist the login record. Best-effort: a blocked/full storage just means the
+   *  next visit reconnects normally. */
+  readonly saveSession = (session: StoredSession): void => {
+    try {
+      this.storage?.setItem(SESSION_KEY, JSON.stringify(session));
+    } catch {
+      // quota/privacy-mode write failure — session persistence is a convenience only.
+    }
+  };
+
+  /**
+   * Load the stored session, or null when absent, malformed, tokenless, or expired
+   * (expired/broken records are removed so the next visit starts clean). `now` is
+   * unix seconds, injectable for expiry tests.
+   */
+  readonly loadSession = (now: number = Math.floor(Date.now() / 1000)): StoredSession | null => {
+    const storage = this.storage;
+    if (!storage) return null;
+    const raw = ((): string | null => {
+      try {
+        return storage.getItem(SESSION_KEY);
+      } catch {
+        return null;
+      }
+    })();
+    if (!raw) return null;
+    try {
+      const s = JSON.parse(raw) as StoredSession;
+      if (
+        typeof s.eoaAddress !== "string" ||
+        typeof s.compressedPubkey !== "string" ||
+        typeof s.token !== "string" ||
+        typeof s.exp !== "number" ||
+        s.token === "" ||
+        s.exp <= now
+      ) {
+        storage.removeItem(SESSION_KEY);
+        return null;
+      }
+      return {
+        eoaAddress: s.eoaAddress,
+        compressedPubkey: s.compressedPubkey,
+        token: s.token,
+        exp: s.exp,
+        // An unrecognised transport is treated as absent rather than trusted: the restore
+        // would open a transport this build has no code for.
+        transport: s.transport === "walletconnect" ? "walletconnect" : "injected",
+      };
+    } catch {
+      storage.removeItem(SESSION_KEY);
+      return null;
+    }
+  };
+
+  /** Drop the stored login record (the Settings Disconnect button). */
+  readonly clearSession = (): void => {
+    try {
+      this.storage?.removeItem(SESSION_KEY);
+    } catch {
+      // nothing to clean if storage is unreachable
+    }
+  };
+
+  /** The compressed bjj pubkey `eoaAddress` derived here last time, or null. */
+  readonly loadKeyBinding = (eoaAddress: string): string | null => {
+    return readBindings(this.storage)[eoaAddress.trim().toLowerCase()] ?? null;
+  };
+
+  /** Remember what this account derives, so a later login can be checked against it. */
+  readonly saveKeyBinding = (eoaAddress: string, compressedPubkey: string): void => {
+    const storage = this.storage;
+    if (!storage) return;
+    const current = readBindings(storage);
+    const bindings = Object.keys(current).length >= MAX_BINDINGS ? {} : current;
+    bindings[eoaAddress.trim().toLowerCase()] = compressedPubkey;
+    try {
+      storage.setItem(KEY_BINDING_KEY, JSON.stringify(bindings));
+    } catch {
+      // A browser that cannot store this just loses the check, not the login.
+    }
+  };
+
+  /** Forget every remembered account (explicit Disconnect only). */
+  readonly clearKeyBindings = (): void => {
+    try {
+      this.storage?.removeItem(KEY_BINDING_KEY);
+    } catch {
+      // nothing to clean if storage is unreachable
+    }
+  };
 }

@@ -15,7 +15,7 @@ import { obtainViewToken } from "@bongtu/client/indexerClient";
 import { assertKeyUnchanged, loginNeedsDeterminismCheck } from "@bongtu/client/loginGuard";
 import { ensureChain } from "@bongtu/client/connection";
 import type { Connection } from "@bongtu/client/connection";
-import { loadKeyBinding, saveKeyBinding, saveSession, type StoredSession } from "@bongtu/client/session";
+import { SessionStore, type StoredSession } from "@bongtu/client/session";
 
 export interface LoginContext {
   indexerUrl: string;
@@ -46,12 +46,17 @@ export interface RunLoginDeps {
  *  edges default to the real ones. */
 export type LoginIo = Pick<RunLoginDeps, "openConnection" | "deriveIdentity"> & Partial<RunLoginDeps>;
 
+// ONE store over the browser's real localStorage: every storage edge of a
+// default-wired login goes through the same receiver (arrow-bound methods, so
+// plucking them here keeps `this`).
+const sessionStore = new SessionStore();
+
 const DEFAULT_DEPS: Omit<RunLoginDeps, "openConnection" | "deriveIdentity"> = {
   ensureChain,
   obtainViewToken,
-  loadKeyBinding,
-  saveKeyBinding,
-  saveSession,
+  loadKeyBinding: sessionStore.loadKeyBinding,
+  saveKeyBinding: sessionStore.saveKeyBinding,
+  saveSession: sessionStore.saveSession,
 };
 
 export interface LoginResult {
