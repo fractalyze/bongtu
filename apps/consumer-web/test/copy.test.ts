@@ -15,6 +15,15 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { ActionStubs, ACTIONS_STUB_NOTICE } from "../src/ui/screens/Home.js";
+import { SyncDot } from "../src/ui/components/SyncDot.js";
+import { ActivityList } from "../src/ui/components/ActivityList.js";
+import {
+  ACTIVITY_EMPTY_TEXT,
+  ACTIVITY_LOADING_TEXT,
+  activityEmptyLine,
+} from "../src/ui/activityView.js";
+import { WALLET_ENDED_NOTICE } from "../src/lib/accountGuard.js";
+import { SELF_SCAN_LOCKED_NOTICE, SELF_SCAN_PENDING_NOTICE } from "@bongtu/client/selfscan";
 
 const SRC_DIR = new URL("../src/", import.meta.url).pathname;
 
@@ -114,4 +123,44 @@ test("no screen hardcodes a wallet brand in what the user reads", () => {
     if (brandAware.some((f) => file.endsWith(f))) continue;
     assert.doesNotMatch(text, /MetaMask/, `${file} names a brand instead of the detected wallet`);
   }
+});
+
+// ======================= (4) DISCOVERY-SURFACE COPY PINS =====================
+
+// Every notice the discovery screens surface, word-for-word: the calm strips
+// come from the engine (selfscan.ts), the disconnect notice from the guard —
+// a drift here silently changes what users are told about their money.
+test("the discovery notices are pinned word-for-word", () => {
+  assert.equal(
+    SELF_SCAN_PENDING_NOTICE,
+    "Some incoming payments are still being delivered. They'll appear once delivery completes.",
+  );
+  assert.equal(
+    SELF_SCAN_LOCKED_NOTICE,
+    "Wallet locked. Showing your last scan. Unlock to check for new payments.",
+  );
+  assert.equal(WALLET_ENDED_NOTICE, "Your wallet ended the connection. Connect again to continue.");
+});
+
+test("the sync dot carries its status in a tooltip and stays a refresh button", () => {
+  const dot = (state: "synced" | "syncing" | "stale"): string =>
+    renderToStaticMarkup(h(SyncDot, { state, onRefresh: () => {} }));
+  assert.ok(dot("synced").includes('title="Synced"'));
+  assert.ok(dot("syncing").includes('title="Syncing…"'));
+  assert.ok(dot("stale").includes('title="Out of sync. Tap to refresh"'));
+  // While a refresh is already running the button disarms; stale keeps it live —
+  // the tap IS the recovery.
+  assert.ok(dot("syncing").includes('disabled=""'));
+  assert.ok(!dot("stale").includes('disabled=""'));
+});
+
+test("the empty feed says loading while a scan runs, and 'No activity yet.' after", () => {
+  assert.equal(ACTIVITY_LOADING_TEXT, "Loading activity…");
+  assert.equal(ACTIVITY_EMPTY_TEXT, "No activity yet.");
+  assert.equal(activityEmptyLine(true), ACTIVITY_LOADING_TEXT);
+  assert.equal(activityEmptyLine(false), ACTIVITY_EMPTY_TEXT);
+  const empty = (loading: boolean): string =>
+    renderToStaticMarkup(h(ActivityList, { history: [], loading, explorerBase: "https://scan.test" }));
+  assert.ok(empty(true).includes(ACTIVITY_LOADING_TEXT));
+  assert.ok(empty(false).includes(ACTIVITY_EMPTY_TEXT));
 });
