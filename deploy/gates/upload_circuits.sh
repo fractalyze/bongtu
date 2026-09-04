@@ -17,6 +17,9 @@ set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")/../.." && pwd)   # deploy/gates -> repo root
 ASSETS=${1:-"$HERE/apps/wallet-web/public/circuits"}
+# `vercel blob` reads BLOB_READ_WRITE_TOKEN from the env on its own — the
+# guard below only fails fast; the token is never passed as a flag, because
+# argv is world-readable in /proc for the duration of each upload.
 : "${BLOB_READ_WRITE_TOKEN:?set BLOB_READ_WRITE_TOKEN (vercel env pull in the linked wallet dir)}"
 
 # transfer10 is DEPRECATED (2026-07-28): its assets left the served set when
@@ -42,7 +45,6 @@ for f in transfer.wasm transfer.zkey transfer10x2.wasm transfer10x2.zkey withdra
     --pathname "circuits/$pinned/$f" \
     --content-type application/octet-stream \
     --access public \
-    --cache-control-max-age 31536000 \
-    --rw-token "$BLOB_READ_WRITE_TOKEN"
+    --cache-control-max-age 31536000
 done
 echo "done — point the wallet vercel.json /circuits rewrite at circuits/$pinned/"

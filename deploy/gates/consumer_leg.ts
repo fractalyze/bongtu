@@ -44,6 +44,10 @@ import { getHead, getNullifiers, getPath, IndexerClient } from "@bongtu/core/ind
 import type { PointInput } from "@bongtu/core/babyjub";
 import { deriveIdentityFromSignature } from "@bongtu/client/derive";
 import type { ConsumerWalletIdentity } from "@bongtu/client/derive";
+import { buildConsumerTransferRequest, selfConsumerRecipient } from "@bongtu/client/consumerBuild";
+import { submitTransferPriv } from "@bongtu/client/consumerSubmit";
+import type { Connection } from "@bongtu/client/connection";
+import type { Calldata } from "@bongtu/core/proving";
 import { runSelfScan, EMPTY_SCAN_STATE } from "@bongtu/client/selfscan";
 import type { SelfScanState } from "@bongtu/client/selfscan";
 
@@ -313,43 +317,61 @@ export async function runConsumerLeg(rig: Rig): Promise<void> {
     }
 
     // ======================= transferPriv (spend) =========================
-    step("CONSUMER transferPriv: SENDER spends note(1300) -> 500 RECIPIENT + 800 change");
-    const trf1 = planOutputs(
-      [
-        { id: RECIPIENT, value: 500n, salt: sal(3) },
-        { id: SENDER, value: 800n, salt: sal(4) },
-      ],
-      ECDH_TRF1, NONCE_TRF1, "trf1",
-    );
+    // THIS op runs the @bongtu/client path end to end (issue #13 S7): witness
+    // assembly by consumerBuild (buildConsumerTransferRequest) and the tx by
+    // consumerSubmit (submitTransferPriv) over a real Connection on the leg's
+    // anvil rig, against the REAL circuit + module. A wrong ABI fragment or
+    // witness layout in the client therefore reverts on-chain right here in CI.
+    // Every other op keeps the leg-local assembly on purpose: that path is the
+    // independent reference the client builders are checked against.
+    step("CONSUMER transferPriv via @bongtu/client: SENDER spends note(1300) -> 500 RECIPIENT + 800 change");
     const zerosPath: bigint[] = new Array(H).fill(0n);
-    {
-      const padSalt = sal(5);
+    const connection: Connection = {
+      address: rig.address,
+      walletClient: rig.walletClient,
+      publicClient: rig.publicClient,
+      injected: null,
+      transport: "injected",
+    };
+    const trf1 = await (async (): Promise<{ commitment: bigint }[]> => {
       const { siblings } = oracle.merklePath(1);
-      const input = {
-        nullifiers: [nullifier(1300n, sal(2), SENDER.keypair.formattedPrivateKey), 0n],
-        inputCommitments: [dep1[1].commitment, commitment(0n, padSalt, SENDER.keypair.publicKey)],
-        inputValues: [1300n, 0n],
-        inputSalts: [sal(2), padSalt],
-        inputOwnerPrivateKey: SENDER.keypair.formattedPrivateKey,
-        ecdhPrivateKey: ECDH_TRF1,
-        root: oracle.getRoot(),
-        pathElements: [siblings, zerosPath],
-        leafIndices: [1n, 0n],
-        enabled: [1n, 0n],
-        ...outputSide(trf1),
-        encryptionNonce: NONCE_TRF1,
-      };
-      const { a, b, c, pub } = await prove("transferPriv", input);
-      const mod = rig.at(trfMod.address, artifact("TransferPrivModule", "TransferPrivModule").abi as Abi);
-      oracle.appendLeaf(trf1[0].commitment); // leaf 2 — RECIPIENT payment
-      oracle.appendLeaf(trf1[1].commitment); // leaf 3 — SENDER change
-      await mod.write("transferPriv", [
-        ...proofArgs({ a, b, c, pub }),
-        trf1.map((o) => kemHex(o.seal.kemCiphertext)),
-      ]);
-      await matchRoot("after transferPriv");
-      ok(await pool.read("nullifierUsed", [input.nullifiers[0]]), "transferPriv marked the spent nullifier");
-    }
+      const built = buildConsumerTransferRequest(
+        SENDER,
+        [{ value: "1300", salt: sal(2).toString(), leafIndex: 1 }],
+        [{ root: oracle.getRoot().toString(), pathElements: siblings.map(String), leafIndex: 1 }],
+        selfConsumerRecipient(RECIPIENT),
+        "500",
+        {
+          ecdhPrivateKey: ECDH_TRF1.toString(),
+          encryptionNonce: NONCE_TRF1.toString(),
+          payeeSalt: sal(3).toString(),
+          changeSalt: sal(4).toString(),
+          padSalts: [sal(5).toString()],
+          // the same deterministic seeds sealTo draws for this label, so the
+          // sealed bytes stay reproducible run to run
+          encapSeeds: [sha("bongtu/consumer-leg/encap/trf1/0"), sha("bongtu/consumer-leg/encap/trf1/1")],
+        },
+      );
+      ok(built.request.circuit === "transferPriv" && built.meta.membershipOk,
+        "client builder assembled transferPriv with a membership that folds to the live root");
+      ok(built.meta.changeValue === "800", "client builder conserves value: change == 800");
+      const { a, b, c, pub } = await prove("transferPriv", built.request.input);
+      const outs = built.meta.outputCommitments.map(BigInt);
+      oracle.appendLeaf(outs[0]); // leaf 2 — RECIPIENT payment
+      oracle.appendLeaf(outs[1]); // leaf 3 — SENDER change
+      const res = await submitTransferPriv(
+        connection,
+        { a, b, c, pub } as Calldata,
+        built.meta.kemCiphertexts,
+        "https://anvil.invalid",
+        trfMod.address,
+      );
+      ok(/^0x[0-9a-f]{64}$/i.test(res.txHash), "consumerSubmit resolved a tx hash after the receipt");
+      await matchRoot("after transferPriv (client-built, client-submitted)");
+      ok(await pool.read("nullifierUsed", [BigInt(built.meta.nullifiers[0])]),
+        "transferPriv marked the spent nullifier");
+      return outs.map((commitment) => ({ commitment }));
+    })();
 
     // ======================= withdrawPriv (exit) ==========================
     step("CONSUMER withdrawPriv: SENDER exits 750 ERC-20 (proof-bound recipient) + 50 change");

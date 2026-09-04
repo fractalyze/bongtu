@@ -67,8 +67,7 @@ export const DEFAULTS = {
   circuitBaseUrl: "/circuits",
 } as const;
 
-// PLACEHOLDER PIN — S7 is the uploader. Structured exactly like wallet-web's
-// CIRCUITS_VERSION so S7 only edits VALUES, never shape: first 8 of sha256 over the
+// Structured exactly like wallet-web's CIRCUITS_VERSION: first 8 of sha256 over the
 // FOUR consumer zkeys, concatenated in this documented order (the version bucket
 // stores them all, so regenerating any one must change the version):
 //   cat circuits/out/depositPriv.zkey circuits/out/transferPriv.zkey \
@@ -77,11 +76,10 @@ export const DEFAULTS = {
 // ("bongtu-circuits-v<version>") and evicts any stale bucket, so a re-proven zkey
 // forces a one-time re-download instead of serving a mismatched key from disk.
 // A bump is live only with its two companions in the SAME change: upload the new
-// assets to the blob store and point vercel.json's /circuits rewrite at the new
-// circuits/<version>/ path. The all-zero placeholder cannot collide with a real
-// hash pin, and a fetch against it 404s loudly instead of serving another app's
-// bucket — S7 replaces it when it uploads the consumer set.
-export const CIRCUITS_VERSION = "00000000";
+// assets to the blob store (deploy/gates/upload_consumer_circuits.sh, which refuses
+// a hash that does not match this pin) and point vercel.json's /circuits rewrite at
+// the new circuits/<version>/ path.
+export const CIRCUITS_VERSION = "e8b5e502";
 
 /** The circuits with browser-served proving assets — one name per {wasm, zkey}
  *  pair under `circuitBaseUrl`, and the key every asset/download path is typed

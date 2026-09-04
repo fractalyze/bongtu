@@ -61,15 +61,17 @@ async function submitModule(
   kemCiphertexts: string[],
   explorerBase: string,
   tail: readonly unknown[] = [],
+  moduleAddress?: string,
 ): Promise<SubmitResult> {
   assertKemCiphertexts(kemCiphertexts, op === "withdrawPriv" ? 1 : 2, op);
   const { a, b, c, pub } = asProofArgs(calldata);
   const hash = await submitPoolWrite(connection, {
-    // Pinned to the canonical record constants (unlike the enterprise submits'
-    // poolAddr parameter): the live pool is canonical per CLAUDE.md, and a
-    // fresh-stack environment (the e2e deploy shape) retargets by swapping the
-    // submit fns through the flows' deps seam, not by threading addresses.
-    address: CONSUMER_MODULES[op].module,
+    // Default: the canonical record constants (the live pool is canonical per
+    // CLAUDE.md). The explicit moduleAddress exists for ONE caller class: a
+    // fresh-stack gate (deploy/gates/consumer_leg.ts) that must drive its own
+    // anvil deploy through this byte-identical encode path, which is what makes
+    // a fragment/witness drift revert on-chain in CI. App flows never pass it.
+    address: moduleAddress ?? CONSUMER_MODULES[op].module,
     abi: CONSUMER_MODULE_ABI,
     functionName: op,
     args: [a, b, c, pub, kemCiphertexts, ...tail],
@@ -86,8 +88,9 @@ export function submitDepositPriv(
   calldata: Calldata,
   kemCiphertexts: string[],
   explorerBase: string,
+  moduleAddress?: string,
 ): Promise<SubmitResult> {
-  return submitModule(connection, "depositPriv", calldata, kemCiphertexts, explorerBase);
+  return submitModule(connection, "depositPriv", calldata, kemCiphertexts, explorerBase, [], moduleAddress);
 }
 
 /** Submit a proven transferPriv (2-in/2-out consumer spend). */
@@ -96,8 +99,9 @@ export function submitTransferPriv(
   calldata: Calldata,
   kemCiphertexts: string[],
   explorerBase: string,
+  moduleAddress?: string,
 ): Promise<SubmitResult> {
-  return submitModule(connection, "transferPriv", calldata, kemCiphertexts, explorerBase);
+  return submitModule(connection, "transferPriv", calldata, kemCiphertexts, explorerBase, [], moduleAddress);
 }
 
 /** Submit a proven transfer10x2Priv: the 3–10-note consumer spend and every
@@ -107,8 +111,9 @@ export function submitTransfer10x2Priv(
   calldata: Calldata,
   kemCiphertexts: string[],
   explorerBase: string,
+  moduleAddress?: string,
 ): Promise<SubmitResult> {
-  return submitModule(connection, "transfer10x2Priv", calldata, kemCiphertexts, explorerBase);
+  return submitModule(connection, "transfer10x2Priv", calldata, kemCiphertexts, explorerBase, [], moduleAddress);
 }
 
 /** Submit a proven withdrawPriv (2-in / 1-out change + proof-bound payout).
@@ -125,9 +130,15 @@ export function submitWithdrawPriv(
   calldata: Calldata,
   kemCiphertexts: string[],
   explorerBase: string,
+  moduleAddress?: string,
 ): Promise<SubmitResult> {
-  return submitModule(connection, "withdrawPriv", calldata, kemCiphertexts, explorerBase, [
-    ZERO_EPHEMERAL as `0x${string}`,
-    0,
-  ]);
+  return submitModule(
+    connection,
+    "withdrawPriv",
+    calldata,
+    kemCiphertexts,
+    explorerBase,
+    [ZERO_EPHEMERAL as `0x${string}`, 0],
+    moduleAddress,
+  );
 }
