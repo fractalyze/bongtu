@@ -97,10 +97,14 @@ public BY DESIGN" property carries over.
 |---|---|---|---|
 | `PoolConfig` | `["config", mint]` | ~300 B, one-time | admin, mint, vault, `B`, family flags, arbiter bjj key + KEM pk hash (enterprise profiles; absent on consumer-only), root-history mode params |
 | `TreeState` | `["tree", config]` | ~4.6 KB, one-time (S0 #4) | zero-copy single-frontier IMT: `filledSubtrees[32]`, `nextLeafIndex`, `currentRoot`; `zeros[32]` as program constants, not account data |
-| `Nullifier` | `["nf", nf_le_bytes]` | 0-data PDA, ~0.0019 SOL locked forever (S0 #4) | existence == spent |
-| `KnownRoot` | `["root", root_le_bytes]` | 0-data PDA, ~0.0019 SOL-class (est., same rent class as Nullifier) | existence == this root occurred |
+| `Nullifier` | `["nf", nf_be_bytes]` | 0-data PDA, ~0.0019 SOL locked forever (S0 #4) | existence == spent |
+| `KnownRoot` | `["root", root_be_bytes]` | 0-data PDA, ~0.0019 SOL-class (est., same rent class as Nullifier) | existence == this root occurred |
 | `Vault` | ATA of `["authority", config]` | one-time | SPL token escrow |
 | `DisburseBatch` (enterprise, §3.3) | `["batch", start_leaf_index]` | ~100 B | `disclosureHash`, epoch, kem binding — the per-batch audit anchor |
+
+S2 decision (2026-09-05): marker-PDA seeds use the 32-byte BIG-endian public-input
+encoding (this table first drafted LE), keeping exactly one byte convention on the rail:
+wire publics, verify inputs, and PDA seeds are all BE.
 
 **Nullifier representation — decision: PDA-per-nullifier.** Existence check and creation in
 one instruction, O(1), no account-size ceiling, and creation doubles as the double-spend
@@ -133,6 +137,11 @@ circuit's `verification_key.json`, (3) applies state through one shared internal
 mirroring `applyOp`'s invariant list (known root iff spending; nullifiers nonzero+unused,
 created sequentially; leaves nonzero; escrow motion last), (4) emits a self-CPI event
 (§3.2.2).
+
+S2 decision (2026-09-05): on this rail the invariant checks of step (3) run BEFORE the
+verify of step (2). The EVM modules verify first; the accepted set is identical (all
+checks are conjunctive and side-effect-free until every one has passed) and a failing op
+rejects before paying the ~150-250k CU verify.
 
 **The wire carries no derivable publics.** The EVM modules inject `enabled[i]` and (on
 enterprise) the arbiter key into the public vector before verify; the Solana instruction
@@ -410,7 +419,8 @@ circuit).
 - **Cross-rail identity** — because the KDF domain binds the rail, one human with one
   wallet gets *different* bjj identities per rail. Whether that is the product intent
   (isolation) or a UX bug (one balance expectation) is **OPEN-2b** — a product question,
-  flagged not decided. Note the EVM KDF cannot simply be reused: the seed is a signature
+  flagged not decided. DECIDED (user 2026-09-04, issue #8 comment): per-rail identities
+  are the product intent. Note the EVM KDF cannot simply be reused: the seed is a signature
   from a *different* wallet stack.
 - **withdrawPriv recipient binding** — the circuit binds `recipient` as one field element
   the EVM module range-checks to uint160 (OPMOD §2, withdrawPriv pub[15]). A Solana
@@ -421,7 +431,10 @@ circuit).
   `Poseidon(limbs(address))` — clean but needs the *program* to hash (cheap, ~1k CU) and
   a decision on limb split; (iii) a circuit variant with 2 limbs — violates no-fork,
   rejected. (i) and (ii) both keep the circuit verbatim; choosing between them is a
-  security-review call for S2, not this doc.
+  security-review call for S2, not this doc. DECIDED in S2 (security review 2026-09-05,
+  recorded on issue #8): option (i) with 253 bits, truncate-253. The program binds the low
+  253 bits of the recipient token account address; mask spec: addr[0] &= 0x1F on the
+  big-endian bytes.
 - **chainId in publics — there is none.** Verified: no circuit binds a chain id in its
   public vector (the chain binding lives in the client KDF only). Consequence for
   fixtures: §5.2. Flip side, flagged explicitly: **OPEN-4** — nothing in the proof binds
@@ -502,16 +515,20 @@ shared packages unaffected" → S6 gate.
 
 ## SOLR §7. Open questions and risks
 
-Open questions (each carried above; none decided in this doc):
+Open questions (each carried above; none decided at draft time, S2 decisions marked
+DECIDED inline):
 
 - **OPEN-1** — which enterprise ops accompany disburse on Solana (deposit at minimum, as
   the institution funding path); scope call, due before S3.
 - **OPEN-2** — Solana wallet KDF: exact signMessage payload and the domain fields playing
   the `(chainId, verifyingContract)` role. Consensus-critical bytes; due before S5.
 - **OPEN-2b** — cross-rail identity: per-rail keys (implied by any domain-separated KDF)
-  vs a one-identity product expectation. Product call.
+  vs a one-identity product expectation. DECIDED (user 2026-09-04, issue #8 comment):
+  per-rail identities are the product intent.
 - **OPEN-3** — withdrawPriv recipient binding for 32-byte addresses under a verbatim
-  circuit: truncated-bits vs program-side Poseidon-of-limbs. Security review, due in S2.
+  circuit: truncated-bits vs program-side Poseidon-of-limbs. DECIDED (S2 security review
+  2026-09-05, recorded on issue #8): truncate-253, bind the low 253 bits of the token
+  account address, mask spec addr[0] &= 0x1F big-endian.
 - **OPEN-4** — no rail/pool binding in any public vector: cross-rail proof replay is
   blocked by state (root divergence), not by the proof; whether to add an explicit
   binding at the next circuit revision belongs to the circuit-freeze review.
