@@ -57,7 +57,7 @@ trades that for an HMAC token from the indexer (`/auth/challenge` + `/auth/token
 (`@bongtu/client` `session.ts`). Balance and activity read with the token alone — no key, no popup — so a
 returning visit restores silently as long as the wallet still reports the same account.
 
-**Spending** runs on the key itself, held by the `@bongtu/client` `KeyCache` (wired app-side in `src/lib/keyCache.ts`) — the wallet's *lock*, and the
+**Spending** runs on the key itself, held by the `@bongtu/client` `KeyCache` (each app's `src/lib/keyCache.ts` constructs its one instance through the engine's `createKeyCache`, so the KDF config and the stealth seam cannot be miswired per-app) — the wallet's *lock*, and the
 only place the bjj private key lives between actions. It is memory-only: never storage, never React
 state, gone on reload.
 

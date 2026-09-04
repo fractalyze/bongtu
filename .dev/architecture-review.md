@@ -121,3 +121,35 @@ land later with zero caller impact; exporting *both* fold flavors from `imt.ts` 
 re-create the dual-convention hazard #2 exists to kill; and importing the shared
 envelope codec into `auditor_decrypt_check.ts` would collapse checker and checked into
 one implementation.
+
+
+## 2026-09-04 pass (continuation; full detail in gh issue #12)
+
+A second Explore pass over the TypeScript workspaces, run under the same
+vocabulary and the same deletion test. Nothing from the Rejected list above was
+re-proposed. Outcome:
+
+**Applied (3, behavior-neutral, PR of issue #12).** `WalletEdge` named +
+`createKeyCache` as the one sanctioned lock construction (the parameter is the
+`currentAccount` slice the lock actually consumes — review finding; the other
+three quartet members are the declared seam future login/watch threading lands
+against, not yet consumed by the engine); exhaustive per-app `ChainFailure`
+copy tables over core's distributive `FailureCopyTable` (a new kind is now a
+tsc error in every app, and the payroll adapter's empty-accounts event routes
+to `disconnected` honestly); `submitPoolWrite` as the one pool-write submit
+discipline (gas pin ×3 floor + pending nonce + receipt wait), payroll's
+disburse riding it.
+
+**Deferred (3) — each blocked on a named decision, not on effort.**
+- payroll console session/refresh orchestration → `createOwnerReads` +
+  `refreshTick` in `packages/client`: blocked on the PRODUCT question of
+  whether payroll's login intentionally skips the key-determinism guard and
+  session persistence that wallet-web's `runLogin` performs.
+- a shared node-service kit (deploy-record resolution ×3, JSON `node:http`
+  envelope ×3, boot fail-fast, anonymous chain object): blocked on the
+  node-only-vs-bundled boundary — the module reads `node:fs` and must be
+  unreachable from vite bundles.
+- `applyLogs` op-family descriptor table (the twelve-branch mirror ladder in
+  `apps/indexer/src/ingest.ts`): the highest-leverage candidate, but it IS the
+  mirror invariant — land only behind the full heavy gates with the table
+  itself human-reviewed.
