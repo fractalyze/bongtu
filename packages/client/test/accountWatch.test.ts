@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { accountWatchHandler, type WatchedAccount } from "../src/connection.js";
+import { accountWatchHandler, type WatchedAccount } from "@bongtu/client/connection";
 
 const connected = (address: string): WatchedAccount => ({ address, status: "connected" });
 const disconnected: WatchedAccount = { status: "disconnected" };

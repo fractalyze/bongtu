@@ -4,8 +4,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { Base8, mulPointEscalar, IDENTITY } from "../src/babyjub.js";
-import { deriveKeypair } from "../src/note.js";
+import { Base8, mulPointEscalar, IDENTITY } from "@bongtu/core/babyjub";
+import { deriveKeypair } from "@bongtu/core/note";
 import {
   SUBGROUP_ORDER,
   signNotesAuth,
@@ -13,7 +13,7 @@ import {
   notesAuthMessage,
   packSignature,
   parseSignature,
-} from "../src/eddsa.js";
+} from "@bongtu/core/eddsa";
 
 test("SUBGROUP_ORDER is Base8's order (L·Base8 == identity)", () => {
   assert.deepEqual(mulPointEscalar(Base8, SUBGROUP_ORDER), [IDENTITY[0], IDENTITY[1]]);

@@ -65,8 +65,8 @@ import {
   type KemTransport,
   type OwnerNote,
   type PathResult,
-} from "./indexerClient.js";
-import type { ConsumerWalletIdentity, WalletIdentity } from "./derive.js";
+} from "@bongtu/client/indexerClient";
+import type { ConsumerWalletIdentity, WalletIdentity } from "@bongtu/client/derive";
 
 /** The event kinds the consumer pipeline scans (viewTags + kem transport). */
 export const CONSUMER_EVENT_KINDS: ReadonlySet<EventKind> = new Set<EventKind>([

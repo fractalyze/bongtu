@@ -46,10 +46,10 @@ import {
   arbiterKemPkGuardError,
   explorerTxUrl,
   isPreKemProbeError,
-} from "../src/network.js";
+} from "@bongtu/core/network";
 import { keccak_256 } from "@noble/hashes/sha3";
 
-import { KEM_PUBLIC_KEY_BYTES, kemBytesToHex, kemHexToBytes, ml_kem768 } from "../src/kem.js";
+import { KEM_PUBLIC_KEY_BYTES, kemBytesToHex, kemHexToBytes, ml_kem768 } from "@bongtu/core/kem";
 
 // packages/core/test -> repo root (tests run under tsx/node, not the browser).
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");

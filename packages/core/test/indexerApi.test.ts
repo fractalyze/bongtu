@@ -9,8 +9,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { deriveKeypair } from "../src/note.js";
-import { packPubkey, unpackPubkey } from "../src/pubkey.js";
+import { deriveKeypair } from "@bongtu/core/note";
+import { packPubkey, unpackPubkey } from "@bongtu/core/pubkey";
 import {
   notesAuthMessage,
   viewTokenAuthMessage,
@@ -18,7 +18,7 @@ import {
   signNotesAuth,
   verifyNotesAuth,
   packSignature,
-} from "../src/eddsa.js";
+} from "@bongtu/core/eddsa";
 import {
   buildNotesUrl,
   buildHistoryUrl,
@@ -39,7 +39,7 @@ import {
   type NameRecord,
   type NameRegistration,
   type WithdrawAnnouncementRecord,
-} from "../src/indexerApi.js";
+} from "@bongtu/core/indexerApi";
 
 const OWNER_SCALAR = 424242424242424242424242n;
 
@@ -358,7 +358,7 @@ import {
   getPortalAnnouncements,
   type PortalIssuance,
   type PortalRecord,
-} from "../src/indexerApi.js";
+} from "@bongtu/core/indexerApi";
 
 const PORTAL_ISSUANCE: PortalIssuance = {
   destination: "0x" + "77".repeat(20),

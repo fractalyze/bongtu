@@ -19,10 +19,10 @@ import {
   signNotesAuth,
   verifyNotesAuth,
   parseSignature,
-} from "../src/eddsa.js";
-import { buildNameRegistrationV2 } from "../src/indexerApi.js";
-import { deriveKeypair } from "../src/note.js";
-import { packPubkey } from "../src/pubkey.js";
+} from "@bongtu/core/eddsa";
+import { buildNameRegistrationV2 } from "@bongtu/core/indexerApi";
+import { deriveKeypair } from "@bongtu/core/note";
+import { packPubkey } from "@bongtu/core/pubkey";
 
 const OWNER = deriveKeypair(123456789123456789n);
 const META = { viewPub: "0x" + "ab".repeat(32), spendPub: "0x" + "02".repeat(33) };

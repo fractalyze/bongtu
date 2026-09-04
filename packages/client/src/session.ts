@@ -12,7 +12,7 @@
 
 import { DEPLOYMENT_TAG } from "@bongtu/core/network";
 
-import type { WalletTransport } from "./loginGuard.js";
+import type { WalletTransport } from "@bongtu/client/loginGuard";
 
 /** What survives a page reload: enough to show Home + read data, nothing that spends. */
 export interface StoredSession {

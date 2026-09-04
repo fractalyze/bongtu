@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { Base8, mulPointEscalar, addPoint, isOnCurve } from "../src/babyjub.js";
+import { Base8, mulPointEscalar, addPoint, isOnCurve } from "@bongtu/core/babyjub";
 import {
   deriveKeypair,
   commitment,
@@ -13,7 +13,7 @@ import {
   poseidonDecrypt,
   ecdhSharedSecret,
   assertDistinctOwnerPubkeys,
-} from "../src/note.js";
+} from "@bongtu/core/note";
 
 // --- babyjub self-checks (no external reference; on-curve + ladder consistency)
 

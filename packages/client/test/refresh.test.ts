@@ -28,8 +28,8 @@ import {
   EXPIRED_MESSAGE,
   RECONNECT_NOTICE,
   type OwnerSnapshot,
-} from "../src/refresh.js";
-import type { OwnerNote, HistoryItem, HistoryPage } from "../src/indexerClient.js";
+} from "@bongtu/client/refresh";
+import type { OwnerNote, HistoryItem, HistoryPage } from "@bongtu/client/indexerClient";
 
 const note = (commitment: string, spent: boolean): OwnerNote => ({
   owner: ["1", "2"],

@@ -23,8 +23,8 @@ import {
   poseidonDecrypt,
   ecdhSharedSecret,
 } from "@bongtu/core/note";
-import type { WalletIdentity } from "./derive.js";
-import { type FeedEvent } from "./indexerClient.js";
+import type { WalletIdentity } from "@bongtu/client/derive";
+import { type FeedEvent } from "@bongtu/client/indexerClient";
 
 /** Anything with a decimal value and a spent flag sums the same way. */
 export interface UnspentSummable {

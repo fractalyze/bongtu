@@ -13,9 +13,9 @@
 // index so fixtures are reproducible and the workflow env is satisfied.
 
 import { poseidon4 } from "poseidon-lite";
-import { poseidonN, FIELD_PRIME } from "./poseidon.js";
-import { Base8, mulPointEscalar } from "./babyjub.js";
-import type { FieldInput, Point, PointInput } from "./babyjub.js";
+import { poseidonN, FIELD_PRIME } from "@bongtu/core/poseidon";
+import { Base8, mulPointEscalar } from "@bongtu/core/babyjub";
+import type { FieldInput, Point, PointInput } from "@bongtu/core/babyjub";
 
 // poseidon-lite's fixed-arity fns return a length-`nOuts` ARRAY when nOuts > 1
 // (its .d.ts only types the nOuts=1 single-bigint case). The Poseidon sponge

@@ -6,7 +6,21 @@
   "license": "Apache-2.0",
   "private": true,
   "exports": {
-    "./*": "./src/*.ts"
+    "./babyjub": "./src/babyjub.ts",
+    "./consumer": "./src/consumer.ts",
+    "./eddsa": "./src/eddsa.ts",
+    "./envelope": "./src/envelope.ts",
+    "./errors": "./src/errors.ts",
+    "./extern": "./src/extern.ts",
+    "./imt": "./src/imt.ts",
+    "./indexerApi": "./src/indexerApi.ts",
+    "./kem": "./src/kem.ts",
+    "./network": "./src/network.ts",
+    "./note": "./src/note.ts",
+    "./poseidon": "./src/poseidon.ts",
+    "./proving": "./src/proving.ts",
+    "./pubkey": "./src/pubkey.ts",
+    "./stealth": "./src/stealth.ts"
   },
   "scripts": {
     "test": "tsx --test test/*.test.ts",

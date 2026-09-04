@@ -20,12 +20,12 @@
 //  - Left/right order at level j is bit j of the index: bit 0 => left child.
 //    This matches circomlib's CheckIMTProof (Num2Bits + Switcher) exactly.
 
-import { poseidon2 } from "./poseidon.js";
+import { poseidon2 } from "@bongtu/core/poseidon";
 
 // A field element in a form the tree accepts as leaf input (coerced via BigInt).
 // Declared once in babyjub.ts; re-exported so `@bongtu/core/imt` importers keep working.
-import type { FieldInput } from "./babyjub.js";
-export type { FieldInput } from "./babyjub.js";
+import type { FieldInput } from "@bongtu/core/babyjub";
+export type { FieldInput } from "@bongtu/core/babyjub";
 
 // A reconstructed merkle authentication path against the current root.
 export interface MerklePath {

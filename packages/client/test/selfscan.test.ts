@@ -32,9 +32,9 @@ import { ImtTree } from "@bongtu/core/imt";
 import { ml_kem768 } from "@bongtu/core/kem";
 import { packPubkey } from "@bongtu/core/pubkey";
 
-import { deriveIdentityFromSignature, type ConsumerWalletIdentity } from "../src/derive.js";
-import { sumUnspent } from "../src/balance.js";
-import type { FeedEvent, PathResult } from "../src/indexerClient.js";
+import { deriveIdentityFromSignature, type ConsumerWalletIdentity } from "@bongtu/client/derive";
+import { sumUnspent } from "@bongtu/client/balance";
+import type { FeedEvent, PathResult } from "@bongtu/client/indexerClient";
 import {
   scanEventsPass,
   pathConfirmsLeaf,
@@ -47,7 +47,7 @@ import {
   EMPTY_SCAN_STATE,
   type SelfScanIo,
   type SelfScanState,
-} from "../src/selfscan.js";
+} from "@bongtu/client/selfscan";
 import { consumerReceiver } from "../../../circuits/fixtures/consumer_lib.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));

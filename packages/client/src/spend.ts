@@ -53,7 +53,7 @@ import type {
   WithdrawInput,
   ProvingRequest,
 } from "@bongtu/core/proving";
-import type { WalletIdentity } from "./derive.js";
+import type { WalletIdentity } from "@bongtu/client/derive";
 
 // --- app-facing input shapes (all field elements as decimal strings) ------------
 

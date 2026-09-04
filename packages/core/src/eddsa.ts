@@ -31,13 +31,13 @@
 // re-exports the client-facing ones so the fetch flows keep one import path.
 
 import { sha256 } from "@noble/hashes/sha2.js";
-import { Base8, addPoint, mulPointEscalar, isOnCurve, P, IDENTITY, SUBGROUP_ORDER } from "./babyjub.js";
-import type { FieldInput, Point, PointInput } from "./babyjub.js";
-import { poseidonN } from "./poseidon.js";
+import { Base8, addPoint, mulPointEscalar, isOnCurve, P, IDENTITY, SUBGROUP_ORDER } from "@bongtu/core/babyjub";
+import type { FieldInput, Point, PointInput } from "@bongtu/core/babyjub";
+import { poseidonN } from "@bongtu/core/poseidon";
 
 // The subgroup order L lives with the curve (babyjub.ts); re-exported here so
 // existing `@bongtu/core/eddsa` importers keep working.
-export { SUBGROUP_ORDER } from "./babyjub.js";
+export { SUBGROUP_ORDER } from "@bongtu/core/babyjub";
 
 const isIdentity = ([x, y]: Point): boolean => x === IDENTITY[0] && y === IDENTITY[1];
 

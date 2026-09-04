@@ -11,7 +11,7 @@
 // permissionless deposit tx).
 
 import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
-import type { Connection } from "./connection.js";
+import type { Connection } from "@bongtu/client/connection";
 import {
   approveToken,
   assertPoolKemEpoch,
@@ -19,10 +19,10 @@ import {
   readTokenState,
   submitDeposit,
   walletErrorMessage,
-} from "./connection.js";
-import type { KeyCache } from "./keyCache.js";
-import { assertDepositAffordable, buildDepositRequest, freshDepositCrypto } from "./deposit.js";
-import { randField } from "./spend.js";
+} from "@bongtu/client/connection";
+import type { KeyCache } from "@bongtu/client/keyCache";
+import { assertDepositAffordable, buildDepositRequest, freshDepositCrypto } from "@bongtu/client/deposit";
+import { randField } from "@bongtu/client/spend";
 
 /** The coarse stages a deposit passes through. "unlock" is the signature that hands
  *  over the spending key and fires ONLY when the wallet is locked; "approve" is

@@ -19,8 +19,8 @@
 
 import { sha256 } from "@noble/hashes/sha2.js";
 
-import { P, A, D, isOnCurve, mod, modpow, inv } from "./babyjub.js";
-import type { Point, PointInput } from "./babyjub.js";
+import { P, A, D, isOnCurve, mod, modpow, inv } from "@bongtu/core/babyjub";
+import type { Point, PointInput } from "@bongtu/core/babyjub";
 
 // Legendre symbol: 1 if a is a nonzero quadratic residue, P-1 if a non-residue.
 function legendre(a: bigint): bigint {

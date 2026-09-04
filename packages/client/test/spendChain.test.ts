@@ -28,9 +28,9 @@ import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
 
 import { scanStealthAnnouncement, type StealthDerivation } from "@bongtu/core/stealth";
 
-import { deriveIdentityFromSignature } from "../src/derive.js";
-import { KeyCache } from "../src/keyCache.js";
-import { prepareStealthDestination, stealthKeysFromKdfSignature } from "../src/stealthKeys.js";
+import { deriveIdentityFromSignature } from "@bongtu/client/derive";
+import { KeyCache } from "@bongtu/client/keyCache";
+import { prepareStealthDestination, stealthKeysFromKdfSignature } from "@bongtu/client/stealthKeys";
 import {
   runSpendChain,
   CHAIN_FAILURE_REASSURANCE,
@@ -38,8 +38,8 @@ import {
   type RunSpendDeps,
   type SpendIo,
   type SpendContext,
-} from "../src/spendFlow.js";
-import type { OwnerNote } from "../src/indexerClient.js";
+} from "@bongtu/client/spendFlow";
+import type { OwnerNote } from "@bongtu/client/indexerClient";
 import {
   legCircuit,
   pendingLegOf,
@@ -47,7 +47,7 @@ import {
   SpendSelectionError,
   type SelectableNote,
   type SpendLeg,
-} from "../src/spend.js";
+} from "@bongtu/client/spend";
 import { H, B } from "@bongtu/core/network";
 
 const SIG = "0x" + "a1".repeat(32) + "b2".repeat(32) + "1c";

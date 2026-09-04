@@ -41,10 +41,10 @@
 // already passed the session check and no other account can reproduce it.
 
 import type { StealthKeys } from "@bongtu/core/stealth";
-import type { WalletIdentity } from "./derive.js";
-import { ACCOUNT_MISMATCH_MESSAGE, assertSessionIdentity, KEY_DERIVATION, deriveTransientIdentity } from "./identity.js";
-import { deriveStealthKeys } from "./stealthKeys.js";
-import type { Connection, WalletEdge } from "./connection.js";
+import type { WalletIdentity } from "@bongtu/client/derive";
+import { ACCOUNT_MISMATCH_MESSAGE, assertSessionIdentity, KEY_DERIVATION, deriveTransientIdentity } from "@bongtu/client/identity";
+import { deriveStealthKeys } from "@bongtu/client/stealthKeys";
+import type { Connection, WalletEdge } from "@bongtu/client/connection";
 
 /** How long an unused spending key is kept before the wallet re-locks itself. */
 export const IDLE_WIPE_MS = 10 * 60 * 1000;

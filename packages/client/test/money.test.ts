@@ -21,7 +21,7 @@ import {
   allowanceLabel,
   MAX_NOTE_WEI,
   MAX_UINT256,
-} from "../src/money.js";
+} from "@bongtu/client/money";
 
 const WEI = 10n ** 18n;
 

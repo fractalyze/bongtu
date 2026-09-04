@@ -4,8 +4,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { poseidon2, poseidonN } from "../src/poseidon.js";
-import { ImtTree, foldToRoot } from "../src/imt.js";
+import { poseidon2, poseidonN } from "@bongtu/core/poseidon";
+import { ImtTree, foldToRoot } from "@bongtu/core/imt";
 
 const H = 32;
 const B = 16;

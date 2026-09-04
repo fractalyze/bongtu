@@ -36,15 +36,15 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { CHAIN_ID } from "../src/network.js";
+import { CHAIN_ID } from "@bongtu/core/network";
 import {
   deriveKeypair,
   commitment,
   poseidonEncrypt,
   poseidonDecrypt,
   ecdhSharedSecret,
-} from "../src/note.js";
-import type { Point } from "../src/babyjub.js";
+} from "@bongtu/core/note";
+import type { Point } from "@bongtu/core/babyjub";
 
 import {
   parseEnvelope,
@@ -54,14 +54,14 @@ import {
   disclosureChain,
   type OpKind,
   type ParsedEnvelope,
-} from "../src/envelope.js";
+} from "@bongtu/core/envelope";
 import {
   KEM_SECRET_KEY_BYTES,
   hybridEnvelopeKey,
   kemPkFromSecret,
   kemSsToLimbs,
   ml_kem768,
-} from "../src/kem.js";
+} from "@bongtu/core/kem";
 // THE fixture arbiter's bjj scalar, declared once for the whole repo.
 import { FIXTURE_ARBITER_SCALAR } from "../../../circuits/fixtures/fixture_lib.js";
 

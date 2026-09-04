@@ -11,7 +11,7 @@
 // (test/refresh.test.ts); App.tsx wires the real token-authed fetches.
 
 import { classifyIndexerRead } from "@bongtu/core/errors";
-import type { OwnerNote, HistoryItem, HistoryPage } from "./indexerClient.js";
+import type { OwnerNote, HistoryItem, HistoryPage } from "@bongtu/client/indexerClient";
 
 /** One consistent read of the owner's indexer state. `history` is the FIRST page
  *  of the activity feed and `historyNextBefore` the cursor for the page after it

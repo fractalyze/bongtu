@@ -27,12 +27,12 @@ import assert from "node:assert/strict";
 import type { Calldata } from "@bongtu/core/proving";
 import { commitment } from "@bongtu/core/note";
 import { ImtTree, foldToRoot } from "@bongtu/core/imt";
-import { deriveIdentityFromSignature } from "../src/derive.js";
-import { ACCOUNT_MISMATCH_MESSAGE, assertSessionIdentity } from "../src/identity.js";
-import { KeyCache } from "../src/keyCache.js";
-import { runSpendChain, type SpendIo, type SpendContext } from "../src/spendFlow.js";
-import { runDeposit, type DepositContext, type DepositIo } from "../src/depositFlow.js";
-import type { OwnerNote } from "../src/indexerClient.js";
+import { deriveIdentityFromSignature } from "@bongtu/client/derive";
+import { ACCOUNT_MISMATCH_MESSAGE, assertSessionIdentity } from "@bongtu/client/identity";
+import { KeyCache } from "@bongtu/client/keyCache";
+import { runSpendChain, type SpendIo, type SpendContext } from "@bongtu/client/spendFlow";
+import { runDeposit, type DepositContext, type DepositIo } from "@bongtu/client/depositFlow";
+import type { OwnerNote } from "@bongtu/client/indexerClient";
 
 const SESSION_SIG = "0x" + "a1".repeat(32) + "b2".repeat(32) + "1c";
 const OTHER_SIG = "0x" + "c3".repeat(32) + "d4".repeat(32) + "1b";

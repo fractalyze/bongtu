@@ -44,16 +44,16 @@ import assert from "node:assert/strict";
 
 import { createWalletClient, custom, hashTypedData } from "viem";
 import { CHAIN_ID, POOL_ADDRESS } from "@bongtu/core/network";
-import { liveChain } from "../src/chain.js";
+import { liveChain } from "@bongtu/client/chain";
 import { createHash } from "node:crypto";
 import { kemPkFromSecret } from "@bongtu/core/kem";
 import {
   keyDerivationTypedData,
   deriveIdentityFromSignature,
   viewScalarFromSignature,
-} from "../src/derive.js";
-import { signKeyDerivation, type Connection } from "../src/connection.js";
-import { deriveLoginIdentity } from "../src/identity.js";
+} from "@bongtu/client/derive";
+import { signKeyDerivation, type Connection } from "@bongtu/client/connection";
+import { deriveLoginIdentity } from "@bongtu/client/identity";
 
 // --- pinned derivation facts ------------------------------------------------------
 

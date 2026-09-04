@@ -50,10 +50,10 @@
 // pin suite (test/envelope.test.ts p2) proves this TS fold equals the
 // in-circuit gadget on the committed disburse256 proof fixture.
 
-import type { FieldInput, Point } from "./babyjub.js";
-import { hybridEnvelopeKey } from "./kem.js";
-import { ecdhSharedSecret, poseidonDecrypt } from "./note.js";
-import { poseidon2 } from "./poseidon.js";
+import type { FieldInput, Point } from "@bongtu/core/babyjub";
+import { hybridEnvelopeKey } from "@bongtu/core/kem";
+import { ecdhSharedSecret, poseidonDecrypt } from "@bongtu/core/note";
+import { poseidon2 } from "@bongtu/core/poseidon";
 
 export type OpKind =
   | "deposit"

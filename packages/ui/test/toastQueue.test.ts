@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { ToastQueue } from "../src/toastQueue.js";
+import { ToastQueue } from "@bongtu/ui/toastQueue";
 
 /** A hand-cranked timer: collects scheduled callbacks, fires them on demand. */
 function fakeTimers(): {

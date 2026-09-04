@@ -6,9 +6,9 @@ import assert from "node:assert/strict";
 
 import { sha256 } from "@noble/hashes/sha2.js";
 
-import { Base8, mulPointEscalar, isOnCurve, P, A, D } from "../src/babyjub.js";
-import { deriveKeypair } from "../src/note.js";
-import { packPubkey, unpackPubkey, sqrtMod, encodeAddress, decodeAddress } from "../src/pubkey.js";
+import { Base8, mulPointEscalar, isOnCurve, P, A, D } from "@bongtu/core/babyjub";
+import { deriveKeypair } from "@bongtu/core/note";
+import { packPubkey, unpackPubkey, sqrtMod, encodeAddress, decodeAddress } from "@bongtu/core/pubkey";
 
 const fmod = (x: bigint): bigint => ((x % P) + P) % P;
 

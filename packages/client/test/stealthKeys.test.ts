@@ -6,16 +6,16 @@ import assert from "node:assert/strict";
 
 import { SUBGROUP_ORDER } from "@bongtu/core/babyjub";
 import { SECP256K1_ORDER, deriveStealthAddress, scanStealthAnnouncement } from "@bongtu/core/stealth";
-import { scalarFromSignature } from "../src/derive.js";
-import type { KeyDerivationTypedData } from "../src/derive.js";
-import type { Connection } from "../src/connection.js";
+import { scalarFromSignature } from "@bongtu/client/derive";
+import type { KeyDerivationTypedData } from "@bongtu/client/derive";
+import type { Connection } from "@bongtu/client/connection";
 import {
   prepareStealthDestination,
   stealthKeysFromKdfSignature,
   stealthKeyTypedData,
-} from "../src/stealthKeys.js";
-import { discoverStealthFunds, exportStealthFundKey } from "../src/stealthFunds.js";
-import { KEY_DERIVATION } from "../src/identity.js";
+} from "@bongtu/client/stealthKeys";
+import { discoverStealthFunds, exportStealthFundKey } from "@bongtu/client/stealthFunds";
+import { KEY_DERIVATION } from "@bongtu/client/identity";
 import type { WithdrawAnnouncementRecord } from "@bongtu/core/indexerApi";
 
 // A syntactically valid 65-byte signature hex (deterministic test input).
