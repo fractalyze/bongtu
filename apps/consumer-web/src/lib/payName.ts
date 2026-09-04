@@ -9,7 +9,7 @@
 // signed zero-sentinel clear both refuse); this file owns only the wallet's
 // words for each outcome.
 
-import { normalizeName, resolveName } from "@bongtu/client/indexerClient";
+import { normalizeName, resolveName } from "@bongtu/core/indexerApi";
 import { consumerRecipientOf, type ConsumerRecipient } from "@bongtu/client/consumerBuild";
 
 /** The name does not normalize or is not in the directory — a typo-or-unregistered

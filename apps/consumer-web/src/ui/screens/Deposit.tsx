@@ -14,7 +14,7 @@ import type { ReactNode } from "react";
 import { DEFAULTS } from "../../config.js";
 import { consumerRunDeposit, type ConsumerDepositOutcome } from "@bongtu/client/consumerFlows";
 import { readTokenState } from "@bongtu/client/connection";
-import { normalizeName } from "@bongtu/client/indexerClient";
+import { normalizeName } from "@bongtu/core/indexerApi";
 import type { ConsumerRecipient } from "@bongtu/client/consumerBuild";
 import { resolveConsumerRecipient } from "../../lib/payName.js";
 import { consumerErrorMessage } from "../../lib/errors.js";

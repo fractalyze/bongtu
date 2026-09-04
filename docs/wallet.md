@@ -409,7 +409,7 @@ The wallet has two discovery modes, picked at build time (`VITE_DISCOVERY` via `
 in `src/config.ts`; default `arbiter`, so every existing deployment is byte-unchanged):
 
 **Arbiter mode** (the enterprise profile): balance is `sum(value)` over unspent notes from a
-**signed `GET /notes`** against an arbiter-mode indexer (`packages/client/src/balance.ts`). The wallet proves
+**signed `GET /notes`** against an arbiter-mode indexer (`packages/client/src/scan/balance.ts`). The wallet proves
 control of its own key with an EdDSA-Poseidon read-auth signature over
 `Poseidon(ownerPub.x, ownerPub.y, ts)`, so it can read only its own row even though the arbiter
 holds everyone's. Activity is the per-owner `/history` feed.

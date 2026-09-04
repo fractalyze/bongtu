@@ -13,7 +13,7 @@
 // passes a sliced recent feed + onViewAll; the Activity screen passes the full feed.
 
 import type { ReactNode } from "react";
-import type { HistoryItem, HistoryKind } from "@bongtu/client/indexerClient";
+import type { HistoryItem, HistoryKind } from "@bongtu/core/indexerApi";
 import { activityEmptyLine, presentActivity, type ActivityRowView } from "../activityView.js";
 import { LinkButton } from "./controls.js";
 import { IconReceived, IconSend, IconDeposit, IconWithdraw, IconExternalLink } from "./icons.js";

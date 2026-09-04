@@ -32,7 +32,7 @@ import { ACCOUNT_MISMATCH_MESSAGE, assertSessionIdentity } from "@bongtu/client/
 import { KeyCache } from "@bongtu/client/keyCache";
 import { runSpendChain, type SpendIo, type SpendContext } from "@bongtu/client/spendFlow";
 import { runDeposit, type DepositContext, type DepositIo } from "@bongtu/client/depositFlow";
-import type { OwnerNote } from "@bongtu/client/indexerClient";
+import type { OwnerNote } from "@bongtu/core/indexerApi";
 
 const SESSION_SIG = "0x" + "a1".repeat(32) + "b2".repeat(32) + "1c";
 const OTHER_SIG = "0x" + "c3".repeat(32) + "d4".repeat(32) + "1b";

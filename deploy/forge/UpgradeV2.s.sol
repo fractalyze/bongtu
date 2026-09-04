@@ -30,7 +30,7 @@ import {AddressBook, AddressRecord} from "./AddressBook.sol";
 /// Post-state is read back and asserted (verifier wired, reinitializer version
 /// consumed, and the storage that must survive an implementation swap: tree
 /// head, batch size, token, arbiter epoch). The addresses file is merge-written
-/// (only `withdrawVerifier` + `poolImpl` change); `packages/core/src/network.ts`
+/// (only `withdrawVerifier` + `poolImpl` change); `packages/core/src/chain/network.ts`
 /// mirrors that file and must be updated BY FIELD NAME in the same change.
 contract UpgradeV2 is Script {
     // anvil account 0 (public dev key) — matches Deploy.s.sol; the live run
@@ -87,7 +87,7 @@ contract UpgradeV2 is Script {
 
         console2.log("withdrawVerifier:", address(verifier));
         console2.log("poolImpl        :", address(impl));
-        console2.log("addresses merged; mirror packages/core/src/network.ts BY FIELD NAME");
+        console2.log("addresses merged; mirror packages/core/src/chain/network.ts BY FIELD NAME");
         return (address(verifier), address(impl));
     }
 }

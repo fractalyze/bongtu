@@ -95,7 +95,7 @@ kept for a from-scratch redeploy.
 
 The live chain is the SAME `forge/Deploy.s.sol` with different env. Its facts —
 chain id, RPC, explorer, faucet, gas-price pin — have one home,
-`packages/core/src/network.ts`, and are tabulated in
+`packages/core/src/chain/network.ts`, and are tabulated in
 [`docs/deployment.md`](../docs/deployment.md#chain-facts). It is a sovereign EVM
 L1 (Cosmos-SDK x/feemarket EIP-1559 fees, gas token tOKRW) with the BN254
 precompiles present — the smoke deposit's Groth16 proof verified natively on-chain.

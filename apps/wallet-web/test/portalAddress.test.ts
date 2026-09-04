@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import type { NameRecord, PortalIssuance } from "@bongtu/client/indexerClient";
+import type { NameRecord, PortalIssuance } from "@bongtu/core/indexerApi";
 import type { StorageLike } from "@bongtu/client/session";
 import {
   PAY_NAME_KEY,

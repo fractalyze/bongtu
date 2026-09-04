@@ -15,7 +15,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import QRCode from "qrcode";
-import { normalizeName, registerName, resolveName } from "@bongtu/client/indexerClient";
+import { normalizeName, registerName, resolveName } from "@bongtu/core/indexerApi";
 import { buildNameRegistrationV2 } from "@bongtu/core/indexerApi";
 import { isConsumerIdentity } from "@bongtu/client/selfscan";
 import { selfConsumerRecipient } from "@bongtu/client/consumerBuild";

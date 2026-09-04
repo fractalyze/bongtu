@@ -24,7 +24,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { DEFAULTS, discoveryFromEnv, isSelfScan } from "../src/config.js";
 import { ActivityList } from "../src/ui/components/ActivityList.js";
-import type { HistoryItem } from "@bongtu/client/indexerClient";
+import type { HistoryItem } from "@bongtu/core/indexerApi";
 import { selfScanSyncState } from "../src/ui/components/SyncDot.js";
 import { loadScanState, saveScanState, clearScanState } from "../src/lib/scanStore.js";
 import { EMPTY_SCAN_STATE } from "@bongtu/client/selfscan";

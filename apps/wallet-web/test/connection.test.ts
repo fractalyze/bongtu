@@ -6,7 +6,7 @@
 //       byte-exact calldata for the right function, and resolves only after the
 //       receipt. The browser apps do NOT pin the gas price (they ask the node for
 //       eth_gasPrice and take 3x); the GAS_PRICE_PIN_GWEI pin is the live drivers'
-//       — see packages/core/src/network.ts. The KEM-ct length pre-check fires
+//       — see packages/core/src/chain/network.ts. The KEM-ct length pre-check fires
 //       BEFORE any RPC.
 //   (2) KEM EPOCH GUARD — the pool's arbiterKemPkHash(currentEpoch()) must vouch
 //       for the bundled key; a pre-KEM pool (empty eth_call return) fails CLOSED

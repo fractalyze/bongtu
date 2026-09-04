@@ -5,7 +5,7 @@
 
 import { isAddress } from "viem";
 import { decodeAddress } from "@bongtu/core/pubkey";
-import { normalizeName } from "@bongtu/client/indexerClient";
+import { normalizeName } from "@bongtu/core/indexerApi";
 import { parseKkrw } from "@bongtu/client/money";
 
 /**

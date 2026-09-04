@@ -54,7 +54,7 @@ struct ConsumerModuleRecord {
 ///
 /// Module addresses live in their own `deploy/modules.<chainid>.json` (not the
 /// AddressBook record): the pool record's field list is enterprise-shaped and
-/// consumed field-by-field by `packages/core/src/network.ts`; the module set is
+/// consumed field-by-field by `packages/core/src/chain/network.ts`; the module set is
 /// an add-on whose canonical on-chain source is the ModuleRegistered event
 /// stream (OPMOD §1.4) — this file is the deploy-time convenience mirror.
 library ConsumerModuleKit {

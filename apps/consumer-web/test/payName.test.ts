@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import type { NameRecord } from "@bongtu/client/indexerClient";
+import type { NameRecord } from "@bongtu/core/indexerApi";
 import {
   RECIPIENT_NOT_REGISTERED_MESSAGE,
   RECIPIENT_V1_ONLY_MESSAGE,

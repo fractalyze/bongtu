@@ -39,7 +39,7 @@ import {
   type SpendIo,
   type SpendContext,
 } from "@bongtu/client/spendFlow";
-import type { OwnerNote } from "@bongtu/client/indexerClient";
+import type { OwnerNote } from "@bongtu/core/indexerApi";
 import {
   legCircuit,
   pendingLegOf,

@@ -29,7 +29,7 @@ import { consumerRunSpendChain } from "@bongtu/client/consumerFlows";
 import type { SpendOutcome } from "@bongtu/client/spendFlow";
 import { consumerCircuitOf, type ConsumerRecipient } from "@bongtu/client/consumerBuild";
 import { previewSpend } from "@bongtu/client/spend";
-import { normalizeName } from "@bongtu/client/indexerClient";
+import { normalizeName } from "@bongtu/core/indexerApi";
 import { resolveConsumerRecipient } from "../../lib/payName.js";
 import { consumerErrorMessage } from "../../lib/errors.js";
 import { keyCache } from "../../lib/keyCache.js";

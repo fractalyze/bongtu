@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { KEM_EK_ZERO, NOTE_VIEW_PUB_ZERO } from "@bongtu/core/indexerApi";
-import type { NameRecord } from "@bongtu/client/indexerClient";
+import type { NameRecord } from "@bongtu/core/indexerApi";
 import {
   clearOwnPayName,
   loadOwnPayName,

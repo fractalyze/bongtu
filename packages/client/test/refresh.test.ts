@@ -29,7 +29,7 @@ import {
   RECONNECT_NOTICE,
   type OwnerSnapshot,
 } from "@bongtu/client/refresh";
-import type { OwnerNote, HistoryItem, HistoryPage } from "@bongtu/client/indexerClient";
+import type { OwnerNote, HistoryItem, HistoryPage } from "@bongtu/core/indexerApi";
 
 const note = (commitment: string, spent: boolean): OwnerNote => ({
   owner: ["1", "2"],

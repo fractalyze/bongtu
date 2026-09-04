@@ -316,7 +316,7 @@ contract Transfer10x2Test is Base {
     }
 
     /// The in-vector ciphertext runs are exactly what the envelope codec
-    /// computes for (10,2) (packages/core/src/envelope.ts: 2x4 receiver
+    /// computes for (10,2) (packages/core/src/crypto/envelope.ts: 2x4 receiver
     /// elements, and authorityCiphertextLen of transfer10x2 == 31 — 30
     /// plaintext fields, the one arity whose sponge pads by zero) — pinned here
     /// so a layout change cannot pass by only moving the event.

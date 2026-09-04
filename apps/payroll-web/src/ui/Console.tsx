@@ -40,7 +40,7 @@ import type { LegProgress, SpendStage } from "@bongtu/client/spendFlow";
 import { sumUnspent } from "@bongtu/client/balance";
 import { formatKkrw, groupAmountInput } from "@bongtu/client/money";
 import { encodeAddress } from "@bongtu/core/pubkey";
-import { IndexerClient, obtainViewToken, type OwnerNote } from "@bongtu/client/indexerClient";
+import { IndexerClient, obtainViewToken, type OwnerNote } from "@bongtu/core/indexerApi";
 import { DEFAULTS } from "../config.js";
 import { errorDetails, payrollErrorMessage } from "../lib/errors.js";
 import { openInjectedConnection, watchInjectedAccount } from "../lib/connect.js";

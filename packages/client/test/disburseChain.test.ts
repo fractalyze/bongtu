@@ -30,7 +30,7 @@ import {
   type SpendContext,
   type SpendIo,
 } from "@bongtu/client/spendFlow";
-import type { OwnerNote } from "@bongtu/client/indexerClient";
+import type { OwnerNote } from "@bongtu/core/indexerApi";
 import {
   planDisburseChain,
   pendingLegOf,

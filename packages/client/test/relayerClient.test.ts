@@ -1,4 +1,4 @@
-// Headless gates for the relayed withdraw submit (src/relayerClient.ts), driven
+// Headless gates for the relayed withdraw submit (src/wallet/relayerClient.ts), driven
 // by a fake fetchFn — no relayer process, no network. What is gated:
 //
 //   (1) HAPPY PATH — POST {calldata, kemCiphertext} to <relayerUrl>/relay and

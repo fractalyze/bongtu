@@ -309,7 +309,7 @@ witness:
 
 - **Distinct output owner pubkeys (disburse only).** All outputs of a disburse batch share one
   ephemeral key and one `encryptionNonce`, so two outputs to the same owner leak
-  `c1 − c2 = m1 − m2`. `assertDistinctOwnerPubkeys` (`packages/core/src/note.ts`) rejects
+  `c1 − c2 = m1 − m2`. `assertDistinctOwnerPubkeys` (`packages/core/src/notes/note.ts`) rejects
   duplicates before proving. The transfer arities are exempt since U-X3 (§11-8 v1.1): their
   base encrypts receiver ciphertext `i` under `encryptionNonce + i` in-circuit
   (`encrypt-outputs-per-output-nonce.circom`), so duplicate owners — a self-send, or a merge whose

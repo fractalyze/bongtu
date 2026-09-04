@@ -113,7 +113,7 @@ export const CONSUMER_MODULES = {
  * Anything persisted under a derived identity — a browser session record, the
  * account→key binding — is therefore meaningful only for one pair, and must be
  * stored under a key that carries it: a record from another deployment has to
- * read as ABSENT, not as a contradiction (packages/client/src/session.ts).
+ * read as ABSENT, not as a contradiction (packages/client/src/login/session.ts).
  */
 export const DEPLOYMENT_TAG = `${CHAIN_ID}:${POOL_ADDRESS.toLowerCase()}`;
 

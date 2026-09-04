@@ -22,7 +22,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { BalanceCard } from "../src/ui/components/BalanceCard.js";
 import { ActivityList } from "../src/ui/components/ActivityList.js";
-import type { HistoryItem } from "@bongtu/client/indexerClient";
+import type { HistoryItem } from "@bongtu/core/indexerApi";
 import { selfScanSyncState } from "../src/ui/components/SyncDot.js";
 import { clearScanState, loadScanState, saveScanState, scanNotice } from "../src/lib/scanStore.js";
 import {

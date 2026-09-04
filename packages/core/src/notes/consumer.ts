@@ -17,7 +17,7 @@
 // § The hybrid envelope key) minus the binding output: there is no arbiter to
 // alarm, and a junk encapsulation self-sabotages only the sender's own
 // delivery — the recipient's commitment-vs-leaf acceptance (the leaf-match MAC
-// substitute, packages/client/src/balance.ts trialDecryptEvents) rejects the
+// substitute, packages/client/src/scan/balance.ts trialDecryptEvents) rejects the
 // garbage decrypt while the note's funds stay intact. No per-output kemBinding
 // exists (OPMOD §2/§3.3).
 //
