@@ -36,6 +36,7 @@ import {
 } from "@bongtu/core/network";
 import { liveChain } from "@bongtu/client/chain";
 import { ZERO_EPHEMERAL, type StealthDerivation } from "@bongtu/core/stealth";
+import { KEM_CIPHERTEXT_BYTES } from "@bongtu/core/kem";
 
 // The shared per-function ABI fragments (@bongtu/core/network) — only the pool
 // functions the wallet touches, parsed once for viem. deposit is the 0-in/2-out
@@ -340,13 +341,17 @@ export async function assertPoolKemEpoch(connection: Connection, poolAddr: strin
 // (WrongKemCiphertextLength) and re-emits it for the arbiter; pre-checking the
 // length here turns that revert into a readable client error.
 function assertKemCiphertext(kemCiphertext: string): void {
-  if (!/^0x[0-9a-fA-F]+$/.test(kemCiphertext) || (kemCiphertext.length - 2) / 2 !== 1088) {
-    throw new Error(`kemCiphertext must be 1088 bytes of 0x-hex (got ${kemCiphertext.length} chars)`);
+  if (!/^0x[0-9a-fA-F]+$/.test(kemCiphertext) || (kemCiphertext.length - 2) / 2 !== KEM_CIPHERTEXT_BYTES) {
+    throw new Error(
+      `kemCiphertext must be ${KEM_CIPHERTEXT_BYTES} bytes of 0x-hex (got ${kemCiphertext.length} chars)`,
+    );
   }
 }
 
-/** The proof calldata's decimal strings as the bigints viem's ABI encoder takes. */
-function asProofArgs(calldata: Calldata) {
+/** The proof calldata's decimal strings as the bigints viem's ABI encoder takes.
+ *  Exported: consumerSubmit.ts rides the same belt — one home, not three copies
+ *  (the payroll copy predates this and migrates when that app is next touched). */
+export function asProofArgs(calldata: Calldata) {
   return {
     a: calldata.a.map(BigInt) as [bigint, bigint],
     b: calldata.b.map((r) => r.map(BigInt)) as [[bigint, bigint], [bigint, bigint]],
