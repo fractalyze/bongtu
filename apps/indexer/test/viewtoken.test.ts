@@ -471,6 +471,8 @@ test("/path gates a within-batch leaf behind read-auth + leaf ownership", () => 
       B: 4,
       nextLeafIndex: () => 8,
       isBatch: (k: number) => k === 1,
+      // an ARBITER fill, never a consumer one — this test is about the gate
+      isPublicBatch: () => false,
       path: () => ({ siblings: [1n, 2n, 3n], pathIndices: [0, 1, 0], root: 42n }),
     },
   } as unknown as Indexer;

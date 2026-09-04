@@ -251,6 +251,23 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     ///         ArbiterRotated for the same epoch.
     event ArbiterKemPkHashSet(uint256 indexed epoch, bytes32 kemPkHash);
 
+    // --- op-module layer events (OPMOD §1.5) ----------------------------------
+    event ModuleRegistered(address indexed module);
+    event ModuleRemoved(address indexed module);
+    /// @notice One per applyOp*: the audit trail tying a tree mutation to the
+    ///         module that caused it. Carries the resulting root so the
+    ///         indexer's per-insert mirror assertion has the same anchor the
+    ///         low-level Appended/SubtreeAppended events give it (which keep
+    ///         firing unchanged — the tree feed is family-blind).
+    event OpApplied(
+        address indexed module,
+        uint256 startLeafIndex,
+        uint256 nullifierCount,
+        uint256 leafCount, // 0 for a subtree attach
+        uint256 subtreeRoot, // 0 for single-leaf appends
+        uint256 root
+    );
+
     // --- errors ---------------------------------------------------------------
     // (re-init reverts via Initializable.InvalidInitialization, not a local error)
     error NotInitialized();
@@ -269,6 +286,12 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     error ZeroVerifier();
     error ZeroOutputCommitment();
     error InvalidRecipient(uint256 recipient);
+    // --- op-module layer (OPMOD §1) ---
+    error ModuleNotRegistered(address module);
+    error ModuleAlreadyRegistered(address module);
+    error MixedAppendShape();
+    error ZeroModule();
+    error EmptyOp();
 
     // --- reentrancy guard -----------------------------------------------------
     // Behind a proxy the inline default does not reach the proxy's storage, so
@@ -369,6 +392,42 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
         emit ArbiterKemPkHashSet(0, arbiterKemPkHash_);
     }
 
+    /// @notice The CONSUMER-ONLY initializer (OPMOD §7/§9 resolved default;
+    ///         issue #6: "a consumer-only profile initializes with no arbiter
+    ///         key at all"). Brings up the core WITHOUT any arbiter material —
+    ///         no arbiter epoch is ever minted, no KEM pk hash stored, and no
+    ///         enterprise verifier wired — so no auditor key exists rather
+    ///         than being burned. Consumer ops arrive exclusively through
+    ///         registered modules ({registerModule} is live immediately: the
+    ///         caller becomes owner, and modules need the proxy address, so
+    ///         registration follows deployment rather than riding an init
+    ///         payload).
+    ///
+    ///         Deliberate consequences on such a pool, pinned by tests:
+    ///         - every enterprise entrypoint REVERTS (each injects
+    ///           `currentArbiterKey()`, which panics on the empty epoch list) —
+    ///           the enterprise family does not exist here, which is the
+    ///           profile's whole meaning;
+    ///         - `currentEpoch()` / `currentArbiterKey()` revert; the six
+    ///           enterprise verifier getters read zero.
+    ///
+    ///         Shares the `initializer` version slot with {initialize}: a pool
+    ///         is one profile or the other, never both, and neither can run
+    ///         after the other. The enterprise {initialize} is byte-untouched.
+    function initializeConsumerOnly(IPoseidon2 _poseidon, IERC20 _token, uint256 _batchSize) external initializer {
+        if (_batchSize <= 1 || (_batchSize & (_batchSize - 1)) != 0) revert BatchSizeNotPowerOfTwo(_batchSize);
+
+        __Ownable2Step_init(msg.sender);
+        __UUPSUpgradeable_init();
+        _locked = 1;
+
+        poseidon = _poseidon;
+        token = _token;
+        B = _batchSize;
+        _initTreeAndParams(_batchSize);
+        initialized = true;
+    }
+
     /// @dev Wire every verifier the pool will ever call, rejecting the zero
     ///      address on each: a zeroed verifier turns its entry point into a call
     ///      into nothing — reachable, always reverting, and unfixable short of an
@@ -439,6 +498,25 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     function reinitializeV2(IWithdrawVerifier _withdrawVerifier) external onlyOwner reinitializer(2) {
         if (address(_withdrawVerifier) == address(0)) revert ZeroVerifier();
         withdrawVerifier = _withdrawVerifier;
+    }
+
+    /// @notice One-shot migration payload for the op-module upgrade (OPMOD §7.2):
+    ///         registers the initial consumer module set. No verifier swap rides
+    ///         in it — the six enterprise verifiers are untouched, so unlike
+    ///         {reinitializeV2} there is no atomicity constraint between old
+    ///         proofs and new verifiers. `onlyOwner` for the same reason
+    ///         reinitializeV2 is — `reinitializer(3)` alone is first-come after
+    ///         a bare `upgradeTo`.
+    function reinitializeV3(address[] calldata modules) external onlyOwner reinitializer(3) {
+        for (uint256 i = 0; i < modules.length; i++) {
+            if (modules[i] == address(0)) revert ZeroModule();
+            // A duplicate entry would double-emit ModuleRegistered — the same
+            // unbalanced-log hazard the setter guards close: the event stream
+            // is the canonical registry reconstruction source.
+            if (registeredModules[modules[i]]) revert ModuleAlreadyRegistered(modules[i]);
+            registeredModules[modules[i]] = true;
+            emit ModuleRegistered(modules[i]);
+        }
     }
 
     /// @notice Append an epoch and emit its index; the arbiter pubkey is read
@@ -909,6 +987,156 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     }
 
     // ==========================================================================
+    //                        OP-MODULE LAYER (OPMOD §1)
+    // ==========================================================================
+    // The core's module-only external surface. The six enterprise entrypoints
+    // above are byte-untouched and never route through applyOp; a consumer op
+    // family ships as a plain (non-proxied) module contract that checks its
+    // own Groth16 proof, arranges its public-signal layout, and calls one
+    // applyOp* per user op. The core re-derives NOTHING from proofs — it
+    // enforces the OPMOD §1.3 invariant list on whatever a REGISTERED module
+    // passes, which is why registration is onlyOwner and upgrade-equivalent
+    // power (a hostile module is a hostile implementation).
+
+    /// @notice The tree/nullifier effects of one op (OPMOD §1.2), copied by
+    ///         the MODULE out of the public-signal vector its verifier
+    ///         accepted — the core never sees the proof itself.
+    struct OpEffects {
+        /// Membership root the proof was made against. MUST be a known root
+        /// when `nullifiers` is non-empty; MUST be 0 when it is empty (a
+        /// rootless mint may not smuggle a root claim).
+        uint256 root;
+        /// Nullifiers to spend. Every entry MUST be nonzero and unused —
+        /// modules strip padded (zero) slots before calling; unlike
+        /// {_spendNullifier}, the core does NOT skip zeros here.
+        uint256[] nullifiers;
+        /// Output commitments to append as single leaves, in order. Every
+        /// entry MUST be nonzero. MUST be empty when subtreeRoot != 0.
+        uint256[] leaves;
+        /// Nonzero => attach ONE B-leaf subtree at level LOG_B instead of
+        /// appending leaves (the disburse shape). Zero => single-leaf appends.
+        uint256 subtreeRoot;
+    }
+
+    /// @dev The whole applyOp access story: users never call applyOp*; they
+    ///      call a module, and the module is msg.sender here.
+    modifier onlyRegisteredModule() {
+        if (!registeredModules[msg.sender]) revert ModuleNotRegistered(msg.sender);
+        _;
+    }
+
+    /// @notice Register `module` as an applyOp* caller. Upgrade-equivalent
+    ///         power (OPMOD §1.3 #6): a registered module can spend any
+    ///         approval made to the core and mint into the shared tree, so the
+    ///         trust boundary is the owner key, same as {_authorizeUpgrade}.
+    ///         Reverts on a no-op re-register: the ModuleRegistered/
+    ///         ModuleRemoved event stream is the canonical registry
+    ///         reconstruction source, so it must stay a balanced add/remove
+    ///         log — never spurious.
+    function registerModule(address module) external onlyOwner whenInitialized {
+        if (module == address(0)) revert ZeroModule();
+        if (registeredModules[module]) revert ModuleAlreadyRegistered(module);
+        registeredModules[module] = true;
+        emit ModuleRegistered(module);
+    }
+
+    /// @notice Deregister `module`, effective immediately. Strands nothing:
+    ///         notes are untyped, and a pending user tx re-proves against a
+    ///         replacement module unchanged (proofs bind no module address).
+    ///         Reverts when `module` is not registered, for the same reason
+    ///         {registerModule} rejects a re-register: the event stream is the
+    ///         canonical registry reconstruction source and must stay a
+    ///         balanced add/remove log — never spurious.
+    function removeModule(address module) external onlyOwner whenInitialized {
+        if (!registeredModules[module]) revert ModuleNotRegistered(module);
+        registeredModules[module] = false;
+        emit ModuleRemoved(module);
+    }
+
+    /// @notice Apply one op's tree/nullifier effects with NO escrow motion.
+    ///         Returns the leaf index of the first appended leaf (or the batch
+    ///         start for a subtree attach) — modules need it for their events.
+    function applyOp(OpEffects calldata fx)
+        external
+        whenInitialized
+        nonReentrant
+        onlyRegisteredModule
+        returns (uint256 startLeafIndex)
+    {
+        return _applyOp(fx);
+    }
+
+    /// @notice {applyOp} + pull exactly `amount` from `from` (the deposit
+    ///         shape). CEI: the pull runs AFTER all tree/nullifier writes,
+    ///         mirroring {deposit}. That `amount` equals the module's
+    ///         proof-bound public is a module obligation reviewed at
+    ///         registration — the core never sees the proof.
+    function applyOpWithPull(OpEffects calldata fx, address from, uint256 amount)
+        external
+        whenInitialized
+        nonReentrant
+        onlyRegisteredModule
+        returns (uint256 startLeafIndex)
+    {
+        startLeafIndex = _applyOp(fx);
+        token.safeTransferFrom(from, address(this), amount);
+    }
+
+    /// @notice {applyOp} + push exactly `amount` to `to` (the withdraw shape).
+    ///         CEI as above; the module has already range-checked the
+    ///         proof-bound recipient the way {withdraw} does.
+    function applyOpWithPush(OpEffects calldata fx, address to, uint256 amount)
+        external
+        whenInitialized
+        nonReentrant
+        onlyRegisteredModule
+        returns (uint256 startLeafIndex)
+    {
+        if (to == address(0)) revert InvalidRecipient(0);
+        startLeafIndex = _applyOp(fx);
+        token.safeTransfer(to, amount);
+    }
+
+    /// @dev The OPMOD §1.3 invariant gate, in execution order: known-root iff
+    ///      nullifiers present (a mint claims no membership); every nullifier
+    ///      nonzero + unused, marked sequentially and completely (an in-tx
+    ///      duplicate reverts on its second occurrence); shape exclusivity
+    ///      (subtree attach XOR single-leaf appends); every leaf nonzero.
+    ///      {_appendLeaf}/{_attachSubtree} keep the Appended/SubtreeAppended
+    ///      feed identical to the in-core ops' — the indexer is family-blind.
+    function _applyOp(OpEffects calldata fx) private returns (uint256 startLeafIndex) {
+        // A zero-effect op (no nullifiers, no leaves, no subtree) has no
+        // legitimate module use and would emit an ambiguous OpApplied.
+        if (fx.nullifiers.length == 0 && fx.leaves.length == 0 && fx.subtreeRoot == 0) revert EmptyOp();
+        if (fx.nullifiers.length > 0) {
+            if (!knownRoots[fx.root]) revert UnknownRoot(fx.root);
+        } else if (fx.root != 0) {
+            revert UnknownRoot(fx.root);
+        }
+
+        for (uint256 i = 0; i < fx.nullifiers.length; i++) {
+            uint256 nf = fx.nullifiers[i];
+            if (nf == 0) revert ZeroNullifier();
+            if (nullifierUsed[nf]) revert NullifierAlreadyUsed(nf);
+            nullifierUsed[nf] = true;
+        }
+
+        if (fx.subtreeRoot != 0) {
+            if (fx.leaves.length != 0) revert MixedAppendShape();
+            startLeafIndex = _attachSubtree(fx.subtreeRoot);
+            emit SubtreeAppended(startLeafIndex, fx.subtreeRoot, root);
+        } else {
+            startLeafIndex = nextLeafIndex;
+            for (uint256 i = 0; i < fx.leaves.length; i++) {
+                if (fx.leaves[i] == 0) revert ZeroOutputCommitment();
+                _appendLeaf(fx.leaves[i]);
+            }
+        }
+
+        emit OpApplied(msg.sender, startLeafIndex, fx.nullifiers.length, fx.leaves.length, fx.subtreeRoot, root);
+    }
+
+    // ==========================================================================
     //                              IMT INTERNALS
     // ==========================================================================
 
@@ -1015,8 +1243,14 @@ contract BongtuPool is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable {
     // The 10-in/2-out {transfer10x2} verifier, wired by {initialize}.
     ITransfer10x2Verifier public transfer10x2Verifier;
 
+    /// OPMOD §1.4: the module registry. True => the address may call applyOp*.
+    /// Registration is onlyOwner and upgrade-equivalent power. One mapping, one
+    /// word — module addresses are recoverable from ModuleRegistered/
+    /// ModuleRemoved events, so no enumerable array.
+    mapping(address => bool) public registeredModules;
+
     /// @dev Reserved trailing storage so a future implementation can add state
     ///      without colliding with any slot introduced here (upgrade-safety).
     ///      Shrink it by exactly one word for each word appended above.
-    uint256[47] private __gap;
+    uint256[46] private __gap;
 }

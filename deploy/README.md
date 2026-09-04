@@ -39,6 +39,24 @@ Addresses are written to `deploy/addresses.<chainid>.json` (forge also writes
 | `ARBITER_KEM_PK_HASH` | fixture hash — **chain 31337 only** | `keccak256` of the arbiter's ML-KEM-768 encapsulation key. Off anvil there is no default: `Deploy.s.sol` reads it with `vm.envBytes32`, which reverts when unset, and refuses the fixture value outright |
 | `ARBITER_KEM_PK` | fixture key — **chain 31337 only** | the full encapsulation key recorded next to the hash; must hash to `ARBITER_KEM_PK_HASH`. Off anvil the deploy self-check fails without it (`no ARBITER_KEM_PK recorded`) |
 | `LIVE_RPC` | the sdk `RPC_URL` | the chain the live invocation below and the `live/` drivers talk to (`.env.example` carries it) |
+| `MODULE_PROFILE` | `none` (Deploy) / `consumer` (UpgradeV3) | which consumer module set the deployment registers — see [Deploy profiles](#deploy-profiles) |
+| `MODULE_CHUNK_ARITY` | 86 at B=256, else 6 (min B) | outputs per disburse kem-ct chunk tx (OPMOD §5) |
+
+### Deploy profiles
+
+Which op families a deployment serves is the module registration list (OPMOD §7/§9 —
+registration is `onlyOwner` + event-logged, upgrade-equivalent power):
+
+| profile | how | arbiter key | what is registered |
+|---|---|---|---|
+| audited-only / enterprise | `Deploy.s.sol` with `MODULE_PROFILE=none` (the default — byte-identical to the pre-profile deploy), or `UpgradeV3.s.sol` with `MODULE_PROFILE=none` | required (epoch 0) | no consumer modules — the pool-level audit guarantee holds |
+| consumer (shared pool) | `Deploy.s.sol MODULE_PROFILE=consumer` (fresh), or `UpgradeV3.s.sol` (existing pool — the live-pool path) | required (enterprise family live) | the 5 consumer modules via `ConsumerModuleKit` (`deploy/modules.<chainid>.json`) |
+| consumer-only | `DeployConsumerOnly.s.sol` | **none exists** — `initializeConsumerOnly` mints no arbiter epoch, wires no enterprise verifier; every enterprise entrypoint reverts | the 5 consumer modules (records `addresses.consumer.<chainid>.json` + `modules.consumer.<chainid>.json`) |
+
+`UpgradeV3.s.sol` is the OPMOD §7.3 migration for an EXISTING pool: consumer verifiers +
+modules deployed first (inert until registered), then ONE
+`upgradeToAndCall(reinitializeV3(modules))` — drilled by `gates/test_upgrade_v3.sh`
+(v1 proxy → v3, modules registered, enterprise Smoke still accepted, rerun refused).
 
 The two KEM knobs are **required off anvil, and deliberately have no live default** — a silent
 fixture fallback would make every auditor envelope world-readable with nothing in the deploy saying
@@ -131,12 +149,28 @@ Canonical data stays at the top; everything else is grouped by what runs it.
   testnet). Take an address from these **by field name**: the deployer replayed the same CREATE
   nonces on the project's previous chain, so several addresses recur across deployments while
   naming different contracts.
+- `modules.<chainid>.json` — the consumer module set registered on the pool of
+  `addresses.<chainid>.json` (written by `Deploy.s.sol MODULE_PROFILE=consumer` and
+  `UpgradeV3.s.sol`; the canonical on-chain source is the `ModuleRegistered` event stream, this
+  file is the deploy-time mirror). The 31337 file is tracked scratch, same as `addresses.31337.json`.
+- `addresses.consumer.<chainid>.json` / `modules.consumer.<chainid>.json` — the consumer-only
+  profile's record pair (`DeployConsumerOnly.s.sol`; tracked scratch at 31337).
+  The **by field name** rule above covers the module records too: never take an address from any
+  of these files by pattern-matching a remembered value.
 - `arbiter-kem-pk.84532.hex` — the live arbiter's ML-KEM-768 public key.
 
 `forge/` — the Solidity scripts, run through `forge script` from `contracts/`:
 
 - `Deploy.s.sol` — the whole stack in one broadcast (Poseidon + the six verifiers + impl + ERC-1967
-  proxy running `initialize`) + the `addresses.<chainid>.json` writer.
+  proxy running `initialize`) + the `addresses.<chainid>.json` writer; `MODULE_PROFILE=consumer`
+  additionally deploys + registers the consumer module set.
+- `UpgradeV2.s.sol` — the shipped stealth-withdraw upgrade (verifier + impl + `reinitializeV2`).
+- `UpgradeV3.s.sol` — the op-module upgrade for an EXISTING pool: consumer verifiers + modules +
+  ONE `upgradeToAndCall(reinitializeV3(modules))` (OPMOD §7.3); merge-writes `poolImpl`, writes
+  `modules.<chainid>.json`.
+- `DeployConsumerOnly.s.sol` — the consumer-only profile (`initializeConsumerOnly`: no arbiter key
+  exists; consumer modules are the whole op surface).
+- `ConsumerModuleKit.sol` — the one declaration of the consumer module-set deploy + its record writer.
 - `Smoke.s.sol` — real-deposit smoke tx against the deployed pool.
 - `AddressBook.sol` — the one declaration of the addresses-file field list, plus its read + merge-write.
 
@@ -152,7 +186,12 @@ Canonical data stays at the top; everything else is grouped by what runs it.
 `gates/` — the pass/fail scripts (CI and pre-release):
 
 - `deploy_local.sh` — anvil + Deploy + getter reads + Smoke, the U6 gate (also the CI `forge` job's deploy gate).
-- `e2e_m0.sh` / `e2e_orchestrator.ts` — the M0 full spend-cycle e2e on a fresh anvil.
+- `test_upgrade_v3.sh` — the op-module upgrade drill (v1 proxy → UpgradeV3 → modules registered,
+  enterprise Smoke still accepted, rerun refused).
+- `e2e_m0.sh` / `e2e_orchestrator.ts` — the M0 full spend-cycle e2e on a fresh anvil, including the
+  portal leg (`portal_leg.ts`) and the arbiter-free consumer leg (`consumer_leg.ts`: profile deploy +
+  V3 upgrade, CPU-proved consumer ops + disburse chunk txs, PUBLIC indexer, self-scan discovery +
+  batch-interior spend via the auth-free `/path`, and the committed disbursePriv256 calldata replay).
 - `test_one_shot_deploy.sh` — scratch-anvil drill of the deploy: B=256, all six verifier getters
   wired and matching the record, Initializable version 1, `currentEpoch() == 0`.
 - `upload_circuits.sh` — publishes the wallet's proving assets to the Vercel Blob store.

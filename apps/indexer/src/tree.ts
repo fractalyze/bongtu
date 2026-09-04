@@ -65,12 +65,20 @@ export class MirrorTree {
   // mixed (a disburse pads to a B boundary before attaching, §5.1), so this
   // cleanly tags which block-level nodes are opaque batches.
   private readonly batchRoots: (bigint | undefined)[] = [];
-  // Blocks whose B underlying leaves have been recovered + filled (arbiter mode
-  // only, via fillBatch). A filled batch is no longer opaque: path()/blockNode
-  // fold it from its known leaves instead of treating it as a 422 hole. Public
-  // mode never fills, so a batch leaf there always returns the batch-leaf
-  // sentinel. Persisted across ingest calls so a poll-retry replay stays correct.
+  // Blocks whose B underlying leaves have been recovered + filled (fillBatch).
+  // A filled batch is no longer opaque: path()/blockNode fold it from its known
+  // leaves instead of treating it as a 422 hole. Two fill sources exist
+  // (OPMOD §4.4): "arbiter" — the ledger decrypted the enterprise authority
+  // envelope (interior leaves stay other recipients' secrets, so /path into the
+  // block stays owner-gated) — and "public" — a consumer disburse published its
+  // commitment run and the fold checked out against subtreeRoot, so the
+  // interiors are public calldata and /path serves them auth-free.
+  // Persisted across ingest calls so a poll-retry replay stays correct.
   private readonly filled = new Set<number>();
+  // The "public"-source subset of `filled` — what routes/path.ts keys the
+  // auth-free decision on. A block can be in both (arbiter + consumer indexer
+  // configurations); public wins, because published calldata gates nothing.
+  private readonly publicFilled = new Set<number>();
   // Leaf rows recorded since the last durable flush — the U-I2 Postgres DELTA.
   // recordLeaf / applyAttach append here on FIRST sight of a leaf/batch (a replay
   // finds it already recorded and appends nothing), so a poll persists O(new
@@ -163,21 +171,32 @@ export class MirrorTree {
 
   /**
    * Record the B real underlying leaves of a disburse batch and mark the block
-   * filled (ARBITER MODE). Once filled, path()/blockNode fold the block from these
-   * leaves — so /path into the batch serves a real path that folds to root()
-   * instead of the 422 batch-leaf sentinel. Public mode never calls this, so a
-   * batch leaf there stays opaque. The caller (PostgresLedger) folds these leaves
-   * to the on-chain subtreeRoot before filling; the fold-to-root assert in path()
-   * is the internal backstop, so a bad fill surfaces as a 500, not a wrong path.
+   * filled. Once filled, path()/blockNode fold the block from these leaves — so
+   * /path into the batch serves a real path that folds to root() instead of the
+   * 422 batch-leaf sentinel. `source` records WHO could recover the leaves
+   * (OPMOD §4.4): "arbiter" = the ledger's decrypted authority envelope
+   * (routes/path.ts keeps the owner gate), "public" = a consumer disburse's
+   * published + fold-checked commitment run (auth-free serve). The caller folds
+   * these leaves to the on-chain subtreeRoot before filling; the fold-to-root
+   * assert in path() is the internal backstop, so a bad fill surfaces as a 500,
+   * not a wrong path.
    */
-  fillBatch(startLeafIndex: number, leaves: bigint[]): void {
+  fillBatch(startLeafIndex: number, leaves: bigint[], source: "arbiter" | "public" = "arbiter"): void {
     for (const k of Array(leaves.length).keys()) this.leaves[startLeafIndex + k] = leaves[k];
     this.filled.add(startLeafIndex / this.B);
+    if (source === "public") this.publicFilled.add(startLeafIndex / this.B);
   }
 
   /** Whether block `k` is an attached disburse batch (opaque unless later filled). */
   isBatch(k: number): boolean {
     return this.batchRoots[k] !== undefined;
+  }
+
+  /** Whether block `k` was filled from PUBLISHED commitments (a consumer batch,
+   *  OPMOD §4.4) — the interiors are public calldata, so /path serves them
+   *  auth-free where an arbiter-filled block stays owner-gated. */
+  isPublicBatch(k: number): boolean {
+    return this.publicFilled.has(k);
   }
 
   /**

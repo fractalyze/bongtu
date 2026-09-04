@@ -1,8 +1,9 @@
 // The wallet shell: a mobile-width vertical frame centered on the page, holding all
 // runtime state (connection, session, balance/notes/history) in one React context and
 // switching screens on the hash route. There is NO local-journal fallback (locked
-// decision): balance + activity come only from the arbiter-mode indexer's /notes and
-// /history.
+// decision): balance + activity come only from the configured discovery engine —
+// the arbiter-mode indexer's /notes + /history, or (selfscan profile) the public
+// feed via the §3.6 self-scan.
 //
 // KEY-CUSTODY RULE (user-mandated): the bjj private key NEVER enters React state or
 // browser storage. Connect derives it (one signature), trades it for a VIEW-ONLY
@@ -21,7 +22,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { DEFAULTS } from "../config.js";
+import { DEFAULTS, isSelfScan } from "../config.js";
 import { walletErrorMessage, type Connection } from "@bongtu/client/connection";
 import {
   endWalletConnection,
@@ -35,6 +36,17 @@ import { KEY_DERIVATION, deriveLoginIdentity } from "@bongtu/client/identity";
 import { keyCache } from "../lib/keyCache.js";
 import type { WalletDescription } from "../lib/walletBrand.js";
 import { sumUnspent } from "@bongtu/client/balance";
+import {
+  EMPTY_SCAN_STATE,
+  SELF_SCAN_LOCKED_NOTICE,
+  SELF_SCAN_PENDING_NOTICE,
+  isConsumerIdentity,
+  runSelfScan,
+  selfScanIo,
+  selfScanSnapshot,
+  type SelfScanState,
+} from "@bongtu/client/selfscan";
+import { clearScanState, loadScanState, saveScanState } from "../lib/scanStore.js";
 import {
   buildNotesUrl,
   buildHistoryUrl,
@@ -101,6 +113,10 @@ export interface WalletContextValue {
   /** calm, non-error note about the data on screen (e.g. a tokenless session that
    *  cannot refresh). Never clears the balance the way dataError does. */
   dataNotice: string | null;
+  /** selfscan mode: the last completed scan's /head stamp — the sync dot's
+   *  freshness reference. Null before a scan lands, and always null in
+   *  arbiter mode. */
+  scannedNextLeafIndex: number | null;
 
   /** True while a login is running (the Connect button disables and says so).
    *  Which wallet to use is the RainbowKit modal's business, not this state's. */
@@ -136,6 +152,16 @@ const WalletContext = createContext<WalletContextValue | null>(null);
 // at another box (config.ts), and vite proxies the default relative `/indexer`.
 const INDEXER_URL = DEFAULTS.indexerUrl;
 
+// Which discovery engine feeds balance/activity (config.ts discoveryFromEnv):
+// "arbiter" = the token-authed /notes + /history reads below, byte-unchanged;
+// "selfscan" = the OPMOD §3.6 public-feed scan — no /notes, no /auth
+// requirement, no arbiter key anywhere in the balance path.
+const SELFSCAN = isSelfScan(DEFAULTS.discovery);
+// The shell states the mode to the refresh plan ONCE: selfscan reads are
+// public (auth-free), and the plan itself (refresh.ts refreshPlan) owns the
+// read-or-notice decision — no token shims, no scattered call-site gates.
+const PLAN_OPTS = { authFree: SELFSCAN } as const;
+
 /** Access the wallet context (throws if used outside the provider — a wiring bug). */
 export function useWallet(): WalletContextValue {
   const ctx = useContext(WalletContext);
@@ -161,6 +187,14 @@ export function App(): ReactNode {
   const [dataError, setDataError] = useState<string | null>(null);
   const [dataNotice, setDataNotice] = useState<string | null>(null);
 
+  // selfscan mode: the last completed scan (memory-first, localStorage-backed
+  // via scanStore) plus its /head freshness stamp, and which owner the cached
+  // scan belongs to (so sign-out can clear the right store row without making
+  // endSession depend on session state).
+  const scanRef = useRef<SelfScanState | null>(null);
+  const scanOwnerRef = useRef<string | null>(null);
+  const [scannedNextLeafIndex, setScannedNextLeafIndex] = useState<number | null>(null);
+
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
 
@@ -168,15 +202,42 @@ export function App(): ReactNode {
   // refined with vendor brand flags once the raw provider resolves (hooks.ts).
   const wallet = useWalletDescription();
 
+  /** SELFSCAN read: one incremental §3.6 scan, resumed from the stored cursor,
+   *  served in the arbiter snapshot's shape so everything downstream —
+   *  applySnapshot, snapshotChanged, sumUnspent — is mode-blind. Scanning needs
+   *  the view keys, and a background read must never pop a signature, so a
+   *  LOCKED wallet serves its last completed scan unchanged under the calm
+   *  notice. This is also where the pending-batches notice is decided: it lands
+   *  after runRefresh's setNotice(null), so a successful read keeps it. */
+  const loadSelfScan = useCallback(async (ownerCompressed: string): Promise<OwnerSnapshot> => {
+    const prev = scanRef.current ?? loadScanState(ownerCompressed) ?? EMPTY_SCAN_STATE;
+    const identity = keyCache.peek(ownerCompressed);
+    const state =
+      identity !== null && isConsumerIdentity(identity)
+        ? await runSelfScan(selfScanIo(INDEXER_URL), identity, prev)
+        : prev;
+    scanRef.current = state;
+    scanOwnerRef.current = ownerCompressed;
+    saveScanState(ownerCompressed, state);
+    setScannedNextLeafIndex(state.scannedNextLeafIndex);
+    setDataNotice(
+      state.pending.length > 0 ? SELF_SCAN_PENDING_NOTICE : identity === null ? SELF_SCAN_LOCKED_NOTICE : null,
+    );
+    return selfScanSnapshot(state, ownerCompressed);
+  }, []);
+
   /** Used by every read path except the tokenless one-shot below, which cannot
-   *  page and so cannot share this. */
+   *  page and so cannot share this. In selfscan mode the token is unused —
+   *  every read is public. */
   const loadFirstPage = useCallback(
     (token: string, ownerCompressed: string): Promise<OwnerSnapshot> =>
-      loadOwnerSnapshot(
-        () => fetchNotes(buildNotesTokenUrl(INDEXER_URL, ownerCompressed, token)),
-        () => fetchHistoryPage(INDEXER_URL, ownerCompressed, token),
-      ),
-    [],
+      SELFSCAN
+        ? loadSelfScan(ownerCompressed)
+        : loadOwnerSnapshot(
+            () => fetchNotes(buildNotesTokenUrl(INDEXER_URL, ownerCompressed, token)),
+            () => fetchHistoryPage(INDEXER_URL, ownerCompressed, token),
+          ),
+    [loadSelfScan],
   );
 
   // Applying a snapshot RESETS the activity paging: the feed becomes the page that
@@ -200,8 +261,12 @@ export function App(): ReactNode {
     keyCache.lock(); // signing out drops the spending key too, not just the token
     toasts.clear(); // stale event toasts must not follow the user to onboarding
     clearSession();
+    scanRef.current = null;
+    setScannedNextLeafIndex(null);
     if (forget) {
       clearKeyBindings();
+      // A clean device keeps no decrypted amounts either (scanStore).
+      if (scanOwnerRef.current !== null) clearScanState(scanOwnerRef.current);
       // wagmi drops + forgets the connector (for WalletConnect that ends the
       // session, so the wallet app stops showing bongtu as connected).
       void endWalletConnection();
@@ -228,7 +293,9 @@ export function App(): ReactNode {
       if (!session) return;
       if (!quiet) setLoading(true); // an auto tick must not flash loading UI every 3 s
       try {
-        // Reads authenticate with the VIEW token only — no key, no signature popup.
+        // Arbiter reads authenticate with the VIEW token only — no key, no
+        // signature popup. Selfscan reads are auth-free: PLAN_OPTS says so once
+        // and the plan owns the read-or-notice decision (refresh.ts).
         await runRefresh(session, loadFirstPage, {
           applySnapshot,
           setBanner: setDataError,
@@ -238,6 +305,7 @@ export function App(): ReactNode {
         }, {
           manual,
           indexerUrl: INDEXER_URL,
+          ...PLAN_OPTS,
           // An unchanged read never touches the screen: applying wholesale resets
           // activity paging, a pure loss when the data is identical. `balance` is
           // null until a snapshot has actually landed, which is what tells the
@@ -403,7 +471,7 @@ export function App(): ReactNode {
   // still catching up.
   const refreshAfterAction = useCallback(
     async (txHash: string): Promise<void> => {
-      if (refreshPlan(session).kind === "notice") {
+      if (refreshPlan(session, PLAN_OPTS).kind === "notice") {
         await refresh(); // tokenless (or logged out): nothing to poll with
         return;
       }
@@ -448,7 +516,7 @@ export function App(): ReactNode {
   // balance on screen keeps up with a chain in flight) but never clears anything on
   // failure — the chain's own bounded poll decides when the wait has gone on too long.
   const reloadNotes = useCallback(async (): Promise<OwnerNote[]> => {
-    if (!session || refreshPlan(session).kind === "notice") {
+    if (!session || refreshPlan(session, PLAN_OPTS).kind === "notice") {
       throw new Error(RECONNECT_NOTICE); // tokenless: no way to read, so no way to chain
     }
     const snap = await loadFirstPage(session.token, session.compressedPubkey);
@@ -471,6 +539,7 @@ export function App(): ReactNode {
       syncing,
       dataError,
       dataNotice,
+      scannedNextLeafIndex,
       connecting,
       connectError,
       connectWallet,
@@ -482,8 +551,8 @@ export function App(): ReactNode {
     }),
     [
       connection, wallet, session, balance, notes, history, historyNextBefore, historyLoadingMore,
-      loading, syncing, dataError, dataNotice, connecting, connectError, connectWallet, disconnect,
-      refresh, refreshAfterAction, loadMoreHistory, reloadNotes,
+      loading, syncing, dataError, dataNotice, scannedNextLeafIndex, connecting, connectError,
+      connectWallet, disconnect, refresh, refreshAfterAction, loadMoreHistory, reloadNotes,
     ],
   );
 

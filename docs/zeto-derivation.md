@@ -61,6 +61,34 @@ is silently dropped** — every delta above is written down in the vendored file
 or inline at the constraint's own call site (the value belt and the zero-commitment guard are
 documented in the body, next to the constraints they add).
 
+### The consumer (no-auditor) family
+
+The consumer circuits are a **second-generation derivation**: every parent is a vendored bongtu file
+from the tables above, not an upstream Zeto file, and every parent is left untouched — each consumer
+file is a sibling carrying its own provenance header that names the parent and the deltas (the
+headers are the authoritative per-file record; the rows below summarize them). Two deltas are
+family-wide and listed once: **all authority material is removed** (no `cipherTextAuthority`, no
+`kemBinding`, no `authorityPublicKey`, no arbiter-side hybrid KDF — there is no arbiter in this
+family), and receiver encryption goes through the shared `ConsumerEncryptOutputs` gadget — ECDH
+against per-output note-layer VIEW pubkeys, hybrid receiver keys folding in per-output ML-KEM-768
+limbs under the new frozen `bongtu/consumer-note/v1/*` tags (the arbiter tags are never reused),
+canonical 8-bit `viewTags` via `Num2Bits_strict`, and the per-output nonce rule
+(`encryptionNonce + i`) uniform across all five shapes.
+
+| bongtu file | parent (this repo) | verdict | deliberate deltas |
+|---|---|---|---|
+| `lib/consumer-encrypt-outputs.circom` | `lib/encrypt-outputs-per-output-nonce.circom` (itself from Zeto `lib/encrypt-outputs.circom`) | sibling derivation | the family's encryption gadget itself: ECDH re-targeted to per-output VIEW pubkeys (the spend key stays bound only by the commitment); ciphertexts keyed by tagged Poseidon(5) folds of (S_i, kemSs_i) with NO `kemBinding` output; NEW `viewTags[nOutputs]` outputs — the canonical low 8 bits of a tagged Poseidon, decomposed with `Num2Bits_strict` because plain `Num2Bits(254)` admits a second decomposition (`tagField + p`) that flips the low byte; per-output nonce kept verbatim |
+| `lib/consumer_deposit_imt_base.circom` | `lib/deposit_authority_imt_base.circom` | sibling derivation, parent untouched | NEW per-output receiver ciphertexts + `viewTags` (the enterprise deposit publishes an authority envelope only) — a consumer deposit can mint directly to a third party who discovers it by scan; stock `CheckHashes` and value-sum (`out`) checks kept verbatim — 16-public surface (enterprise: 19) |
+| `lib/consumer_transfer_imt_small_base.circom` | `lib/anon_enc_nullifier_non_repudiation_imt_small_base.circom` | sibling derivation, parent untouched | `ConsumerEncryptOutputs` replaces `EncryptOutputsPerOutputNonce`; NEW `viewTags` declared as the last output run; every input-side soundness constraint (enabled boolean, value belt, zero-commitment guard, `CheckPositive`, `CheckSum`, IMT membership) survives verbatim |
+| `lib/consumer_withdraw_imt_base.circom` | `lib/check-nullifiers-value-imt-base.circom` | sibling derivation, parent untouched | NEW receiver ciphertext + `viewTag` over the CHANGE note (the enterprise withdraw has none — its change is arbiter-recoverable; the consumer sender must recover change from chain scan alone); input-side belts and the `GreaterEqThan(101)` conservation check verbatim |
+| `lib/consumer_disburse_imt_base.circom` | `lib/anon_enc_nullifier_non_repudiation_imt_base.circom` | sibling derivation, parent untouched | per-output nonce is NEW at this shape (the enterprise disburse shares one nonce and needs the assembly-time `assertDistinctOwnerPubkeys` guard; the offset kills the two-time-pad class structurally); **extended** `disclosureHash` fold over `receiverCts[4B] ++ viewTags[B] ++ outputCommitments[B]` (6B elements; 1536 at B=256) replacing the enterprise `cts ++ cipherTextAuthority` preimage — the same commitment witnesses feed the fold, the note binding and the subtree builder; the enabled/value-belt pair stays absent exactly as in the parent (the module's `ZeroNullifier`-then-inject obligation) |
+| `depositPriv.circom` | `deposit.circom` | sibling top | `BongtuConsumerDeposit(2)` over the consumer deposit base; drops `cipherTextAuthority[10]`/`kemBinding`/`authorityPublicKey[2]`, adds `cipherTexts[2][4]` + `viewTags[2]` — uint[16] vs the enterprise uint[19] |
+| `transferPriv.circom` | `transfer.circom` | sibling top | `BongtuConsumerTransfer(2, 2, 32)`; drops `cipherTextAuthority[16]`/`kemBinding`/`authorityPublicKey[2]`, adds `viewTags[2]` — uint[20] vs uint[37] |
+| `transfer10x2Priv.circom` | `transfer10x2.circom` | sibling top | the same consumer base at (10, 2, 32) — the consolidation + payment workhorse; uint[36] vs uint[68]; the deprecated `transfer10` gets NO consumer twin |
+| `withdrawPriv.circom` | `withdraw.circom` | sibling top | wrapper appends ONE public input `recipient` (square-constraint calldata binding) so a stealth withdraw is relayer-submittable without the relayer redirecting funds; NEW `cipherTexts[1][4]` + `viewTags[1]` over the change note — uint[16] vs uint[27] |
+| `disbursePriv.circom` | `disburse.circom` | sibling top | `BongtuConsumerDisburse(1, 16, 32)` — the dev-loop arity; uint[8] vs uint[11] (drops `kemBinding`/`authorityPublicKey[2]`) |
+| `disbursePriv256.circom` | `disburse256.circom` | sibling top | the same consumer base at (1, 256, 32); uint[8]; the 1536-element disclosure array rides the module's calldata bound by the extended fold (a PUBLIC indexer can verify it with no arbiter key); like `disburse256`, NOT in `build/prove_all.sh` (GPU regen recipe applies) |
+
 ## Project-authored circuit files
 
 Three load-bearing circuit files are **not** upstream — a fresh clone of hyperledger-labs/zeto does

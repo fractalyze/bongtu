@@ -45,7 +45,13 @@ import assert from "node:assert/strict";
 import { createWalletClient, custom, hashTypedData } from "viem";
 import { CHAIN_ID, POOL_ADDRESS } from "@bongtu/core/network";
 import { liveChain } from "../src/chain.js";
-import { keyDerivationTypedData, deriveIdentityFromSignature } from "../src/derive.js";
+import { createHash } from "node:crypto";
+import { kemPkFromSecret } from "@bongtu/core/kem";
+import {
+  keyDerivationTypedData,
+  deriveIdentityFromSignature,
+  viewScalarFromSignature,
+} from "../src/derive.js";
 import { signKeyDerivation, type Connection } from "../src/connection.js";
 import { deriveLoginIdentity } from "../src/identity.js";
 
@@ -70,6 +76,18 @@ const FIXED_SIG = ("0x" + "a1".repeat(32) + "b2".repeat(32) + "1c") as `0x${stri
  *  failure here is always a real KDF regression. */
 const PIN_SCALAR = 2232542207878167874305209947598685605095785653266525372150719396610432433903n;
 const PIN_COMPRESSED = "0x05c818db6e4feb82639a2170ec769abcdbfc9077833153ed2266a52b653c1f96";
+
+/** The consumer view identity derived from FIXED_SIG (OPMOD §3.1), recorded
+ *  2026-09-03 when the derivation shipped. Like PIN_SCALAR these hash the
+ *  SIGNATURE (under distinct ascii suffix tags), not the typed data, so they
+ *  never move on a deployment change — a failure here is a KDF regression that
+ *  would silently strand every consumer note behind a rotated view identity.
+ *  The spend pins above are UNTOUCHED by the extension: "every live key
+ *  survives" is the S3.1 contract this file now also witnesses. */
+const PIN_VIEW_SCALAR = 1667726457022364403377257978503016485956539627643118706499228418183446227977n;
+const PIN_VIEW_COMPRESSED = "0xeb198c8f34d687dc0aa64d1c89f612c15bd496d30324faf0b3d6244867756e23";
+const PIN_KEM_EK_SHA256 = "57ff87f169fb4159b55220a51940a9476310cff0441db8995550ff9eee83e461";
+const PIN_KEM_DK_SHA256 = "11f5775965db21121d53c429e317eee9fd209cbb5919925a011ae830e4ddc130";
 
 const ACCOUNT = "0x00000000000000000000000000000000000000a1" as const;
 
@@ -155,4 +173,27 @@ test("the full login derivation path reproduces the pinned identity from the moc
     PIN_DIGEST,
     "the login signs the pinned payload, byte-for-byte",
   );
+});
+
+test("the consumer view identity derives deterministically beside the untouched spend pins", () => {
+  const identity = deriveIdentityFromSignature(FIXED_SIG);
+
+  // Spend half: byte-identical to the pre-extension derivation (S3.1: every
+  // live key survives — the extension may not perturb these).
+  assert.equal(identity.keypair.formattedPrivateKey, PIN_SCALAR);
+  assert.equal(identity.compressedPubkey, PIN_COMPRESSED);
+
+  // View half: pinned, distinct from the spend scalar, and reproducible via
+  // the standalone KDF (the delegated-scanner entry point).
+  assert.equal(identity.viewKeypair.formattedPrivateKey, PIN_VIEW_SCALAR);
+  assert.equal(identity.compressedViewPubkey, PIN_VIEW_COMPRESSED);
+  assert.equal(viewScalarFromSignature(FIXED_SIG), PIN_VIEW_SCALAR);
+  assert.notEqual(identity.viewKeypair.formattedPrivateKey, identity.keypair.formattedPrivateKey);
+
+  // KEM half: FIPS 203 wire sizes, pinned bytes, and internal ek/dk consistency.
+  assert.equal(identity.kemKeypair.ek.length, 1184);
+  assert.equal(identity.kemKeypair.dk.length, 2400);
+  assert.equal(createHash("sha256").update(identity.kemKeypair.ek).digest("hex"), PIN_KEM_EK_SHA256);
+  assert.equal(createHash("sha256").update(identity.kemKeypair.dk).digest("hex"), PIN_KEM_DK_SHA256);
+  assert.deepEqual(kemPkFromSecret(identity.kemKeypair.dk), identity.kemKeypair.ek);
 });

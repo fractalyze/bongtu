@@ -9,7 +9,7 @@
 
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { fetchHealth, type Health } from "@bongtu/client/indexerClient";
+import { fetchHealth, getHead, type Head, type Health } from "@bongtu/client/indexerClient";
 
 export type SyncState = "synced" | "syncing" | "stale";
 
@@ -69,6 +69,27 @@ export function SyncDot({ state, onRefresh }: { state: SyncState; onRefresh: () 
 }
 
 /**
+ * The selfscan twin of syncState: the freshness reference is the SCAN CURSOR,
+ * not the indexer's self-report. The dot is green only when the last completed
+ * scan covered everything /head says exists (`scannedNextLeafIndex >=
+ * head.nextLeafIndex`); a tree that has grown past the scan reads stale — tap
+ * to rescan. Before either side has answered, nothing is confirmed: syncing.
+ */
+export function selfScanSyncState(input: {
+  head: Head | null;
+  headErrored: boolean;
+  /** the last completed scan's /head.nextLeafIndex (null until one lands). */
+  scannedNextLeafIndex: number | null;
+  refreshing: boolean;
+  dataError: boolean;
+}): SyncState {
+  if (input.refreshing) return "syncing";
+  if (input.dataError || input.headErrored) return "stale";
+  if (input.head === null || input.scannedNextLeafIndex === null) return "syncing";
+  return input.head.nextLeafIndex > input.scannedNextLeafIndex ? "stale" : "synced";
+}
+
+/**
  * The dot Home renders: polls the indexer's health every 15 s and folds it together
  * with the page's own read state. `onRefresh` is the SAME manual-refresh path the
  * post-action poll lands on.
@@ -109,4 +130,55 @@ export function IndexerSyncDot({
   }, [indexerUrl]);
 
   return <SyncDot state={syncState({ health, healthErrored, refreshing, dataError })} onRefresh={onRefresh} />;
+}
+
+/**
+ * The dot a SELFSCAN-mode Home renders: polls the public `GET /head` every 15 s
+ * and compares it against the scan cursor's freshness stamp. No /health
+ * dependency — /head is the one fact the scan is measured against, and it is
+ * served key-free in every indexer mode.
+ */
+export function SelfScanSyncDot({
+  indexerUrl,
+  scannedNextLeafIndex,
+  refreshing,
+  dataError,
+  onRefresh,
+}: {
+  indexerUrl: string;
+  scannedNextLeafIndex: number | null;
+  refreshing: boolean;
+  dataError: boolean;
+  onRefresh: () => void;
+}): ReactNode {
+  const [head, setHead] = useState<Head | null>(null);
+  const [headErrored, setHeadErrored] = useState(false);
+
+  useEffect(() => {
+    const alive = { current: true };
+    const poll = async (): Promise<void> => {
+      try {
+        const h = await getHead(indexerUrl);
+        if (alive.current) {
+          setHead(h);
+          setHeadErrored(false);
+        }
+      } catch {
+        if (alive.current) setHeadErrored(true);
+      }
+    };
+    void poll();
+    const id = setInterval(poll, 15_000);
+    return () => {
+      alive.current = false;
+      clearInterval(id);
+    };
+  }, [indexerUrl]);
+
+  return (
+    <SyncDot
+      state={selfScanSyncState({ head, headErrored, scannedNextLeafIndex, refreshing, dataError })}
+      onRefresh={onRefresh}
+    />
+  );
 }

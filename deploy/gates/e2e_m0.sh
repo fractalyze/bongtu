@@ -9,8 +9,13 @@
 #   the recipient note recovered from ciphertext (not memory), and end-to-end
 #   value conserved — then the portal-deposit loop (deploy/gates/portal_leg.ts:
 #   factory + real indexer + sweeper runOnce), which needs the Postgres this
-#   script provisions. No Postgres is FATAL: the portal loop is part of the
-#   DoD and must never be skipped silently.
+#   script provisions, and then the arbiter-free consumer leg
+#   (deploy/gates/consumer_leg.ts: consumer-only profile deploy + the V3
+#   module upgrade, CPU-proved consumer ops with disburse chunk txs, a PUBLIC
+#   indexer, and self-scan discovery), which needs its own bongtu_consumer
+#   database on that Postgres (E2E_CONSUMER_DATABASE_URL). No Postgres is
+#   FATAL — for the portal database AND the bongtu_consumer one: both legs
+#   are part of the DoD and must never be skipped silently.
 #
 #   cd bongtu && bash deploy/gates/e2e_m0.sh    # exits 0 iff every assertion holds
 #
@@ -35,7 +40,7 @@ fail() { echo "FATAL: $*" >&2; exit 1; }
 # --- preflight: build artifacts + proving inputs exist ----------------------
 echo "== preflight: forge build + zkey/wasm presence =="
 ( cd contracts && "$FORGE" build >/dev/null ) || fail "forge build failed"
-for n in deposit disburse transfer withdraw; do
+for n in deposit disburse transfer withdraw depositPriv transferPriv withdrawPriv disbursePriv; do
   [ -f "circuits/out/${n}.zkey" ] || fail "missing circuits/out/${n}.zkey (run: cd circuits && bash build/prove_all.sh)"
   [ -f "circuits/out/${n}_js/${n}.wasm" ] || fail "missing circuits/out/${n}_js/${n}.wasm (run build/prove_all.sh)"
 done
@@ -87,10 +92,19 @@ if [ -z "${E2E_DATABASE_URL:-}" ]; then
     done
     [ "$PGREADY" = 1 ] || { "$DOCKER" logs "$PG_NAME" 2>&1 | tail -20; fail "postgres did not become ready"; }
     export E2E_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:${PG_PORT}/postgres"
+    # The CONSUMER leg spawns a SECOND indexer (public mode) against its own
+    # pool; two indexers must never share one database (each owns its schema +
+    # cursor), so it gets a dedicated database in the same container.
+    "$DOCKER" exec "$PG_NAME" createdb -U postgres bongtu_consumer || fail "createdb bongtu_consumer failed"
+    export E2E_CONSUMER_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:${PG_PORT}/bongtu_consumer"
   else
     fail "the portal leg needs Postgres: export E2E_DATABASE_URL or make docker available (the leg is part of the DoD — no silent skip)"
   fi
 fi
+# Belt for an externally provisioned E2E_DATABASE_URL (CI service): the consumer
+# leg needs its OWN database and must never silently skip.
+[ -n "${E2E_CONSUMER_DATABASE_URL:-}" ] || \
+  fail "the consumer leg needs its own Postgres database: export E2E_CONSUMER_DATABASE_URL (a different database on the same server is fine)"
 
 # --- drive the cycle --------------------------------------------------------
 echo "== running e2e orchestrator =="

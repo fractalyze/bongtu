@@ -24,6 +24,7 @@ from pydantic import TypeAdapter, ValidationError
 from prover_service.schema import (
     BN254_R,
     Calldata,
+    DisbursePrivRequest,
     DisburseRequest,
     ProvingRequest,
 )
@@ -125,6 +126,69 @@ def test_all_four_circuit_tags_parse():
         req = request_adapter.validate_python({"circuit": circuit, "input": inp})
         assert req.circuit == circuit
         assert req.backend is None
+
+
+def minimal_disburse_priv_input(**overrides) -> dict:
+    d = {
+        "nullifiers": ["11"],
+        "inputCommitments": ["22"],
+        "inputValues": ["100"],
+        "inputSalts": ["3"],
+        "inputOwnerPrivateKey": "4",
+        "ecdhPrivateKey": "5",
+        "root": "6",
+        "pathElements": [["0"] * 32],
+        "leafIndices": ["1"],
+        "enabled": ["1"],
+        "outputCommitments": ["7", "8"],
+        "outputValues": ["60", "40"],
+        "outputSalts": ["9", "10"],
+        "outputOwnerPublicKeys": [["1", "2"], ["3", "4"]],
+        "outputViewPublicKeys": [["5", "6"], ["7", "8"]],
+        "kemSs": [["15", "16"], ["17", "18"]],
+        "encryptionNonce": "12",
+    }
+    d.update(overrides)
+    return d
+
+
+def test_repo_disburse_priv256_fixture_parses_unchanged():
+    # The consumer 1x256 batch (OPMOD §2): the committed witness input the U3
+    # export proved is the executable wire contract for the "disbursePriv" tag,
+    # exactly as disburse256.json is for "disburse". Per-output kemSs limb
+    # pairs and the outputViewPublicKeys run are the shape deltas the mirror
+    # must carry; authorityPublicKey must be absent (extra="forbid" enforces it).
+    raw = json.loads((INPUTS / "disbursePriv256.json").read_text())
+    req = request_adapter.validate_python({"circuit": "disbursePriv", "input": raw, "backend": "gpu"})
+    assert isinstance(req, DisbursePrivRequest)
+    assert len(req.input.outputCommitments) == 256
+    assert len(req.input.kemSs) == 256 and len(req.input.kemSs[0]) == 2
+    assert len(req.input.outputViewPublicKeys) == 256
+    assert "authorityPublicKey" not in raw
+    assert req.input.model_dump() == raw
+
+
+def test_disburse_priv_shape_guards_and_no_distinct_owner_guard():
+    with pytest.raises(ValidationError, match="exactly one input"):
+        request_adapter.validate_python(
+            {"circuit": "disbursePriv", "input": minimal_disburse_priv_input(nullifiers=["1", "2"])}
+        )
+    with pytest.raises(ValidationError, match="agree in length"):
+        request_adapter.validate_python(
+            {"circuit": "disbursePriv", "input": minimal_disburse_priv_input(kemSs=[["1", "2"]])}
+        )
+    # authorityPublicKey does not exist in this family — a request carrying one
+    # is a mis-assembled enterprise input, rejected rather than ignored.
+    with pytest.raises(ValidationError):
+        request_adapter.validate_python(
+            {"circuit": "disbursePriv",
+             "input": minimal_disburse_priv_input(authorityPublicKey=["1", "2"])}
+        )
+    # DUPLICATE owners are LEGAL here (per-output hybrid key + nonce+i, OPMOD
+    # §3.3/§3.5): a §11-8 guard would 422 a batch paying one person twice.
+    dup = minimal_disburse_priv_input(outputOwnerPublicKeys=[["1", "2"], ["1", "2"]])
+    req = request_adapter.validate_python({"circuit": "disbursePriv", "input": dup})
+    assert req.input.outputOwnerPublicKeys[0] == req.input.outputOwnerPublicKeys[1]
 
 
 def test_two_time_pad_guard_rejects_duplicate_disburse_owners():

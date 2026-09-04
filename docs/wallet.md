@@ -351,12 +351,43 @@ offered exactly when the public kKRW balance is zero (`src/lib/faucet.ts`, `FAUC
 
 ## Indexer dependency
 
-Balance is `sum(value)` over unspent notes from a **signed `GET /notes`** against an arbiter-mode
-indexer (`src/lib/balance.ts`). The wallet proves control of its own key with an EdDSA-Poseidon
-read-auth signature over `Poseidon(ownerPub.x, ownerPub.y, ts)`, so it can read only its own row
-even though the arbiter holds everyone's.
+The wallet has two discovery modes, picked at build time (`VITE_DISCOVERY` via `discoveryFromEnv`
+in `src/config.ts`; default `arbiter`, so every existing deployment is byte-unchanged):
 
-**There is no fallback balance path.** If `/notes` fails the wallet says so on the surface the
+**Arbiter mode** (the enterprise profile): balance is `sum(value)` over unspent notes from a
+**signed `GET /notes`** against an arbiter-mode indexer (`packages/client/src/balance.ts`). The wallet proves
+control of its own key with an EdDSA-Poseidon read-auth signature over
+`Poseidon(ownerPub.x, ownerPub.y, ts)`, so it can read only its own row even though the arbiter
+holds everyone's. Activity is the per-owner `/history` feed.
+
+**Selfscan mode** (the no-auditor consumer profile): balance and activity derive from the PUBLIC
+feed with only the wallet's own keys — the normative discovery pipeline of
+`.dev/op-module-design.md` §3.6, implemented in `@bongtu/client` `selfscan.ts`. Per event, per
+output slice: the published viewTag is checked against the wallet's own
+(`Poseidon(3)([TAG_VIEWTAG, viewPriv·ecdhPublicKey]) & 0xff` — a miss skips all expensive work,
+§3.2's ~256× filter); survivors are ML-KEM-decapsulated and decrypted at `nonce + i` (§3.5); a
+note is accepted only when its rebuilt commitment equals the on-chain leaf — the same leaf-match
+MAC substitute as `trialDecryptEvents`, fed from the published commitment run for a consumer batch
+(`leafIndex = batchId + output index`, §4.4) and from an auth-free `GET /path` fold for a
+single-append op. Spent flags come from the public `/nullifiers` set. Enterprise-era envelope
+notes for the same wallet are found in the same pass (a deferred-acceptance twin of the spend-key
+trial decrypt), so **single-append** enterprise notes keep that money on screen; an enterprise
+DISBURSE-batch interior cannot be path-confirmed in public mode (its `/path` is 422-gated by
+design), so it surfaces as a pending entry — the wallet may hold notes only an arbiter indexer
+can open — never a silent drop. The scan is cursor-incremental and resumable: `selfscan.ts` owns the persisted-state
+contract (`SelfScanState` — feed cursor, `/head` freshness stamp, discovered notes, unresolved
+batches; `scan(A..B)` then `scan(B..C)` equals `scan(A..C)`), and `src/lib/scanStore.ts` wires it
+to localStorage per owner — decrypted amounts land in that store, keys never do. A consumer
+disburse whose kem-ct chunks are not yet assembled surfaces as a calm **"discovery pending"**
+notice, never a silently smaller balance, and is re-read each scan until it completes. The sync
+dot compares the scan's `/head` stamp against the live `/head` instead of `/health`; no arbiter
+public key and no `/notes`/`/auth` endpoint is involved anywhere in the balance path. Activity
+rows are derived from the op events the notes came from — what discovery can honestly attest
+(received / deposit / withdraw-change; the public feed carries no block timestamps, so a selfscan
+row carries no `blockTimestamp` and the activity list renders no time element for it — verb and
+amount only, never a fabricated epoch date).
+
+**In arbiter mode there is no fallback balance path.** If `/notes` fails the wallet says so on the surface the
 failure's class earns ([errors.md](errors.md)): a failed background refresh sets the stale-data
 *banner* and leaves the numbers already on screen alone (never a toast, never a blanked balance;
 the next successful read clears it), a failed *manual* refresh additionally toasts, and a 401 —
@@ -365,7 +396,8 @@ onboarding with the notice. The pure
 `trialDecryptEvents` core still exists and is tested — it proves the protocol property that every
 receiver ciphertext slice is key-only recoverable (ECDH-decrypt `[value, salt]`, rebuild the
 commitment, accept iff it equals the on-chain leaf; the Poseidon sponge has no MAC, so the leaf
-match *is* the "is this mine" test) — but no adapter wires it as a balance source. Funds safety
+match *is* the "is this mine" test) — but no adapter wires it as an arbiter-mode balance source
+(selfscan mode implements the same acceptance rule for both note families in `selfscan.ts`). Funds safety
 never depends on the indexer; discovery liveness does. See
 [security-model.md](security-model.md#residual-gaps).
 

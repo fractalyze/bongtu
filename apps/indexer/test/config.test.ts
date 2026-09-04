@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 
 import { parseAbi } from "viem";
 
-import { databaseUrlError, kemBootGuardError, parseKemKey, staleOpAbiError } from "../src/chain.js";
+import { databaseUrlError, kemBootGuardError, parseKemGraceSeconds, parseKemKey, staleOpAbiError } from "../src/chain.js";
 
 const failures = { count: 0 };
 function ok(cond: unknown, msg: string): void {
@@ -99,6 +99,25 @@ step("UNIT: parseKemKey — exact 2400-byte ML-KEM-768 dk, malformed rejected");
   }
 }
 
+step("UNIT: parseKemGraceSeconds — one boot-time parse, garbage refuses to boot");
+{
+  ok(parseKemGraceSeconds(undefined) === 3600, "unset → the 3600s default");
+  ok(parseKemGraceSeconds("") === 3600, "empty string counts as unset");
+  ok(parseKemGraceSeconds("120") === 120, "numeric value parses");
+  ok(parseKemGraceSeconds("-1") === -1, "negative allowed (the tests' everything-is-withheld dial)");
+  for (const bad of ["abc", "12s", "NaN"]) {
+    const threw = ((): boolean => {
+      try {
+        parseKemGraceSeconds(bad);
+        return false;
+      } catch (e) {
+        return (e as Error).message.includes("KEM_GRACE_SECONDS");
+      }
+    })();
+    ok(threw, `garbage "${bad}" throws at boot, naming the knob`);
+  }
+}
+
 step("SPAWN: src/index.ts without DATABASE_URL exits nonzero with the refusal line");
 {
   const env: Record<string, string | undefined> = { ...process.env };
@@ -122,6 +141,9 @@ step("UNIT: staleOpAbiError — a build missing a dispatched op event fails clos
     "event Transferred10(uint256 indexed epoch)",
     "event Transferred10x2(uint256 indexed epoch)",
     "event WithdrawAnnouncement(uint256 recipient, bytes32 stealthEphemeralPub, uint8 stealthViewTag)",
+    "event OpApplied(address indexed module, uint256 startLeafIndex, uint256 nullifierCount, uint256 leafCount, uint256 subtreeRoot, uint256 root)",
+    "event ModuleRegistered(address indexed module)",
+    "event ModuleRemoved(address indexed module)",
   ]);
   ok(staleOpAbiError(full) === null, "ABI carrying every dispatched op event passes");
   const preV5 = parseAbi(["event Transferred10(uint256 indexed epoch)"]);
@@ -136,6 +158,15 @@ step("UNIT: staleOpAbiError — a build missing a dispatched op event fails clos
   const preV4 = parseAbi(["event Appended(uint256 indexed leafIndex)"]);
   const err4 = staleOpAbiError(preV4) ?? "";
   ok(err4.includes("Transferred10"), "a pre-V4 ABI is refused on its first missing event");
+  // A pre-op-module (V2-era) build must be refused too: without the registry
+  // events the whole consumer watch-set silently never forms.
+  const preV3Pool = parseAbi([
+    "event Transferred10(uint256 indexed epoch)",
+    "event Transferred10x2(uint256 indexed epoch)",
+    "event WithdrawAnnouncement(uint256 recipient, bytes32 stealthEphemeralPub, uint8 stealthViewTag)",
+  ]);
+  ok((staleOpAbiError(preV3Pool) ?? "").includes("OpApplied"),
+    "a pre-op-module ABI names the missing OpApplied event");
 }
 
 console.log(`\n${failures.count === 0 ? "CONFIG TEST PASS — Postgres-only boot refusal (unit + spawn)" : `CONFIG TEST FAIL — ${failures.count} assertion(s)`}`);

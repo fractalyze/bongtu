@@ -17,6 +17,7 @@
 // in-circuit gadget by the sdk pin suite (packages/core/test/envelope.test.ts p2).
 
 import { disclosureChain } from "@bongtu/core/envelope";
+import { poseidon2, FIELD_PRIME } from "@bongtu/core/poseidon";
 
 export type DisclosureStatus =
   | "verified" // published ciphertext (receiver ++ authority) hashes to disclosureHash
@@ -72,5 +73,78 @@ export function verifyDisclosure(
     receiverCount,
     recomputed: recomputed.toString(),
     expected: onchainDH.toString(),
+  };
+}
+
+/** verifyConsumerDisclosure's answer: the alarm-classified result, plus the
+ *  batch's commitment run when every check passed (the public-fill material —
+ *  a null keeps a bad publish an alarm instead of a wrong fill). */
+export interface ConsumerDisclosureVerdict {
+  result: DisclosureResult;
+  /** the B output commitments — safe to hand to
+   *  MirrorTree.fillBatch(…, "public"); null on any failing check. */
+  leaves: bigint[] | null;
+}
+
+// The OPMOD §4.4 consumer-disburse checks — the PUBLIC-mode duty behind the
+// public batch fill. In order:
+//   1. canonical form: every published element < p. The chain already rejects
+//      >= p (NonCanonicalDisclosureElement), so a violation here is feed
+//      corruption — classified into the existing "mismatch" alarm class rather
+//      than throwing, because poseidon folds reduce mod p silently and a
+//      mod-p-aliased element WOULD pass the fold while its raw bytes disagree
+//      with the proven ones (§4.4 canonical-form binding).
+//   2. the §4.2 extended fold over the 6B elements == the proof's
+//      disclosureHash ("mismatch" otherwise). The module enforces the exact
+//      length on-chain, so a wrong-length publish is a broken feed —
+//      "unverifiable" for a truncation, "withheld" for an absent publish,
+//      mapping the enterprise classes unchanged.
+//   3. the commitment run (elements 5B..6B-1) folded pairwise up LOG_B levels
+//      == the SubtreeAppended subtreeRoot. Implied by 2 + circuit soundness,
+//      but kept independent because it is what makes the FILL safe: a bad
+//      publish becomes an alarm instead of a 500 out of MirrorTree.path's
+//      internal fold-to-root backstop. A check-3 failure reuses "mismatch"
+//      with (recomputed, expected) = (fold, subtreeRoot).
+export function verifyConsumerDisclosure(
+  disclosure: bigint[],
+  onchainDH: bigint,
+  subtreeRoot: bigint,
+  batchSize: number,
+  txHash: string,
+  startLeafIndex: number,
+): ConsumerDisclosureVerdict {
+  const B = batchSize;
+  const expectedLen = 6 * B;
+  const base: Omit<DisclosureResult, "status" | "recomputed" | "expected"> = {
+    txHash,
+    startLeafIndex,
+    emittedCount: disclosure.length,
+    receiverCount: 4 * B,
+  };
+  const fail = (status: DisclosureStatus, recomputed: bigint, expected: bigint = onchainDH): ConsumerDisclosureVerdict => ({
+    result: { status, ...base, recomputed: recomputed.toString(), expected: expected.toString() },
+    leaves: null,
+  });
+
+  if (disclosure.length === 0) return fail("withheld", 0n);
+  if (disclosure.length !== expectedLen) return fail("unverifiable", 0n);
+  if (disclosure.some((x) => x < 0n || x >= FIELD_PRIME)) return fail("mismatch", 0n);
+
+  const recomputed = disclosureChain(disclosure);
+  if (recomputed !== onchainDH) return fail("mismatch", recomputed);
+
+  // Check 3 — a plain pairwise Merkle fold, no zeros involved: all B slots of a
+  // consumer batch are real nonzero-commitment notes (§4.5 pads included).
+  const leaves = disclosure.slice(5 * B, 6 * B);
+  const fold = ((): bigint => {
+    const up = (level: bigint[]): bigint[] =>
+      level.length === 1 ? level : up(Array.from({ length: level.length / 2 }, (_, m) => poseidon2(level[2 * m], level[2 * m + 1])));
+    return up(leaves)[0];
+  })();
+  if (fold !== subtreeRoot) return fail("mismatch", fold, subtreeRoot);
+
+  return {
+    result: { status: "verified", ...base, recomputed: recomputed.toString(), expected: onchainDH.toString() },
+    leaves,
   };
 }

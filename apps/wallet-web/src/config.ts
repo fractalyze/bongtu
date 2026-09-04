@@ -32,6 +32,29 @@ export function testnetFromEnv(value: string | undefined): boolean {
   return (value ?? "true") !== "false";
 }
 
+/** How the wallet discovers its balance and activity (docs/wallet.md § Indexer
+ *  dependency): "arbiter" reads the arbiter indexer's per-owner /notes +
+ *  /history (view-token auth; the enterprise profile, byte-compatible with
+ *  every deployment to date); "selfscan" runs the OPMOD §3.6 self-scan over
+ *  the PUBLIC feed with the wallet's own keys — no /notes, no /auth
+ *  requirement, no arbiterPubKey involved in the balance path. */
+export type DiscoveryMode = "arbiter" | "selfscan";
+
+/** ENV-derived like testnetFromEnv: only the literal "selfscan" flips the
+ *  no-auditor profile on; anything else (unset included) stays the enterprise
+ *  arbiter path — the default every existing deployment relies on. Pure so the
+ *  rule gates under the node runner. */
+export function discoveryFromEnv(value: string | undefined): DiscoveryMode {
+  return value === "selfscan" ? "selfscan" : "arbiter";
+}
+
+/** The ONE mode gate: whether a discovery mode is the selfscan profile.
+ *  App.tsx and Home.tsx both read this — no inline re-derivations of the
+ *  literal, so the mode comparison cannot drift between screens. */
+export function isSelfScan(mode: DiscoveryMode): boolean {
+  return mode === "selfscan";
+}
+
 export const DEFAULTS = {
   chainId: CHAIN_ID,
   // Testnet posture from ENV, never copy checks (see testnetFromEnv); default true
@@ -51,8 +74,12 @@ export const DEFAULTS = {
   // transfer/withdraw circuits encrypt an authority envelope to this key; the
   // contract injects the SAME key from storage before verifying, so a mismatch fails.
   arbiterPubKey: [ARBITER_PUBKEY_X, ARBITER_PUBKEY_Y] as [string, string],
-  // The arbiter-mode indexer for the signed `GET /notes` balance path (required —
-  // the wallet has no fallback balance path; decision 2026-07-25, review #17b).
+  // Which discovery engine feeds balance/activity (see discoveryFromEnv above).
+  discovery: discoveryFromEnv(import.meta.env?.VITE_DISCOVERY),
+  // The arbiter-mode indexer for the signed `GET /notes` balance path (required
+  // in arbiter mode — that profile has no fallback balance path; decision
+  // 2026-07-25, review #17b). Selfscan mode reads the same base URL's PUBLIC
+  // endpoints (/events, /nullifiers, /head, /path) instead.
   // Default is the RELATIVE base `/indexer`, which the Vite proxy (vite.config
   // server+preview) forwards to the real indexer server-side. The relative base makes
   // every /notes,/history,/head,... call SAME-ORIGIN, so there is no CORS wall and a

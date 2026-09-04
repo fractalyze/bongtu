@@ -66,4 +66,30 @@ contract VerifierDriftTest is Test {
     function testTransfer10x2VerifierIsTheGeneratedOneRenamed() public view {
         _assertRenameOnly("transfer10x2_verifier.sol", "Transfer10x2Verifier");
     }
+
+    // --- consumer (no-auditor) family (OPMOD §2) — same rename-only rule ----
+
+    function testDepositPrivVerifierIsTheGeneratedOneRenamed() public view {
+        _assertRenameOnly("depositPriv_verifier.sol", "DepositPrivVerifier");
+    }
+
+    function testTransferPrivVerifierIsTheGeneratedOneRenamed() public view {
+        _assertRenameOnly("transferPriv_verifier.sol", "TransferPrivVerifier");
+    }
+
+    function testTransfer10x2PrivVerifierIsTheGeneratedOneRenamed() public view {
+        _assertRenameOnly("transfer10x2Priv_verifier.sol", "Transfer10x2PrivVerifier");
+    }
+
+    function testWithdrawPrivVerifierIsTheGeneratedOneRenamed() public view {
+        _assertRenameOnly("withdrawPriv_verifier.sol", "WithdrawPrivVerifier");
+    }
+
+    function testDisbursePrivVerifierIsTheGeneratedOneRenamed() public view {
+        _assertRenameOnly("disbursePriv_verifier.sol", "DisbursePrivVerifier");
+    }
+
+    function testDisbursePriv256VerifierIsTheGeneratedOneRenamed() public view {
+        _assertRenameOnly("disbursePriv256_verifier.sol", "DisbursePriv256Verifier");
+    }
 }

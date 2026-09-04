@@ -47,7 +47,12 @@ export type EventKind =
   | "transfer10"
   | "transfer10x2"
   | "withdraw"
-  | "disburse";
+  | "disburse"
+  | "depositPriv"
+  | "transferPriv"
+  | "transfer10x2Priv"
+  | "withdrawPriv"
+  | "disbursePriv";
 
 /** GET /events disclosure verdict vocabulary (full detail lives on /alarms): a
  *  passing disclosureHash chain, a proven tamper, or the two publication gaps
@@ -62,6 +67,24 @@ export interface FeedSlice {
   leafIndex: number | null;
 }
 
+/** The kem-ct chunk transport state of a consumer disburse batch (OPMOD §5).
+ *  Every non-"complete" status is OPERATIONAL — nothing on-chain-provable was
+ *  violated (undelivered chunks are the sender-self-sabotage class), so they
+ *  ride the feed here, never /alarms. "pending"/"withheld" mean chunks are
+ *  still MISSING on-chain (inside / past the grace window);
+ *  "accepted-unassembled" means every chunk was accepted (keccak-enforced) —
+ *  nothing was withheld — but some chunk's bytes could not be decoded from its
+ *  submit-tx calldata (a wrapped submission, or a failed fetch). The bytes are
+ *  on-chain; the indexer re-attempts the fetch+decode at every boot. */
+export interface KemTransport {
+  status: "complete" | "pending" | "withheld" | "accepted-unassembled";
+  chunkCount: number;
+  acceptedCount: number;
+  /** per-output 1088-byte ML-KEM cts as 0x-hex, leaf order — present once
+   *  every chunk's bytes are assembled (what Decaps consumes). */
+  kemCiphertexts?: string[];
+}
+
 /** One `GET /events` entry — the SPEC §6b ciphertext feed a wallet trial-decrypts. */
 export interface FeedEvent {
   seq: number;
@@ -73,9 +96,23 @@ export interface FeedEvent {
   encryptionNonce: string | null;
   slices: FeedSlice[];
   ciphertext: string[];
-  disclosure?: DisclosureStatus; // present for `disburse`
-  /** present for `withdraw` since the stealth upgrade (see WithdrawAnnouncementRecord). */
+  disclosure?: DisclosureStatus; // present for `disburse` / `disbursePriv`
+  /** present for `withdraw`/`withdrawPriv` since the stealth upgrade (see
+   *  WithdrawAnnouncementRecord). */
   announcement?: { recipient: string; ephemeralPub: string; viewTag: number };
+  /** consumer ops (OPMOD §3.2): one canonical [0,256) view tag per output
+   *  slice, decimal, slice order — the S3.6 pre-filter. */
+  viewTags?: string[];
+  /** consumer SMALL ops (§3.4): per-output 1088-byte ML-KEM cts, 0x-hex,
+   *  output order. A consumer disburse's arrive via `kem` instead. */
+  kemCiphertexts?: string[];
+  /** consumer disburse: the batch start (== the chunk-transport batchId). */
+  batchId?: number;
+  /** consumer disburse (§4.1): the published commitment run, decimal, leaf
+   *  order — what lets ANY consumer re-fold the batch to its subtreeRoot. */
+  outputCommitments?: string[];
+  /** consumer disburse: the chunk transport state + assembled kem cts. */
+  kem?: KemTransport;
 }
 
 /** One `GET /announcements` entry — the stealth-withdraw discovery feed a
@@ -119,7 +156,10 @@ export interface HistoryItem {
   counterparty: string | null; // compressed bjj pubkey hex, or null
   amount: string;
   txHash: string;
-  blockTimestamp: number; // unix seconds
+  /** unix seconds. ABSENT when the item's source has no timestamps — the
+   *  selfscan public-feed derivation; the arbiter /history always stamps it,
+   *  and the display edge suppresses the time element when it is missing. */
+  blockTimestamp?: number;
   seq: number; // newest-first: the feed is sorted by seq desc
 }
 
@@ -267,6 +307,13 @@ export function getSignedPath(
 
 export function getEvents(indexerUrl: string, limit = 5000): Promise<FeedEvent[]> {
   return getJson<FeedEvent[]>(`${trim(indexerUrl)}/events?limit=${limit}`);
+}
+
+/** Cursor-paged `GET /events` (seq > cursor, chain order) — the incremental
+ *  read the OPMOD §3.6 self-scan resumes on. `cursor = -1` reads from the
+ *  start; the caller's next cursor is the highest `seq` it processed. */
+export function getEventsFrom(indexerUrl: string, cursor: number, limit = 5000): Promise<FeedEvent[]> {
+  return getJson<FeedEvent[]>(`${trim(indexerUrl)}/events?cursor=${cursor}&limit=${limit}`);
 }
 
 /** The spent nullifier set (PUBLIC, key-free), as decimal strings. */
@@ -495,8 +542,19 @@ export function fetchHistoryPage(
 // pubkey (the in-pool receive identity) and stealth meta-address (the pool-edge
 // one). Server half: apps/indexer src/names.ts + api/routes/names.ts.
 
-import { nameAuthMessage, nameBindingField } from "./eddsa.js";
+import {
+  nameAuthMessage,
+  nameBindingField,
+  nameAuthMessageV2,
+  nameBindingFieldV2,
+  NOTE_VIEW_PUB_ZERO,
+  KEM_EK_ZERO,
+} from "./eddsa.js";
 import type { StealthMetaAddress } from "./stealth.js";
+
+// The v2 zero-sentinels, re-exported so a client clearing its consumer pair
+// keeps one import path with the fetch builders below.
+export { NOTE_VIEW_PUB_ZERO, KEM_EK_ZERO } from "./eddsa.js";
 
 // Lowercase label, 3–32 chars, alnum with interior hyphens — a deliberately
 // DNS-label-shaped grammar so a name can later become an ENS/CCIP subname
@@ -521,16 +579,26 @@ export interface NameRecord {
   viewPub: string;
   /** compressed secp256k1 stealth SPEND pubkey (see stealth.ts). */
   spendPub: string;
+  /** compressed bjj NOTE-LAYER view pubkey (consumer triple, OPMOD §6.1) —
+   *  absent on records registered before the consumer extension. */
+  noteViewPub?: string;
+  /** ML-KEM-768 encapsulation key, 0x + 1184-byte hex (consumer triple) —
+   *  required together with `noteViewPub`, absent on legacy records. */
+  kemEk?: string;
   /** unix seconds of the last accepted registration (server clock). */
   updatedAt: number;
 }
 
-/** The signed POST /names body. */
+/** The signed POST /names body. OPMOD §6.4 form selection is by payload shape:
+ *  `noteViewPub`/`kemEk` present (required together) selects the v2 signature
+ *  form exclusively; neither present selects v1 exclusively — no dual-try. */
 export interface NameRegistration {
   name: string;
   owner: string;
   viewPub: string;
   spendPub: string;
+  noteViewPub?: string;
+  kemEk?: string;
   ts: number;
   sig: string;
 }
@@ -555,6 +623,53 @@ export function buildNameRegistration(
     nowSeconds,
   );
   return { name, owner, viewPub: meta.viewPub, spendPub: meta.spendPub, ts, sig };
+}
+
+/** The note-layer consumer identity a v2 registration binds beside the stealth
+ *  meta (OPMOD §6.1): the bjj note-view pubkey + the ML-KEM-768 encapsulation
+ *  key — an unusable half-identity alone, so always required together. */
+export interface ConsumerNameIdentity {
+  noteViewPub: string; // compressed bjj pubkey, 0x + 32-byte hex
+  kemEk: string; // 0x + 1184-byte hex
+}
+
+/**
+ * Build a v2 registration carrying (or clearing) the consumer triple. The owner
+ * signs the FIVE-segment v2 binding under the v2 domain tag (OPMOD §6.4): pass
+ * the identity to set/rotate it, or `"clear"` to sign the zero-sentinels —
+ * clearing is a signed statement, never an omission. Legacy v1 payloads keep
+ * using `buildNameRegistration` unchanged.
+ */
+export function buildNameRegistrationV2(
+  name: string,
+  ownerCompressed: string,
+  ownerPrivateKey: FieldInput,
+  meta: StealthMetaAddress,
+  consumer: ConsumerNameIdentity | "clear",
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): NameRegistration {
+  const pair = consumer === "clear" ? { noteViewPub: NOTE_VIEW_PUB_ZERO, kemEk: KEM_EK_ZERO } : consumer;
+  const { owner, ts, sig } = signedOwnerProof(
+    ownerCompressed,
+    ownerPrivateKey,
+    (pub, at) =>
+      nameAuthMessageV2(
+        pub,
+        nameBindingFieldV2(name, meta.viewPub, meta.spendPub, pair.noteViewPub, pair.kemEk),
+        at,
+      ),
+    nowSeconds,
+  );
+  return {
+    name,
+    owner,
+    viewPub: meta.viewPub,
+    spendPub: meta.spendPub,
+    noteViewPub: pair.noteViewPub,
+    kemEk: pair.kemEk,
+    ts,
+    sig,
+  };
 }
 
 /** POST a registration; resolves to the accepted record, throws on any error

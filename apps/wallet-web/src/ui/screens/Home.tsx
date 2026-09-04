@@ -1,8 +1,9 @@
 // Home: the balance hero, the connected-wallet card, the primary actions, and the
 // recent activity head — sibling white cards in one vertical stack. This is the whole
 // app most of the time — other screens are pushed on top via the hash route. All
-// private data (balance, activity) comes from the arbiter indexer; a dataError
-// renders a calm "connect an arbiter-mode indexer" panel instead of numbers. The
+// private data (balance, activity) comes from the configured discovery engine
+// (arbiter indexer, or the selfscan feed scan); a dataError renders a calm
+// connect-an-indexer panel instead of numbers. The
 // public kKRW token context lives on the Deposit screen only (where the flow needs it).
 
 import { useState } from "react";
@@ -10,11 +11,11 @@ import type { ReactNode } from "react";
 import { encodeAddress } from "@bongtu/core/pubkey";
 import { useWallet } from "../App.js";
 import { navigate } from "../hooks.js";
-import { DEFAULTS } from "../../config.js";
+import { DEFAULTS, isSelfScan } from "../../config.js";
 import { shortenPubkey } from "../format.js";
 import { BalanceCard } from "../components/BalanceCard.js";
 import { ActivityList } from "../components/ActivityList.js";
-import { IndexerSyncDot } from "../components/SyncDot.js";
+import { IndexerSyncDot, SelfScanSyncDot } from "../components/SyncDot.js";
 import { LockChip } from "../components/LockChip.js";
 import { ReceiveModal } from "../components/ReceiveModal.js";
 import { WalletMark } from "../components/WalletMark.js";
@@ -33,8 +34,10 @@ import {
 const RECENT_COUNT = 4;
 
 export function Home(): ReactNode {
-  const { session, connection, wallet, balance, history, loading, syncing, dataError, dataNotice, indexerUrl, refresh } =
-    useWallet();
+  const {
+    session, connection, wallet, balance, history, loading, syncing, dataError, dataNotice,
+    scannedNextLeafIndex, indexerUrl, refresh,
+  } = useWallet();
 
   // Receive is a modal over Home (primary path — the #/receive route is a deep link).
   const [receiveOpen, setReceiveOpen] = useState(false);
@@ -54,12 +57,24 @@ export function Home(): ReactNode {
             with its words in a hover tooltip. The sync dot is also the manual
             refresh, so no separate refresh button competes with it. */}
         <div className="flex items-center gap-0.5">
-          <IndexerSyncDot
-            indexerUrl={indexerUrl}
-            refreshing={refreshing}
-            dataError={dataError !== null}
-            onRefresh={() => void refresh(true)}
-          />
+          {isSelfScan(DEFAULTS.discovery) ? (
+            // Selfscan: the dot measures the SCAN CURSOR against the public
+            // /head — no /health, no arbiter coupling.
+            <SelfScanSyncDot
+              indexerUrl={indexerUrl}
+              scannedNextLeafIndex={scannedNextLeafIndex}
+              refreshing={refreshing}
+              dataError={dataError !== null}
+              onRefresh={() => void refresh(true)}
+            />
+          ) : (
+            <IndexerSyncDot
+              indexerUrl={indexerUrl}
+              refreshing={refreshing}
+              dataError={dataError !== null}
+              onRefresh={() => void refresh(true)}
+            />
+          )}
           <LockChip walletName={wallet.name} />
           <IconButton aria-label="Settings" onClick={() => navigate("settings")}>
             <IconGear />

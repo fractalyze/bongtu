@@ -11,6 +11,10 @@
 //   DATABASE_URL               REQUIRED — Postgres connection string (the indexer
 //                              is Postgres-only; it refuses to boot without it)
 //   LOG_CHUNK                  getLogs chunk size in blocks (default 50000)
+//   KEM_GRACE_SECONDS          seconds an incomplete consumer-disburse chunk
+//                              set reads kem-"pending" before kem-"withheld"
+//                              (default 3600; parsed once at boot — garbage
+//                              refuses to boot)
 //   PORTAL_FACTORY             PortalFactory address => portal deposits live:
 //                              POST /pay/{name} issues stealth destinations and
 //                              ingest scans the factory's Swept logs. UNSET =>

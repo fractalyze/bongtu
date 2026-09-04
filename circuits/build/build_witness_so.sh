@@ -10,7 +10,7 @@
 # node/WASM calculator it replaced, with an elementwise-identical witness
 # vector (prover/README.md owns the byte-identity gate).
 #
-#   cd circuits && bash build/build_witness_so.sh                # the 3 GPU-served circuits
+#   cd circuits && bash build/build_witness_so.sh                # every registry circuit (4)
 #   cd circuits && bash build/build_witness_so.sh disburse256    # just one
 #
 # Toolchain (env-overridable, defaults = this dev box):
@@ -57,7 +57,7 @@ for tool in "$CIRCOM_MLIR" "$PRIME_IR_OPT" "$MLIR_TRANSLATE" "$LLC"; do
   [ -x "$tool" ] || { echo "FATAL: toolchain binary missing/not executable: $tool"; exit 1; }
 done
 
-ALL_CIRCUITS=(disburse256 transfer10x2 deposit)
+ALL_CIRCUITS=(disburse256 transfer10x2 deposit disbursePriv256)
 if [ "$#" -gt 0 ]; then CIRCUITS=("$@"); else CIRCUITS=("${ALL_CIRCUITS[@]}"); fi
 
 mkdir -p out

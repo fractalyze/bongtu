@@ -49,17 +49,24 @@
 #                        on-chain verifiers — which is also why caching the
 #                        built artifacts is sound.
 #   e2e-m0               restores circuits/out and runs deploy/gates/e2e_m0.sh
-#                        (anvil deposit -> disburse16 -> transfer -> withdraw).
+#                        (anvil deposit -> disburse16 -> transfer -> withdraw,
+#                        then the portal leg and the arbiter-free consumer leg:
+#                        V3 module upgrade + CPU-proved consumer ops with kem
+#                        chunk txs + a public indexer + self-scan discovery).
 #   indexer-conformance  restores circuits/out and runs the indexer anvil
-#                        scenario incl. arbiter mode, ingesting into a postgres
+#                        scenarios incl. arbiter mode and the consumer
+#                        (op-module) leg — module events, kem chunk transport,
+#                        public batch fill — ingesting into a postgres
 #                        service container (the indexer is Postgres-only, U-I4;
 #                        TEST_DATABASE_URL makes run.sh use the service instead
 #                        of spinning docker itself).
 #
-# WALL-TIME BUDGET: a typical push (circuits unchanged, caches warm) targets
-# <= ~3 min wall — the circuits job is lookup-only and e2e-m0 / conformance run
-# in parallel off the artifact cache. A circuits/pins change pays the full
-# rebuild (~10-12 min) once, then re-warms the cache.
+# WALL-TIME BUDGET: on a typical push (circuits unchanged, caches warm) the
+# circuits job is lookup-only and e2e-m0 / conformance run in parallel off the
+# artifact cache. Those two carry the portal + consumer legs, so they — not the
+# ~3 min node path — bound the wall time (timeout-minutes 25 each). A
+# circuits/pins change pays the full rebuild (~10-12 min) once, then re-warms
+# the cache.
 #
 # EXCLUDED — with the reason each cannot genuinely pass on a hosted runner
 #   - disburse256 (1x256) proving and the prover/ service boot (prover/setup.sh
@@ -382,7 +389,7 @@ jobs:
   e2e-m0:
     needs: circuits
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: load toolchain pins
@@ -423,13 +430,13 @@ jobs:
           path: circuits/out
           key: ${{ needs.circuits.outputs.key }}
           fail-on-cache-miss: true
-      - name: M0 e2e gate (anvil deposit -> disburse16 -> transfer -> withdraw)
+      - name: M0 e2e gate (deposit -> disburse16 -> transfer -> withdraw, + portal + consumer legs)
         run: bash deploy/gates/e2e_m0.sh
 
   indexer-conformance:
     needs: circuits
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     # The indexer is Postgres-only (U-I4): the conformance gate ingests into a
     # real Postgres. Hosted runners support service containers, so the test RUNS
     # here (not skips) against this service. The password is a throwaway for the
@@ -488,5 +495,5 @@ jobs:
           path: circuits/out
           key: ${{ needs.circuits.outputs.key }}
           fail-on-cache-miss: true
-      - name: indexer conformance gate (anvil scenario incl. arbiter mode)
+      - name: indexer conformance gate (anvil scenarios incl. arbiter mode + the consumer leg)
         run: npm test -w @bongtu/indexer

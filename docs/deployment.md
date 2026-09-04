@@ -108,6 +108,41 @@ not restate them). One operational observation worth keeping: the public
 returned a MIXED view (new initializer slot, old verifier) from a lagging
 replica — post-upgrade verification must re-read until consecutive reads agree.
 
+## Deploy profiles and the consumer module family
+
+Which op families a pool serves is its module registration list (`.dev/op-module-design.md`
+§1/§7 — registration is `onlyOwner`, event-logged, and upgrade-equivalent power). Three
+profiles exist; the env knob and script per profile live in
+[`deploy/README.md`](../deploy/README.md#deploy-profiles):
+
+- **audited-only / enterprise** — `Deploy.s.sol` with `MODULE_PROFILE=none` (the default;
+  byte-identical to the pre-profile deploy). No consumer module is registered, so the
+  pool-level audit guarantee holds: every op that exists is arbiter-disclosable.
+- **consumer on the shared pool** — the live-pool path. Order per OPMOD §7.3, all of it
+  drilled by `deploy/gates/test_upgrade_v3.sh`:
+  1. deploy the five consumer verifiers + five module contracts
+     (`deploy/forge/ConsumerModuleKit.sol`; modules are inert until registered, so this
+     carries no sequencing risk);
+  2. deploy the new `BongtuPool` implementation (`applyOp*` + module registry +
+     `reinitializeV3`; the six enterprise entrypoints byte-identical);
+  3. ONE `upgradeToAndCall(impl, reinitializeV3(modules))` (`deploy/forge/UpgradeV3.s.sol`).
+     Unlike the v2 upgrade there is no verifier-swap atomicity constraint — the enterprise
+     verifiers are untouched, so enterprise ops keep verifying before, during and after.
+  The module addresses land in `deploy/modules.<chainid>.json`; the canonical on-chain
+  source is the `ModuleRegistered`/`ModuleRemoved` event stream.
+- **consumer-only** — `deploy/forge/DeployConsumerOnly.s.sol`, built on
+  `initializeConsumerOnly`: **no arbiter key exists at all** (no epoch minted, no KEM pk
+  hash, no enterprise verifier wired), rather than a burned placeholder. Every enterprise
+  entrypoint reverts on such a pool; the consumer modules are its whole op surface. The
+  KEM deploy knobs above do not apply to this profile — there is no authority envelope to
+  key. Pinned by `contracts/test/ConsumerOnly.t.sol`.
+
+The consumer end-to-end leg of `deploy/gates/e2e_m0.sh` (`deploy/gates/consumer_leg.ts`)
+proves the consumer flows with no arbiter-mode indexer in the loop: profile deploy + V3
+upgrade, real CPU-proved consumer ops (including the disburse chunk transport), a
+public-mode indexer, and self-scan discovery + a batch-interior spend through the
+auth-free `/path`.
+
 ## The hybrid PQ authority envelope
 
 Epoch 0 carries an ML-KEM-768 encapsulation-key hash alongside the bjj arbiter key, so every

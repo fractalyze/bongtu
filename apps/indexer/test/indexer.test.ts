@@ -47,6 +47,11 @@ import { Indexer } from "../src/ingest.js";
 import { parseKemKey } from "../src/chain.js";
 import { startApi } from "../src/api/router.js";
 import { runScenario } from "./scenario.js";
+import { runConsumerScenario } from "./consumer_scenario.js";
+import { deriveKeypair } from "@bongtu/core/note";
+import { buildNameRegistrationV2 } from "@bongtu/core/indexerApi";
+import { ml_kem768 } from "@bongtu/core/kem";
+import { stealthKeysFromScalars } from "@bongtu/core/stealth";
 
 const failures = { count: 0 };
 function ok(cond: unknown, msg: string): void {
@@ -506,8 +511,156 @@ async function main(): Promise<void> {
   // with spent status derived from envelopes ALONE (no user key, no nullifier link).
   await runArbiter(sc);
 
-  console.log(`\n${failures.count === 0 ? "INDEXER TEST PASS — mirror==contract, /path folds, feed trial-decrypts, disclosureHash pass + tamper alarm, arbiter note-ledger spent-transition + batch paths + /nullifiers" : `INDEXER TEST FAIL — ${failures.count} assertion(s)`}`);
+  // ================== CONSUMER OP FAMILY (OPMOD §4.4/§5, U5) ==================
+  await runConsumer();
+
+  console.log(`\n${failures.count === 0 ? "INDEXER TEST PASS — mirror==contract, /path folds, feed trial-decrypts, disclosureHash pass + tamper alarm, arbiter note-ledger spent-transition + batch paths + /nullifiers, consumer public batch fill + kem chunk assembly" : `INDEXER TEST FAIL — ${failures.count} assertion(s)`}`);
   process.exit(failures.count === 0 ? 0 : 1);
+}
+
+// Consumer op-family conformance (PUBLIC MODE ONLY — no arbiter key anywhere):
+// a THIRD pool driven with the committed consumer fixtures (real Groth16 proofs
+// through the registered modules), a public indexer ingesting it, and the U5
+// duties asserted over real HTTP: registry mirror, the fold-checked PUBLIC
+// batch fill served auth-free on /path, the S3.6 feed material, the K=3 kem
+// chunk transport (pending -> withheld -> complete), and the boot-time re-fill.
+async function runConsumer(): Promise<void> {
+  step("CONSUMER SCENARIO: fresh B=16 pool + registered modules + committed consumer fixtures");
+  const cs = await runConsumerScenario();
+  console.log(`   pool=${cs.poolAddr} batchId=${cs.batchId} modules: deposit=${cs.depositModule} disburse=${cs.disburseModule}`);
+  const B = 16;
+
+  const dbUrl = await freshDatabase("bongtu_conf_consumer");
+  const cix = new Indexer({
+    rpc: process.env.E2E_RPC || "http://127.0.0.1:8545",
+    pool: cs.poolAddr,
+    startBlock: 0,
+    databaseUrl: dbUrl,
+  });
+  await cix.ingest();
+
+  step("CONSUMER ingest: mirror == contract; registry mirror replays the lifecycle");
+  ok(cix.tree.root().toString() === cs.headRoot, "mirror root == contract root at consumer head");
+  ok(cix.tree.nextLeafIndex() === cs.nextLeafIndex && cs.nextLeafIndex === 2 * B,
+    `nextLeafIndex == ${2 * B} (seed 2 + depositPriv 2 + pad + batch)`);
+  ok(cix.arbiterMode === false && cix.ledger === null, "consumer leg runs in PUBLIC mode (no arbiter key anywhere)");
+  ok(cix.modules.isRegistered(cs.depositModule) && cix.modules.isRegistered(cs.disburseModule),
+    "both live modules mirrored as registered");
+  ok(!cix.modules.isRegistered(cs.stubModule) && cix.modules.isKnown(cs.stubModule),
+    "the registered-then-removed stub module reads removed (balanced stream replayed)");
+
+  const capi = await startApi(cix, Number(process.env.INDEXER_TEST_PORT_CONSUMER || 0));
+  const cbase = `http://127.0.0.1:${capi.port}`;
+  try {
+    step("CONSUMER /events: the S3.6 feed material for depositPriv + disbursePriv");
+    const evRes = await get(cbase, "/events");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const feed = evRes.body as any[];
+    ok(feed.map((e) => e.kind).join(",") === "deposit,depositPriv,disbursePriv",
+      `feed kinds in chain order: ${feed.map((e) => e.kind).join(",")}`);
+    const dep = feed[1];
+    ok(dep.slices.length === 2 && dep.slices[0].leafIndex === cs.depositLeaves[0]
+      && dep.slices[1].leafIndex === cs.depositLeaves[1], "depositPriv slices name leaves @2/@3");
+    ok(dep.viewTags.join(",") === cs.depositViewTags.join(","), "depositPriv viewTags == the proof's publics");
+    ok(dep.kemCiphertexts.length === 2 && dep.kemCiphertexts[0] === cs.depositKemCts[0],
+      "depositPriv per-output kem cts ride the entry");
+    ok(dep.epoch === null, "consumer entries carry no arbiter epoch");
+    const dis = feed[2];
+    ok(dis.disclosure === "verified", "consumer disclosure passes all three §4.4 checks");
+    ok(dis.batchId === cs.batchId, "entry carries the batchId");
+    ok(dis.outputCommitments.length === B
+      && dis.outputCommitments.join(",") === cs.disclosure.slice(5 * B, 6 * B).join(","),
+      "the published commitment run rides the entry");
+    ok(dis.viewTags.join(",") === cs.disclosure.slice(4 * B, 5 * B).join(","), "the viewTag run rides the entry");
+    ok(dis.kem.status === "pending" && dis.kem.acceptedCount === 2 && dis.kem.chunkCount === 3,
+      "kem transport: 2 of 3 chunks accepted => pending inside the grace window");
+
+    // kem-withheld is the PAST-GRACE projection of the same incomplete batch —
+    // grace -1 makes any incomplete batch read withheld deterministically. The
+    // knob is parsed once at boot (chain.ts) and lives on the Indexer, so the
+    // mid-run flip goes through that seam, not process.env.
+    cix.kemGraceSeconds = -1;
+    const evW = await get(cbase, "/events");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ok((evW.body as any[])[2].kem.status === "withheld", "past the grace window the same batch reads kem-withheld");
+    cix.kemGraceSeconds = 3600;
+
+    step("CONSUMER /path: batch interiors serve AUTH-FREE and fold to the head root");
+    for (const i of [0, 1, B - 1]) {
+      const pr = await get(cbase, `/path/${cs.batchId + i}`);
+      ok(pr.status === 200, `GET /path/${cs.batchId + i} (consumer batch interior, no auth) → 200`);
+      const p = pr.body as { siblings: string[]; pathIndices: number[]; root: string };
+      const leaf = BigInt(cs.disclosure[5 * B + i]);
+      ok(foldToRoot(leaf, p.siblings.map(BigInt), p.pathIndices).toString() === cs.headRoot,
+        `interior leaf ${cs.batchId + i} folds to the head root`);
+    }
+    const single = await get(cbase, `/path/${cs.depositLeaves[0]}`);
+    ok(single.status === 200, "single-append depositPriv leaf serves as before");
+
+    step("CONSUMER /alarms + /nullifiers: clean run, one spent nullifier");
+    const al = await get(cbase, "/alarms");
+    ok((al.body as unknown[]).length === 0, "no alarms on the honest consumer run");
+    const nf = await get(cbase, "/nullifiers");
+    ok((nf.body as string[]).length === 1, "exactly the disbursePriv nullifier in the public set");
+
+    step("CONSUMER names v2: the registry triple round-trips through real Postgres");
+    const owner = deriveKeypair(881122334455667788n);
+    const meta = stealthKeysFromScalars(7771n, 7772n).meta;
+    const kemEkHex = "0x" + Buffer.from(ml_kem768.keygen(new Uint8Array(64).fill(11)).publicKey).toString("hex");
+    const noteViewPub = packPubkey(deriveKeypair(991122334455n).publicKey);
+    const reg = buildNameRegistrationV2(
+      "consumer-alice", packPubkey(owner.publicKey), owner.formattedPrivateKey, meta,
+      { noteViewPub, kemEk: kemEkHex },
+    );
+    const posted = await fetch(cbase + "/names", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(reg),
+    });
+    ok(posted.status === 200, `POST /names (v2) → 200 (got ${posted.status})`);
+    const resolved = await get(cbase, "/names/consumer-alice");
+    const rec = resolved.body as { noteViewPub?: string; kemEk?: string };
+    ok(rec.noteViewPub === noteViewPub && rec.kemEk === kemEkHex,
+      "GET /names serves the consumer triple back (Postgres columns round-trip)");
+
+    step("CONSUMER kem completion: final chunk lands => complete + assembled cts");
+    await runConsumerFinalChunk(cs, cix, cbase, B);
+
+    step("CONSUMER restart: a fresh indexer on the same DB re-fills the public batch from persisted state");
+    const cix2 = new Indexer({
+      rpc: process.env.E2E_RPC || "http://127.0.0.1:8545",
+      pool: cs.poolAddr,
+      startBlock: 0,
+      databaseUrl: dbUrl,
+    });
+    await cix2.ingest();
+    ok(cix2.tree.isPublicBatch(cs.batchId / B), "boot re-fill tags the consumer batch public again");
+    const p2 = cix2.tree.path(cs.batchId + 3);
+    ok(!("batchLeaf" in p2), "restarted indexer still serves the batch interior");
+    ok(cix2.kem.assembled(cs.batchId) !== null, "restarted kem store re-assembles from persisted chunks");
+    ok(cix2.modules.isRegistered(cs.disburseModule) && !cix2.modules.isRegistered(cs.stubModule),
+      "restarted registry mirror rebuilt from the modules table");
+    await cix2.close();
+  } finally {
+    await capi.stop();
+    await cix.close();
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function runConsumerFinalChunk(cs: any, cix: Indexer, cbase: string, B: number): Promise<void> {
+  await cs.submitFinalChunk();
+  // ingest() (not pollOnce) so a real ingest error surfaces instead of landing
+  // in the swallowed /health streak — the tail poll is the same code path.
+  await cix.ingest(cix.store.lastBlock + 1);
+  const ev = await get(cbase, "/events");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dis = (ev.body as any[]).find((e) => e.kind === "disbursePriv");
+  ok(dis.kem.status === "complete" && dis.kem.acceptedCount === 3, "all three chunks accepted => complete");
+  ok(Array.isArray(dis.kem.kemCiphertexts) && dis.kem.kemCiphertexts.length === B,
+    "assembled per-output kem ct array served on /events");
+  ok(dis.kem.kemCiphertexts.every((ct: string, i: number) => ct === cs.kemCts[i]),
+    "assembled cts == the fixture's kem cts, leaf order (Decaps-ready)");
 }
 
 main().catch((e) => {

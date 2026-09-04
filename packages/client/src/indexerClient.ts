@@ -9,7 +9,9 @@
 //     indexer's verifier, tested headlessly in the sdk suite), so only the owner
 //     can read its own notes even though the arbiter indexer holds everyone's;
 //   - `GET /events` + `GET /nullifiers` for the key-only trial-decrypt discovery
-//     primitive (`trialDecryptEvents` — tested, not a wallet balance path);
+//     primitive (`trialDecryptEvents` — tested, not a wallet balance path) and —
+//     with the cursor-paged `getEventsFrom`, the auth-free `getPath`, and `getHead`
+//     — for the selfscan-mode balance path (selfscan.ts, OPMOD §3.6);
 //   - `GET /head` + signed `GET /path/{leafIndex}` to build a spend's membership
 //     witness — signed because a disbursed note sits inside a batch, and the
 //     arbiter indexer only opens a batch slot to its proven owner;
@@ -29,6 +31,9 @@ export {
   getHead,
   getSignedPath,
   getEvents,
+  getEventsFrom,
+  getNullifiers,
+  getPath,
   buildNotesUrl,
   fetchNotes,
   buildHistoryUrl,
@@ -49,6 +54,9 @@ export {
   payPortal,
   type OwnerNote,
   type FeedEvent,
+  type FeedSlice,
+  type EventKind,
+  type KemTransport,
   type WithdrawAnnouncementRecord,
   type Head,
   type PathResult,

@@ -35,23 +35,26 @@ def reload_config(monkeypatch):
 
 
 def test_registry_has_every_circuit_with_pinned_wire_tags_and_pub_counts():
-    assert set(config.CIRCUITS) == {"disburse256", "transfer10x2", "deposit"}
-    d, t, p = (
+    assert set(config.CIRCUITS) == {"disburse256", "transfer10x2", "deposit", "disbursePriv256"}
+    d, t, p, dp = (
         config.CIRCUITS["disburse256"],
         config.CIRCUITS["transfer10x2"],
         config.CIRCUITS["deposit"],
+        config.CIRCUITS["disbursePriv256"],
     )
     assert (d.wire_tag, d.num_public) == ("disburse", 11)
     assert (t.wire_tag, t.num_public) == ("transfer10x2", 68)
     assert (p.wire_tag, p.num_public) == ("deposit", 19)
+    assert (dp.wire_tag, dp.num_public) == ("disbursePriv", 8)
     assert config.WIRE_TAG_TO_CIRCUIT == {
         "disburse": "disburse256",
         "transfer10x2": "transfer10x2",
         "deposit": "deposit",
+        "disbursePriv": "disbursePriv256",
     }
 
 
-@pytest.mark.parametrize("name", ["disburse256", "transfer10x2", "deposit"])
+@pytest.mark.parametrize("name", ["disburse256", "transfer10x2", "deposit", "disbursePriv256"])
 def test_registry_num_public_matches_the_built_vkey_when_present(name):
     # circuits/out is a gitignored build product — absent on CI runners, present
     # on any box that can actually serve the circuit. Where it exists, the
@@ -65,8 +68,12 @@ def test_registry_num_public_matches_the_built_vkey_when_present(name):
     assert len(json.loads(public.read_text())) == n
 
 
-def test_default_enables_every_registry_circuit():
-    assert config.ENABLED_CIRCUITS == list(config.CIRCUITS)
+def test_default_is_the_enterprise_trio_not_the_registry():
+    # Registering a new circuit must not change what an unconfigured box serves:
+    # consumer circuits are opt-in (their artifacts are absent on enterprise boxes).
+    assert config.ENABLED_CIRCUITS == ["disburse256", "transfer10x2", "deposit"]
+    assert "disbursePriv256" in config.CIRCUITS
+    assert "disbursePriv256" not in config.ENABLED_CIRCUITS
 
 
 def test_bongtu_circuits_selects_a_subset(reload_config):

@@ -110,8 +110,8 @@ so a cold backfill does not open one socket per block.
 | route | serves | auth |
 |---|---|---|
 | `GET /head` | `{ root, nextLeafIndex }` of the ingested mirror | none |
-| `GET /events?cursor=&limit=` | the ciphertext feed a wallet trial-decrypts: per op `{ seq, txHash, blockNumber, kind, epoch, ecdhPublicKey, encryptionNonce, slices[], ciphertext[], disclosure? }` | none |
-| `GET /path/{leafIndex}` | `{ leafIndex, siblings[], pathIndices[], root }`; 404 out of range; **422** for a disburse-batch interior leaf in public mode | none for a single-append leaf (siblings are public chain data); **bjj signature or view token + leaf ownership** for a batch-interior leaf in arbiter mode (its siblings are other recipients' commitments) — 400/401 unauthenticated, **403** for a leaf the proven owner does not hold |
+| `GET /events?cursor=&limit=` | the ciphertext feed a wallet trial-decrypts: per op `{ seq, txHash, blockNumber, kind, epoch, ecdhPublicKey, encryptionNonce, slices[], ciphertext[], disclosure? }`. Consumer (op-module) entries — kinds `depositPriv` / `transferPriv` / `transfer10x2Priv` / `withdrawPriv` / `disbursePriv` — additionally carry `viewTags[]` (the per-output scan pre-filter), per-output `kemCiphertexts[]` (small ops), and for `disbursePriv` the `batchId`, the published `outputCommitments[]`, and `kem: { status, chunkCount, acceptedCount, kemCiphertexts? }` — the chunk-transport state, `status` ∈ `complete` / `pending` / `withheld` / `accepted-unassembled` (see below) | none |
+| `GET /path/{leafIndex}` | `{ leafIndex, siblings[], pathIndices[], root }`; 404 out of range; **422** for an **enterprise** disburse-batch interior leaf in public mode. A **consumer** (`disbursePriv`) batch interior serves in **both** modes: its leaves were published as calldata and fold-verified against the proof's `subtreeRoot` before the fill | none for a single-append leaf (siblings are public chain data) or a fold-verified consumer batch interior (its siblings are published chain data too); **bjj signature or view token + leaf ownership** for an enterprise batch-interior leaf in arbiter mode (its siblings are other recipients' commitments) — 400/401 unauthenticated, **403** for a leaf the proven owner does not hold |
 | `GET /nullifiers` | the spent-nullifier set derived from events | none |
 | `GET /alarms` | one discriminated feed: every non-passing disclosure (`type:"disclosure"`) plus, arbiter mode only, envelope cross-check failures (`type:"envelope"`) | none |
 | `GET /health` | `{ ok, lastBlock, nextLeafIndex, batchSize, alarms, lastSuccessAt, lastError, lastErrorAt, consecutiveFailures }`; `ok` is false when the tail poll is persistently failing | none |
@@ -166,14 +166,22 @@ string. `docker-compose.yml` forwards both.
    ─────────────                         ───────────────
    chain data only                       chain data + EVERY owner's decrypted notes
    /notes, /history absent (404)         /notes, /history present, per-owner signature-gated
-   batch-interior /path -> 422           batch-interior /path served to its proven owner only
+   ENTERPRISE batch /path -> 422         ENTERPRISE batch /path served to its proven owner only
+   consumer batch /path auth-free        consumer batch /path auth-free (same as public)
 ```
 
 The read-auth governs *who may query*, not what the instance can see. An arbiter-mode indexer is
 institution-internal infrastructure and must be operated as such; the key is held in memory only and
-is never logged, never returned, and never printed alongside the connection string. Public-mode
-batch-interior paths are structurally unservable — the sibling leaves are encrypted to other
-recipients — which is why they 422 rather than 500.
+is never logged, never returned, and never printed alongside the connection string.
+
+The batch-interior `/path` rule is per batch **class**, not global. An **enterprise**
+(`disburse`) batch publishes only its subtree root; its interior leaves exist off-chain solely
+because the arbiter decrypted the authority envelope, so in public mode those paths are
+structurally unservable — the sibling leaves are other recipients' encrypted commitments — which
+is why they 422 rather than 500. A **consumer** (`disbursePriv`) batch publishes its full
+commitment run as calldata, and the indexer fold-verifies that run against the proof's
+`subtreeRoot` before filling the batch — the interiors are then the same privacy class as
+single-append leaves and serve **auth-free in both modes**.
 
 ## Disclosure alarms
 
@@ -193,6 +201,53 @@ from tampered receiver-only bytes, so staying silent would make the alarm duty b
 truncating what is published. This is the operational half of enforced disclosure — the contract
 guarantees the bytes are *there*, the indexer proves they are *right*. See
 [security-model.md](security-model.md).
+
+A **consumer** disburse (`disbursePriv`) runs the extended form of the same duty: canonical shape,
+the extended fold against the proof's `disclosureHash`, **and** the published commitment run folded
+to the on-chain `subtreeRoot`. Any failure classifies into the same statuses and alarms the same
+way; only a fully-verified publication fills the batch (which is what makes its `/path` interiors
+auth-free above). Design rationale: `.dev/op-module-design.md` §4.4.
+
+## Consumer op family: the module event stream
+
+The consumer (no-auditor) ops are emitted by **registered op modules**, not the pool, which adds
+three ingest obligations this section owns (mechanics and how-to-run: `apps/indexer/README.md`;
+design rationale: `.dev/op-module-design.md`).
+
+**The module-registry mirror is pool-derived, and dispatch is address-gated.** The registered-module
+set is mirrored from the pool's `ModuleRegistered`/`ModuleRemoved` stream, which is *balanced by
+construction* (the pool reverts no-op transitions), so a double-add or remove-of-unknown is treated
+as ingest corruption, not tolerated state. Only **pool-emitted** logs ever drive the mirror — and
+that is one instance of the general dispatch rule: event decoding matches on topic0 across the
+combined ABI, so which handler a log may reach is decided by its **emitter address**, never its name.
+Pool-family events apply only from the pool, `Swept` only from the PortalFactory, and the consumer
+op family only from the current watch-set: registered modules plus removed modules still owed kem
+chunk accepts (`submitDisburseKemChunk` outlives deregistration). Logs from any other emitter are
+not ours and are dropped silently.
+
+**`OpApplied` is the per-op audit anchor.** The pool emits `OpApplied` inside every `applyOp`, and
+each consumer op event must consume its tx's next `OpApplied` and agree with it — module
+attribution, shape (nullifier/leaf counts, start index, subtree root) and resulting root — the same
+mirror-invariant posture as the `Appended` commitment cross-check; disagreement halts ingest. The
+reverse gap is surfaced too: an `OpApplied` left unconsumed after a pass (a module mutated the tree
+with no decodable family event) produces an alarm-class warning naming the module and tx, without
+wedging ingest.
+
+**Kem chunk bytes are a documented calldata-fetch deviation from the logs-only rule.** A consumer
+disburse's per-output KEM ciphertexts are too large for one tx and arrive in K chunk transactions
+whose bytes live in **calldata only** (`DisburseKemChunkAccepted` re-emits nothing); ingest fetches
+each accepting tx and re-verifies the bytes against the batch-time keccak commitments the chain
+already enforced — a mismatch there means the RPC lied and halts. Everything else the indexer serves
+still derives from logs alone. The `/events` `kem.status` projection distinguishes chunks *missing
+on-chain* (`pending` inside the `KEM_GRACE_SECONDS` window, `withheld` past it) from *accepted but
+unassembled* (`accepted-unassembled`: every accept landed — nothing was withheld — but some chunk's
+bytes could not be decoded from its submit calldata, e.g. a wrapped submission). Accepted bytes are
+on-chain, so recovery is expected: the indexer re-attempts the fetch+decode at every boot. All of
+these are operational transport states, never `/alarms` entries — nothing on-chain-provable was
+violated. Module-*emitted* inconsistencies (an accept for an unknown batch, an out-of-range or
+duplicate chunk index) degrade the same way: warn and drop, with the chunk simply counting as
+missing — a hostile module emission must cost at most its own batch's discoverability, never the
+poll loop.
 
 ## Envelope alarms and the KEM binding
 
@@ -219,17 +274,39 @@ false tamper verdict.
 
 `/names` is the one indexer-owned **mutable** surface — every other table mirrors chain
 events; a name registration has no on-chain footprint. `name → { owner bjj pubkey,
-stealth meta-address }` records are accepted only under the owner's bjj EdDSA-Poseidon
-signature over the full payload (`nameAuthMessage`, domain-separated from the read-auth
-and view-token tuples, `|now − ts| ≤ 300s`), so the registry is **availability-trusted
-only**: a hostile indexer can withhold a name, never forge or splice one. Ownership
-rule: first-come per name; the same owner may update (stealth-meta rotation); transfer
-does not exist. Served identically in public and arbiter mode — the records are public
-identity material. Names are DNS-label-shaped (3–32 lowercase alnum, interior hyphens)
-so a later ENS/CCIP-read gateway can serve the same records without migration. Wire
-shapes + the client half (`buildNameRegistration`, `registerName`, `resolveName`):
-`@bongtu/core/indexerApi`; server half: `apps/indexer/src/names.ts` +
-`api/routes/names.ts`; stealth meta-address semantics: `packages/core/src/stealth.ts`.
+stealth meta-address, optional consumer pair }` records are accepted only under the
+owner's bjj EdDSA-Poseidon signature over the full payload (domain-separated from the
+read-auth and view-token tuples, `|now − ts| ≤ 300s`), so the registry is
+**availability-trusted only**: a hostile indexer can withhold a name, never forge or
+splice one. Ownership rule: first-come per name; the same owner may update
+(stealth-meta rotation); transfer does not exist. Served identically in public and
+arbiter mode — the records are public identity material. Names are DNS-label-shaped
+(3–32 lowercase alnum, interior hyphens) so a later ENS/CCIP-read gateway can serve the
+same records without migration.
+
+A record optionally carries the **consumer pair** — `noteViewPub` (the note-layer bjj
+view pubkey) and `kemEk` (the ML-KEM-768 encapsulation key) — everything a payer needs
+to seal a consumer op's outputs to the name. The pair is **required together** (a lone
+half is an unusable identity → 400), and the ek is validated by an actual
+encapsulation before it is stored, so a payer can never burn a note against garbage.
+
+Registrations come in **two signature forms, selected deterministically by payload
+shape — no dual-try**. A payload carrying neither consumer field verifies as **v1**:
+`nameAuthMessage` over the 3-segment binding (`name|viewPub|spendPub`) under the
+`bongtu/name-auth-v1` domain tag. A payload carrying both verifies as **v2** only: the
+5-segment binding (`…|noteViewPub|kemEk`) under `bongtu/name-auth-v2` — the tags are
+disjoint, so no signature verifies under the other form. **v1 writes are read-only for
+the consumer columns**: a legacy-signed update touches only the three legacy fields and
+preserves any consumer pair the owner set, so a captured v1 registration replayed
+inside the auth window re-asserts only what it already bound. Setting, rotating or
+clearing the pair requires a v2 signature; clearing is explicit — the owner signs both
+full-width zero-sentinels. Rationale and the exact digest forms:
+`.dev/op-module-design.md` §6.1–§6.4.
+
+Wire shapes + the client half (`buildNameRegistration`, `buildNameRegistrationV2`,
+`registerName`, `resolveName`): `@bongtu/core/indexerApi`; server half:
+`apps/indexer/src/names.ts` + `api/routes/names.ts`; stealth meta-address semantics:
+`packages/core/src/stealth.ts`.
 
 ## Announcement feed
 

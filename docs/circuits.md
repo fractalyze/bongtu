@@ -1,9 +1,11 @@
 # Circuits
 
 Six circom circuits over four bases, one shared membership gadget, one shared envelope
-construction. Sources: `circuits/*.circom` (top-levels) and `circuits/lib/*.circom` (vendored
-bases). Provenance against upstream Zeto is in [zeto-derivation.md](zeto-derivation.md); build
-commands are in [toolchain.md](toolchain.md).
+construction — the **enterprise** family; the **consumer** (no-auditor) family adds six more
+tops over four sibling bases ([below](#consumer-circuits-and-public-surfaces)). Sources:
+`circuits/*.circom` (top-levels) and `circuits/lib/*.circom` (vendored bases). Provenance
+against upstream Zeto is in [zeto-derivation.md](zeto-derivation.md); build commands are in
+[toolchain.md](toolchain.md).
 
 | circuit | template | arity | constraints | publics | domain |
 |---|---|---|---|---|---|
@@ -160,6 +162,107 @@ squeeze.
 Neither the batch's ciphertext nor the 1088-byte `kemCiphertext` rides in the public vector. The
 former travels as a separate calldata argument bound by `disclosureHash`; the latter as a `bytes`
 argument bound by `kemBinding` (see [protocol.md](protocol.md) and [contracts.md](contracts.md)).
+
+## Consumer circuits and public surfaces
+
+The consumer (no-auditor) family: six tops over four sibling bases, each base derived from a
+vendored enterprise base above with the parent untouched — per-file provenance and deltas in
+[zeto-derivation.md](zeto-derivation.md#the-consumer-no-auditor-family), design record in
+`.dev/op-module-design.md` (OPMOD §2/§3). These circuits are verified by op **modules**, not
+the pool ([contracts.md](contracts.md#the-op-module-layer)); the module indexes the vector
+literally, so a reorder is a breaking change requiring a new verifier and a module swap.
+
+| circuit | template | arity | constraints | publics | domain |
+|---|---|---|---|---|---|
+| `depositPriv.circom` | `BongtuConsumerDeposit(2)` | 0-in / 2-out | 20,509 | 16 | 2^15 |
+| `transferPriv.circom` | `BongtuConsumerTransfer(2,2,32)` | 2-in / 2-out | 60,704 | 20 | 2^16 |
+| `transfer10x2Priv.circom` | `BongtuConsumerTransfer(10,2,32)` | 10-in / 2-out | 204,984 | 36 | 2^18 |
+| `withdrawPriv.circom` | `BongtuWithdrawPriv(2,1,32)` | 2-in / 1-out | 52,614 | 16 | 2^16 |
+| `disbursePriv.circom` | `BongtuConsumerDisburse(1,16,32)` | 1-in / 16-out | 214,769 | 8 | 2^18 |
+| `disbursePriv256.circom` | `BongtuConsumerDisburse(1,256,32)` | 1-in / 256-out | 3,049,889 | 8 | 2^22 |
+
+Constraint counts measured 2026-09-03. `transferPriv` lands at 2^16 with ~4.8k of margin,
+resolving the spec's TIGHT flag; `disbursePriv` is the dev-loop instantiation of the same base
+as `disbursePriv256` (the enterprise disburse/disburse256 pattern — an envelope change on this
+base regenerates both pairs). The deprecated `transfer10` has no consumer twin.
+
+Versus its enterprise twin, every consumer top **drops** `cipherTextAuthority[·]`, `kemBinding`
+and `authorityPublicKey[2]` — there is no authority material anywhere in the family — and
+**adds** `viewTags[nOut]` as the last output run; `depositPriv` and `withdrawPriv` additionally
+gain receiver ciphertexts their twins never had (the enterprise deposit publishes only an
+authority envelope; the enterprise withdraw's change note is arbiter-recoverable). Receiver
+encryption is the hybrid per-output construction (ECDH against the recipient's note-layer VIEW
+key folded with a per-output ML-KEM-768 secret, nonce `encryptionNonce + i`, uniform across all
+six shapes). Every input-side soundness constraint of the section below survives each base edit
+verbatim; the per-circuit preservation table is OPMOD §2.1.
+
+**depositPriv — `uint[16]`** (enterprise deposit: `uint[19]`)
+
+| idx | signal |
+|---|---|
+| 0 | `out` (sum of output values; the amount the module pulls) |
+| 1..2 | `ecdhPublicKey[2]` |
+| 3..10 | `cipherTexts[2][4]` (receiver-decryptable, one per output) |
+| 11..12 | `viewTags[2]` |
+| 13..14 | `outputCommitments[2]` |
+| 15 | `encryptionNonce` |
+
+**transferPriv — `uint[20]`** (enterprise transfer: `uint[37]`)
+
+| idx | signal |
+|---|---|
+| 0..1 | `ecdhPublicKey[2]` |
+| 2..9 | `cipherTexts[2][4]` |
+| 10..11 | `viewTags[2]` |
+| 12..13 | `nullifiers[2]` |
+| 14 | `root` |
+| 15..16 | `enabled[2]` (module-injected: `nullifier[i] != 0`) |
+| 17..18 | `outputCommitments[2]` |
+| 19 | `encryptionNonce` |
+
+**transfer10x2Priv — `uint[36]`** (enterprise transfer10x2: `uint[68]`)
+
+| idx | signal |
+|---|---|
+| 0..1 | `ecdhPublicKey[2]` |
+| 2..9 | `cipherTexts[2][4]` |
+| 10..11 | `viewTags[2]` |
+| 12..21 | `nullifiers[10]` |
+| 22 | `root` |
+| 23..32 | `enabled[10]` (module-injected) |
+| 33..34 | `outputCommitments[2]` |
+| 35 | `encryptionNonce` |
+
+**withdrawPriv — `uint[16]`** (enterprise withdraw: `uint[27]`)
+
+| idx | signal |
+|---|---|
+| 0 | `out` (= `sum(inputs) − change`, the ERC-20 amount the module pushes) |
+| 1..2 | `ecdhPublicKey[2]` |
+| 3..6 | `cipherTexts[1][4]` (the change note) |
+| 7 | `viewTags[1]` |
+| 8..9 | `nullifiers[2]` |
+| 10 | `root` |
+| 11..12 | `enabled[2]` (module-injected) |
+| 13 | `outputCommitments[0]` (the change note) |
+| 14 | `encryptionNonce` |
+| 15 | `recipient` (L1 payout address; the module range-checks uint160 and pays it, never msg.sender — relayable like the enterprise withdraw) |
+
+**disbursePriv / disbursePriv256 — `uint[8]`** (enterprise disburse: `uint[11]`)
+
+| idx | signal |
+|---|---|
+| 0..1 | `ecdhPublicKey[2]` |
+| 2 | `disclosureHash` (the EXTENDED fold over `receiverCts[4B] ++ viewTags[B] ++ outputCommitments[B]`) |
+| 3 | `subtreeRoot` |
+| 4 | `nullifiers[0]` |
+| 5 | `root` |
+| 6 | `enabled[0]` (module-injected constant 1 after a `ZeroNullifier` check) |
+| 7 | `encryptionNonce` |
+
+The batch's 6·B-element `disclosure` array and every circuit's per-recipient 1088-byte KEM
+ciphertexts ride module calldata, not the public vector; the on-chain checks they get are the
+module's ([contracts.md](contracts.md#the-op-module-layer)).
 
 ## Soundness invariants
 

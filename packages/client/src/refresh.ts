@@ -84,9 +84,20 @@ export const RECONNECT_NOTICE = "Reconnect to refresh your balance.";
  * one anyway returns 400/401 and the error path would wipe the balance the fallback
  * just loaded — turning a working screen into an indexer-error screen on the first
  * auto-refresh. So a tokenless refresh does not fetch at all.
+ *
+ * `authFree` is the selfscan profile's declaration that its reads are PUBLIC
+ * (no token is involved anywhere in the balance path), so the token gate does
+ * not apply — the PLAN owns the read-or-notice decision, the shell only
+ * states the mode. Logged out (no session) still cannot read: there is no
+ * owner to scan for.
  */
-export function refreshPlan(session: { token: string } | null): RefreshPlan {
-  if (!session || session.token === "") return { kind: "notice", message: RECONNECT_NOTICE };
+export function refreshPlan(
+  session: { token: string } | null,
+  opts: { authFree?: boolean } = {},
+): RefreshPlan {
+  if (!session) return { kind: "notice", message: RECONNECT_NOTICE };
+  if (opts.authFree === true) return { kind: "read" };
+  if (session.token === "") return { kind: "notice", message: RECONNECT_NOTICE };
   return { kind: "read" };
 }
 
@@ -177,8 +188,9 @@ export interface RefreshSinks {
 }
 
 /**
- * ONE refresh, start to finish: plan (tokenless sessions never issue a doomed
- * read), load, then route the outcome to exactly one surface. `manual` says the
+ * ONE refresh, start to finish: plan (a tokenless arbiter session never issues
+ * a doomed read; an `authFree` profile reads regardless — refreshPlan), load,
+ * then route the outcome to exactly one surface. `manual` says the
  * user asked for this refresh right now — the only case that may toast; the
  * background loop and the post-action fallback run with manual=false and can only
  * move the banner.
@@ -187,9 +199,9 @@ export async function runRefresh(
   session: { token: string; compressedPubkey: string } | null,
   load: (token: string, owner: string) => Promise<OwnerSnapshot>,
   sinks: RefreshSinks,
-  opts: { manual?: boolean; indexerUrl: string; skipUnchangedFrom?: OwnerSnapshot },
+  opts: { manual?: boolean; indexerUrl: string; skipUnchangedFrom?: OwnerSnapshot; authFree?: boolean },
 ): Promise<void> {
-  const plan = refreshPlan(session);
+  const plan = refreshPlan(session, { authFree: opts.authFree });
   if (plan.kind === "notice" || !session) {
     // No token to read with: keep the snapshot already on screen and say so.
     sinks.setNotice(plan.kind === "notice" ? plan.message : RECONNECT_NOTICE);
