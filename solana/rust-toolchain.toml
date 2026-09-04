@@ -1,0 +1,6 @@
+# Host toolchain pin (mollusk harness + unit tests). The SBF build ignores
+# this: cargo-build-sbf selects its own platform-tools toolchain (v1.52 /
+# rustc 1.89, from the Agave release pinned as AGAVE_VERSION in
+# .github/ci-pins.env).
+[toolchain]
+channel = "1.98.1"

@@ -1,0 +1,7 @@
+{
+  "comment": "Per-op CU regression budgets (SOLR §3.1.3 gate 3). Measured by mollusk (0.15.1, Agave 4.x runtime costs) against the committed realproof fixtures: deposit_priv 220,463; transfer_priv 247,814; transfer10x2_priv 330,502; withdraw_priv 208,485 (post the S2 pre-funded-PDA hardening, 2026-09-05). Budgets carry ~5% headroom and move only by explicit commit, like the EVM gas tables. The mollusk gate fails any op consuming more than its budget.",
+  "deposit_priv": 232000,
+  "transfer_priv": 260000,
+  "transfer10x2_priv": 347000,
+  "withdraw_priv": 219000
+}

@@ -22,6 +22,14 @@
 #                        anvil). forge-std is vendored under contracts/lib/ and
 #                        all fixtures (poseidon2.hex, committed real Groth16
 #                        proofs incl. disburse256) are in-tree — no network.
+#   solana-mollusk       solana/ program island (SOLR §3.1.3): cargo-build-sbf
+#                        + the mollusk gate suite (poseidon conformance, verify
+#                        parity vs committed realproof fixtures, tx-size, the
+#                        invariant-gate rows, CU budgets). Fast lane, runs when
+#                        solana/ or the committed fixtures change. Self-contained:
+#                        every fixture/vector is in-tree; the only network use
+#                        is the pinned Agave toolchain install (AGAVE_VERSION
+#                        in ci-pins.env).
 #   prover-pytest        prover/ CPU-only unit gates (tests import pydantic +
 #                        prover_service.{schema,calldata,config} — no jax /
 #                        rabbitsnark / GPU). Deliberately does NOT run
@@ -123,6 +131,7 @@ jobs:
       prover: ${{ steps.filter.outputs.prover }}
       indexer: ${{ steps.filter.outputs.indexer }}
       image: ${{ steps.filter.outputs.image }}
+      solana: ${{ steps.filter.outputs.solana }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -138,7 +147,7 @@ jobs:
             FILES=""
           fi
           if [ -z "$FILES" ]; then
-            for k in code contracts prover indexer image; do echo "$k=true" >> "$GITHUB_OUTPUT"; done
+            for k in code contracts prover indexer image solana; do echo "$k=true" >> "$GITHUB_OUTPUT"; done
             exit 0
           fi
           has() { echo "$FILES" | grep -qE "$1" && echo true || echo false; }
@@ -148,6 +157,7 @@ jobs:
             echo "prover=$(has '^prover/|^\.github/')"
             echo "indexer=$(has '^apps/indexer/|^contracts/|^packages/core/|^package(-lock)?\.json|^\.github/')"
             echo "image=$(has '^apps/indexer/|^packages/|^package(-lock)?\.json|^\.github/')"
+            echo "solana=$(has '^solana/|^contracts/test/fixtures/|^\.github/')"
           } >> "$GITHUB_OUTPUT"
 
   node-fast:
@@ -361,6 +371,37 @@ jobs:
         # The only gate exercising Deploy.s.sol/Smoke.s.sol wiring (proxy init,
         # verifier wiring, addresses round-trip); deployer = anvil account 0.
         run: bash deploy/gates/deploy_local.sh
+
+  solana-mollusk:
+    # solana/ program island (SOLR §3.1.3): cargo-build-sbf + the mollusk
+    # gates (poseidon conformance, verify parity vs committed EVM realproof
+    # fixtures, invariant-gate conformance, CU budget). Self-contained: the
+    # pinned Agave release ships cargo-build-sbf + platform-tools, the host
+    # toolchain comes from solana/rust-toolchain.toml via rustup, and every
+    # fixture/vector is committed — no network beyond toolchain install.
+    needs: changes
+    if: ${{ success() && needs.changes.outputs.solana == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: load toolchain pins
+        run: grep -E '^[A-Z0-9_]+=' .github/ci-pins.env >> "$GITHUB_ENV"
+      - name: install Agave toolchain (AGAVE_VERSION pin in ci-pins.env)
+        # TODO: sha256-pin the installer download (the ptau/circom checksum
+        # precedent in ci-pins.env); no local artifact of the installer exists
+        # to hash offline, so the pin is version-only for now.
+        run: |
+          sh -c "$(curl -sSfL "https://release.anza.xyz/${AGAVE_VERSION}/install")"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            solana/target
+          key: solana-cargo-${{ runner.os }}-${{ env.AGAVE_VERSION }}-${{ hashFiles('solana/Cargo.lock', 'solana/rust-toolchain.toml') }}
+      - name: mollusk gates
+        run: bash solana/gates/mollusk.sh
 
   prover-pytest:
     needs: changes
