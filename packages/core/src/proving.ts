@@ -35,9 +35,11 @@ export type Backend = "cpu" | "gpu";
 
 /** The v1 circuits (SPEC §4) plus the two 10-input instantiations of the transfer
  *  base, `transfer10` (10-out) and `transfer10x2` (2-out), plus the consumer
- *  (no-auditor) circuits the prover service serves — today `disbursePriv`, the
- *  wire tag of the 1x256 consumer batch (OPMOD §2; the artifact stem is
- *  disbursePriv256, prover/prover_service/config.py owns the mapping). */
+ *  (no-auditor) circuits (OPMOD §2): the four CPU ops the wallet proves itself —
+ *  `depositPriv`, `transferPriv`, `transfer10x2Priv`, `withdrawPriv` — and
+ *  `disbursePriv`, the wire tag of the 1x256 consumer batch the prover service
+ *  serves (the artifact stem is disbursePriv256,
+ *  prover/prover_service/config.py owns the mapping). */
 export type Circuit =
   | "deposit"
   | "transfer"
@@ -45,6 +47,10 @@ export type Circuit =
   | "transfer10x2"
   | "withdraw"
   | "disburse"
+  | "depositPriv"
+  | "transferPriv"
+  | "transfer10x2Priv"
+  | "withdrawPriv"
   | "disbursePriv";
 
 // ---------------------------------------------------------------------------
@@ -229,6 +235,63 @@ export interface DisbursePrivInput {
   encryptionNonce: FieldInput;
 }
 
+/** depositPriv (0-in / 2-out, the CONSUMER no-auditor mint — OPMOD §2): no
+ *  membership and NO authority envelope. Each output carries a receiver
+ *  ciphertext to its own note-layer VIEW key under the hybrid per-output key
+ *  (ECDH point + per-output ML-KEM-768 limbs) at `encryptionNonce + i`
+ *  (OPMOD §3.3/§3.5) — which is what lets a consumer deposit mint DIRECTLY to
+ *  a third party (the recipient discovers the note by self-scan), and why
+ *  duplicate output owners are legal (no keystream is ever shared). */
+export interface ConsumerDepositInput {
+  outputCommitments: FieldInput[]; // length 2
+  outputValues: FieldInput[]; // length 2
+  outputSalts: FieldInput[]; // length 2
+  outputOwnerPublicKeys: PointInput[]; // length 2 — SPEND keys (commitment binding)
+  outputViewPublicKeys: PointInput[]; // length 2 — note-layer VIEW keys (receiver cts)
+  kemSs: FieldInput[][]; // [2][2] per-output LE-uint128 ML-KEM-768 limbs (@bongtu/core/consumer)
+  ecdhPrivateKey: FieldInput;
+  encryptionNonce: FieldInput;
+}
+
+/** transferPriv (2-in / 2-out) AND transfer10x2Priv (10-in / 2-out): the
+ *  consumer twins of transfer/transfer10x2 — the same membership + nullifier
+ *  grammar and input-padding convention, minus every authority field, plus the
+ *  per-output view keys and KEM limbs of the hybrid receiver ciphertexts. ONE
+ *  shape serves both arities (the array lengths are the circuit's), exactly as
+ *  circuits/fixtures/consumer_lib.ts lays the witness out. `enabled` is still
+ *  a witness input; on-chain the module re-derives it from the nullifiers and
+ *  injects it into the public vector before verify (OPMOD §2), so a lying
+ *  witness simply fails verification. */
+export interface ConsumerSpendInput {
+  nullifiers: FieldInput[]; // length 2 or 10 (0 for a padded input)
+  inputCommitments: FieldInput[]; // length 2 or 10
+  inputValues: FieldInput[]; // length 2 or 10
+  inputSalts: FieldInput[]; // length 2 or 10
+  inputOwnerPrivateKey: FieldInput; // one owner spends every real input
+  ecdhPrivateKey: FieldInput;
+  kemSs: FieldInput[][]; // [nOut][2] per-output LE-uint128 ML-KEM-768 limbs
+  root: FieldInput; // membership root (a live pool root)
+  pathElements: FieldInput[][]; // [nIn][H] merkle siblings
+  leafIndices: FieldInput[]; // [nIn]
+  enabled: FieldInput[]; // [nIn] 0/1 (module re-derives + injects on-chain)
+  outputCommitments: FieldInput[]; // length 2
+  outputValues: FieldInput[]; // length 2 — [payment, change]
+  outputSalts: FieldInput[]; // length 2
+  outputOwnerPublicKeys: PointInput[]; // length 2 — SPEND keys (commitment binding)
+  outputViewPublicKeys: PointInput[]; // length 2 — note-layer VIEW keys (receiver cts)
+  encryptionNonce: FieldInput;
+}
+
+/** withdrawPriv (2-in / 1-out + proof-bound recipient): the consumer exit. The
+ *  single output is the CHANGE note back to the sender, receiver-ct'd because
+ *  there is no /notes oracle for consumer notes — the sender recovers change
+ *  by self-scan (docs/consumer.md § Discovery is self-scan). */
+export interface ConsumerWithdrawInput extends ConsumerSpendInput {
+  /** L1 payout address (public input, uint160 range) — proof-bound so a
+   *  relayer cannot redirect the payout (OPMOD §2). */
+  recipient: FieldInput;
+}
+
 // ---------------------------------------------------------------------------
 // The tagged request union + the calldata result.
 // ---------------------------------------------------------------------------
@@ -242,6 +305,10 @@ export type ProvingRequest =
   | { circuit: "transfer10x2"; input: Transfer10x2Input; backend?: Backend }
   | { circuit: "withdraw"; input: WithdrawInput; backend?: Backend }
   | { circuit: "disburse"; input: DisburseInput; backend?: Backend }
+  | { circuit: "depositPriv"; input: ConsumerDepositInput; backend?: Backend }
+  | { circuit: "transferPriv"; input: ConsumerSpendInput; backend?: Backend }
+  | { circuit: "transfer10x2Priv"; input: ConsumerSpendInput; backend?: Backend }
+  | { circuit: "withdrawPriv"; input: ConsumerWithdrawInput; backend?: Backend }
   | { circuit: "disbursePriv"; input: DisbursePrivInput; backend?: Backend };
 
 /** The map from a circuit tag to the shape of its `input`. */
@@ -252,6 +319,10 @@ export interface CircuitInputs {
   transfer10x2: Transfer10x2Input;
   withdraw: WithdrawInput;
   disburse: DisburseInput;
+  depositPriv: ConsumerDepositInput;
+  transferPriv: ConsumerSpendInput;
+  transfer10x2Priv: ConsumerSpendInput;
+  withdrawPriv: ConsumerWithdrawInput;
   disbursePriv: DisbursePrivInput;
 }
 

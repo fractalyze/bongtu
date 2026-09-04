@@ -548,8 +548,10 @@ export function freshSpendCrypto(rand: RandField, drawKem: KemDrawFn = freshKemM
 // The membership witness shared by every spending circuit: recompute each real
 // input's commitment + nullifier from the wallet key, pad the remaining slots up to
 // the circuit's arity with value-0 notes, and fold every real input to the shared
-// root.
-interface AssembledInputs {
+// root. Exported (not just used here) because the consumer builders
+// (consumerBuild.ts) spend the SAME untyped notes — the input-side algebra is
+// family-shared by construction, so reusing this function keeps it that way.
+export interface AssembledInputs {
   nullifiers: bigint[];
   inputCommitments: bigint[];
   inputValues: bigint[];
@@ -562,7 +564,7 @@ interface AssembledInputs {
   membershipOk: boolean;
 }
 
-function assembleInputs(
+export function assembleInputs(
   identity: WalletIdentity,
   inputs: WalletInputNote[],
   memberships: MembershipWitness[],

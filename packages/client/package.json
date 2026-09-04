@@ -10,6 +10,7 @@
     "./balance": "./src/balance.ts",
     "./chain": "./src/chain.ts",
     "./connection": "./src/connection.ts",
+    "./consumerBuild": "./src/consumerBuild.ts",
     "./deposit": "./src/deposit.ts",
     "./depositFlow": "./src/depositFlow.ts",
     "./derive": "./src/derive.ts",
