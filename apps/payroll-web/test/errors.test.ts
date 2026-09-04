@@ -11,7 +11,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { CHAIN_NAME, GAS_TOKEN_PHRASE } from "@bongtu/core/network";
-import { errorDetails, parseDepositAmount, payrollErrorMessage } from "../src/lib/errors.js";
+import { errorDetails, parseDepositAmount, PAYROLL_FAILURE_COPY, payrollErrorMessage } from "../src/lib/errors.js";
+import type { ChainFailure } from "@bongtu/core/errors";
 
 // ---------------------------- wallet / RPC failures -------------------------------
 
@@ -42,6 +43,24 @@ test("anything the classifier cannot name keeps the words it already has", () =>
   );
   // … and a precise revert beats a vague paraphrase of it.
   assert.match(payrollErrorMessage(new Error("execution reverted: InvalidProof")), /InvalidProof/);
+});
+
+test("the console copy table covers every ChainFailure kind, each with words", () => {
+  assert.deepEqual(
+    Object.keys(PAYROLL_FAILURE_COPY).sort(),
+    ["chain_switch", "insufficient_gas", "other", "timeout", "transport", "user_rejected"],
+    "a kind added to the classifier must get a wording decision here, not a fall-through",
+  );
+  for (const [kind, words] of Object.entries(PAYROLL_FAILURE_COPY)) {
+    for (const rejected of [false, true]) {
+      const failure = { kind, rejected, text: "engine line" } as unknown as ChainFailure;
+      const message = (words as (f: ChainFailure, e: unknown) => string)(failure, new Error("engine line"));
+      assert.ok(message.length > 0, `${kind} (rejected=${rejected}) must map to words`);
+    }
+  }
+  // The rejected-switch line is this table's own copy — pin the words themselves.
+  const declined = { kind: "chain_switch", rejected: true, text: null } as unknown as ChainFailure;
+  assert.match(PAYROLL_FAILURE_COPY.chain_switch(declined as never, declined), /^Network switch rejected in your wallet/);
 });
 
 test("the raw thrown value stays available for Copy details", () => {

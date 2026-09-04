@@ -163,6 +163,40 @@ export type ChainFailure =
   | { kind: "transport"; text: string | null }
   | { kind: "other"; text: string | null };
 
+/**
+ * The shared tail of every app's chain-failure wording, for the kinds an app has
+ * no better words for: viem's own best text when the classifier found one, else a
+ * JSON rendering, else String — because provider errors are often plain objects
+ * and the naive `String(e)` shows users "[object Object]". App-agnostic by the
+ * copy-placement rule above: it only relays what the thrown value already says.
+ */
+/**
+ * The per-app wording table shape: one entry PER ChainFailure kind, each entry
+ * typed against ITS OWN failure variant — exhaustiveness and narrowing both come
+ * from the type, so an entry never re-tests `kind` at runtime.
+ */
+export type FailureCopyTable = {
+  [K in ChainFailure["kind"]]: (failure: Extract<ChainFailure, { kind: K }>, e: unknown) => string;
+};
+
+/**
+ * Dispatch a failure through a copy table. Indexing a mapped table with a union
+ * key demands the parameter INTERSECTION, so the one cast lives here — the table
+ * type above already guarantees the entry matches the kind.
+ */
+export function failureCopy(table: FailureCopyTable, failure: ChainFailure, e: unknown): string {
+  return (table[failure.kind] as (f: ChainFailure, e: unknown) => string)(failure, e);
+}
+
+export function fallbackText(failure: ChainFailure, e: unknown): string {
+  if (failure.text !== null) return failure.text;
+  try {
+    return JSON.stringify(e);
+  } catch {
+    return String(e);
+  }
+}
+
 const REJECTED_CODES = new Set<number | string>([4001, "ACTION_REJECTED"]);
 
 function chainHasName(e: unknown, names: readonly string[]): boolean {

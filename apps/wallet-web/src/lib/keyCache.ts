@@ -1,33 +1,15 @@
-// The wallet's ONE lock instance. The lock itself — the in-memory-only KeyCache
-// state machine with its idle wipe and session-account refusals — lives in
-// @bongtu/client/keyCache; this file is the app wiring that brings it to life:
-// the lazy re-derive under THIS deployment's KDF config, and wagmi's live-account
-// read (the only honest answer to "whose key would a derivation produce?" after a
-// mid-session account switch).
-//
 // KEY-CUSTODY RULE (user-mandated): the bjj private key may live in memory only —
-// this instance is the one place that holds it across calls, and nothing here is
-// persisted (see the class's own contract in @bongtu/client/keyCache).
+// this instance is the one place that holds it across calls (the contract lives
+// with the class: @bongtu/client/keyCache). Construction goes through the shared
+// createKeyCache so the stealth seam and the deployment's KDF config cannot be
+// wired differently here than in payroll-web.
 
-import { KeyCache } from "@bongtu/client/keyCache";
-import { KEY_DERIVATION, deriveTransientIdentity } from "@bongtu/client/identity";
-import { deriveStealthKeys } from "@bongtu/client/stealthKeys";
-import type { Connection } from "@bongtu/client/connection";
-import type { WalletIdentity } from "@bongtu/client/derive";
-import type { StealthKeys } from "@bongtu/core/stealth";
-import { currentAccount } from "./wagmi.js";
+import { createKeyCache } from "@bongtu/client/keyCache";
+import { walletEdge } from "./wagmi.js";
 
-/** The wallet's one cache. Flows take it through their deps seam so tests can run
- *  their own instance with a fake clock. It holds BOTH derived values — the
- *  spending key and the stealth identity — under the one set of custody rules;
- *  the stealth seam is its own EIP-712 struct (stealthKeys.ts), unlocked lazily
- *  by the first stealth action. */
-export const keyCache = new KeyCache({
-  derive: (connection: Connection): Promise<WalletIdentity> =>
-    deriveTransientIdentity(connection, KEY_DERIVATION),
-  deriveStealth: (connection: Connection): Promise<StealthKeys> => deriveStealthKeys(connection),
-  currentAccount,
-});
+/** The wallet's one cache; flows take it through their deps seam so tests can
+ *  run their own instance with a fake clock. */
+export const keyCache = createKeyCache(walletEdge);
 
 // Stable module-level bindings for useSyncExternalStore (a fresh closure per render
 // would resubscribe on every paint).

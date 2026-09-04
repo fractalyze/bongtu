@@ -51,9 +51,11 @@ import {
   ensureChain,
   mintTestToken,
   submitTransfer,
+  WALLET_FAILURE_COPY,
   walletErrorMessage,
   type Connection,
 } from "@bongtu/client/connection";
+import type { ChainFailure } from "@bongtu/core/errors";
 import { describeWallet, NEUTRAL_WALLET_NAME } from "../src/lib/walletBrand.js";
 import type { Calldata } from "@bongtu/core/proving";
 
@@ -351,6 +353,24 @@ test("walletErrorMessage classifies viem's layered errors like the plain provide
     message: 'The contract function "transfer" reverted.\n\nContract Call:\n  address: 0x...',
   };
   assert.equal(walletErrorMessage(reverted), 'The contract function "transfer" reverted.');
+});
+
+test("the wallet copy table covers every ChainFailure kind, each with words", () => {
+  assert.deepEqual(
+    Object.keys(WALLET_FAILURE_COPY).sort(),
+    ["chain_switch", "insufficient_gas", "other", "timeout", "transport", "user_rejected"],
+    "a kind added to the classifier must get a wording decision here, not a fall-through",
+  );
+  for (const [kind, words] of Object.entries(WALLET_FAILURE_COPY)) {
+    for (const rejected of [false, true]) {
+      const failure = { kind, rejected, text: "engine line" } as unknown as ChainFailure;
+      const message = (words as (f: ChainFailure, e: unknown) => string)(failure, new Error("engine line"));
+      assert.ok(message.length > 0, `${kind} (rejected=${rejected}) must map to words`);
+    }
+  }
+  // A DECLINED switch is a rejection in the wallet's words — pin the exact line.
+  const declined = { kind: "chain_switch", rejected: true, text: null } as unknown as ChainFailure;
+  assert.equal(WALLET_FAILURE_COPY.chain_switch(declined as never, declined), "Transaction rejected in your wallet.");
 });
 
 // ========================= (5) THE WC BUILD FLAG ============================

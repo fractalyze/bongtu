@@ -11,29 +11,33 @@
 
 import { walletErrorMessage } from "@bongtu/client/connection";
 import { parseKkrw } from "@bongtu/client/money";
-import { classifyChainFailure, describeThrown } from "@bongtu/core/errors";
+import { classifyChainFailure, describeThrown, failureCopy, type FailureCopyTable } from "@bongtu/core/errors";
 import { CHAIN_NAME } from "@bongtu/core/network";
 
 /**
- * The console's message for a failed wallet/RPC interaction. Delegates the two
- * verdicts the shared wallet wording already covers (user rejection, gas), and
- * words the rest itself. Anything the classifier cannot name falls through to
- * the engine's own words: a precise revert line beats a vague paraphrase.
+ * The console's words per ChainFailure kind — a Record over the full union, so a
+ * kind added to the shared classifier is a tsc error here instead of a silent
+ * fall-through. The desk-machine failures (network switch, timeout, transport)
+ * get the console's own words; the rest delegate to the shared wallet wording
+ * (user rejection, gas, and the catch-all — where the engine's own line, a
+ * precise revert, beats a vague paraphrase of it).
  */
+export const PAYROLL_FAILURE_COPY: FailureCopyTable = {
+  user_rejected: (_failure, e) => walletErrorMessage(e),
+  insufficient_gas: (_failure, e) => walletErrorMessage(e),
+  chain_switch: (failure) =>
+    failure.rejected
+      ? `Network switch rejected in your wallet. Switch to ${CHAIN_NAME} and try again.`
+      : `Could not switch the wallet to ${CHAIN_NAME}.`,
+  timeout: () => "No response — the request timed out. Try again in a moment.",
+  transport: () => "Could not reach the network. Check your connection and try again.",
+  other: (_failure, e) => walletErrorMessage(e),
+};
+
+/** The console's message for a failed wallet/RPC interaction, routed through the
+ *  exhaustive table above. */
 export function payrollErrorMessage(e: unknown): string {
-  const failure = classifyChainFailure(e);
-  switch (failure.kind) {
-    case "chain_switch":
-      return failure.rejected
-        ? `Network switch rejected in your wallet. Switch to ${CHAIN_NAME} and try again.`
-        : `Could not switch the wallet to ${CHAIN_NAME}.`;
-    case "timeout":
-      return "No response — the request timed out. Try again in a moment.";
-    case "transport":
-      return "Could not reach the network. Check your connection and try again.";
-    default:
-      return walletErrorMessage(e);
-  }
+  return failureCopy(PAYROLL_FAILURE_COPY, classifyChainFailure(e), e);
 }
 
 /** The full thrown value for the "Copy details" affordance. Details never leave the

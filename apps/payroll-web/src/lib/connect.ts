@@ -11,7 +11,7 @@
 
 import { createPublicClient, createWalletClient, custom, http, type PublicClient } from "viem";
 import { liveChain } from "@bongtu/client/chain";
-import type { Connection } from "@bongtu/client/connection";
+import type { Connection, WalletEdge } from "@bongtu/client/connection";
 
 interface Eip1193 {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;
@@ -68,8 +68,10 @@ export async function currentAccount(): Promise<string | null> {
 }
 
 /** Subscribe to the injected wallet's accountsChanged (the console locks the key
- *  and signs out on it — an admin session must not survive an account swap). */
-export function watchInjectedAccount(onChange: () => void): () => void {
+ *  and signs out on it — an admin session must not survive an account swap).
+ *  EIP-1193 signals a disconnect AS accountsChanged with an empty array, so the
+ *  accounts are passed through for callers that split the two meanings. */
+export function watchInjectedAccount(onChange: (accounts: string[]) => void): () => void {
   const injected = injectedProvider() as
     | (Eip1193 & {
         on?: (ev: string, fn: (a: string[]) => void) => void;
@@ -77,7 +79,24 @@ export function watchInjectedAccount(onChange: () => void): () => void {
       })
     | null;
   if (!injected?.on) return () => {};
-  const handler = (): void => onChange();
+  const handler = (accounts: string[]): void => onChange(accounts);
   injected.on("accountsChanged", handler);
   return () => injected.removeListener?.("accountsChanged", handler);
 }
+
+/** This app's WalletEdge. The injected stream carries both meanings in one
+ *  event (EIP-1193: a disconnect is accountsChanged with NO accounts), so the
+ *  adapter splits them to honour the quartet's contract — a handler registered
+ *  for `disconnected` must actually hear it. The console itself treats every
+ *  account event as a sign-out and keeps calling watchInjectedAccount directly;
+ *  a console consumer of THIS adapter wanting that behaviour registers both
+ *  handlers. */
+export const walletEdge: WalletEdge = {
+  hasInjectedWallet,
+  openConnection: openInjectedConnection,
+  currentAccount,
+  watchAccount: (handlers) =>
+    watchInjectedAccount((accounts) =>
+      accounts.length === 0 ? handlers.disconnected?.() : handlers.accountsChanged?.(),
+    ),
+};

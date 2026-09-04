@@ -42,8 +42,9 @@
 
 import type { StealthKeys } from "@bongtu/core/stealth";
 import type { WalletIdentity } from "./derive.js";
-import { ACCOUNT_MISMATCH_MESSAGE, assertSessionIdentity } from "./identity.js";
-import type { Connection } from "./connection.js";
+import { ACCOUNT_MISMATCH_MESSAGE, assertSessionIdentity, KEY_DERIVATION, deriveTransientIdentity } from "./identity.js";
+import { deriveStealthKeys } from "./stealthKeys.js";
+import type { Connection, WalletEdge } from "./connection.js";
 
 /** How long an unused spending key is kept before the wallet re-locks itself. */
 export const IDLE_WIPE_MS = 10 * 60 * 1000;
@@ -64,11 +65,12 @@ export interface KeyCacheDeps {
 }
 
 /** What a KeyCache must be handed to exist: `derive` (the identity derivation,
- *  carrying the app's KDF config — deriveTransientIdentity partially applied),
- *  `deriveStealth` (the stealth meta-key derivation — required so no app can hold
- *  stealth keys outside the lock for lack of a seam), and `currentAccount` (the
- *  wallet edge's live-account read — wagmi in wallet-web). Clock/timer deps
- *  default to the real ones. */
+ *  carrying the deployment's KDF config), `deriveStealth` (the stealth meta-key
+ *  derivation — required so no app can hold stealth keys outside the lock for
+ *  lack of a seam), and `currentAccount` (the wallet edge's live-account read).
+ *  Clock/timer deps default to the real ones. Apps construct through
+ *  createKeyCache below; this wiring seam exists for tests, which need to fake
+ *  the derivations and the clock. */
 export type KeyCacheWiring = Pick<KeyCacheDeps, "derive" | "deriveStealth" | "currentAccount"> &
   Partial<KeyCacheDeps>;
 
@@ -277,6 +279,23 @@ export class KeyCache {
   }
 }
 
-// The app owns its ONE cache instance (apps/wallet-web/src/lib/keyCache.ts wires
-// this class to its wagmi currentAccount + configured derivation); the flows take
-// it through their deps seam so tests run their own instance with a fake clock.
+/**
+ * The one sanctioned app construction: wire the lock to the wallet edge's
+ * live-account read under the deployment's KDF config, with BOTH derivations
+ * (spending + stealth) supplied here. The key-custody rule — no app may hold a
+ * cache missing the stealth seam, and both apps must derive the same key for
+ * the same account — is structural this way: an app would have to bypass this
+ * helper deliberately (and re-wire the derivations by hand) to get anything
+ * else. The parameter is the slice the lock actually consumes (apps pass their
+ * full WalletEdge, which satisfies it). Each app owns its ONE instance; the
+ * flows take it through their deps seam so tests run their own with a fake
+ * clock.
+ */
+export function createKeyCache(edge: Pick<WalletEdge, "currentAccount">): KeyCache {
+  return new KeyCache({
+    derive: (connection: Connection): Promise<WalletIdentity> =>
+      deriveTransientIdentity(connection, KEY_DERIVATION),
+    deriveStealth: (connection: Connection): Promise<StealthKeys> => deriveStealthKeys(connection),
+    currentAccount: () => edge.currentAccount(),
+  });
+}
