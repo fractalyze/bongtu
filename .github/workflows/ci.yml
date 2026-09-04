@@ -1,7 +1,8 @@
 # bongtu CI — every gate a GitHub-hosted ubuntu runner can genuinely pass.
 #
 # INCLUDED
-#   node                 npm ci + typecheck (root cross-tree tsc + every workspace
+#   node-fast/-payroll/-wallet
+#                        npm ci + typecheck (root cross-tree tsc + every workspace
 #                        tsc) + unit tests (core, payroll-web, wallet-web) + the
 #                        two vite builds.
 #   indexer-units        the anvil-free indexer unit suite (tree + disclosure +
@@ -61,6 +62,16 @@
 #                        TEST_DATABASE_URL makes run.sh use the service instead
 #                        of spinning docker itself).
 #
+# LANES (2026-09-04): pull requests run the FAST lane only — the `changes`
+# router skips every job whose inputs did not change, and the node job is
+# split (node-fast / node-payroll / node-wallet) so the wall time is the
+# slowest suite, not their sum. The HEAVY lane (circuits, e2e-m0,
+# indexer-conformance) runs on pushes to main, on workflow_dispatch, and on
+# PRs labeled `ci:heavy` — measured warm timings made the call: forge 33s,
+# prover 14s, indexer-units 73s, e2e 2m43s/conformance 2m19s off a warm
+# artifact cache, but a packages/core change re-keys the circuits cache into
+# a ~12-min rebuild, which cannot fit the 5-minute PR budget.
+#
 # WALL-TIME BUDGET: on a typical push (circuits unchanged, caches warm) the
 # circuits job is lookup-only and e2e-m0 / conformance run in parallel off the
 # artifact cache. Those two carry the portal + consumer legs, so they — not the
@@ -99,9 +110,51 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  node:
+  changes:
+    # PR path router for the FAST lane: each fast job runs only when its
+    # inputs changed (a docs-only PR runs nothing below). Push-to-main and
+    # workflow_dispatch force every output true — a filter bug can at worst
+    # hide a breakage from a PR, never from main.
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      contracts: ${{ steps.filter.outputs.contracts }}
+      prover: ${{ steps.filter.outputs.prover }}
+      indexer: ${{ steps.filter.outputs.indexer }}
+      image: ${{ steps.filter.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          BASE: ${{ github.base_ref }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch -q origin "$BASE"
+            FILES=$(git diff --name-only "origin/$BASE...HEAD")
+          else
+            FILES=""
+          fi
+          if [ -z "$FILES" ]; then
+            for k in code contracts prover indexer image; do echo "$k=true" >> "$GITHUB_OUTPUT"; done
+            exit 0
+          fi
+          has() { echo "$FILES" | grep -qE "$1" && echo true || echo false; }
+          {
+            echo "code=$(echo "$FILES" | grep -vE '^docs/|^\.dev/|\.md$|^LICENSE|^NOTICE' | grep -q . && echo true || echo false)"
+            echo "contracts=$(has '^contracts/|^deploy/|^\.github/')"
+            echo "prover=$(has '^prover/|^\.github/')"
+            echo "indexer=$(has '^apps/indexer/|^contracts/|^packages/core/|^package(-lock)?\.json|^\.github/')"
+            echo "image=$(has '^apps/indexer/|^packages/|^package(-lock)?\.json|^\.github/')"
+          } >> "$GITHUB_OUTPUT"
+
+  node-fast:
+    needs: changes
+    if: ${{ success() && needs.changes.outputs.code == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -132,16 +185,62 @@ jobs:
         run: npm test -w @bongtu/relayer
       - name: sweeper tests
         run: npm test -w @bongtu/sweeper
+
+  node-payroll:
+    needs: changes
+    if: ${{ success() && needs.changes.outputs.code == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.17.1
+          cache: npm
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: nm
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node-modules-v1-${{ hashFiles('package-lock.json') }}
+      - if: steps.nm.outputs.cache-hit != 'true'
+        run: npm ci
       - name: payroll-web tests
         run: npm test -w @bongtu/payroll-web
-      - name: wallet-web tests
-        run: npm test -w @bongtu/wallet-web
       - name: payroll-web build
         run: npm run build -w @bongtu/payroll-web
+
+  node-wallet:
+    needs: changes
+    if: ${{ success() && needs.changes.outputs.code == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.17.1
+          cache: npm
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: nm
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node-modules-v1-${{ hashFiles('package-lock.json') }}
+      - if: steps.nm.outputs.cache-hit != 'true'
+        run: npm ci
+      - name: wallet-web tests
+        run: npm test -w @bongtu/wallet-web
       - name: wallet-web build
         run: npm run build -w @bongtu/wallet-web
 
   indexer-units:
+    needs: changes
+    if: ${{ success() && needs.changes.outputs.indexer == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -202,6 +301,8 @@ jobs:
     # `docker compose up` + the pg integration test (apps/indexer/test/
     # pg_integration.sh) are LOCAL gates — they need a live RPC, a deployed pool,
     # and CPU proofs, so they are deliberately NOT run here (see the header note).
+    needs: changes
+    if: ${{ success() && needs.changes.outputs.image == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -218,6 +319,8 @@ jobs:
             -t bongtu-indexer:ci .
 
   forge:
+    needs: changes
+    if: ${{ success() && needs.changes.outputs.contracts == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -234,6 +337,8 @@ jobs:
         run: bash deploy/gates/deploy_local.sh
 
   prover-pytest:
+    needs: changes
+    if: ${{ success() && needs.changes.outputs.prover == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -248,6 +353,11 @@ jobs:
         working-directory: prover
 
   circuits:
+    # HEAVY LANE: main pushes, manual dispatch, and PRs labeled ci:heavy.
+    # Measured: warm e2e is ~3min, but any packages/core change re-keys the
+    # artifact cache into a ~12-min rebuild — the lane cannot fit the 5-min
+    # PR budget. Post-merge main runs stay unfiltered.
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:heavy')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     outputs:
@@ -388,6 +498,7 @@ jobs:
 
   e2e-m0:
     needs: circuits
+    if: ${{ success() && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:heavy')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -435,6 +546,7 @@ jobs:
 
   indexer-conformance:
     needs: circuits
+    if: ${{ success() && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:heavy')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     # The indexer is Postgres-only (U-I4): the conformance gate ingests into a

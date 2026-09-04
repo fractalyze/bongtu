@@ -272,6 +272,14 @@ Milestone trackers and decision records (applied/deferred/rejected lists, layout
 Testnet PoC: single-party trusted setup, a demo arbiter key, and a mock kKRW token. Mainnet requires a
 phase-2 MPC ceremony and a real authority key (see [`docs/security-model.md`](docs/security-model.md)).
 
+## Contributing
+
+- **Merging**: squash-and-merge by default; rebase-merge when a PR's commits
+  are each independently meaningful. Never a merge commit — main stays linear.
+- **PRs**: written in English, structured for a human skim — a short summary,
+  the review points that deserve scrutiny, related issues. Long-lived detail
+  belongs in the issue or the commit body, not the PR description.
+
 ## License & credits
 
 Licensed under the **Apache License, Version 2.0**; see [`LICENSE`](./LICENSE) and [`NOTICE`](./NOTICE).
