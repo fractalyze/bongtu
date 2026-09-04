@@ -11,9 +11,11 @@ this README covers only what the package contains and how to run it.
 
 ## Modules
 
-Raw-source package: `"exports": { "./*": "./src/*.ts" }`, no build step — consumers
-import `@bongtu/core/<module>` and tsc (NodeNext), tsx, and Vite all resolve the same
-`.ts` source.
+Raw-source package with an explicit exports map (subpath → source file), no build
+step — consumers import `@bongtu/core/<module>` and tsc (NodeNext), tsx, and Vite all
+resolve the same `.ts` source. The map is the one routing table: source files live in
+theme folders (`crypto/`, `notes/`, `chain/`, `wire/`) but the import subpaths below
+are the stable public names.
 
 | module | owns |
 |---|---|
@@ -21,13 +23,17 @@ import `@bongtu/core/<module>` and tsc (NodeNext), tsx, and Vite all resolve the
 | `poseidon` | Poseidon-v1 over BN254 (`poseidon2` / `poseidonN`, circomlib-compatible via `poseidon-lite`), `FIELD_PRIME` |
 | `babyjub` | pure-JS BabyJubJub group law + scalar multiplication — the one EC op witness building needs, with no curve dependency |
 | `note` | note machinery: `commitment`, `nullifier`, `deriveKeypair`, `ecdhSharedSecret`, `poseidonEncrypt` / `poseidonDecrypt` (Poseidon-sponge symmetric), `assertDistinctOwnerPubkeys` (the two-time-pad guard) |
+| `consumer` | consumer (no-auditor) note-layer crypto (OPMOD §3): per-output hybrid receiver keys (bjj ECDH view half + ML-KEM-768 encaps), `viewTag` derivation, and the frozen domain-tag literals the five consumer circuits mirror byte-equal |
 | `eddsa` | bjj EdDSA-Poseidon sign/verify for the indexer `/notes` read-auth: `notesAuthMessage`, `signNotesAuth`, `verifyNotesAuth`, `packSignature` / `parseSignature` |
 | `stealth` | stealth-address derivation for pool-edge payments — dual-curve DKSAP (`stealthKeysFromScalars`, sender `deriveStealthAddress`, view-key `scanStealthAnnouncement`, `recoverStealthKey`, `randomEphemeralScalar`): BabyJubJub ECDH view half + secp256k1 one-time spend key, pinned by a committed determinism vector |
 | `pubkey` | compressed bjj pubkey codec (`packPubkey` / `unpackPubkey`) — the 32-byte note-owner identifier on every wire |
 | `envelope` | the authority (non-repudiation) envelope codec — per-op plaintext layouts as inverse `buildAuthorityPlaintext` / `parseEnvelope`, `envelopePlaintextLen` / `authorityCiphertextLen`, and the `disclosureChain` Poseidon(2) fold; the disburse layout + fold are byte-pinned to the committed disburse256 proof's publics by `test/envelope.test.ts`; circuit parity for the other three ops is held by the hand-decoded `circuits/gates/auditor_decrypt_check.ts` gate |
+| `kem` | hybrid (ECDH ‖ ML-KEM-768) authority-envelope key derivation: the LE-uint128 shared-secret limb packing, `hybridKey` / `kemBinding` folds, frozen tag literals mirrored by the four enterprise circuits |
 | `proving` | the shared proving wire types: `ProvingRequest` (a complete, already-resolved circom witness input + circuit tag), `Calldata` (`{a,b,c,pub}`), the per-circuit input shapes, and `toWire` (deep bigint → decimal-string conversion for JSON) |
-| `indexerApi` | the spec-normative indexer read-API wire shapes (`FeedEvent`, `OwnerNote`, `Head`, `PathResult`, `Alarm`, …) plus the typed fetch client (`getHead`, `getPath`, `getEvents`, `getNullifiers`, `getAlarms`, `buildNotesUrl`, `fetchNotes`) |
-| `extern` | node-only `createRequire` loader for the deliberately repo-external heavy deps (ethers v5, snarkjs, circomlibjs) via `BONGTU_NODE_MODULES` — never import it from browser code |
+| `indexerApi` | the spec-normative indexer read-API wire shapes (`FeedEvent`, `OwnerNote`, `Head`, `PathResult`, …), the typed fetch layer, the `/names` directory (`resolveName`, `registerName`, v2 registration), and the `IndexerClient` class binding a URL once with owner-scoped read capabilities — the import home for every indexer consumer since the client-side barrel was removed (issue #15) |
+| `errors` | the headless error-surface standard: the AppError consequence-class taxonomy plus the three shared boundary classifiers (indexer reads, chain submissions, in-browser proving) returning structured verdicts each app words itself |
+| `network` | the ONE home for the live pool's deployment-coupled chain facts (chain id, gas pin, pool/module/token addresses, `CONSUMER_MODULES`), mirrored field-for-field from `deploy/addresses.450815.json` by a record-equality test |
+| `extern` | node-only `createRequire` loader for the deliberately repo-external heavy deps (snarkjs, circomlibjs) via `BONGTU_NODE_MODULES` — never import it from browser code |
 
 ## Who consumes it
 
@@ -64,7 +70,7 @@ const path = tree.merklePath(0);
 foldToRoot(c, path.siblings, 0) === tree.getRoot(); // true
 ```
 
-`extern` is the one node-only module: it loads ethers/snarkjs/circomlibjs at runtime
+`extern` is the one node-only module: it loads snarkjs/circomlibjs at runtime
 from an external `node_modules` (env `BONGTU_NODE_MODULES` — the repo deliberately
 ships no local install of them; see the repo [`CLAUDE.md`](../../CLAUDE.md) and
 [`docs/toolchain.md`](../../docs/toolchain.md)).
@@ -72,7 +78,7 @@ ships no local install of them; see the repo [`CLAUDE.md`](../../CLAUDE.md) and
 ## Testing
 
 ```sh
-npm test              # 108 tests (tsx + node --test over test/*.test.ts)
+npm test              # 147 tests (tsx + node --test over test/*.test.ts)
 npm run typecheck     # tsc --noEmit
 ```
 
