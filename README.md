@@ -193,6 +193,7 @@ Each has its own README.
 - [`apps/indexer/`](apps/indexer/README.md): event ingest, tree mirror, `/notes` + disclosure alarms (arbiter mode)
 - [`apps/payroll-web/`](apps/payroll-web/README.md): the employer pay console — MetaMask login, one worksheet, batch disburse
 - [`apps/wallet-web/`](apps/wallet-web/README.md): self-custody wallet, in-browser proving
+- [`apps/consumer-web/`](apps/consumer-web/README.md): the consumer self-scan wallet, no-auditor P2P ops (tokenless, in-browser proving)
 - [`deploy/`](deploy/README.md): forge scripts, live-chain drivers, anvil gates — recorded addresses at the top
 - [`docs/`](docs/): reference docs, one file per topic (index below)
 - [`.dev/`](.dev/README.md): working docs: milestone trackers and decision records
@@ -211,6 +212,7 @@ How to build, test, and run each component lives in its own README:
 - **Circuits** (prove_all, soundness gates): [`circuits/README.md`](circuits/README.md)
 - **Indexer** (local + live chain, Postgres, docker compose): [`apps/indexer/README.md`](apps/indexer/README.md)
 - **Wallet** (dev server, in-browser proving): [`apps/wallet-web/README.md`](apps/wallet-web/README.md)
+- **Consumer wallet** (self-scan, tokenless): [`apps/consumer-web/README.md`](apps/consumer-web/README.md)
 - **Payroll console**: [`apps/payroll-web/README.md`](apps/payroll-web/README.md)
 - **GPU prover service**: [`prover/README.md`](prover/README.md)
 - **Deploy + e2e** (local anvil, live-chain runbook): [`deploy/README.md`](deploy/README.md)
@@ -232,8 +234,10 @@ System guarantees and inter-component contracts live in [`docs/`](docs/), one fi
   UUPS upgrade path, and the arbiter-key-at-deploy coupling.
 - [Indexer](docs/indexer.md): the mirror invariant, single-transaction persist and gap-only resume, the HTTP
   API with its read-auth, and the arbiter-mode trust boundary.
-- [Wallet](docs/wallet.md): key derivation from a MetaMask signature, in-browser proving and the stale-zkey
-  hazard, the deposit/faucet shape, pay-by-name, the withdraw destination, and the indexer dependency.
+- [Wallet](docs/wallet.md): the two wallets on one engine: the shared core (key derivation, the lock,
+  in-browser proving and the stale-zkey hazard, spend chains), the enterprise wallet (view-token
+  session, arbiter-coupled reads, deposit/faucet, relayer withdraw, portal receive, pay-by-name),
+  and the consumer wallet (tokenless self-scan, the P2P 4 ops, registry-name sends).
 - [Relayer](docs/relayer.md): the gas-sponsoring withdraw submitter — why a proof-bound recipient makes
   third-party submission safe, its API, and the no-silent-fallback client contract.
 - [Portal](docs/portal.md): stealth deposits — how a plain transfer from any wallet becomes a shielded
@@ -262,7 +266,8 @@ How to run each piece is owned by its own README:
 - Folder READMEs: each folder's own layout, run/test commands, and API surface:
   [`packages/core`](packages/core/README.md) · [`apps/indexer`](apps/indexer/README.md) ·
   [`circuits`](circuits/README.md) · [`contracts`](contracts/README.md) ·
-  [`apps/payroll-web`](apps/payroll-web/README.md) · [`apps/wallet-web`](apps/wallet-web/README.md).
+  [`apps/payroll-web`](apps/payroll-web/README.md) · [`apps/wallet-web`](apps/wallet-web/README.md) ·
+  [`apps/consumer-web`](apps/consumer-web/README.md).
 
 Milestone trackers and decision records (applied/deferred/rejected lists, layout and CI rationale) live in
 [`.dev/`](.dev/README.md): agent-facing working docs, kept out of `docs/`.

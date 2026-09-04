@@ -7,7 +7,9 @@ material anywhere** — no arbiter key input, no authority envelope, no arbiter-
 bongtu included, can open a consumer note involuntarily. This page states the family's contracts
 and guarantees; the full design record — every derivation, budget and rejected alternative — is
 [`.dev/op-module-design.md`](../.dev/op-module-design.md) (cited as `OPMOD §n`), which this page
-summarizes and does not replace.
+summarizes and does not replace. The consumer wallet app itself (custody, session,
+screens) is [wallet.md](wallet.md#the-consumer-wallet-appsconsumer-web)'s story; this
+page owns the protocol family.
 
 Both families share **one pool**: one IMT, one nullifier set, one kKRW escrow. Notes are
 **untyped** — the commitment/nullifier algebra is byte-identical across families — so notes
