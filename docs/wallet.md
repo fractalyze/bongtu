@@ -1,20 +1,41 @@
 # Wallet
 
-`apps/wallet-web` is the self-custody public app: a wallet in through the RainbowKit connect modal
-(every installed extension via EIP-6963, plus WalletConnect QR / deep-link when the build is
-configured for it — wagmi v2 + viem v2 underneath), a BabyJubJub spending key derived on the fly,
-notes read from an arbiter indexer, and transfer / transfer10x2 / withdraw / deposit proved
-**in the browser**. It imports `@bongtu/core` source directly, so every commitment, nullifier and
-Poseidon-sponge ciphertext it builds is byte-identical to what the provers prove and the contract
-verifies. Run commands and the test layout are owned by `apps/wallet-web/README.md`.
+bongtu ships **two wallet apps on one browser engine**. `apps/wallet-web` is the
+**enterprise wallet**: notes read from an arbiter indexer over a view-token session, the
+audited pool entrypoints driven directly. `apps/consumer-web` is the **consumer
+wallet**: discovery by self-scan of the public feed, a tokenless session, and the
+no-auditor module family ([consumer.md](consumer.md)). Both are self-custody: a wallet
+in through the RainbowKit connect modal (every installed extension via EIP-6963, plus
+WalletConnect QR / deep-link when the build is configured for it — wagmi v2 + viem v2
+underneath), a BabyJubJub spending key derived on the fly, and every proof generated
+**in the browser**. Both import `@bongtu/core` source directly, so every commitment,
+nullifier and ciphertext they build is byte-identical to what the provers prove and the
+contracts verify. The shared machinery is `@bongtu/client`, the engine package all the
+web apps drive; the app shells are forked copies by recorded decision
+(`.dev/architecture-review.md`), not a shared UI package. Run commands and each app's
+test layout are owned by its own README.
 
-Both web apps are **desktop-only**: a mobile browser gets a "use a PC" notice instead of the app
-(`@bongtu/client` `device.ts`, a user-agent verdict shared by both roots — MetaMask has no injected
-provider in a phone's system browser, and the flows would break mid-way rather than at the door).
-The WalletConnect QR path pairs a *phone-held wallet* to a *desktop browser session*; it does not
-make the apps themselves mobile.
+| | enterprise wallet ([`apps/wallet-web`](../apps/wallet-web/README.md)) | consumer wallet ([`apps/consumer-web`](../apps/consumer-web/README.md)) |
+|---|---|---|
+| op family | the audited pool entrypoints: transfer, transfer10x2, withdraw, deposit | the P2P 4-op module family: depositPriv, transferPriv, transfer10x2Priv, withdrawPriv |
+| session | view token traded from the arbiter indexer | tokenless by construction |
+| discovery | signed `GET /notes` + `/history` against an arbiter indexer | self-scan of the public feed with the wallet's own keys |
+| recipient input | bjj address or registered name | registered name only |
+| authority | every op encrypts an authority envelope inside the proof | no authority material anywhere |
 
-## Key derivation
+All three web apps are **desktop-only**: a mobile browser gets a "use a PC" notice
+instead of the app (`@bongtu/client` `device.ts`, a user-agent verdict shared by the app
+roots — MetaMask has no injected provider in a phone's system browser, and the flows
+would break mid-way rather than at the door). The WalletConnect QR path pairs a
+*phone-held wallet* to a *desktop browser session*; it does not make the apps themselves
+mobile.
+
+## The shared engine core
+
+Everything in this section holds for both wallets; where a file path names an app
+module, both apps carry the forked twin unless a subsection says otherwise.
+
+### Key derivation
 
 There is no seed and no persisted private key. The spending key is a pure function of a wallet
 signature over a domain-separated EIP-712 struct (`@bongtu/client` `derive.ts` + `connection.ts` — the engine package both web apps share):
@@ -40,33 +61,33 @@ Consequences worth stating plainly:
 - **The signature *is* the spending key.** Anyone who can make the account sign this exact struct
   reconstructs the bjj key. v1 assumes an EOA with deterministic ECDSA; ERC-4337 accounts need a
   different derivation. Injected wallets are taken to satisfy it, and a wallet reached over
-  WalletConnect has to prove it — see *Signing in*.
+  WalletConnect has to prove it — see *Connecting, and WalletConnect*.
 - **`keyVersion` is a rotation lever.** It sits in the EIP-712 domain, so bumping it rotates every
   derived key — and orphans every note held under the old one. It is pinned per deployment in
   `src/config.ts`; never change it casually.
 - The exact struct bytes are consensus for the user's identity: editing `name`, `version` or the
   message text rotates everybody's key.
 
-## Signing in, and the lock
+The consumer wallet derives its whole identity from this ONE signature: the spend key
+above, plus the note-layer view key and the ML-KEM decapsulation key
+([consumer.md](consumer.md#discovery-is-self-scan)), so recovery stays "re-sign the
+same struct" in both wallets.
 
-Two different secrets, two different lifetimes.
+### The lock
 
-**Viewing** runs on a view token. Connecting derives the key once, signs a challenge with it, and
-trades that for an HMAC token from the indexer (`/auth/challenge` + `/auth/token`, see
-`docs/indexer.md`); the token and the compressed pubkey are all that reach `localStorage`
-(`@bongtu/client` `session.ts`). Balance and activity read with the token alone — no key, no popup — so a
-returning visit restores silently as long as the wallet still reports the same account.
-
-**Spending** runs on the key itself, held by the `@bongtu/client` `KeyCache` (each app's `src/lib/keyCache.ts` constructs its one instance through the engine's `createKeyCache`, so the KDF config and the stealth seam cannot be miswired per-app) — the wallet's *lock*, and the
+**Spending** runs on the key itself, held by the `@bongtu/client` `KeyCache` (each app's
+`src/lib/keyCache.ts` constructs its one instance through the engine's `createKeyCache`, so the
+KDF config and the stealth seam cannot be miswired per-app) — the wallet's *lock*, and the
 only place the bjj private key lives between actions. It is memory-only: never storage, never React
 state, gone on reload.
 
-A **fresh login starts unlocked**: connecting already derived the key to sign the token handshake,
-so `App.connectWallet` hands that identity to the lock (`keyCache.seed`, which re-checks it against
-the session pubkey exactly as `unlock` checks a derived one) instead of dropping it. No second
-popup, and the idle clock starts at login. A **silently restored session starts locked** — nothing
-persists the key — and its first send/withdraw/deposit derives it (one signature, shown as an
-"Unlocking" stage). Either way later actions reuse the hold, so they cost only the transaction popup.
+A **fresh login starts unlocked**: connecting already derived the key (the login flows
+below), so `App.connectWallet` hands that identity to the lock (`keyCache.seed`, which re-checks it
+against the session pubkey exactly as `unlock` checks a derived one) instead of dropping it. No
+second popup, and the idle clock starts at login. A **silently restored session starts locked** —
+nothing persists the key — and its first send/withdraw/deposit derives it (one signature, shown as
+an "Unlocking" stage). Either way later actions reuse the hold, so they cost only the transaction
+popup.
 
 The hold ends on sign-out, on a wallet account switch, and after 10 idle minutes — enforced twice,
 by a timer that also flips the header's padlock to closed, and by a timestamp check at use time that
@@ -74,22 +95,25 @@ a throttled background tab cannot skip. The first login on a device gets a one-s
 exactly this (`src/lib/lockIntro.ts` stores one boolean — not key material — under
 `bongtu.lockIntro.v1`).
 
-"Idle" counts **user actions only**. A background poll that signs a read with the held key takes it
+"Idle" counts **user actions only**. A background poll that uses the held key takes it
 through `keyCache.peek()`, which returns the identity without re-arming the wipe or asking the wallet
 which account is selected — otherwise a console left open on a refreshing screen would never re-lock.
-The payroll console (whose tokenless reads are signed) is the caller that needs it; the wallet reads
-with a view token and so peeks nowhere.
+The payroll console (whose tokenless reads are signed) and the consumer wallet's
+background scan (which needs the view keys) are the callers that need it; the enterprise
+wallet reads with a view token and so peeks nowhere.
 
 A held key belongs to exactly one wallet account. If the selected account changes, the wallet
 refuses the action outright (`ACCOUNT_MISMATCH_MESSAGE`) rather than derive and spend under a
 stranger's key — and when a held key already proves the mismatch, it refuses without a popup.
 
-The login itself is a flow, not component code: `runLogin` (`@bongtu/client` `loginFlow.ts`) takes the
-wallet the connect modal just opened (`connection.ts requireConnection`), derives, runs the two
-checks below, trades the identity for a view token and persists — and when a check fails it throws
-having written **nothing**. `App.connectWallet` is left with the lock, the screen state and the
-one-shot read a tokenless session does; the Onboarding screen opens the RainbowKit modal first when
-no wallet is live and runs the login the moment one is.
+The login itself is a flow, not component code (`@bongtu/client` `loginFlow.ts`): it
+takes the wallet the connect modal just opened (`connection.ts requireConnection`),
+derives, runs the two checks below, and persists; when a check fails it throws having
+written **nothing**. The enterprise variant (`runLogin`) additionally trades the
+identity for a view token; the consumer variant (`runTokenlessLogin`) persists a
+tokenless record instead. `App.connectWallet` is left with the lock, the screen state
+and the first read; the Onboarding screen opens the RainbowKit modal first when no
+wallet is live and runs the login the moment one is.
 
 ### Connecting, and WalletConnect
 
@@ -164,7 +188,7 @@ project id (it is public — it identifies the dapp to the relay and has no secr
 inject, so an existing deployment does not pick it up. Nothing else changes — no contract, no
 indexer, no circuit.
 
-## Which wallet the UI shows
+### Which wallet the UI shows
 
 Any wallet the modal can connect works, so nothing may be drawn or named as MetaMask by default
 (`src/lib/walletBrand.ts`). Identification has two sources:
@@ -187,7 +211,7 @@ card's tooltip and aria-label, never as visible text. Nothing about the brand is
 silently-restored session re-detects it from the reconnected connector (`ui/hooks.ts
 useWalletDescription`).
 
-## Which circuit a spend uses
+### Which circuit a spend uses
 
 A spending circuit takes a **fixed** number of input notes, so the number of notes a payment needs
 decides which circuit can prove it. The user never picks; `planSpendAction` (`@bongtu/client` `spend.ts`)
@@ -203,9 +227,14 @@ Largest-first is what makes that a decision and not a guess: if any *k* notes co
 largest *k* do, so a selection that overruns the arity proves no *k*-note cover exists. Unused input
 slots are padded (`nullifier 0`, `value 0`, `enabled 0`, zeros path, and a real value-0 self-owned
 commitment on its own salt) — the contract-derived `enabled=0` disables the slot's membership and
-the §5.2 value belt forces its value to 0, so a pad can neither prove membership nor mint. Unused
+the §5.2 value belt forces its value to 0, so a pad can neither prove membership nor mint.
 This is the convention `circuits/fixtures/inputs/transfer10x2.json` carries, and
 `test/transfer10x2.test.ts` checks both sides against it.
+
+The consumer wallet runs the same plan: `planSpendAction` and `planSpendChain` are
+arity-driven and family-blind, and the consumer flows map each picked circuit through
+`consumerCircuitOf` to its `*Priv` twin, whose arities are identical
+([consumer.md](consumer.md#the-five-circuits)).
 
 **`transfer10` is deprecated** (user decision, 2026-07-28): the 10-in / 10-*out* circuit and its V4
 entrypoint stay deployed on chain, but the wallet routes **nothing** to it anymore. An output is a
@@ -216,8 +245,9 @@ depth-32 IMT append — the dominant per-op gas — and a real spend only ever n
 left the wallet's download set. `test/transfer10x2.test.ts` and `test/spendChain.test.ts` carry
 deprecation pins that fail the moment any plan, merge leg or submit routes to `transfer10` again;
 `deploy/live/transfer10x2_e2e.ts` is the live driver (`--dry` for a network-free structural check).
+The deprecated circuit gets no consumer twin either ([consumer.md](consumer.md#the-five-circuits)).
 
-## A spend is a chain, not a transaction
+### A spend is a chain, not a transaction
 
 Money arrives in separate notes — every deposit, every payment received, every disburse line is one —
 and no circuit above can spend more than ten at once. Withdraw is stricter still: it has no arity-10
@@ -259,10 +289,11 @@ exactly as it always did, with no chain wording bolted on.
 `test/spendChain.test.ts` gates both halves: the plan as a table, and the run against a fake
 chain+indexer where a submit appends the transaction's outputs and only then does `/notes` show them.
 
-## Proving in the browser
+### Proving in the browser
 
-The wallet proves `transfer`, `transfer10x2`, `withdraw` and `deposit` locally with snarkjs — a
-self-custody wallet must never send spending-key witnesses to a server. `disburse` is GPU-only and is
+The enterprise wallet proves `transfer`, `transfer10x2`, `withdraw` and `deposit` locally with
+snarkjs — a self-custody wallet must never send spending-key witnesses to a server. The
+consumer wallet proves its four `*Priv` twins the same way. `disburse` is GPU-only and is
 not a wallet operation. snarkjs is GPL-3.0 and shipping it to the page *is* distribution; the PoC
 accepts that deliberately and dynamically imports it so it loads only when the user actually proves.
 
@@ -278,6 +309,11 @@ into a version-keyed Cache Storage bucket (`src/lib/assets.ts`):
    other buckets "bongtu-circuits-*"                       <- evicted on prefetch
    unrelated caches                                        <- never touched
 ```
+
+Each app pins its OWN `CIRCUITS_VERSION` in its `src/config.ts`, computed over its own
+circuit set (the consumer `*Priv` set is a different byte family); the bucket and
+eviction rule are identical. Where the consumer assets are hosted, and the three-part
+companion rule a regen triggers there, is `apps/consumer-web/README.md`'s.
 
 **Stale-zkey hazard.** A regenerated zkey that keeps the old version string is served from disk
 forever and fails on-chain verification with no self-heal — the browser has no way to know the key
@@ -298,9 +334,27 @@ the form currently implies — the FIRST leg's, which is the proof the user wait
 re-fetches when it changes. A chained withdraw therefore ends up holding both keys, having
 prefetched `withdraw` on screen open and `transfer10x2` when the plan grew a merge. Each circuit is fetched at most once per
 session, and the existing download panel — progress, ETA, disabled Confirm — covers the switch
-unchanged.
+unchanged. The consumer wallet applies the same rule to `transfer10x2Priv`, whose zkey is
+~92 MB.
 
-## Encapsulating to the arbiter
+## The enterprise wallet (`apps/wallet-web`)
+
+The self-custody app against the audited pool: notes read from an arbiter indexer over a
+view-token session, and transfer / transfer10x2 / withdraw / deposit proved in the
+browser and submitted to the pool entrypoints directly. Run commands and the test layout
+are owned by `apps/wallet-web/README.md`.
+
+### The view-token session
+
+**Viewing** runs on a view token. Connecting derives the key once, signs a challenge with it, and
+trades that for an HMAC token from the indexer (`/auth/challenge` + `/auth/token`, see
+`docs/indexer.md`); the token and the compressed pubkey are all that reach `localStorage`
+(`@bongtu/client` `session.ts`). Balance and activity read with the token alone — no key, no popup — so a
+returning visit restores silently as long as the wallet still reports the same account. The
+key itself is a different secret with a different lifetime: it lives only in the lock
+(*The lock*, above).
+
+### Encapsulating to the arbiter
 
 Every operation the wallet builds — deposit, transfer, transfer10x2, withdraw — draws fresh ML-KEM-768 material
 against the arbiter's encapsulation key: the shared secret joins the witness as `kemSs`, and the
@@ -322,7 +376,7 @@ Two failures are distinguished and both are fatal:
 Failing here rather than at submit is the point: the alternative is an unlabeled `InvalidProof`
 revert, or worse, an accepted operation whose envelope no one can open.
 
-## Deposit and the dev faucet
+### Deposit and the dev faucet
 
 Deposit is a 0-in / 2-out mint, and `BongtuPool.deposit` is permissionless (`external`, gated only
 by `whenInitialized` + `nonReentrant`), so a browser can initiate one directly
@@ -349,7 +403,7 @@ first-time user self-mints test tokens from their own wallet and pays their own 
 offered exactly when the public kKRW balance is zero (`src/lib/faucet.ts`, `FAUCET_AMOUNT =
 1_000_000` raw units). This is a mock-token affordance and does not exist on a production token.
 
-## Indexer dependency
+### Indexer dependency
 
 The wallet has two discovery modes, picked at build time (`VITE_DISCOVERY` via `discoveryFromEnv`
 in `src/config.ts`; default `arbiter`, so every existing deployment is byte-unchanged):
@@ -385,7 +439,8 @@ public key and no `/notes`/`/auth` endpoint is involved anywhere in the balance 
 rows are derived from the op events the notes came from — what discovery can honestly attest
 (received / deposit / withdraw-change; the public feed carries no block timestamps, so a selfscan
 row carries no `blockTimestamp` and the activity list renders no time element for it — verb and
-amount only, never a fabricated epoch date).
+amount only, never a fabricated epoch date). The consumer wallet runs this same engine as
+its ONLY mode (*Self-scan discovery*, below).
 
 **In arbiter mode there is no fallback balance path.** If `/notes` fails the wallet says so on the surface the
 failure's class earns ([errors.md](errors.md)): a failed background refresh sets the stale-data
@@ -427,7 +482,7 @@ escape hatch in either direction. Set `VITE_INDEXER_URL` to an absolute URL to b
 entirely. The URL is **build-time only** (`App.INDEXER_URL`): the Settings screen's runtime override
 was removed, because a typo there silently broke balance and activity with no way back.
 
-## What the client bundles
+### What the client bundles
 
 Everything in `src/config.ts` and `@bongtu/core/network` is public: pool address, token address,
 chain id, RPC and explorer bases, `H` and `B`, the gas-price floor, the **arbiter bjj public key**
@@ -437,7 +492,7 @@ against the chain before use: the bjj key by the contract's own injection before
 key by the pre-encapsulation hash guard above. A stale copy of either costs a wasted proof, not a
 silent mis-encryption. No private key ever lives in the wallet.
 
-## Withdraw destination, and who submits
+### Withdraw destination, and who submits
 
 The Withdraw screen takes an optional **destination address** (an ordinary L1
 EOA; empty means the connected account, today's default). It can accept any
@@ -463,7 +518,7 @@ primitives (`@bongtu/core/stealth`, `@bongtu/client/stealthKeys` /
 `stealthFunds`, the lock's stealth custody) and their tests remain in the
 packages as the deposit slice's foundation (`.dev/milestone-stealth.md`).
 
-## Receiving through the portal
+### Receiving through the portal
 
 The Receive panel issues **one-time deposit addresses** (name-gated — the
 issuance route is keyed on the registered name, and the wallet first proves
@@ -472,7 +527,7 @@ transfer from any wallet or exchange and the deposit lands shielded with no
 further action; the mechanism, and its recorded v1 trust concession, are
 [Portal](portal.md)'s.
 
-## Pay by name
+### Pay by name
 
 The Send screen's recipient field also takes a **registered name**
 (`docs/indexer.md` `/names`). Which reading an input gets is decided by length
@@ -485,3 +540,78 @@ name is REGISTERED is the indexer's answer, not a form shape's — and the
 confirm sheet shows both halves of the binding (the name AND the resolved
 owner address), because what the user approves is "this name pays this key".
 An unregistered name gets its own copy and keeps the form.
+
+## The consumer wallet (`apps/consumer-web`)
+
+The wallet for the no-auditor family ([consumer.md](consumer.md)): the P2P 4 ops
+(`depositPriv`, `transferPriv`, `transfer10x2Priv`, `withdrawPriv`) proved in the
+browser and submitted to the registered op modules (token approvals still target the
+pool, the escrow holder). The shell is wallet-web's, forked and trimmed to the profile
+that IS this product. What deliberately does not exist here (issue #13's v1 scope): the
+enterprise view-token session, owner-authed indexer reads, activity paging, the pool
+KEM-epoch guard, the relayer exit leg, the portal receive, and any disburse UI.
+
+### Tokenless session
+
+There is no view token because there is nothing to authenticate: every read the wallet
+performs is public. Logins run the engine's `runTokenlessLogin` variant with the same
+derivation and determinism checks as the shared login; what persists is an app-layer
+record of routing data only (account, derived receive pubkey, transport) under a
+deployment-scoped key (`src/lib/sessionStore.ts`), never a credential and never a key. A
+silently restored session starts locked and serves the last completed scan under a calm
+locked notice, because scanning needs the view keys and a background read must never pop
+a signature. An explicit Disconnect forgets the device: the key bindings, the stored
+scan, and the wallet link.
+
+### Self-scan discovery
+
+Balance and activity come only from the self-scan of the public feed: the same engine,
+acceptance rule and persisted-state contract as wallet-web's selfscan mode, described
+under [Indexer dependency](#indexer-dependency), here as the only mode rather than a
+build-time choice. The scan store persists decrypted amounts per owner in localStorage
+(keys never), the sync dot compares the scan's `/head` stamp against the live `/head`,
+and an incompletely delivered batch surfaces as the "discovery pending" notice rather
+than a silently smaller balance. The activity list is the whole scan-derived feed with
+nothing to page. A background scan takes the held key through `keyCache.peek()`, so it
+never extends the idle deadline (*The lock*, above).
+
+### The consumer flows
+
+The op flows are the engine's consumer variants (`@bongtu/client` `consumerFlows.ts` /
+`consumerBuild.ts` / `consumerSubmit.ts`): the same stage grammar, chain planning and
+submit discipline as the enterprise flows, with the family deltas applied once in the
+engine. Exactly: no `assertPoolKemEpoch` (there is no arbiter KEM epoch to guard);
+membership over the auth-free `GET /path` (consumer batches serve paths openly,
+[consumer.md](consumer.md#the-public-batch-path-disbursepriv256)); every output sealed
+to its recipient's consumer triple instead of an authority envelope, the per-output
+ML-KEM ciphertexts riding as `bytes[]` calldata; submits at the module addresses
+(`@bongtu/core/network` `CONSUMER_MODULES`); merge legs as `transfer10x2Priv` self-sends;
+and a self-scan pass in place of the `/notes` reload between chain legs. The witness
+objects the builders produce are pinned byte-identical to the committed
+`circuits/inputs/consumer*` conformance fixtures. The dev faucet affordance is the
+enterprise wallet's, unchanged (the deployed kKRW is the same `MockERC20`).
+
+### Registry-name sends, and Receive as identity
+
+A consumer payment seals to the recipient's registered v2 consumer triple (spend pubkey,
+note-layer view pubkey, ML-KEM-768 encapsulation key,
+[consumer.md](consumer.md#the-registry-triple)), which is ~1.2 KB of key material no one
+could paste. So v1 sends are **registry-name-only**: the Send screen accepts a
+registered name, resolves it at Continue, and refuses a record without the consumer
+triple in plain words (paying it would mint notes the recipient could never discover by
+self-scan; `src/lib/payName.ts` owns the wording, the refusal itself is the engine's
+`consumerRecipientOf`). The Receive screen is the identity panel: what a person shares
+to get paid is their NAME, never the raw triple and no longer a bare address, and
+registration is v2-only, binding the stealth meta pair and the consumer pair under one
+owner signature ([indexer.md](indexer.md#name-directory)).
+
+### What the consumer bundle carries
+
+`src/config.ts` ships the same public deployment facts from `@bongtu/core/network`, plus
+this app's own `CIRCUITS_VERSION` pin and per-asset byte table over the four consumer
+circuits. Two enterprise knobs are ABSENT by design: there is no discovery-mode knob
+(self-scan is the product, so there is no second engine to select) and no institutional
+authority key of any kind (a config test convicts one reappearing). The indexer base is
+the same relative `/indexer` contract as above, and it must resolve to a PUBLIC-mode
+indexer instance; the deployment knobs, the ops note on that route, and the proving-asset
+pipeline are [`apps/consumer-web/README.md`](../apps/consumer-web/README.md)'s.

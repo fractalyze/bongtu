@@ -58,6 +58,11 @@ not re-derive what those files own.
   fallback path, prebuilt `circuits/out` / `contracts/out`, fast spawns). Check any new CI-run
   test against a clean env before pushing — see `.dev/ci.md`. In particular, refresh
   `apps/indexer/abi/BongtuPool.abi.json` whenever the pool ABI changes (CI drift-gates it).
+- **Isolated agent worktrees need local `node_modules/@bongtu` symlinks**: a worktree
+  without its own `node_modules` resolves `@bongtu/*` UP-TREE to the main checkout, so
+  gates run there silently test the WRONG branch's packages. Before running tests in a
+  fresh isolated worktree, recreate the workspace symlinks (`node_modules/@bongtu/<name>
+  -> ../../packages/<name>` etc. inside that worktree); two agents hit this on 2026-09-04.
 - **package-lock.json regen**: npm 11.5 on this box reuses the actual node_modules tree and
   silently DROPS the ~49 cross-platform optional entries (@esbuild/*, @rollup/rollup-*) —
   the box tolerates it but Vercel's `npm ci` rejects the lock and every git-integration

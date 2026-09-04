@@ -184,8 +184,9 @@ export function disbursePrivPlan(): OutputPlan[] {
   return [...funded, ...pads];
 }
 
-// --- witness-input interfaces (local: @bongtu/core/proving grows the module
-// --- wire types in a later unit; the circuits are the contract here) --------
+// --- witness-input interfaces (local twins: @bongtu/core/proving owns the
+// --- module wire types now (issue #13 S2); the circuits stay the contract
+// --- here, so this fixture layer keeps its own layout) ----------------------
 
 export interface ConsumerDepositInput {
   outputCommitments: FieldInput[]; // [2]
