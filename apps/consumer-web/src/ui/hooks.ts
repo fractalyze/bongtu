@@ -10,12 +10,16 @@ import { describeWallet, type WalletDescription } from "../lib/walletBrand.js";
 import { subscribeCircuitDownload, type CircuitDownloadState } from "../lib/prove.js";
 import type { BrowserCircuit } from "../config.js";
 
-// The op screens (Send/Withdraw/Deposit/Receive) arrive with S5-S6; until then the
-// route space is exactly the discovery shell, so a stale deep link cannot land on a
-// screen that does not exist yet — it falls back to Home like any unknown hash.
-export type Route = "home" | "activity" | "settings";
+export type Route =
+  | "home"
+  | "receive"
+  | "send"
+  | "withdraw"
+  | "deposit"
+  | "activity"
+  | "settings";
 
-const ROUTES: readonly Route[] = ["home", "activity", "settings"];
+const ROUTES: readonly Route[] = ["home", "receive", "send", "withdraw", "deposit", "activity", "settings"];
 
 function parseHash(): Route {
   const h = window.location.hash.replace(/^#\/?/, "");

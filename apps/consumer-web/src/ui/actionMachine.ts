@@ -19,9 +19,42 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { DEFAULTS, type BrowserCircuit } from "../config.js";
 import { ensureCircuitAssets, prewarmProver } from "../lib/prove.js";
-import { walletErrorMessage } from "@bongtu/client/connection";
+import { consumerErrorMessage } from "../lib/errors.js";
 import { withUnlock, type StagedStep } from "./components/StagedProgress.js";
 import { useCircuitDownload, useElapsedSeconds, type CircuitDownloadView } from "./hooks.js";
+
+/** What a second op's Confirm says while one is already running. */
+export const OP_IN_FLIGHT_MESSAGE =
+  "Another action is still running. Let it finish before starting a new one.";
+
+/**
+ * The one-op-at-a-time gate. Every screen owns its own ActionMachine, so nothing
+ * structural stops a Send chain and a Deposit from proving at once — two wallet
+ * popups interleaving over one lock is exactly the confusion the S5 guard exists
+ * to prevent. The gate is a single shared slot: submit() takes it for the whole
+ * run and releases it in finally, so an abort (a mid-op account switch included)
+ * can never strand the slot with a stage on screen.
+ */
+export class OpGate {
+  private holder: symbol | null = null;
+
+  tryAcquire(token: symbol): boolean {
+    if (this.holder !== null && this.holder !== token) return false;
+    this.holder = token;
+    return true;
+  }
+
+  release(token: symbol): void {
+    if (this.holder === token) this.holder = null;
+  }
+
+  busy(): boolean {
+    return this.holder !== null;
+  }
+}
+
+/** The page's one gate — every screen's machine defaults onto it. */
+export const opGate = new OpGate();
 
 export type ActionPhase = "form" | "confirm" | "running" | "done";
 
@@ -70,10 +103,15 @@ export function stepsForRun(steps: StagedStep[], unlocking: boolean): StagedStep
 export class ActionMachine<O extends ActionResult> {
   private snap: ActionSnapshot<O>;
   private readonly listeners = new Set<() => void>();
+  private readonly opToken = Symbol("op");
 
   /** `firstStage` is the flow's own opening stage (spend "assemble", deposit
-   *  "approve"), shown as active until the flow reports otherwise. */
-  constructor(private readonly firstStage: string) {
+   *  "approve"), shown as active until the flow reports otherwise. `gate`
+   *  defaults to the page-wide one-op-at-a-time slot; tests pass their own. */
+  constructor(
+    private readonly firstStage: string,
+    private readonly gate: OpGate = opGate,
+  ) {
     this.snap = {
       phase: "form",
       stage: firstStage,
@@ -113,6 +151,13 @@ export class ActionMachine<O extends ActionResult> {
    * refresh here would usually read the pre-action state).
    */
   submit = async (run: ActionRun<O>, afterAction: (txHash: string) => unknown): Promise<void> => {
+    // The one-op-at-a-time invariant: a run that cannot take the shared slot
+    // never starts — it lands back on the form with the plain refusal, exactly
+    // where a failed run lands, so the screen needs no second error surface.
+    if (!this.gate.tryAcquire(this.opToken)) {
+      this.set({ phase: "form", error: OP_IN_FLIGHT_MESSAGE });
+      return;
+    }
     this.set({
       phase: "running",
       stage: this.firstStage,
@@ -130,7 +175,12 @@ export class ActionMachine<O extends ActionResult> {
       this.set({ phase: "done", outcome });
       void afterAction(outcome.txHash);
     } catch (e) {
-      this.set({ phase: "form", error: walletErrorMessage(e) });
+      // Every abort — a mid-op account switch included: the S5 guard locks the
+      // key, the flow's next unlock refuses, and the run lands HERE — returns
+      // the screen to the form. No stage is ever stranded on screen.
+      this.set({ phase: "form", error: consumerErrorMessage(e) });
+    } finally {
+      this.gate.release(this.opToken);
     }
   };
 }
