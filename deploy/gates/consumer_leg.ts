@@ -40,11 +40,11 @@ import { ImtTree, foldToRoot } from "@bongtu/core/imt";
 import { commitment, nullifier } from "@bongtu/core/note";
 import { sealConsumerOutput, consumerDisclosureElements } from "@bongtu/core/consumer";
 import type { SealedConsumerOutput } from "@bongtu/core/consumer";
-import { getHead, getNullifiers, getPath } from "@bongtu/core/indexerApi";
+import { getHead, getNullifiers, getPath, IndexerClient } from "@bongtu/core/indexerApi";
 import type { PointInput } from "@bongtu/core/babyjub";
 import { deriveIdentityFromSignature } from "@bongtu/client/derive";
 import type { ConsumerWalletIdentity } from "@bongtu/client/derive";
-import { runSelfScan, selfScanIo, EMPTY_SCAN_STATE } from "@bongtu/client/selfscan";
+import { runSelfScan, EMPTY_SCAN_STATE } from "@bongtu/client/selfscan";
 import type { SelfScanState } from "@bongtu/client/selfscan";
 
 import {
@@ -483,7 +483,7 @@ export async function runConsumerLeg(rig: Rig): Promise<void> {
       return head.nextLeafIndex === expectedLeaves;
     });
 
-    const io = selfScanIo(url);
+    const io = new IndexerClient(url); // satisfies SelfScanIo structurally
     const scanned = await (async (): Promise<SelfScanState> => {
       // kem chunk txs are fetched by the tail (eth_getTransactionByHash) — a
       // batch still assembling surfaces as PENDING, so re-scan until resolved.
