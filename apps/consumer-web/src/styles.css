@@ -1,0 +1,115 @@
+/* bongtu public wallet — light fintech visual language (locked): page #F6F7F9, ink
+   text, ONE accent (deep ink-blue #123A5C — deliberately not the bright #3182F6
+   family), restrained green ONLY for incoming amounts, white cards with a subtle 1px
+   border and 12px radius (rounded-xl). Mobile-first single ~420px vertical frame,
+   hash routing. No external fonts/assets (offline-capable); amounts use tabular-nums.
+
+   Tailwind v4, utilities-first: ALL styling lives in the JSX on the standard scale;
+   this file owns only the brand tokens, the two animations, and the body base. The
+   repeated control looks (buttons, tags) are React components (ui/components/
+   controls.tsx), not CSS classes. */
+
+@import "tailwindcss";
+/* The shared UI package (toast host, banner) is classname-based on THIS app's
+   tokens and lives outside the Vite root, so Tailwind must be told to scan it —
+   without this line its classes would silently compile to nothing. */
+@source "../../../packages/ui/src";
+
+@theme {
+  --color-*: initial;
+  --color-bg: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-surface-2: #eff1f4;
+  --color-border: #e4e7ec;
+  --color-border-strong: #cbd2da;
+  --color-ink: #111827;
+  --color-muted: #667085;
+  --color-primary: #123a5c;
+  --color-primary-hover: #0e2e4a;
+  --color-primary-ink: #ffffff;
+  --color-pos: #15803d;
+  --color-pos-bg: #eaf4ee;
+  --color-warn: #92580b;
+  --color-warn-bg: #fcf7ec;
+  --color-warn-border: #ebd6ae;
+  --color-err: #b42318;
+  --color-err-bg: #fdf3f2;
+  --color-err-border: #f0c4bf;
+  --color-info-ink: #2a4a66;
+  --color-info-bg: #f1f5f9;
+  --color-info-border: #c9d6e2;
+  --color-white: #ffffff;
+  --color-backdrop: rgba(17, 24, 39, 0.45);
+
+  --font-sans: "Pretendard", Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+  --animate-pulse-soft: pulse-soft 1.1s infinite;
+  --animate-dl-sweep: dl-sweep 1.2s ease-in-out infinite;
+  --animate-check-pop: check-pop 0.28s ease-out;
+  --animate-desc-in: desc-in 0.22s ease-out;
+  --animate-flow-dash: flow-dash 0.9s linear infinite;
+}
+
+/* A finished step's check settles in with a small overshoot. */
+@keyframes check-pop {
+  0% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  70% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+/* The active step's one-line explanation slides open under it. */
+/* The FlowHint arrow's dashes travel in the money's direction. */
+@keyframes flow-dash {
+  to {
+    stroke-dashoffset: -11;
+  }
+}
+@keyframes desc-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes pulse-soft {
+  50% {
+    opacity: 0.3;
+  }
+}
+/* No Content-Length => no percentage; sweep instead of pretending. */
+@keyframes dl-sweep {
+  0% {
+    margin-left: 0;
+  }
+  50% {
+    margin-left: 65%;
+  }
+  100% {
+    margin-left: 0;
+  }
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+  body {
+    background: var(--color-bg);
+    color: var(--color-ink);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+}

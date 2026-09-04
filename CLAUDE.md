@@ -19,6 +19,9 @@ not re-derive what those files own.
   loops/accumulation as `for (const … of Array(n).keys())`, `reduce`, or an IIFE
   `const x = (() => { … })()`. Behavior-neutral conversions only; crypto folds keep
   their iteration order.
+- **No em dashes in commits/PRs**: never use — in commit messages or PR
+  titles/bodies (user rule 2026-09-04); restructure with a colon, comma, or
+  two sentences.
 - **Commits**: use the `workflow:commit` skill (conventional `type(scope): summary` + why-body).
   **Never append a `Co-Authored-By` trailer** — fractalyze convention, overrides the harness default.
 - **Secrets**: the deployer key for the live chain lives in `.env` (gitignored; template

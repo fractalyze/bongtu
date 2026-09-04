@@ -238,6 +238,32 @@ jobs:
       - name: wallet-web build
         run: npm run build -w @bongtu/wallet-web
 
+  node-consumer:
+    needs: changes
+    if: ${{ success() && needs.changes.outputs.code == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.17.1
+          cache: npm
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: nm
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node-modules-v1-${{ hashFiles('package-lock.json') }}
+      - if: steps.nm.outputs.cache-hit != 'true'
+        run: npm ci
+      - name: consumer-web tests
+        run: npm test -w @bongtu/consumer-web
+      - name: consumer-web build
+        run: npm run build -w @bongtu/consumer-web
+
   indexer-units:
     needs: changes
     if: ${{ success() && needs.changes.outputs.indexer == 'true' }}

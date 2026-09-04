@@ -124,3 +124,20 @@ export async function runLogin(ctx: LoginContext, deps: LoginIo): Promise<LoginR
   io.saveKeyBinding(connection.address, identity.compressedPubkey);
   return { connection, identity, session, tokenless };
 }
+
+/** The deps seam a tokenless app fills in: same as LoginIo, minus the view-token
+ *  slot — by type, a caller cannot even supply one. */
+export type TokenlessLoginIo = Pick<RunLoginDeps, "openConnection" | "deriveIdentity"> &
+  Partial<Omit<RunLoginDeps, "obtainViewToken">>;
+
+/** The consumer login: identical flow and refusal ordering, but the view-token
+ *  step is refused INSIDE the engine, so the flow lands on its tokenless branch
+ *  every time. Exists so a tokenless app never names the token machinery at all —
+ *  "no view-token session" becomes a property of the wiring, not of app
+ *  discipline (the consumer contract: every read is public). */
+export async function runTokenlessLogin(ctx: LoginContext, deps: TokenlessLoginIo): Promise<LoginResult> {
+  return runLogin(ctx, {
+    ...deps,
+    obtainViewToken: () => Promise.reject(new Error("tokenless login requested a view token")),
+  });
+}

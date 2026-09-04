@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 
 import { CHAIN_NAME } from "@bongtu/core/network";
 
-import { runLogin, type RunLoginDeps } from "@bongtu/client/loginFlow";
+import { runLogin, runTokenlessLogin, type RunLoginDeps } from "@bongtu/client/loginFlow";
 import { chainSwitchMessage, type Connection } from "@bongtu/client/connection";
 import type { WalletIdentity } from "@bongtu/client/derive";
 import { KEY_CHANGED_MESSAGE } from "@bongtu/client/loginGuard";
@@ -141,4 +141,20 @@ test("but a DIFFERENT key under THIS deployment still refuses — the guard is i
   );
   assert.ok(!calls.includes("saveSession") && !calls.includes("saveBinding"), "refusals write nothing");
   assert.equal(store.loadKeyBinding("0xabc"), "a-different-key", "the remembered key is not overwritten");
+});
+
+// --- the tokenless variant ---------------------------------------------------------
+// runTokenlessLogin exists so a consumer app never names the token machinery: its
+// deps seam has no token slot, and the flow must land on the tokenless branch every
+// time — never persisting a session, still recording the key binding.
+
+test("the tokenless login never mints a token and never persists the session", async () => {
+  const calls: string[] = [];
+  const { obtainViewToken: _refused, ...rest } = fakes(calls);
+  const res = await runTokenlessLogin({ indexerUrl: "http://x" }, rest);
+  assert.equal(res.tokenless, true);
+  assert.equal(res.session.token, "");
+  assert.ok(!calls.includes("token"), "no token endpoint may be reached");
+  assert.ok(!calls.includes("saveSession"), "a page-local session is never written");
+  assert.ok(calls.includes("saveBinding"), "the key binding is still recorded");
 });
