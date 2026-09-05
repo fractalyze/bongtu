@@ -184,6 +184,9 @@ test("runDeposit refuses when the pool's KEM epoch rejects this build's key", as
       throw new Error("no key derivation may happen against an unverified key");
     }),
     readTokenState: async () => ({ balance: 1_000n, allowance: 500n }),
+    approveToken: async () => {
+      throw new Error("approve must not be reached when the kem guard refuses");
+    },
     assertPoolKemEpoch: async () => {
       throw new Error("on-chain arbiter KEM key hash 0x11 does not match this build's ARBITER_KEM_PK");
     },

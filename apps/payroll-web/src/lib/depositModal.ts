@@ -14,8 +14,8 @@
 // view with the transaction — not a one-tap fixed ration off the label row: a
 // stray click must not send a transaction.
 
-import type { Connection, SubmitResult } from "@bongtu/client/connection";
-import { mintTestToken, readGasBalance, readTokenState } from "@bongtu/client/connection";
+import type { Connection, SubmitResult } from "@bongtu/client-evm/connection";
+import { mintTestToken, readGasBalance, readTokenState } from "@bongtu/client-evm/connection";
 import type { DepositStage } from "@bongtu/client/deposit";
 import { formatKkrw } from "@bongtu/client/money";
 import { GAS_TOKEN_PHRASE, NATIVE_CURRENCY } from "@bongtu/core/network";

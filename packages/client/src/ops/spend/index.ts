@@ -15,7 +15,7 @@
 // hand, in ProvingRequest form (@bongtu/core/proving). The SPEC §6 boundary falls
 // INSIDE this subpath now: the builders stop at "a valid ProvingRequest", and run.ts
 // is the layer that proves (through the app-injected prover) and sends the tx
-// (through the @bongtu/client/connection edges).
+// (through the @bongtu/client-evm/connection edges).
 //
 // ARITY, and who picks it. Every circuit here takes a FIXED number of inputs — 2 for
 // transfer/withdraw, 10 for transfer10x2 — so a spend that needs fewer pads the rest
@@ -54,7 +54,7 @@ export * from "./run.js";
 import type { OwnerNote } from "@bongtu/core/indexerApi";
 import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
 import type { StealthDerivation } from "@bongtu/core/stealth";
-import type { Connection } from "@bongtu/client/connection";
+import type { Connection } from "@bongtu/client/rail";
 import type { KeyCacheLike } from "@bongtu/client/keyCache";
 import {
   runDeposit,
@@ -99,7 +99,19 @@ export type SpendOpsDeps = {
   keyCache: KeyCacheLike;
   /** Turn a ProvingRequest into Groth16 calldata (the APP supplies this). */
   prove: (request: ProvingRequest) => Promise<Calldata>;
-} & Partial<RunSpendDeps> &
+} & Pick<
+  RunSpendDeps,
+  | "ensureChain"
+  | "assertPoolKemEpoch"
+  | "submitTransfer"
+  | "submitTransfer10x2"
+  | "submitWithdraw"
+  | "submitWithdrawRelayed"
+> &
+  // the rail io — spread @bongtu/client-evm/ops EVM_ENTERPRISE_IO at the
+  // wiring site (the engine has no rail defaults since the split).
+  Pick<RunDepositDeps, "readTokenState" | "approveToken" | "submitDeposit"> &
+  Partial<RunSpendDeps> &
   Partial<RunDepositDeps>;
 
 /**

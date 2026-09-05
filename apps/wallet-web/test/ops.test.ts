@@ -27,7 +27,7 @@ import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
 import type { ChainFailure } from "@bongtu/core/errors";
 import { deriveIdentityFromSignature } from "@bongtu/client/derive";
 import { KeyCache } from "@bongtu/client/keyCache";
-import type { Connection } from "@bongtu/client/connection";
+import type { Connection } from "@bongtu/client-evm/connection";
 import { selfConsumerRecipient } from "@bongtu/client/consumer";
 import { ACCOUNT_MISMATCH_MESSAGE } from "@bongtu/client/identity";
 import type { ScanNote } from "@bongtu/client/selfscan";

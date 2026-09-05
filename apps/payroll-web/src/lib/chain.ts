@@ -10,7 +10,7 @@
 import { parseAbi } from "viem";
 import type { Calldata } from "@bongtu/core/proving";
 import { POOL_ABI_FRAGMENTS, explorerTxUrl } from "@bongtu/core/network";
-import { submitPoolWrite, type Connection } from "@bongtu/client/connection";
+import { submitPoolWrite, type Connection } from "@bongtu/client-evm/connection";
 
 const POOL_ABI = parseAbi([POOL_ABI_FRAGMENTS.disburseWithCiphertexts]);
 

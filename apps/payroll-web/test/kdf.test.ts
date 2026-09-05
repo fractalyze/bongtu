@@ -11,7 +11,8 @@ import assert from "node:assert/strict";
 
 import { CHAIN_ID, POOL_ADDRESS } from "@bongtu/core/network";
 import { KEY_DERIVATION } from "@bongtu/client/identity";
-import { keyDerivationTypedData, deriveIdentityFromSignature } from "@bongtu/client/derive";
+import { deriveIdentityFromSignature } from "@bongtu/client/derive";
+import { keyDerivationTypedData } from "@bongtu/client-evm/derive";
 
 test("KEY_DERIVATION is exactly the deployment facts both apps share", () => {
   assert.deepEqual(KEY_DERIVATION, {

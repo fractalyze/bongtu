@@ -4,6 +4,7 @@
   "include": [
     "packages/core/src/**/*.ts",
     "packages/client/src/**/*.ts",
+    "packages/client-evm/src/**/*.ts",
     "deploy/**/*.ts",
     "circuits/**/*.ts",
     "chains/evm/test/fixtures/**/*.ts",

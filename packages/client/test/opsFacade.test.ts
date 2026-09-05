@@ -21,7 +21,7 @@ import type { OwnerNote } from "@bongtu/core/indexerApi";
 import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
 
 import { deriveIdentityFromSignature } from "@bongtu/client/derive";
-import type { Connection } from "@bongtu/client/connection";
+import type { Connection } from "@bongtu/client/rail";
 import type { KeyCacheLike } from "@bongtu/client/keyCache";
 import type { ScanNote } from "@bongtu/client/selfscan";
 import {
@@ -172,7 +172,13 @@ function consumerFacade(values: bigint[]) {
     submitTransfer10x2Priv: land("transfer10x2Priv"),
     submitWithdrawPriv: land("withdrawPriv"),
     poll: { sleep: async () => {} },
-  } as unknown as Partial<RunConsumerSpendDeps> & Partial<RunConsumerDepositDeps>;
+  } as unknown as Pick<
+    RunConsumerSpendDeps,
+    "ensureChain" | "submitTransferPriv" | "submitTransfer10x2Priv" | "submitWithdrawPriv"
+  > &
+    Pick<RunConsumerDepositDeps, "readTokenState" | "approveToken" | "submitDepositPriv"> &
+    Partial<RunConsumerSpendDeps> &
+    Partial<RunConsumerDepositDeps>;
 
   const deps: ConsumerOpsDeps = {
     connection: CONN,
@@ -282,7 +288,31 @@ function spendFacade(values: bigint[]) {
     getHead: async () => {
       throw new Error("SENTINEL: membership read reached");
     },
-  } as unknown as Partial<RunSpendDeps> & Partial<RunDepositDeps>;
+    // required rail-io members the deposit-only paths must never reach
+    submitTransfer: async () => {
+      throw new Error("submitTransfer must not be reached here");
+    },
+    submitTransfer10x2: async () => {
+      throw new Error("submitTransfer10x2 must not be reached here");
+    },
+    submitWithdraw: async () => {
+      throw new Error("submitWithdraw must not be reached here");
+    },
+    submitWithdrawRelayed: async () => {
+      throw new Error("submitWithdrawRelayed must not be reached here");
+    },
+  } as unknown as Pick<
+    RunSpendDeps,
+    | "ensureChain"
+    | "assertPoolKemEpoch"
+    | "submitTransfer"
+    | "submitTransfer10x2"
+    | "submitWithdraw"
+    | "submitWithdrawRelayed"
+  > &
+    Pick<RunDepositDeps, "readTokenState" | "approveToken" | "submitDeposit"> &
+    Partial<RunSpendDeps> &
+    Partial<RunDepositDeps>;
 
   const deps: SpendOpsDeps = {
     connection: CONN,

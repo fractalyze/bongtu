@@ -14,7 +14,7 @@
 
 import { parseAbi } from "viem";
 import type { Calldata } from "@bongtu/core/proving";
-import { asProofArgs } from "@bongtu/client/connection";
+import { asProofArgs } from "./connection/index.js";
 import {
   CONSUMER_MODULES,
   CONSUMER_MODULE_ABI_FRAGMENTS,
@@ -25,7 +25,7 @@ import {
   submitPoolWrite,
   type Connection,
   type SubmitResult,
-} from "@bongtu/client/connection";
+} from "./connection/index.js";
 
 const CONSUMER_MODULE_ABI = parseAbi([
   CONSUMER_MODULE_ABI_FRAGMENTS.depositPriv,

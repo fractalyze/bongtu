@@ -197,6 +197,17 @@ function chainWorld(values: bigint[]) {
       pending.current = null;
       return { txHash: `0xmerge${submitted.length}`, explorerUrl: "https://x/tx/merge" };
     },
+    // required rail-io members a merge chain must never reach (merges are
+    // transfer10x2 only; the terminal disburse is the CALLER's transaction)
+    submitTransfer: async () => {
+      throw new Error("submitTransfer must not be reached here");
+    },
+    submitWithdraw: async () => {
+      throw new Error("submitWithdraw must not be reached here");
+    },
+    submitWithdrawRelayed: async () => {
+      throw new Error("submitWithdrawRelayed must not be reached here");
+    },
     poll: { sleep: async () => {} },
     ...over,
   });

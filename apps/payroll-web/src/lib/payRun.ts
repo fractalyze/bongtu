@@ -23,7 +23,8 @@ import {
   type SpendIo,
   type SpendOutcome,
 } from "@bongtu/client/spend";
-import { assertPoolKemEpoch, ensureChain } from "@bongtu/client/connection";
+import { assertPoolKemEpoch, ensureChain, type Connection } from "@bongtu/client-evm/connection";
+import { EVM_ENTERPRISE_IO } from "@bongtu/client-evm/ops";
 import { getHead, getSignedPath, IndexerClient } from "@bongtu/core/indexerApi";
 import type { FieldInput } from "@bongtu/core/babyjub";
 import { DEFAULTS } from "../config.js";
@@ -46,6 +47,12 @@ export const MAX_RECIPIENTS = DEFAULTS.batchSize - 1;
  */
 export const PAY_RUN_FAILURE_REASSURANCE =
   "Your funds are safe: nobody was paid, and the already-merged notes stay merged — a retry finishes in fewer steps.";
+
+/** runPayRun's context: the engine's SpendContext carrying the rail's FULL
+ *  Connection — the terminal disburse leg drives the EVM edges (chain guard,
+ *  KEM-epoch guard, submitDisburse) directly, past the engine's structural
+ *  seam. */
+export type PayRunContext = SpendContext & { connection: Connection };
 
 export interface PayRunResult {
   /** the terminal disburse transaction — what the done screen links. */
@@ -82,7 +89,7 @@ export type ProveFn = (request: Parameters<typeof proveViaService>[1]) => Return
  * rejected wallet popup, a stale root) for the Console to show verbatim.
  */
 export async function runPayRun(
-  ctx: SpendContext,
+  ctx: PayRunContext,
   recipients: RecipientRow[],
   onStage: OnSpendStage,
   deps: PayRunDeps,
@@ -115,6 +122,7 @@ export async function runPayRun(
   // The merges: zero or more transfer10x2 self-sends until one note covers the
   // total, each leg guarded (chain, KEM epoch, session-account) by the engine.
   const { funding, mergeTxs } = await io.runMergeChain(ctx, total.toString(), onStage, {
+    ...EVM_ENTERPRISE_IO,
     keyCache: deps.keyCache,
     prove: deps.prove,
     ...(deps.poll ? { poll: deps.poll } : {}),

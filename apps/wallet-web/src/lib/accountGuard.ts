@@ -15,7 +15,7 @@
 // there it is the phone ending the session; an extension's disconnect can be a
 // mere provider hiccup, and signing a user out over a hiccup was rejected UX.
 
-import type { Connection, WalletWatchHandlers } from "@bongtu/client/connection";
+import type { Connection, WalletWatchHandlers } from "@bongtu/client-evm/connection";
 
 /** What the app tells a user whose wallet hung up the WalletConnect pairing. */
 export const WALLET_ENDED_NOTICE =

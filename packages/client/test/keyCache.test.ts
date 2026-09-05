@@ -30,10 +30,20 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { deriveIdentityFromSignature } from "@bongtu/client/derive";
-import { stealthKeysFromKdfSignature } from "@bongtu/client/stealthKeys";
+import { SUBGROUP_ORDER } from "@bongtu/core/babyjub";
+import { SECP256K1_ORDER, stealthKeysFromScalars, type StealthKeys } from "@bongtu/core/stealth";
 import { ACCOUNT_MISMATCH_MESSAGE } from "@bongtu/client/identity";
 import { IDLE_WIPE_MS, KeyCache, type KeyCacheWiring } from "@bongtu/client/keyCache";
-import type { Connection } from "@bongtu/client/connection";
+import type { Connection } from "@bongtu/client/rail";
+
+// A deterministic signature -> StealthKeys stand-in for the rail's stealth KDF
+// (@bongtu/client-evm/stealthKeys, which this rail-agnostic suite may not
+// import): the lock under test only needs a STABLE mapping, so any injective
+// fold of the signature into the two scalar ranges serves.
+function stealthKeysFromKdfSignature(sig: string): StealthKeys {
+  const seed = BigInt(sig);
+  return stealthKeysFromScalars((seed % (SUBGROUP_ORDER - 1n)) + 1n, (seed % (SECP256K1_ORDER - 1n)) + 1n);
+}
 
 const SESSION_SIG = "0x" + "a1".repeat(32) + "b2".repeat(32) + "1c";
 const OTHER_SIG = "0x" + "c3".repeat(32) + "d4".repeat(32) + "1b";

@@ -17,7 +17,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { DEFAULTS } from "../../config.js";
 import type { DepositOutcome } from "@bongtu/client/deposit";
-import { readTokenState } from "@bongtu/client/connection";
+import { readTokenState } from "@bongtu/client-evm/connection";
 import { useWallet } from "../App.js";
 import { useActionMachine } from "../actionMachine.js";
 import { formatKkrw, parseKkrw } from "@bongtu/client/money";

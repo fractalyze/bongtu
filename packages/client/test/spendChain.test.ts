@@ -26,11 +26,15 @@ import { ImtTree } from "@bongtu/core/imt";
 import { packPubkey } from "@bongtu/core/pubkey";
 import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
 
-import { scanStealthAnnouncement, type StealthDerivation } from "@bongtu/core/stealth";
+import {
+  deriveStealthAddress,
+  scanStealthAnnouncement,
+  stealthKeysFromScalars,
+  type StealthDerivation,
+} from "@bongtu/core/stealth";
 
 import { deriveIdentityFromSignature } from "@bongtu/client/derive";
 import { KeyCache } from "@bongtu/client/keyCache";
-import { prepareStealthDestination, stealthKeysFromKdfSignature } from "@bongtu/client/stealthKeys";
 import {
   runSpendChain,
   CHAIN_FAILURE_REASSURANCE,
@@ -303,6 +307,10 @@ function chainWorld(values: bigint[]) {
     submitTransfer: land("transfer"),
     submitTransfer10x2: land("transfer10x2"),
     submitWithdraw: land("withdraw"),
+    // required rail-io member only the relayed tests override with a live fake
+    submitWithdrawRelayed: async () => {
+      throw new Error("submitWithdrawRelayed must not be reached here");
+    },
     poll: { sleep: async () => {} }, // the wait is real; only its seconds are not
     ...over,
   });
@@ -393,13 +401,13 @@ test("a stealth withdraw pays the address its announcement rediscovers, and a me
   // shape where handing the derivation to the wrong leg is possible at all.
   const w = chainWorld([100n, 100n, 100n]);
   const base = w.deps();
-  // The derivation comes through the real owner function, headless: the seam
-  // signs deterministically and the ephemeral is pinned.
-  const STEALTH_SIG = "0x" + "e5".repeat(64) + "1c";
-  const stealth = await prepareStealthDestination(w.ctx().connection, {
-    sign: async () => STEALTH_SIG,
-    drawEphemeral: () => 31337n,
-  });
+  // The derivation comes through the real core owner function
+  // (deriveStealthAddress), over meta keys fabricated from pinned scalars and a
+  // pinned ephemeral: the rail's signature->meta-keys KDF gates in
+  // @bongtu/client-evm (which this rail-agnostic suite may not import), and
+  // THIS gate is about runSpendChain routing the derivation whole.
+  const keys = stealthKeysFromScalars(123456789n, 987654321n);
+  const stealth = deriveStealthAddress(keys.meta, 31337n);
 
   // Record the two seams the invariant spans: the recipient the withdraw PROOF
   // binds (prove) and the derivation the submit ANNOUNCES (submitWithdraw).
@@ -428,9 +436,7 @@ test("a stealth withdraw pays the address its announcement rediscovers, and a me
   // the merge leg (a self-send with no announcement seam) never touched it.
   assert.deepEqual(announced, [stealth]);
   // THE invariant: the address the proof paid is the address the view key
-  // rediscovers from nothing but the announced R (re-derived from the same
-  // signature, as a wiped browser would).
-  const keys = stealthKeysFromKdfSignature(STEALTH_SIG);
+  // rediscovers from nothing but the announced R.
   const rediscovered = scanStealthAnnouncement(
     keys.viewPriv,
     keys.meta.spendPub,

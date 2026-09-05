@@ -169,15 +169,12 @@ export function buildDepositRequest(
 // ----------------------- run: approve → prove → submit ---------------------------
 
 import type { Calldata } from "@bongtu/core/proving";
-import type { Connection } from "@bongtu/client/connection";
 import {
-  approveToken,
-  assertPoolKemEpoch,
-  ensureChain,
-  readTokenState,
-  submitDeposit,
   walletErrorMessage,
-} from "@bongtu/client/connection";
+  type Connection,
+  type SubmitResult,
+  type TokenState,
+} from "@bongtu/client/rail";
 import type { KeyCacheLike } from "@bongtu/client/keyCache";
 import { randField } from "./spend/crypto.js";
 
@@ -211,32 +208,33 @@ export interface DepositOutcome {
 
 /** The network/proving I/O runDeposit performs, injectable so the pure orchestration
  *  (guards, stage order, skip-approve decision) is unit-testable with fakes — the same
- *  seam assets.ts uses (PrefetchDeps). Defaults are the real MetaMask/snarkjs edges. */
+ *  seam assets.ts uses (PrefetchDeps). The rail members are METHOD-style over the
+ *  structural rail seam (@bongtu/client/rail), so the rail client's real edges
+ *  (typed over its own wider Connection) are assignable — apps spread
+ *  @bongtu/client-evm/ops EVM_ENTERPRISE_IO. */
 export interface RunDepositDeps {
-  readTokenState: typeof readTokenState;
-  approveToken: typeof approveToken;
-  assertPoolKemEpoch: typeof assertPoolKemEpoch;
-  ensureChain: typeof ensureChain;
+  /** the rail's token-state read: balance + allowance to the pool (view, no gas). */
+  readTokenState(connection: Connection, tokenAddr: string, owner: string, spender: string): Promise<TokenState>;
+  /** the rail's exact-amount ERC-20 approve; resolves after the receipt. */
+  approveToken(connection: Connection, tokenAddr: string, spender: string, amount: bigint): Promise<string>;
+  /** refuse a pool whose arbiter KEM key the chain does not vouch for. */
+  assertPoolKemEpoch(connection: Connection, poolAddr: string): Promise<void>;
+  /** put the wallet on the live chain (silent when already there). */
+  ensureChain(connection: Connection): Promise<void>;
   /** the wallet's lock — holds the spending key between actions (keyCache.ts). */
   keyCache: KeyCacheLike;
   /** Turn a ProvingRequest into Groth16 calldata. The APP supplies this: treasury-web
    *  injects in-browser snarkjs (prove.ts proveInBrowser with its circuit asset
    *  base URL applied); payroll-web will inject its prover-service adapter. */
   prove: (request: ProvingRequest) => Promise<Calldata>;
-  submitDeposit: typeof submitDeposit;
+  /** the rail's proven-deposit submit. */
+  submitDeposit(connection: Connection, poolAddr: string, calldata: Calldata, kemCiphertext: string, explorerBase: string): Promise<SubmitResult>;
 }
 
-/** What every deposit must be handed: the app's lock instance and its prover. The
- *  engine-side edges (token reads, guards, submits) default to the real ones. */
-export type DepositIo = Pick<RunDepositDeps, "keyCache" | "prove"> & Partial<RunDepositDeps>;
-
-const DEFAULT_DEPS: Omit<RunDepositDeps, "keyCache" | "prove"> = {
-  readTokenState,
-  approveToken,
-  assertPoolKemEpoch,
-  ensureChain,
-  submitDeposit,
-};
+/** What every deposit must be handed: the app's lock instance, its prover, and
+ *  the rail io (the engine has no rail defaults since the split — spread
+ *  @bongtu/client-evm/ops EVM_ENTERPRISE_IO at the wiring site). */
+export type DepositIo = RunDepositDeps;
 
 /**
  * Approve (if needed) → assemble the deposit witness → prove in-browser → submit the
@@ -261,7 +259,7 @@ export async function runDeposit(
   onStage: (stage: DepositStage) => void,
   deps: DepositIo,
 ): Promise<DepositOutcome> {
-  const io: RunDepositDeps = { ...DEFAULT_DEPS, ...deps };
+  const io: RunDepositDeps = deps;
   const amount = args.amount.trim();
   const V = BigInt(amount);
   if (V <= 0n) throw new Error(`deposit amount must be positive, got ${V}`);

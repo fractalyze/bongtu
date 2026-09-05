@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@bongtu/client": "*",
+    "@bongtu/client-evm": "*",
     "@bongtu/core": "*",
     "@rainbow-me/rainbowkit": "^2.2.11",
     "ffjavascript": "^0.3.0",

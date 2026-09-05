@@ -546,7 +546,7 @@ mistake, not a typo.
 the withdraw toggle and the Stealth-funds screen left the wallet, because with a relayer
 paying gas, "withdraw to a fresh address you control" needs no stealth machinery — while
 non-interactive receiving does. The primitives (`@bongtu/core/stealth`,
-`@bongtu/client/stealthKeys` / `stealthFunds`, the lock's stealth custody) and their tests
+`@bongtu/client-evm/stealthKeys` / `stealthFunds`, the lock's stealth custody) and their tests
 remain in the packages as the deposit slice's foundation (`.dev/milestone-stealth.md`).
 
 ### Receiving through the portal

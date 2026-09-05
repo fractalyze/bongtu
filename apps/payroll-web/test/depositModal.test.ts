@@ -14,7 +14,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import type { Connection } from "@bongtu/client/connection";
+import type { Connection } from "@bongtu/client-evm/connection";
 import { parseKkrw } from "@bongtu/client/money";
 import { GAS_TOKEN_PHRASE } from "@bongtu/core/network";
 import {

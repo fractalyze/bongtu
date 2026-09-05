@@ -20,7 +20,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { DEFAULTS } from "../config.js";
-import { walletErrorMessage, type Connection } from "@bongtu/client/connection";
+import { ensureChain, walletErrorMessage, type Connection } from "@bongtu/client-evm/connection";
 import {
   endWalletConnection,
   requireConnection,
@@ -30,7 +30,9 @@ import {
 } from "@bongtu/ui/wagmi";
 import { runTokenlessLogin } from "@bongtu/client/login";
 import { ConsumerOps } from "@bongtu/client/consumer";
-import { KEY_DERIVATION, deriveLoginIdentity } from "@bongtu/client/identity";
+import { KEY_DERIVATION } from "@bongtu/client/identity";
+import { deriveLoginIdentity } from "@bongtu/client-evm/identity";
+import { EVM_CONSUMER_IO } from "@bongtu/client-evm/ops";
 import { keyCache } from "@bongtu/ui/keyCache";
 import { proveInBrowser } from "../lib/prove.js";
 import type { WalletDescription } from "@bongtu/ui/walletBrand";
@@ -375,6 +377,7 @@ export function App(): ReactNode {
           { indexerUrl: INDEXER_URL },
           {
             openConnection: requireConnection,
+            ensureChain,
             deriveIdentity: (c, plan) => deriveLoginIdentity(c, plan, KEY_DERIVATION),
           },
         );
@@ -432,6 +435,7 @@ export function App(): ReactNode {
       connection && session
         ? new ConsumerOps(
             {
+              ...EVM_CONSUMER_IO,
               connection,
               indexerUrl: INDEXER_URL,
               pool: DEFAULTS.pool,

@@ -22,16 +22,11 @@
 import { commitment } from "@bongtu/core/note";
 import type { StealthDerivation } from "@bongtu/core/stealth";
 import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
-import type { Connection } from "@bongtu/client/connection";
 import {
-  assertPoolKemEpoch,
-  ensureChain,
-  submitTransfer,
-  submitTransfer10x2,
-  submitWithdraw,
   walletErrorMessage,
-} from "@bongtu/client/connection";
-import { submitWithdrawRelayed } from "@bongtu/client/relayer";
+  type Connection,
+  type SubmitResult,
+} from "@bongtu/client/rail";
 import type { KeyCacheLike } from "@bongtu/client/keyCache";
 import { getHead, getSignedPath, type OwnerNote } from "@bongtu/core/indexerApi";
 import { pollUntil, type PollForActionOptions } from "@bongtu/client/refresh";
@@ -102,10 +97,15 @@ export interface SpendOutcome {
 
 /** The network/proving I/O a spend performs, injectable so the pure orchestration
  *  (guard order, stage order, leg order) is unit-testable with fakes — the same seam
- *  ops/deposit.ts uses (RunDepositDeps). Defaults are the real edges. */
+ *  ops/deposit.ts uses (RunDepositDeps). The rail members are METHOD-style over
+ *  the structural rail seam (@bongtu/client/rail), so the rail client's real
+ *  edges (typed over its own wider Connection) are assignable — apps spread
+ *  @bongtu/client-evm/ops EVM_ENTERPRISE_IO. */
 export interface RunSpendDeps {
-  ensureChain: typeof ensureChain;
-  assertPoolKemEpoch: typeof assertPoolKemEpoch;
+  /** put the wallet on the live chain (silent when already there). */
+  ensureChain(connection: Connection): Promise<void>;
+  /** refuse a pool whose arbiter KEM key the chain does not vouch for. */
+  assertPoolKemEpoch(connection: Connection, poolAddr: string): Promise<void>;
   /** the wallet's lock — holds the spending key between actions (keyCache.ts). */
   keyCache: KeyCacheLike;
   getHead: typeof getHead;
@@ -114,30 +114,41 @@ export interface RunSpendDeps {
    *  injects in-browser snarkjs (prove.ts proveInBrowser with its circuit asset
    *  base URL applied); payroll-web will inject its prover-service adapter. */
   prove: (request: ProvingRequest) => Promise<Calldata>;
-  submitTransfer: typeof submitTransfer;
-  submitTransfer10x2: typeof submitTransfer10x2;
-  submitWithdraw: typeof submitWithdraw;
+  /** the rail's proven-transfer submit (2-in / 2-out). */
+  submitTransfer(connection: Connection, poolAddr: string, calldata: Calldata, kemCiphertext: string, explorerBase: string): Promise<SubmitResult>;
+  /** the rail's proven-transfer10x2 submit (10-in / 2-out — every merge leg). */
+  submitTransfer10x2(connection: Connection, poolAddr: string, calldata: Calldata, kemCiphertext: string, explorerBase: string): Promise<SubmitResult>;
+  /** the rail's proven-withdraw submit; a stealth payout hands the WHOLE core
+   *  derivation and the rail maps its announcement half to calldata. */
+  submitWithdraw(connection: Connection, poolAddr: string, calldata: Calldata, kemCiphertext: string, explorerBase: string, stealth?: StealthDerivation): Promise<SubmitResult>;
   /** reached only when ctx carries a relayerUrl, and only by the terminal
-   *  withdraw leg (io/relayer.ts). */
-  submitWithdrawRelayed: typeof submitWithdrawRelayed;
+   *  withdraw leg (@bongtu/client-evm/relayer). */
+  submitWithdrawRelayed(relayerUrl: string, calldata: Calldata, kemCiphertext: string, explorerBase: string, stealth?: StealthDerivation): Promise<SubmitResult>;
   /** interval/cap/sleep for the between-legs wait — the wallet's one bounded-poll
    *  policy (refresh.ts), so tests can run a chain without real seconds. */
   poll: PollForActionOptions;
 }
 
-/** What every spend must be handed: the app's lock instance and its prover. The
- *  engine-side edges (chain guard, indexer reads, submits) default to the real ones. */
-export type SpendIo = Pick<RunSpendDeps, "keyCache" | "prove"> & Partial<RunSpendDeps>;
+/** What every spend must be handed: the app's lock instance, its prover, and the
+ *  rail io (the engine has no rail defaults since the split — spread
+ *  @bongtu/client-evm/ops EVM_ENTERPRISE_IO at the wiring site). The engine-side
+ *  edges (indexer reads, poll policy) default to the real ones. */
+export type SpendIo = Pick<
+  RunSpendDeps,
+  | "keyCache"
+  | "prove"
+  | "ensureChain"
+  | "assertPoolKemEpoch"
+  | "submitTransfer"
+  | "submitTransfer10x2"
+  | "submitWithdraw"
+  | "submitWithdrawRelayed"
+> &
+  Partial<RunSpendDeps>;
 
-const DEFAULT_DEPS: Omit<RunSpendDeps, "keyCache" | "prove"> = {
-  ensureChain,
-  assertPoolKemEpoch,
+const DEFAULT_DEPS: Pick<RunSpendDeps, "getHead" | "getSignedPath" | "poll"> = {
   getHead,
   getSignedPath,
-  submitTransfer,
-  submitTransfer10x2,
-  submitWithdraw,
-  submitWithdrawRelayed,
   poll: {},
 };
 

@@ -10,8 +10,8 @@
 // the shared engine.
 
 import { createPublicClient, createWalletClient, custom, http, type PublicClient } from "viem";
-import { liveChain } from "@bongtu/client/chain";
-import type { Connection, WalletEdge } from "@bongtu/client/connection";
+import { liveChain } from "@bongtu/client-evm/chain";
+import type { Connection, WalletEdge } from "@bongtu/client-evm/connection";
 
 interface Eip1193 {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;

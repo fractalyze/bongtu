@@ -191,6 +191,8 @@ jobs:
         run: npm test -w @bongtu/ui
       - name: client tests
         run: npm test -w @bongtu/client
+      - name: client-evm tests
+        run: npm test -w @bongtu/client-evm
       - name: relayer tests
         run: npm test -w @bongtu/relayer
       - name: sweeper tests

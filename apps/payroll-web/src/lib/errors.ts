@@ -9,7 +9,7 @@
 //
 // Everything here is pure — the wording gates under node:test (test/errors.test.ts).
 
-import { walletErrorMessage } from "@bongtu/client/connection";
+import { walletErrorMessage } from "@bongtu/client-evm/connection";
 import { parseKkrw } from "@bongtu/client/money";
 import { classifyChainFailure, describeThrown, failureCopy, type FailureCopyTable } from "@bongtu/core/errors";
 import { CHAIN_NAME } from "@bongtu/core/network";

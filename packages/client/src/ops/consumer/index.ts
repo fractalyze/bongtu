@@ -3,7 +3,8 @@
 // the module addresses, and the ConsumerOps facade (below) binding the login-time
 // deps once. Parts: plan.ts (recipient shapes and the family planning deltas),
 // requests.ts (the ProvingRequest builders), run.ts (the prove+submit
-// orchestrations), submit.ts (the module submit edges).
+// orchestrations). The module submit edges need viem, so they live in the
+// rail client (@bongtu/client-evm/consumer) — the engine stays rail-free.
 //
 // The build layer is PURE wallet-side witness assembly for the four CPU consumer
 // circuits: depositPriv (0-in / 2-out mint), transferPriv (2-in / 2-out),
@@ -38,18 +39,16 @@
 // witness material: they ride the tx as `bytes[] kemCiphertexts` calldata, one
 // entry per output, surfaced here in each result's meta.
 // This barrel stitches the parts back into the ONE stable public subpath
-// (@bongtu/client/consumer): plan, requests, run and submit, plus the ConsumerOps
-// facade defined below.
+// (@bongtu/client/consumer), plus the ConsumerOps facade defined below.
 export * from "./plan.js";
 export * from "./requests.js";
 export * from "./run.js";
-export * from "./submit.js";
 
 
 // =============================== ConsumerOps =================================
 
 import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
-import type { Connection } from "@bongtu/client/connection";
+import type { Connection } from "@bongtu/client/rail";
 import type { KeyCacheLike } from "@bongtu/client/keyCache";
 import type { ScanNote } from "@bongtu/client/selfscan";
 import {
@@ -98,7 +97,14 @@ export type ConsumerOpsDeps = {
   keyCache: KeyCacheLike;
   /** Turn a ProvingRequest into Groth16 calldata (the APP supplies this). */
   prove: (request: ProvingRequest) => Promise<Calldata>;
-} & Partial<RunConsumerSpendDeps> &
+} & Pick<
+  RunConsumerSpendDeps,
+  "ensureChain" | "submitTransferPriv" | "submitTransfer10x2Priv" | "submitWithdrawPriv"
+> &
+  // the rail io — spread @bongtu/client-evm/ops EVM_CONSUMER_IO at the wiring
+  // site (the engine has no rail defaults since the split).
+  Pick<RunConsumerDepositDeps, "readTokenState" | "approveToken" | "submitDepositPriv"> &
+  Partial<RunConsumerSpendDeps> &
   Partial<RunConsumerDepositDeps>;
 
 /**

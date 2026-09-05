@@ -1,4 +1,4 @@
-// Headless gates for the consumer SUBMIT layer (src/consumerSubmit.ts): each
+// Headless gates for the consumer SUBMIT layer (src/consumer.ts): each
 // wrapper must land on ITS module address with args the shared fragment
 // (CONSUMER_MODULE_ABI_FRAGMENTS) actually encodes — the same parse the live
 // module's ABI is generated from — riding the one submit discipline
@@ -18,7 +18,7 @@ import { ImtTree } from "@bongtu/core/imt";
 import type { Calldata } from "@bongtu/core/proving";
 
 import { deriveIdentityFromSignature } from "@bongtu/client/derive";
-import type { Connection } from "@bongtu/client/connection";
+import type { Connection } from "@bongtu/client-evm/connection";
 import {
   buildConsumerTransferRequest,
   selfConsumerRecipient,
@@ -28,7 +28,7 @@ import {
   submitTransferPriv,
   submitTransfer10x2Priv,
   submitWithdrawPriv,
-} from "@bongtu/client/consumer";
+} from "@bongtu/client-evm/consumer";
 
 // ---- the ONE shared assembled request (S2 builder, real per-output seals) ----
 

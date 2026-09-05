@@ -14,8 +14,13 @@ import assert from "node:assert/strict";
 
 import { deriveKeypair } from "@bongtu/core/note";
 import { packPubkey } from "@bongtu/core/pubkey";
-import type { SpendContext } from "@bongtu/client/spend";
-import { MAX_RECIPIENTS, PAY_RUN_FAILURE_REASSURANCE, runPayRun, type PayRunDeps } from "../src/lib/payRun.js";
+import {
+  MAX_RECIPIENTS,
+  PAY_RUN_FAILURE_REASSURANCE,
+  runPayRun,
+  type PayRunContext,
+  type PayRunDeps,
+} from "../src/lib/payRun.js";
 import type { RecipientRow } from "../src/lib/disburse.js";
 
 const KKRW = 10n ** 18n;
@@ -36,7 +41,7 @@ const CTX = {
   notes: [],
   sessionPubkey: PAYEE,
   reloadNotes: async () => [],
-} as unknown as SpendContext;
+} as unknown as PayRunContext;
 
 const OUTCOME = { txHash: "0xmerge", explorerUrl: "http://explorer.test/0xmerge" };
 

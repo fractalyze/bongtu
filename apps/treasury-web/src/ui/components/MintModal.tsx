@@ -16,7 +16,7 @@ import {
   mintTestToken,
   readGasBalance,
   type Connection,
-} from "@bongtu/client/connection";
+} from "@bongtu/client-evm/connection";
 import { treasuryErrorMessage } from "../../lib/errors.js";
 import { parseKkrw } from "@bongtu/client/money";
 import { shortenPubkey } from "../format.js";

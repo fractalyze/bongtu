@@ -12,8 +12,7 @@
 import type { WalletIdentity } from "@bongtu/client/derive";
 import type { LoginSignaturePlan } from "@bongtu/client/identity";
 import { obtainViewToken } from "@bongtu/core/indexerApi";
-import { ensureChain } from "@bongtu/client/connection";
-import type { Connection } from "@bongtu/client/connection";
+import type { Connection } from "@bongtu/client/rail";
 import { SessionStore, type StoredSession, type WalletTransport } from "./session.js";
 export type { WalletTransport } from "./session.js";
 
@@ -21,19 +20,22 @@ export interface LoginContext {
   indexerUrl: string;
 }
 
-/** Every I/O edge a login touches, injectable so the refusals gate headlessly. */
-export interface RunLoginDeps {
+/** Every I/O edge a login touches, injectable so the refusals gate headlessly.
+ *  Generic in the rail's own Connection shape (`C`), inferred from
+ *  `openConnection`, so a caller gets its rail's full connection back out of
+ *  the LoginResult rather than the engine's structural seam slice. */
+export interface RunLoginDeps<C extends Connection = Connection> {
   /** The wallet the connect modal just opened (treasury-web wagmi.ts
    *  requireConnection). Its `transport` decides the determinism rule below — a
    *  WalletConnect wallet this browser has never derived under pays the double
    *  signature. */
-  openConnection: () => Promise<Connection>;
+  openConnection: () => Promise<C>;
   /** Prompt the wallet onto the live chain BEFORE anything signs: the derivation's
    *  typed data pins domain.chainId to it, and wallets reject a v4 request whose
    *  domain chain differs from the active one — a wallet on another network
    *  must get the add/switch prompt, not raw provider text. */
-  ensureChain: (connection: Connection) => Promise<void>;
-  deriveIdentity: (connection: Connection, plan: LoginSignaturePlan) => Promise<WalletIdentity>;
+  ensureChain: (connection: C) => Promise<void>;
+  deriveIdentity: (connection: C, plan: LoginSignaturePlan) => Promise<WalletIdentity>;
   obtainViewToken: typeof obtainViewToken;
   loadKeyBinding: (eoaAddress: string) => string | null;
   saveKeyBinding: (eoaAddress: string, compressedPubkey: string) => void;
@@ -41,26 +43,31 @@ export interface RunLoginDeps {
 }
 
 /** What every login must be handed: how to reach a wallet (`openConnection` — the
- *  wagmi edge) and how to derive under this deployment's KDF config
- *  (`deriveIdentity` — deriveLoginIdentity partially applied). The engine-side
- *  edges default to the real ones. */
-export type LoginIo = Pick<RunLoginDeps, "openConnection" | "deriveIdentity"> & Partial<RunLoginDeps>;
+ *  wagmi edge), how to derive under this deployment's KDF config
+ *  (`deriveIdentity` — deriveLoginIdentity partially applied), and the rail's
+ *  chain guard (`ensureChain` — a rail-client edge since the rail split, so the
+ *  engine's own defaults stay rail-free). The remaining engine-side edges
+ *  default to the real ones. */
+export type LoginIo<C extends Connection = Connection> = Pick<
+  RunLoginDeps<C>,
+  "openConnection" | "deriveIdentity" | "ensureChain"
+> &
+  Partial<RunLoginDeps<C>>;
 
 // ONE store over the browser's real localStorage: every storage edge of a
 // default-wired login goes through the same receiver (arrow-bound methods, so
 // plucking them here keeps `this`).
 const sessionStore = new SessionStore();
 
-const DEFAULT_DEPS: Omit<RunLoginDeps, "openConnection" | "deriveIdentity"> = {
-  ensureChain,
+const DEFAULT_DEPS: Omit<RunLoginDeps, "openConnection" | "deriveIdentity" | "ensureChain"> = {
   obtainViewToken,
   loadKeyBinding: sessionStore.loadKeyBinding,
   saveKeyBinding: sessionStore.saveKeyBinding,
   saveSession: sessionStore.saveSession,
 };
 
-export interface LoginResult {
-  connection: Connection;
+export interface LoginResult<C extends Connection = Connection> {
+  connection: C;
   /** The derived spending identity. The caller hands it to the lock and drops it —
    *  nothing here persists it (KEY-CUSTODY RULE, see session.ts). */
   identity: WalletIdentity;
@@ -75,8 +82,11 @@ export interface LoginResult {
  * wallet cannot be trusted to reproduce this account's key — and when it throws,
  * nothing has been written.
  */
-export async function runLogin(ctx: LoginContext, deps: LoginIo): Promise<LoginResult> {
-  const io: RunLoginDeps = { ...DEFAULT_DEPS, ...deps };
+export async function runLogin<C extends Connection>(
+  ctx: LoginContext,
+  deps: LoginIo<C>,
+): Promise<LoginResult<C>> {
+  const io: RunLoginDeps<C> = { ...DEFAULT_DEPS, ...deps };
   const connection = await io.openConnection();
   await io.ensureChain(connection);
 
@@ -127,15 +137,21 @@ export async function runLogin(ctx: LoginContext, deps: LoginIo): Promise<LoginR
 
 /** The deps seam a tokenless app fills in: same as LoginIo, minus the view-token
  *  slot — by type, a caller cannot even supply one. */
-export type TokenlessLoginIo = Pick<RunLoginDeps, "openConnection" | "deriveIdentity"> &
-  Partial<Omit<RunLoginDeps, "obtainViewToken">>;
+export type TokenlessLoginIo<C extends Connection = Connection> = Pick<
+  RunLoginDeps<C>,
+  "openConnection" | "deriveIdentity" | "ensureChain"
+> &
+  Partial<Omit<RunLoginDeps<C>, "obtainViewToken">>;
 
 /** The consumer login: identical flow and refusal ordering, but the view-token
  *  step is refused INSIDE the engine, so the flow lands on its tokenless branch
  *  every time. Exists so a tokenless app never names the token machinery at all —
  *  "no view-token session" becomes a property of the wiring, not of app
  *  discipline (the consumer contract: every read is public). */
-export async function runTokenlessLogin(ctx: LoginContext, deps: TokenlessLoginIo): Promise<LoginResult> {
+export async function runTokenlessLogin<C extends Connection>(
+  ctx: LoginContext,
+  deps: TokenlessLoginIo<C>,
+): Promise<LoginResult<C>> {
   return runLogin(ctx, {
     ...deps,
     obtainViewToken: () => Promise.reject(new Error("tokenless login requested a view token")),

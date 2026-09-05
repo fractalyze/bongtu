@@ -1,4 +1,4 @@
-// Headless gates for the viem wallet edge (@bongtu/client/connection) and the app's
+// Headless gates for the viem wallet edge (@bongtu/client-evm/connection) and the app's
 // wagmi config (src/lib/wagmi.ts), driven by
 // FAKE EIP-1193 transports — no wallet, no relay, no RPC. What is gated here:
 //
@@ -44,7 +44,7 @@ import {
   GAS_TOKEN_PHRASE,
   POOL_ABI_FRAGMENTS,
 } from "@bongtu/core/network";
-import { liveChain } from "@bongtu/client/chain";
+import { liveChain } from "@bongtu/client-evm/chain";
 import { buildConnectors } from "@bongtu/ui/wagmi";
 import {
   assertPoolKemEpoch,
@@ -55,7 +55,7 @@ import {
   WALLET_FAILURE_COPY,
   walletErrorMessage,
   type Connection,
-} from "@bongtu/client/connection";
+} from "@bongtu/client-evm/connection";
 import type { ChainFailure } from "@bongtu/core/errors";
 import { describeWallet, NEUTRAL_WALLET_NAME } from "@bongtu/ui/walletBrand";
 import type { Calldata } from "@bongtu/core/proving";

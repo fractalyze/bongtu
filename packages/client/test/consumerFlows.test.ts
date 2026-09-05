@@ -25,7 +25,7 @@ import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
 
 import { deriveIdentityFromSignature } from "@bongtu/client/derive";
 import { KeyCache } from "@bongtu/client/keyCache";
-import type { Connection } from "@bongtu/client/connection";
+import type { Connection } from "@bongtu/client/rail";
 import { selfConsumerRecipient } from "@bongtu/client/consumer";
 import type { ScanNote } from "@bongtu/client/selfscan";
 import {

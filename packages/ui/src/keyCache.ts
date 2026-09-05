@@ -1,10 +1,10 @@
 // KEY-CUSTODY RULE (user-mandated): the bjj private key may live in memory only —
 // this instance is the one place that holds it across calls (the contract lives
-// with the class: @bongtu/client/keyCache). Construction goes through the shared
-// createKeyCache so the stealth seam and the deployment's KDF config cannot be
-// wired differently here than in payroll-web.
+// with the class: @bongtu/client/keyCache). Construction goes through the EVM
+// rail's createKeyCache (@bongtu/client-evm/keyCache) so the stealth seam and the
+// deployment's KDF config cannot be wired differently here than in payroll-web.
 
-import { createKeyCache } from "@bongtu/client/keyCache";
+import { createKeyCache } from "@bongtu/client-evm/keyCache";
 import { walletEdge } from "./wagmi.js";
 
 /** The wallet's one cache; flows take it through their deps seam so tests can
