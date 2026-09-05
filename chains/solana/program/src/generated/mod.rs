@@ -5,6 +5,8 @@ pub mod fields;
 pub mod vk_deposit;
 pub mod vk_deposit_priv;
 pub mod vk_disburse256;
+pub mod vk_transfer;
+pub mod vk_transfer10x2;
 pub mod vk_transfer10x2_priv;
 pub mod vk_transfer_priv;
 pub mod vk_withdraw;

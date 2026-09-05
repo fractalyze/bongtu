@@ -1,10 +1,12 @@
 {
-  "comment": "Per-op CU regression budgets (SOLR §3.1.3 gate 3). Measured by mollusk (0.15.1, Agave 4.x runtime costs) against the committed realproof fixtures: deposit_priv 220,463; transfer_priv 247,814; transfer10x2_priv 330,502; withdraw_priv 208,485 (post the S2 pre-funded-PDA hardening, 2026-09-05); enterprise deposit 233,774; withdraw 264,215; disburse256 202,752 (S3, 2026-09-05 — the batch attach is O(LOG_B+H) poseidon folds, which is why disburse lands far under the SOLR ~640k worksheet estimate). Budgets carry ~5% headroom and move only by explicit commit, like the EVM gas tables. The mollusk gate fails any op consuming more than its budget. Measured numbers exclude the pre-funded-PDA hardening path: a griefed PDA is claimed via a Transfer+Allocate+Assign CPI triple instead of one CreateAccount, adding several thousand CU per griefed PDA — clients should keep the ~10k headroom (or set compute limits above the budget), not set limits at the measured value.",
+  "comment": "Per-op CU regression budgets (SOLR §3.1.3 gate 3). Measured by mollusk (0.15.1, Agave 4.x runtime costs) against the committed realproof fixtures: deposit_priv 220,463; transfer_priv 247,814; transfer10x2_priv 330,502; withdraw_priv 208,485 (post the S2 pre-funded-PDA hardening, 2026-09-05); enterprise deposit 233,774; withdraw 264,215; disburse256 202,752 (S3, 2026-09-05 — the batch attach is O(LOG_B+H) poseidon folds, which is why disburse lands far under the SOLR ~640k worksheet estimate); enterprise transfer 322,195; transfer10x2 491,759 (S3 pass 2, 2026-09-05 — the 10x2 merge fixture: 68-public verify + 11 marker-PDA creates, the widest verify on the rail at ~35% of the 1.4M cap). Budgets carry ~5% headroom and move only by explicit commit, like the EVM gas tables. The mollusk gate fails any op consuming more than its budget. Measured numbers exclude the pre-funded-PDA hardening path: a griefed PDA is claimed via a Transfer+Allocate+Assign CPI triple instead of one CreateAccount, adding several thousand CU per griefed PDA — clients should keep the ~10k headroom (or set compute limits above the budget), not set limits at the measured value.",
   "deposit_priv": 232000,
   "transfer_priv": 260000,
   "transfer10x2_priv": 347000,
   "withdraw_priv": 219000,
   "deposit": 246000,
   "withdraw": 278000,
-  "disburse256": 213000
+  "disburse256": 213000,
+  "transfer": 339000,
+  "transfer10x2": 517000
 }

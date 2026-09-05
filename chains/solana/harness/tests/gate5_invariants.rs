@@ -39,7 +39,7 @@ fn expect_reject(env: &Env, error: PoolError) -> mollusk_svm::result::Instructio
 
 /// Swap the config image for one with `flags` — the consumer profile with a
 /// family switched off (the ModuleNotRegistered analogue, SOLR §2.1).
-fn set_family_flags(env: &mut Env, flags: u8) {
+fn set_family_flags(env: &mut Env, flags: u16) {
     let config_key = env.config_key;
     let data = bongtu_solana_harness::config_account_data(flags);
     let mut account = env

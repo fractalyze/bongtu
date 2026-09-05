@@ -10,14 +10,16 @@
 
 use {
     bongtu_pool_solana::{
-        deposit, deposit_priv, disburse256, transfer10x2_priv, transfer_priv, withdraw,
-        withdraw_priv,
+        deposit, deposit_priv, disburse256, transfer, transfer10x2, transfer10x2_priv,
+        transfer_priv, withdraw, withdraw_priv,
     },
     bongtu_solana_harness::{
         build_deposit_env, build_env, build_transfer10x2_env, build_withdraw_env,
         enterprise::{
-            build_disburse256_env, build_ent_deposit_env, build_ent_withdraw_env,
-            load_disburse256_fixture, load_ent_deposit_fixture, load_ent_withdraw_fixture,
+            build_disburse256_env, build_ent_deposit_env, build_ent_transfer10x2_env,
+            build_ent_transfer_env, build_ent_withdraw_env, load_disburse256_fixture,
+            load_ent_deposit_fixture, load_ent_transfer10x2_fixture, load_ent_transfer_fixture,
+            load_ent_withdraw_fixture,
         },
         load_deposit_fixture, load_fixture, load_transfer10x2_fixture, load_withdraw_fixture,
         v0_tx_size,
@@ -29,7 +31,7 @@ const TX_V1_LIMIT: usize = 4096;
 /// (op, worst-case account metas, instruction data length). Account counts
 /// come from the instruction layouts (module docs): the base accounts plus
 /// the maximum nullifier-PDA run; data = 1-byte discriminator + payload.
-const WORST_CASES: [(&str, usize, usize); 7] = [
+const WORST_CASES: [(&str, usize, usize); 9] = [
     ("deposit_priv", 10, 1 + deposit_priv::PAYLOAD_LEN),
     ("transfer_priv", 10, 1 + transfer_priv::PAYLOAD_LEN),
     ("transfer10x2_priv", 18, 1 + transfer10x2_priv::PAYLOAD_LEN),
@@ -37,6 +39,8 @@ const WORST_CASES: [(&str, usize, usize); 7] = [
     ("deposit", 10, 1 + deposit::PAYLOAD_LEN),
     ("withdraw", 14, 1 + withdraw::PAYLOAD_LEN),
     ("disburse256", 10, 1 + disburse256::PAYLOAD_LEN),
+    ("transfer", 10, 1 + transfer::PAYLOAD_LEN),
+    ("transfer10x2", 18, 1 + transfer10x2::PAYLOAD_LEN),
 ];
 
 #[test]
@@ -61,6 +65,22 @@ fn disburse256_payload_holds_the_solr_331_claim() {
     assert!(data_len <= 1740, "disburse256 payload {data_len} B outgrew the ~1.7 KB design");
 }
 
+/// S3 pass 2 byte worksheet, pinned: the enterprise 10x2 carries the widest
+/// public vector on the rail (56 carried) but only ONE kem ct where the
+/// consumer 10x2 carries two, so the CONSUMER 10x2 remains the largest wire.
+/// Both worst-case orderings are asserted so a kem-ct or publics change that
+/// flips the claim fails here, not in a doc.
+#[test]
+fn enterprise_transfer10x2_worksheet_pinned() {
+    assert_eq!(transfer::PAYLOAD_LEN, 2400, "enterprise transfer payload drifted");
+    assert_eq!(transfer10x2::PAYLOAD_LEN, 3136, "enterprise transfer10x2 payload drifted");
+    let ent = v0_tx_size(18, 1 + transfer10x2::PAYLOAD_LEN);
+    let consumer = v0_tx_size(18, 1 + transfer10x2_priv::PAYLOAD_LEN);
+    println!("tx size[transfer10x2 enterprise] = {ent} B, consumer = {consumer} B");
+    assert!(ent < consumer, "enterprise 10x2 outgrew the consumer 10x2 wire");
+    assert!(ent <= TX_V1_LIMIT);
+}
+
 #[test]
 fn fixture_instructions_are_within_their_worst_case() {
     let deposit = build_deposit_env(&load_deposit_fixture());
@@ -70,6 +90,8 @@ fn fixture_instructions_are_within_their_worst_case() {
     let ent_deposit = build_ent_deposit_env(&load_ent_deposit_fixture());
     let ent_withdraw = build_ent_withdraw_env(&load_ent_withdraw_fixture());
     let disburse = build_disburse256_env(&load_disburse256_fixture());
+    let ent_transfer = build_ent_transfer_env(&load_ent_transfer_fixture());
+    let ent_t10x2 = build_ent_transfer10x2_env(&load_ent_transfer10x2_fixture());
 
     for (env, (op, worst_accounts, worst_data)) in [
         deposit,
@@ -79,6 +101,8 @@ fn fixture_instructions_are_within_their_worst_case() {
         ent_deposit,
         ent_withdraw,
         disburse,
+        ent_transfer,
+        ent_t10x2,
     ]
     .iter()
     .zip(WORST_CASES)

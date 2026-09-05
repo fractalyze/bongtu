@@ -7,8 +7,9 @@
 //! SPL escrow motion + self-CPI event), plus the event handler they invoke.
 //! `initialize` / `set_family_flags` keep reserved discriminators 0/1.
 //!
-//! S3 surface (SOLR §3.3, OPEN-1 decided): the enterprise op set — `deposit`,
-//! `withdraw`, and the 1-tx `disburse256` (disclosureHash on-chain, the
+//! S3 surface (SOLR §3.3, OPEN-1 decided as the FULL enterprise family): the
+//! enterprise op set — `deposit`, `withdraw`, `transfer`, `transfer10x2`
+//! (pass 2), and the 1-tx `disburse256` (disclosureHash on-chain, the
 //! disclosure BYTES institution-served; `DisburseBatch` PDA as the durable
 //! audit anchor). Full on-chain disclosure DA needs ~19 staged write txs plus
 //! an incremental in-tx fold (a 2054-element refold alone is over the CU cap),
@@ -30,6 +31,8 @@ pub mod op_common;
 pub mod recipient_binding;
 pub mod spl;
 pub mod state;
+pub mod transfer;
+pub mod transfer10x2;
 pub mod transfer10x2_priv;
 pub mod transfer_priv;
 pub mod tree;
@@ -75,6 +78,12 @@ pub fn process_instruction(
         }
         disburse256::DISCRIMINATOR => {
             disburse256::process(program_id, accounts, payload).map_err(Into::into)
+        }
+        transfer::DISCRIMINATOR => {
+            transfer::process(program_id, accounts, payload).map_err(Into::into)
+        }
+        transfer10x2::DISCRIMINATOR => {
+            transfer10x2::process(program_id, accounts, payload).map_err(Into::into)
         }
         event::EVENT_DISCRIMINATOR => {
             event::process_emit_event(program_id, accounts).map_err(Into::into)

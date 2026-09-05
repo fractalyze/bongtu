@@ -1,6 +1,7 @@
 //! Gate 2, enterprise rows (SOLR §3.1.3 #2 / §6 S3 acceptance): each
 //! enterprise op's on-SVM verifier accepts its committed realproof fixture —
-//! deposit/withdraw replay the EVM realproofs.json proofs, disburse256 the
+//! deposit/withdraw/transfer/transfer10x2 replay the EVM realproofs.json
+//! proofs (10x2 the MERGE entry: all 10 inputs real), disburse256 the
 //! GPU-proven production-arity proof — with the arbiter key injected from the
 //! enterprise `PoolConfig`, and rejects a tampered public. State-level replay
 //! per SOLR §5.2 (seeded KnownRoot + ImtTree-oracle tree state).
@@ -13,9 +14,10 @@ use {
     bongtu_solana_harness::{
         carried_offset,
         enterprise::{
-            build_disburse256_env, build_ent_deposit_env, build_ent_withdraw_env,
-            disburse_batch_pda, load_disburse256_fixture, load_ent_deposit_fixture,
-            load_ent_withdraw_fixture,
+            build_disburse256_env, build_ent_deposit_env, build_ent_transfer10x2_env,
+            build_ent_transfer_env, build_ent_withdraw_env, disburse_batch_pda,
+            load_disburse256_fixture, load_ent_deposit_fixture, load_ent_transfer10x2_fixture,
+            load_ent_transfer_fixture, load_ent_withdraw_fixture,
         },
         hex32, hex_u64, load_cu_budget, program_id, token_amount, tree_account_data, Env,
         TreeSnapshot,
@@ -188,4 +190,42 @@ fn disburse256_rejects_tampered_disclosure_hash() {
     let fx = load_disburse256_fixture();
     let mut env = build_disburse256_env(&fx);
     run_tamper(&mut env, "disburse256", 2); // carried[2] == pub[2]
+}
+
+// --- transfer (enterprise, S3 pass 2) ----------------------------------------
+
+#[test]
+fn ent_transfer_accepts_committed_evm_realproof() {
+    let fx = load_ent_transfer_fixture();
+    let env = build_ent_transfer_env(&fx);
+    let result = run_happy(&env, "transfer", &fx.post_state);
+    drop(result);
+}
+
+#[test]
+fn ent_transfer_rejects_tampered_public() {
+    let fx = load_ent_transfer_fixture();
+    let mut env = build_ent_transfer_env(&fx);
+    run_tamper(&mut env, "transfer", 32); // carried[32] == pub[34] (nonce)
+}
+
+// --- transfer10x2 (enterprise, S3 pass 2) ------------------------------------
+
+#[test]
+fn ent_transfer10x2_accepts_committed_evm_realproof_all_ten_inputs() {
+    // The merge fixture: all 10 nullifiers real, so the happy path creates
+    // the full 10-nullifier-PDA run — the worst-case CU the budget records.
+    let fx = load_ent_transfer10x2_fixture();
+    assert_eq!(fx.nullifiers.len(), 10);
+    let env = build_ent_transfer10x2_env(&fx);
+    assert_eq!(env.nf_pdas.len(), 10, "merge fixture must drive 10 nf PDAs");
+    let result = run_happy(&env, "transfer10x2", &fx.post_state);
+    drop(result);
+}
+
+#[test]
+fn ent_transfer10x2_rejects_tampered_public() {
+    let fx = load_ent_transfer10x2_fixture();
+    let mut env = build_ent_transfer10x2_env(&fx);
+    run_tamper(&mut env, "transfer10x2", 55); // carried[55] == pub[65] (nonce)
 }

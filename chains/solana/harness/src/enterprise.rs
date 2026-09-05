@@ -1,5 +1,6 @@
 //! Enterprise (S3) mollusk environments — the SOLR §3.3 op set decided under
-//! OPEN-1: `deposit`, `withdraw`, `disburse256`. Same construction discipline
+//! OPEN-1 (full family): `deposit`, `withdraw`, `transfer`, `transfer10x2`,
+//! `disburse256`. Same construction discipline
 //! as the consumer envs in the crate root: fixture-seeded tree state, a
 //! KnownRoot PDA for the spend root, wire-shaped instructions — but against
 //! an ENTERPRISE `PoolConfig` (B=256, arbiter key set, enterprise family
@@ -13,8 +14,8 @@
 
 use {
     crate::{
-        hex32, hex_bytes, hex_u64, token_account, DepositFixture, Env, TreeSnapshot,
-        WithdrawFixture, MINT_BYTES, VAULT_BYTES,
+        hex32, hex_bytes, hex_u64, token_account, DepositFixture, Env, TransferFixture,
+        TreeSnapshot, WithdrawFixture, MINT_BYTES, VAULT_BYTES,
     },
     bongtu_pool_solana::{spl, state},
     serde::Deserialize,
@@ -23,8 +24,9 @@ use {
     solana_pubkey::Pubkey,
 };
 
-/// Enterprise profile: every family on (consumer bits 0..3 + enterprise 4..6).
-pub const ENTERPRISE_FLAGS: u8 = 0x7F;
+/// Enterprise profile: every family on (consumer bits 0..3 + enterprise 4..8;
+/// flags are u16 since the S3 pass-2 widening).
+pub const ENTERPRISE_FLAGS: u16 = 0x01FF;
 
 /// The enterprise batch size (production disburse arity — LOG_B = 8).
 pub const BATCH_B: u32 = 256;
@@ -58,18 +60,25 @@ pub fn load_ent_withdraw_fixture() -> WithdrawFixture {
 pub fn load_disburse256_fixture() -> DisburseFixture {
     crate::load_json("disburse256_fixture.json")
 }
+pub fn load_ent_transfer_fixture() -> TransferFixture {
+    crate::load_json("transfer_fixture.json")
+}
+pub fn load_ent_transfer10x2_fixture() -> TransferFixture {
+    crate::load_json("transfer10x2_fixture.json")
+}
 
 /// Serialize an ENTERPRISE `PoolConfig` image: B=256, the arbiter bjj key at
 /// its fixed offsets, harness mint/vault bytes (state.rs layout).
 pub fn enterprise_config_account_data(
-    flags: u8,
+    flags: u16,
     arbiter_x: &[u8; 32],
     arbiter_y: &[u8; 32],
 ) -> Vec<u8> {
     let mut data = vec![0u8; state::POOL_CONFIG_LEN];
     data[0] = state::TAG_POOL_CONFIG;
     data[1] = 1;
-    data[state::CONFIG_OFF_FLAGS] = flags;
+    data[state::CONFIG_OFF_FLAGS..state::CONFIG_OFF_FLAGS + 2]
+        .copy_from_slice(&flags.to_le_bytes());
     data[4..36].copy_from_slice(&[0xAA; 32]); // admin: opaque to the ops
     data[state::CONFIG_OFF_MINT..state::CONFIG_OFF_MINT + 32].copy_from_slice(&MINT_BYTES);
     data[state::CONFIG_OFF_VAULT..state::CONFIG_OFF_VAULT + 32].copy_from_slice(&VAULT_BYTES);
@@ -84,7 +93,7 @@ pub fn enterprise_config_account_data(
 
 /// Swap the env's config for an enterprise image with the given flags and
 /// arbiter key — the gate-5 mutation hook (family off, wrong key, unset key).
-pub fn set_enterprise_config(env: &mut Env, flags: u8, arbiter_x: &[u8; 32], arbiter_y: &[u8; 32]) {
+pub fn set_enterprise_config(env: &mut Env, flags: u16, arbiter_x: &[u8; 32], arbiter_y: &[u8; 32]) {
     let key = env.config_key;
     let mut account = env
         .accounts
@@ -203,6 +212,95 @@ fn wire(discriminator: u8, proof: &str, carried: &[String], tails: &[Vec<u8>]) -
         data.extend_from_slice(tail);
     }
     data
+}
+
+/// The shared enterprise spend env (transfer / transfer10x2): the consumer
+/// `build_spend_env` shape against an enterprise config whose arbiter key
+/// comes from the fixture's own injected publics, so the config-injected key
+/// matches what the committed proof was made for.
+fn build_ent_spend_env(
+    discriminator: u8,
+    fx: &TransferFixture,
+    arbiter_x: &[u8; 32],
+    arbiter_y: &[u8; 32],
+) -> Env {
+    let pid = crate::program_id();
+    let mollusk = crate::mollusk_with_program(false);
+    let mut b = ent_base(&fx.pre_state, arbiter_x, arbiter_y);
+
+    let spent_root_pda = known_root_pda(&hex32(&fx.spent_root));
+    let new_root_pda = known_root_pda(&hex32(&fx.new_root));
+    let nf_pdas: Vec<Pubkey> = fx
+        .nullifiers
+        .iter()
+        .filter(|nf| hex32(nf) != [0u8; 32])
+        .map(|nf| nullifier_pda(&hex32(nf)))
+        .collect();
+
+    let kems: Vec<Vec<u8>> = fx.kem_ciphertexts.iter().map(|k| hex_bytes(k)).collect();
+    let data = wire(discriminator, &fx.proof, &fx.publics_carried, &kems);
+
+    let mut metas = vec![
+        AccountMeta::new_readonly(b.config_key, false),
+        AccountMeta::new(b.tree_key, false),
+        AccountMeta::new_readonly(spent_root_pda, false),
+        AccountMeta::new(new_root_pda, false),
+        AccountMeta::new(b.payer, true),
+        AccountMeta::new_readonly(Pubkey::default(), false),
+        AccountMeta::new_readonly(b.event_authority, false),
+        AccountMeta::new_readonly(pid, false),
+    ];
+    for nf in &nf_pdas {
+        metas.push(AccountMeta::new(*nf, false));
+    }
+
+    b.accounts.push((spent_root_pda, program_owned(vec![])));
+    b.accounts.push((new_root_pda, Account::default()));
+    for nf in &nf_pdas {
+        b.accounts.push((*nf, Account::default()));
+    }
+
+    Env {
+        mollusk,
+        instruction: Instruction {
+            program_id: pid,
+            accounts: metas,
+            data,
+        },
+        accounts: b.accounts,
+        config_key: b.config_key,
+        tree_key: b.tree_key,
+        spent_root_pda,
+        new_root_pda,
+        payer: b.payer,
+        nf_pdas,
+        pre_tree_data: b.pre_tree_data,
+        vault_key: Pubkey::new_from_array(crate::VAULT_BYTES),
+        payer_token_key: Pubkey::default(),
+        recipient_token_key: Pubkey::default(),
+    }
+}
+
+/// Enterprise transfer env (wire = disc 9, 33 carried publics, ONE kem ct;
+/// arbiter key at pub[35..36]).
+pub fn build_ent_transfer_env(fx: &TransferFixture) -> Env {
+    build_ent_spend_env(
+        bongtu_pool_solana::transfer::DISCRIMINATOR,
+        fx,
+        &hex32(&fx.publics_full[35]),
+        &hex32(&fx.publics_full[36]),
+    )
+}
+
+/// Enterprise transfer10x2 env (wire = disc 10, 56 carried publics, ONE kem
+/// ct; arbiter key at pub[66..67]; the merge fixture drives all 10 nf PDAs).
+pub fn build_ent_transfer10x2_env(fx: &TransferFixture) -> Env {
+    build_ent_spend_env(
+        bongtu_pool_solana::transfer10x2::DISCRIMINATOR,
+        fx,
+        &hex32(&fx.publics_full[66]),
+        &hex32(&fx.publics_full[67]),
+    )
 }
 
 /// Enterprise deposit env (accounts mirror `deposit_priv`; wire = disc 6,

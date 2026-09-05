@@ -33,7 +33,7 @@ use {
 
 pub const SYSTEM_PROGRAM_ID: Pubkey = Pubkey::new_from_array([0u8; 32]);
 
-/// The widest spend arity on the rail (transfer10x2_priv).
+/// The widest spend arity on the rail (transfer10x2_priv and the enterprise transfer10x2).
 pub const MAX_NULLIFIERS: usize = 10;
 
 pub fn as_arr32(slice: &[u8]) -> [u8; 32] {
@@ -74,7 +74,7 @@ pub fn check_common(
     config: &AccountInfo,
     tree: &AccountInfo,
     system_program: &AccountInfo,
-    family_flag: u8,
+    family_flag: u16,
 ) -> Result<(), PoolError> {
     if system_program.key != &SYSTEM_PROGRAM_ID {
         return Err(PoolError::InvalidAccount);
