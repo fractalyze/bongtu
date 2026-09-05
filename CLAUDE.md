@@ -51,7 +51,7 @@ not re-derive what those files own.
   decrypted notes even with `/notes` read-auth). Never log or return the key. Mode
   mechanics: `apps/indexer/README.md`.
 - **Arbiter key at deploy**: every committed proof fixture is bound to ONE arbiter key
-  (`realproofs.arbiterKey` == disburse256 `public[8..9]` — the `Deploy.s.sol` default). Only
+  (`realproofs.arbiterKey` == disburse256 `public[9..10]` — the `Deploy.s.sol` default). Only
   override `ARBITER_KEY_X/Y` alongside freshly re-proven fixtures, or the smoke deposit
   reverts `InvalidProof`.
 - **Local-pass ≠ CI-pass**: hosted runners lack the dev-box defaults (the `BONGTU_NODE_MODULES`

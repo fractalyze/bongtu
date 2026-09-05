@@ -60,6 +60,14 @@ pub enum PoolError {
     /// The SPL token CPI (escrow pull or push) rejected — wrong mint,
     /// insufficient balance, frozen account, or a bad authority.
     TokenTransferFailed = 19,
+    /// An enterprise op ran against a config whose arbiter key is zeroed
+    /// (consumer-only profile) — the `ZeroArbiterKey` analogue: the family
+    /// flag alone cannot enable enterprise ops without a key to inject.
+    ArbiterKeyUnset = 20,
+    /// The disburse256 circuit's output subtree is a fixed depth-8 (256-leaf)
+    /// gadget; a config whose batch size implies a different attach level
+    /// would mint an unspendable batch — refused before verify.
+    WrongBatchSize = 21,
 }
 
 impl From<PoolError> for ProgramError {
