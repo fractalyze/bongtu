@@ -40,6 +40,11 @@ V1_BIN="${SOLANA_V1_BIN:-$HOME/.local/share/solana/install/releases/v4.2.2/solan
   exit 1
 }
 export PATH="$V1_BIN:$HOME/.local/share/solana/install/active_release/bin:$HOME/.cargo/bin:$PATH"
+# The v1 release ships its OWN cargo-build-sbf (different platform-tools /
+# LLVM than the pinned toolchain) and PATH resolves it first; the program
+# must be built by the SAME toolchain mollusk gates it with, so the builder
+# is pinned to active_release and V1_BIN supplies only the validator.
+AGAVE_BIN="${AGAVE_BIN:-$HOME/.local/share/solana/install/active_release/bin}"
 NODE="${NODE:-$(command -v node || echo /home/a41/.nvm/versions/node/v22.17.1/bin/node)}"
 DOCKER="${DOCKER:-$(command -v docker || echo docker)}"
 
@@ -55,8 +60,9 @@ done
 # commit (the cargo cache key hashes Cargo.lock/toolchain, not sources), and a
 # stale program fails ops with InvalidDiscriminator. Incremental build is
 # sub-second when nothing changed.
-echo "== building the program (cargo-build-sbf) =="
-cargo-build-sbf --manifest-path chains/solana/program/Cargo.toml || fail "cargo-build-sbf failed"
+[ -x "$AGAVE_BIN/cargo-build-sbf" ] || fail "no cargo-build-sbf at $AGAVE_BIN (the pinned Agave toolchain builds the program; set AGAVE_BIN)"
+echo "== building the program (pinned-toolchain cargo-build-sbf) =="
+"$AGAVE_BIN/cargo-build-sbf" --manifest-path chains/solana/program/Cargo.toml || fail "cargo-build-sbf failed"
 
 # --- postgres for the indexer -------------------------------------------------
 PG_NAME=""

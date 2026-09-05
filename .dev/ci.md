@@ -85,3 +85,9 @@ build when the artifact file exists will run the stale binary (e2e-solana
 failed InvalidDiscriminator this way on PR #69 while solana-mollusk passed,
 because mollusk.sh always rebuilds). Rule: gates build unconditionally and
 rely on cargo's incremental no-op, never on artifact-file existence.
+Second rule from the same incident: the Agave 4.2.2 release tarball ships its
+OWN cargo-build-sbf, and it HARD-FAILS on transfer10x2's 4,608-byte frame
+(the pinned v3.1.14 toolchain only warns). e2e_s.sh therefore pins its
+builder to active_release (AGAVE_BIN) and uses the v1 release bin ONLY for
+solana-test-validator. Any toolchain pin bump is blocked on the frame fix
+(tracked as a gh issue).
