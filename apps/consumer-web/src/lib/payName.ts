@@ -5,12 +5,12 @@
 // so the triple is REQUIRED on resolve, not a soft preference: sealing to a
 // missing or cleared key would mint notes the recipient could never discover
 // by self-scan (funds land, discovery never does). The refusal itself lives in
-// @bongtu/client/consumerBuild consumerRecipientOf (legacy v1 record and the
+// @bongtu/client/consumer consumerRecipientOf (legacy v1 record and the
 // signed zero-sentinel clear both refuse); this file owns only the wallet's
 // words for each outcome.
 
 import { normalizeName, resolveName } from "@bongtu/core/indexerApi";
-import { consumerRecipientOf, type ConsumerRecipient } from "@bongtu/client/consumerBuild";
+import { consumerRecipientOf, type ConsumerRecipient } from "@bongtu/client/consumer";
 
 /** The name does not normalize or is not in the directory — a typo-or-unregistered
  *  answer, never a network answer (failures propagate, see below). */

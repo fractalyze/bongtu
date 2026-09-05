@@ -33,8 +33,8 @@ import {
   freshConsumerDepositCrypto,
   freshConsumerSpendCrypto,
   selfConsumerRecipient,
-} from "@bongtu/client/consumerBuild";
-import type { ConsumerRecipient, ConsumerSpendCrypto } from "@bongtu/client/consumerBuild";
+} from "@bongtu/client/consumer";
+import type { ConsumerRecipient, ConsumerSpendCrypto } from "@bongtu/client/consumer";
 import type { ConsumerWalletIdentity } from "@bongtu/client/derive";
 import type { MembershipWitness } from "@bongtu/client/spend";
 

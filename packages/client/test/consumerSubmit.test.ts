@@ -22,13 +22,13 @@ import type { Connection } from "@bongtu/client/connection";
 import {
   buildConsumerTransferRequest,
   selfConsumerRecipient,
-} from "@bongtu/client/consumerBuild";
+} from "@bongtu/client/consumer";
 import {
   submitDepositPriv,
   submitTransferPriv,
   submitTransfer10x2Priv,
   submitWithdrawPriv,
-} from "@bongtu/client/consumerSubmit";
+} from "@bongtu/client/consumer";
 
 // ---- the ONE shared assembled request (S2 builder, real per-output seals) ----
 

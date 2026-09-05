@@ -69,7 +69,7 @@ One click, one progress rail, the whole chain:
 **All proofs go to the prover service** (`lib/proverClient.ts` → `POST {base}/prove`,
 per-circuit pub-length pins `disburse=11 / transfer10x2=68 / deposit=19` — the service
 registry's vkey truth). The console never proves in the browser; funding deposits run
-the shared `@bongtu/client` depositFlow with the same service adapter injected.
+the shared `@bongtu/client` `runDeposit` (`ops/deposit.ts`) with the same service adapter injected.
 
 ## Run
 

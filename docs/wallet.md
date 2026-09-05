@@ -38,7 +38,7 @@ module, both apps carry the forked twin unless a subsection says otherwise.
 ### Key derivation
 
 There is no seed and no persisted private key. The spending key is a pure function of a wallet
-signature over a domain-separated EIP-712 struct (`@bongtu/client` `derive.ts` + `connection.ts` — the engine package both web apps share):
+signature over a domain-separated EIP-712 struct (`@bongtu/client` `keys/derive.ts` + `io/connection/` — the engine package both web apps share):
 
 ```
 domain  = { name: "bongtu", version: keyVersion, chainId: 450815, verifyingContract: <pool> }
@@ -106,8 +106,8 @@ A held key belongs to exactly one wallet account. If the selected account change
 refuses the action outright (`ACCOUNT_MISMATCH_MESSAGE`) rather than derive and spend under a
 stranger's key — and when a held key already proves the mismatch, it refuses without a popup.
 
-The login itself is a flow, not component code (`@bongtu/client` `loginFlow.ts`): it
-takes the wallet the connect modal just opened (`connection.ts requireConnection`),
+The login itself is a flow, not component code (`@bongtu/client/login`, `session/login.ts`): it
+takes the wallet the connect modal just opened (`src/lib/wagmi.ts` `requireConnection`),
 derives, runs the two checks below, and persists; when a check fails it throws having
 written **nothing**. The enterprise variant (`runLogin`) additionally trades the
 identity for a view token; the consumer variant (`runTokenlessLogin`) persists a
@@ -127,7 +127,7 @@ WC connector joins the config, and the WC SDK is never fetched (the wagmi connec
 `@walletconnect/ethereum-provider` through a dynamic `import()` only). Set — as in the Vercel prod
 env — the modal also offers the QR / deep-link path for phones and extension-less desktops.
 
-Whatever the modal connects, `src/lib/connection.ts` wraps it into the same `Connection` every
+Whatever the modal connects, `src/lib/wagmi.ts` wraps it into the same `Connection` every
 other module works against: a viem wallet client over the connector's raw EIP-1193 provider
 (signatures and txs reach the wallet the user picked), the app's one viem public client on the
 chain's own RPC (reads and receipt waits never relay through a phone), and a `transport` tag — `"walletconnect"`
@@ -149,7 +149,7 @@ Two things genuinely differ between transports, both about the same risk.
 derivation*. MetaMask-class extensions satisfy it; some mobile wallets reachable over WalletConnect
 randomise their signatures, and such a wallet derives a **different key on every login**, which
 would present as an empty balance and unspendable notes with nothing on screen explaining why.
-Nothing on the wire distinguishes the two, so the wallet looks (`src/lib/loginGuard.ts`):
+Nothing on the wire distinguishes the two, so the wallet looks (the guard half of `@bongtu/client` `session/login.ts`):
 
 - **First WalletConnect login for an account this browser has never seen** — the same typed-data
   signature is requested **twice** and the bytes must match. Two popups, once. Injected logins never
@@ -214,7 +214,7 @@ useWalletDescription`).
 ### Which circuit a spend uses
 
 A spending circuit takes a **fixed** number of input notes, so the number of notes a payment needs
-decides which circuit can prove it. The user never picks; `planSpendAction` (`@bongtu/client` `spend.ts`)
+decides which circuit can prove it. The user never picks; `planSpendAction` (`@bongtu/client/spend` `plan.ts`)
 does, from amount-aware largest-first selection:
 
 | the payment needs | send | withdraw |
@@ -254,11 +254,11 @@ and no circuit above can spend more than ten at once. Withdraw is stricter still
 circuit, so three notes is already past it. That state is common, not exotic, and the wallet does not
 answer it by sending the user off to tidy up first.
 
-`planSpendChain` (`@bongtu/client` `spend.ts`) plans the **whole** way from the balance held to the payment
+`planSpendChain` (`@bongtu/client/spend` `plan.ts`) plans the **whole** way from the balance held to the payment
 asked for: zero or more merge legs — `transfer10x2` self-sends folding the ten largest notes into
 ONE merged note plus a zero-value change note, both the sender's own — then the terminal payment or
 withdrawal. `runSpendChain`
-(`@bongtu/client` `spendFlow.ts`) runs the legs back to back. One Confirm starts the whole thing; each leg is
+(`@bongtu/client/spend` `run.ts`) runs the legs back to back. One Confirm starts the whole thing; each leg is
 one wallet approval. Duplicate output owners are safe in a merge because receiver ciphertext *i* is
 encrypted under `encryptionNonce + i` (§11-8 v1.1), the property that also made self-send legal; the
 shared-keystream ban applies only to `disburse`.
@@ -349,7 +349,7 @@ are owned by `apps/wallet-web/README.md`.
 **Viewing** runs on a view token. Connecting derives the key once, signs a challenge with it, and
 trades that for an HMAC token from the indexer (`/auth/challenge` + `/auth/token`, see
 `docs/indexer.md`); the token and the compressed pubkey are all that reach `localStorage`
-(`@bongtu/client` `session.ts`). Balance and activity read with the token alone — no key, no popup — so a
+(`@bongtu/client` `session/session.ts`). Balance and activity read with the token alone — no key, no popup — so a
 returning visit restores silently as long as the wallet still reports the same account. The
 key itself is a different secret with a different lifetime: it lives only in the lock
 (*The lock*, above).
@@ -380,7 +380,7 @@ revert, or worse, an accepted operation whose envelope no one can open.
 
 Deposit is a 0-in / 2-out mint, and `BongtuPool.deposit` is permissionless (`external`, gated only
 by `whenInitialized` + `nonReentrant`), so a browser can initiate one directly
-(`src/lib/deposit.ts`, `depositFlow.ts`):
+(`@bongtu/client/deposit`, `ops/deposit.ts`):
 
 | output | note | why |
 |---|---|---|
@@ -416,7 +416,7 @@ holds everyone's. Activity is the per-owner `/history` feed.
 
 **Selfscan mode** (the no-auditor consumer profile): balance and activity derive from the PUBLIC
 feed with only the wallet's own keys — the normative discovery pipeline of
-`.dev/op-module-design.md` §3.6, implemented in `@bongtu/client` `selfscan.ts`. Per event, per
+`.dev/op-module-design.md` §3.6, implemented in `@bongtu/client/selfscan`. Per event, per
 output slice: the published viewTag is checked against the wallet's own
 (`Poseidon(3)([TAG_VIEWTAG, viewPriv·ecdhPublicKey]) & 0xff` — a miss skips all expensive work,
 §3.2's ~256× filter); survivors are ML-KEM-decapsulated and decrypted at `nonce + i` (§3.5); a
@@ -428,7 +428,7 @@ notes for the same wallet are found in the same pass (a deferred-acceptance twin
 trial decrypt), so **single-append** enterprise notes keep that money on screen; an enterprise
 DISBURSE-batch interior cannot be path-confirmed in public mode (its `/path` is 422-gated by
 design), so it surfaces as a pending entry — the wallet may hold notes only an arbiter indexer
-can open — never a silent drop. The scan is cursor-incremental and resumable: `selfscan.ts` owns the persisted-state
+can open — never a silent drop. The scan is cursor-incremental and resumable: `@bongtu/client/selfscan` owns the persisted-state
 contract (`SelfScanState` — feed cursor, `/head` freshness stamp, discovered notes, unresolved
 batches; `scan(A..B)` then `scan(B..C)` equals `scan(A..C)`), and `src/lib/scanStore.ts` wires it
 to localStorage per owner — decrypted amounts land in that store, keys never do. A consumer
@@ -452,7 +452,7 @@ onboarding with the notice. The pure
 receiver ciphertext slice is key-only recoverable (ECDH-decrypt `[value, salt]`, rebuild the
 commitment, accept iff it equals the on-chain leaf; the Poseidon sponge has no MAC, so the leaf
 match *is* the "is this mine" test) — but no adapter wires it as an arbiter-mode balance source
-(selfscan mode implements the same acceptance rule for both note families in `selfscan.ts`). Funds safety
+(selfscan mode implements the same acceptance rule for both note families in `@bongtu/client/selfscan`). Funds safety
 never depends on the indexer; discovery liveness does. See
 [security-model.md](security-model.md#residual-gaps).
 
@@ -577,8 +577,8 @@ never extends the idle deadline (*The lock*, above).
 
 ### The consumer flows
 
-The op flows are the engine's consumer variants (`@bongtu/client` `consumerFlows.ts` /
-`consumerBuild.ts` / `consumerSubmit.ts`): the same stage grammar, chain planning and
+The op flows are the engine's consumer variants (`@bongtu/client/consumer`, the
+`ops/consumer/` parts): the same stage grammar, chain planning and
 submit discipline as the enterprise flows, with the family deltas applied once in the
 engine. Exactly: no `assertPoolKemEpoch` (there is no arbiter KEM epoch to guard);
 membership over the auth-free `GET /path` (consumer batches serve paths openly,

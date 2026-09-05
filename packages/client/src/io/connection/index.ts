@@ -11,6 +11,6 @@
 // the app's wagmi half, so it stays where both subjects live.
 // This file stitches the split module back into the ONE stable public subpath
 // (@bongtu/client/connection); the implementation lives in the sibling parts.
-export * from "./walletEdge.js";
-export * from "./poolWrites.js";
+export * from "./edge.js";
+export * from "./writes.js";
 

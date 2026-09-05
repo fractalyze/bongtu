@@ -1,4 +1,4 @@
-// scan/scanEngine.ts — the pure, PRNG-free event-scan pass: viewTag prefilter,
+// scan/selfscan/engine.ts — the pure, PRNG-free event-scan pass: viewTag prefilter,
 // decaps + open, leaf-match, spent flags (split from selfscan.ts; the subpath
 // @bongtu/client/selfscan re-exports everything).
 import { hexToBytes } from "viem";

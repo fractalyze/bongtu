@@ -28,9 +28,11 @@ import {
   warmReconnect,
   watchWallet,
 } from "../lib/wagmi.js";
-import { runTokenlessLogin } from "@bongtu/client/loginFlow";
+import { runTokenlessLogin } from "@bongtu/client/login";
+import { ConsumerOps } from "@bongtu/client/consumer";
 import { KEY_DERIVATION, deriveLoginIdentity } from "@bongtu/client/identity";
 import { keyCache } from "../lib/keyCache.js";
+import { proveInBrowser } from "../lib/prove.js";
 import type { WalletDescription } from "../lib/walletBrand.js";
 import { sumUnspent } from "@bongtu/client/balance";
 import {
@@ -93,10 +95,6 @@ export interface WalletContextValue {
   // self-scan-derived state (null until the first scan lands)
   balance: bigint | null;
   notes: OwnerNote[];
-  /** the same discovered notes in the SCAN shape (leafIndex + spent + seq) —
-   *  what the consumer spend flows plan and prove over (ConsumerSpendContext
-   *  is typed against ScanNote, not the arbiter OwnerNote view). */
-  scanNotes: ScanNote[];
   /** activity derived from the scan (selfScanSnapshot) — the whole feed, unpaged:
    *  the scan holds every row it can ever derive, so there is nothing to page. */
   history: HistoryItem[];
@@ -121,10 +119,11 @@ export interface WalletContextValue {
    *  invocation allowed to toast on failure. Background callers omit it — their
    *  only failure surface is the dataError banner (never a toast). */
   refresh: (manual?: boolean) => Promise<void>;
-  /** The between-legs read a spend chain waits on: a SELF-SCAN pass (consumer
-   *  notes have no oracle to reload from). Applies what it reads so the balance
-   *  on screen keeps up with a chain in flight. */
-  reloadNotes: () => Promise<ScanNote[]>;
+  /** The bound op facade for this login (null until connected): deposit /
+   *  spend / preview over the session's connection, lock, prover and the
+   *  self-scan note source — constructed ONCE per login (issue #34, the C1
+   *  bind-once precedent), so no screen re-threads engine inputs per call. */
+  ops: ConsumerOps | null;
   /** Post-action refresh: the feed tails the chain on a poll, so the moment a
    *  tx confirms a scan may still see the PRE-action state — poll (3s, ≤30s)
    *  until the action is reflected, applying the freshest snapshot either way. */
@@ -159,7 +158,6 @@ export function App(): ReactNode {
 
   const [balance, setBalance] = useState<bigint | null>(null);
   const [notes, setNotes] = useState<OwnerNote[]>([]);
-  const [scanNotes, setScanNotes] = useState<ScanNote[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
@@ -198,7 +196,6 @@ export function App(): ReactNode {
     scanOwnerRef.current = ownerCompressed;
     saveScanState(ownerCompressed, state);
     setScannedNextLeafIndex(state.scannedNextLeafIndex);
-    setScanNotes(state.notes);
     setDataNotice(scanNotice(state, identity !== null));
     return selfScanSnapshot(state, ownerCompressed);
   }, []);
@@ -241,7 +238,6 @@ export function App(): ReactNode {
     setSession(null);
     setBalance(null);
     setNotes([]);
-    setScanNotes([]);
     setHistory([]);
     setDataError(reason);
     setDataNotice(null);
@@ -425,6 +421,32 @@ export function App(): ReactNode {
     return scanRef.current?.notes ?? [];
   }, [session, loadSelfScan, applySnapshot]);
 
+  // ONE facade per login: the engine inputs every op screen used to re-thread —
+  // connection, pool/token/explorer config, the lock, the in-browser prover,
+  // the session pubkey — bind here, and the screens call methods. The note
+  // source reads the scan REF (not React state) so a mid-chain pass always
+  // plans over the freshest completed scan, and its reload IS the self-scan
+  // pass above (the note-shape translation lives behind the seam).
+  const ops = useMemo<ConsumerOps | null>(
+    () =>
+      connection && session
+        ? new ConsumerOps(
+            {
+              connection,
+              indexerUrl: INDEXER_URL,
+              pool: DEFAULTS.pool,
+              token: DEFAULTS.token,
+              explorer: DEFAULTS.explorer,
+              keyCache,
+              prove: (request) => proveInBrowser(request, DEFAULTS.circuitBaseUrl),
+            },
+            session,
+            { notes: () => scanRef.current?.notes ?? [], reload: reloadNotes },
+          )
+        : null,
+    [connection, session, reloadNotes],
+  );
+
   // Post-action refresh, polled rather than read once: the indexer tails the
   // chain, so the first scan after a confirmed tx can still see the PRE-action
   // state. The accept predicate is the shared actionReflected fold.
@@ -451,7 +473,6 @@ export function App(): ReactNode {
       indexerUrl: INDEXER_URL,
       balance,
       notes,
-      scanNotes,
       history,
       loading,
       dataError,
@@ -462,13 +483,13 @@ export function App(): ReactNode {
       connectWallet,
       disconnect,
       refresh,
-      reloadNotes,
+      ops,
       refreshAfterAction,
     }),
     [
-      connection, wallet, session, balance, notes, scanNotes, history, loading, dataError, dataNotice,
+      connection, wallet, session, balance, notes, history, loading, dataError, dataNotice,
       scannedNextLeafIndex, connecting, connectError, connectWallet, disconnect, refresh,
-      reloadNotes, refreshAfterAction,
+      ops, refreshAfterAction,
     ],
   );
 

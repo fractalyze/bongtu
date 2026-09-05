@@ -1,4 +1,4 @@
-// scan/scanRun.ts — the resumable scan state codec, the SelfScanIo seam and the
+// scan/selfscan/run.ts — the resumable scan state codec, the SelfScanIo seam and the
 // runSelfScan shell + snapshot/activity derivations (split from selfscan.ts).
 import { unpackPubkey } from "@bongtu/core/pubkey";
 import {
@@ -18,7 +18,7 @@ import {
   type PendingDiscovery,
   type ScanCandidate,
   type ScanNote,
-} from "./scanEngine.js";
+} from "./engine.js";
 // --- the resumable scan state (the cursor persistence contract) --------------
 
 /** The persisted scan state. The CONTRACT (what the app layer stores, e.g. in

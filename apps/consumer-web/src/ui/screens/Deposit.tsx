@@ -12,14 +12,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { DEFAULTS } from "../../config.js";
-import { consumerRunDeposit, type ConsumerDepositOutcome } from "@bongtu/client/consumerFlows";
+import type { ConsumerDepositOutcome } from "@bongtu/client/consumer";
 import { readTokenState } from "@bongtu/client/connection";
 import { normalizeName } from "@bongtu/core/indexerApi";
-import type { ConsumerRecipient } from "@bongtu/client/consumerBuild";
+import type { ConsumerRecipient } from "@bongtu/client/consumer";
 import { resolveConsumerRecipient } from "../../lib/payName.js";
 import { consumerErrorMessage } from "../../lib/errors.js";
-import { keyCache } from "../../lib/keyCache.js";
-import { proveInBrowser } from "../../lib/prove.js";
 import { useWallet } from "../App.js";
 import { useActionMachine } from "../actionMachine.js";
 import { formatKkrw, parseKkrw } from "@bongtu/client/money";
@@ -36,7 +34,7 @@ export const DEPOSIT_RECIPIENT_HINT =
   "Optional. Enter a payment name to deposit straight to someone else, privately.";
 
 export function Deposit(): ReactNode {
-  const { session, connection, wallet, indexerUrl, refreshAfterAction } = useWallet();
+  const { connection, wallet, indexerUrl, ops, refreshAfterAction } = useWallet();
 
   const [amount, setAmount] = useState("");
   const [recipientInput, setRecipientInput] = useState("");
@@ -91,26 +89,13 @@ export function Deposit(): ReactNode {
   const willApprove = allowance === null || amountWei <= 0n || allowance < amountWei;
 
   function confirm(): void {
-    if (!connection || !session) return;
+    if (!ops) return;
     // The spending key comes from the wallet's lock INSIDE the flow — this
-    // component never holds it. The session pubkey rides along so the flow can
-    // refuse a key that isn't this session's.
+    // component never holds it; the facade carries the session pubkey so the
+    // flow can refuse a key that isn't this session's.
     void action.submit(
       (onStage) =>
-        consumerRunDeposit(
-          {
-            connection,
-            pool: DEFAULTS.pool,
-            token: DEFAULTS.token,
-            explorer: DEFAULTS.explorer,
-            sessionPubkey: session.compressedPubkey,
-          },
-          { amount: amountWei.toString(), recipient: activeResolve?.recipient },
-          onStage,
-          // The engine takes the app's lock + prover through its deps seam: proving
-          // is in-browser snarkjs over the same-origin circuit assets.
-          { keyCache, prove: (request) => proveInBrowser(request, DEFAULTS.circuitBaseUrl) },
-        ),
+        ops.deposit({ amount: amountWei.toString(), recipient: activeResolve?.recipient }, onStage),
       refreshAfterAction,
     );
   }

@@ -18,7 +18,7 @@ import QRCode from "qrcode";
 import { normalizeName, registerName, resolveName } from "@bongtu/core/indexerApi";
 import { buildNameRegistrationV2 } from "@bongtu/core/indexerApi";
 import { isConsumerIdentity } from "@bongtu/client/selfscan";
-import { selfConsumerRecipient } from "@bongtu/client/consumerBuild";
+import { selfConsumerRecipient } from "@bongtu/client/consumer";
 import { keyCache } from "../../lib/keyCache.js";
 import { consumerErrorMessage } from "../../lib/errors.js";
 import { opGate, OP_IN_FLIGHT_MESSAGE } from "../actionMachine.js";

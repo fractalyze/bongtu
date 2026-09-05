@@ -22,7 +22,7 @@ import {
   type SpendContext,
   type SpendIo,
   type SpendOutcome,
-} from "@bongtu/client/spendFlow";
+} from "@bongtu/client/spend";
 import { assertPoolKemEpoch, ensureChain } from "@bongtu/client/connection";
 import { getHead, getSignedPath, IndexerClient } from "@bongtu/core/indexerApi";
 import type { FieldInput } from "@bongtu/core/babyjub";

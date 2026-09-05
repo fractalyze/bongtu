@@ -26,19 +26,19 @@ import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
 import { deriveIdentityFromSignature } from "@bongtu/client/derive";
 import { KeyCache } from "@bongtu/client/keyCache";
 import type { Connection } from "@bongtu/client/connection";
-import { selfConsumerRecipient } from "@bongtu/client/consumerBuild";
+import { selfConsumerRecipient } from "@bongtu/client/consumer";
 import type { ScanNote } from "@bongtu/client/selfscan";
 import {
   CHAIN_FAILURE_REASSURANCE,
   MERGE_NOT_INDEXED_MESSAGE,
-} from "@bongtu/client/spendFlow";
+} from "@bongtu/client/spend";
 import {
   consumerRunDeposit,
   consumerRunSpendChain,
   type ConsumerDepositIo,
   type ConsumerSpendContext,
   type ConsumerSpendIo,
-} from "@bongtu/client/consumerFlows";
+} from "@bongtu/client/consumer";
 
 const SIG = "0x" + "a1".repeat(32) + "b2".repeat(32) + "1c";
 const WALLET = deriveIdentityFromSignature(SIG);

@@ -26,11 +26,8 @@ import type { ReactNode } from "react";
 import { getAddress } from "viem";
 import { decodeAddress, encodeAddress } from "@bongtu/core/pubkey";
 import { DEFAULTS } from "../../config.js";
-import { runSpendChain, type SpendOutcome } from "@bongtu/client/spendFlow";
+import type { SpendOutcome } from "@bongtu/client/spend";
 import { resolveName, type NameRecord } from "@bongtu/core/indexerApi";
-import { previewSpend } from "@bongtu/client/spend";
-import { keyCache } from "../../lib/keyCache.js";
-import { proveInBrowser } from "../../lib/prove.js";
 import { useWallet } from "../App.js";
 import { useActionMachine, stepsForRun } from "../actionMachine.js";
 import { formatKkrw, parseKkrw } from "@bongtu/client/money";
@@ -48,8 +45,7 @@ import {
 import { AmountInput, Button, ErrorBanner, Field, TextInput } from "../components/controls.js";
 
 export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactNode {
-  const { session, connection, wallet, indexerUrl, notes, balance, reloadNotes, refreshAfterAction } =
-    useWallet();
+  const { connection, wallet, indexerUrl, notes, balance, ops, refreshAfterAction } = useWallet();
   const isTransfer = kind === "transfer";
 
   const [recipient, setRecipient] = useState("");
@@ -73,8 +69,10 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
   // Which circuit this amount needs, how many transactions, and whether the wallet
   // simply cannot afford it.
   const plan = useMemo(
-    () => previewSpend(kind, notes, amountWei.toString()),
-    [kind, notes, amountWei],
+    () => (ops ? ops.preview(kind, amountWei.toString()) : { circuit: kind, blocker: null, legCount: 1, pieces: 0 }),
+    // `notes` is the reactivity key: the facade's note source reads the notes
+    // ref, and an applied snapshot updates `notes` in the same pass.
+    [ops, kind, amountWei, notes],
   );
   const action = useActionMachine<SpendOutcome>({ circuit: plan.circuit, steps: SPEND_STEPS });
 
@@ -109,26 +107,14 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
   const review = formatKkrw(amountWei);
 
   function confirm(): void {
-    if (!connection || !session) return;
+    if (!ops) return;
     // The spending key comes from the wallet's lock INSIDE runSpendChain — this
-    // component never holds it. The session pubkey rides along so the flow can refuse
-    // a key that isn't this session's, and is the payee of every merge leg.
+    // component never holds it. The engine inputs (lock, prover, config, the
+    // notes and their between-legs re-read) are bound ONCE in the App's facade.
     void action.submit(
       async (onStage) =>
-        runSpendChain(
+        ops.spend(
           kind,
-          {
-            connection,
-            indexerUrl,
-            pool: DEFAULTS.pool,
-            explorer: DEFAULTS.explorer,
-            // Empty config means "no relayer" — the flow's undefined default
-            // (wallet self-submit); the flow itself relays only withdraw legs.
-            relayerUrl: DEFAULTS.relayerUrl || undefined,
-            notes,
-            sessionPubkey: session.compressedPubkey,
-            reloadNotes,
-          },
           // The flow/witness layer only ever sees the canonical hex form — a
           // resolved name contributes its owner key through the same decodeAddress
           // normalization a typed address gets; base58 and names stop at this edge.
@@ -142,9 +128,6 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
             withdrawTo: withdrawDest ?? undefined,
           },
           onStage,
-          // The engine takes the app's lock + prover through its deps seam: proving
-          // is in-browser snarkjs over the same-origin circuit assets.
-          { keyCache, prove: (request) => proveInBrowser(request, DEFAULTS.circuitBaseUrl) },
         ),
       refreshAfterAction,
     );

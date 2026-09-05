@@ -293,7 +293,7 @@ export interface PollResult<T> {
  *
  * Two callers, both waiting on the same lag: pollForAction below (the post-action
  * balance refresh) and the spend chain, which cannot build its next leg until the
- * indexer has recorded the note the previous leg created (spendFlow.ts).
+ * indexer has recorded the note the previous leg created (ops/spend/run.ts).
  */
 export async function pollUntil<T>(
   load: () => Promise<T>,

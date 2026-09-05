@@ -16,10 +16,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { DEFAULTS } from "../../config.js";
-import { runDeposit, type DepositOutcome } from "@bongtu/client/depositFlow";
+import type { DepositOutcome } from "@bongtu/client/deposit";
 import { readTokenState } from "@bongtu/client/connection";
-import { keyCache } from "../../lib/keyCache.js";
-import { proveInBrowser } from "../../lib/prove.js";
 import { useWallet } from "../App.js";
 import { useActionMachine } from "../actionMachine.js";
 import { formatKkrw, parseKkrw } from "@bongtu/client/money";
@@ -32,7 +30,7 @@ import { AmountInput, Button, ErrorBanner, Field, LinkButton, TestnetTag } from 
 import { MintModal } from "../components/MintModal.js";
 
 export function Deposit(): ReactNode {
-  const { session, connection, wallet, refreshAfterAction } = useWallet();
+  const { connection, wallet, ops, refreshAfterAction } = useWallet();
 
   const [amount, setAmount] = useState("");
   const [tokenBalance, setTokenBalance] = useState<bigint | null>(null);
@@ -74,26 +72,12 @@ export function Deposit(): ReactNode {
   const willApprove = allowance === null || amountWei <= 0n || allowance < amountWei;
 
   function confirm(): void {
-    if (!connection || !session) return;
-    // The spending key comes from the wallet's lock INSIDE runDeposit — this component
-    // never holds it. The session pubkey rides along so the flow can refuse a key that
-    // isn't this session's.
+    if (!ops) return;
+    // The spending key comes from the wallet's lock INSIDE runDeposit — this
+    // component never holds it; the facade carries the session pubkey so the
+    // flow can refuse a key that isn't this session's.
     void action.submit(
-      (onStage) =>
-        runDeposit(
-          {
-            connection,
-            pool: DEFAULTS.pool,
-            token: DEFAULTS.token,
-            explorer: DEFAULTS.explorer,
-            sessionPubkey: session.compressedPubkey,
-          },
-          { amount: amountWei.toString() },
-          onStage,
-          // The engine takes the app's lock + prover through its deps seam: proving
-          // is in-browser snarkjs over the same-origin circuit assets.
-          { keyCache, prove: (request) => proveInBrowser(request, DEFAULTS.circuitBaseUrl) },
-        ),
+      (onStage) => ops.deposit({ amount: amountWei.toString() }, onStage),
       refreshAfterAction,
     );
   }

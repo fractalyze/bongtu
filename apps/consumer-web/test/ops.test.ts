@@ -28,11 +28,11 @@ import type { ChainFailure } from "@bongtu/core/errors";
 import { deriveIdentityFromSignature } from "@bongtu/client/derive";
 import { KeyCache } from "@bongtu/client/keyCache";
 import type { Connection } from "@bongtu/client/connection";
-import { selfConsumerRecipient } from "@bongtu/client/consumerBuild";
+import { selfConsumerRecipient } from "@bongtu/client/consumer";
 import { ACCOUNT_MISMATCH_MESSAGE } from "@bongtu/client/identity";
 import type { ScanNote } from "@bongtu/client/selfscan";
 import { parseKkrw } from "@bongtu/client/money";
-import { CHAIN_FAILURE_REASSURANCE, type SpendOutcome } from "@bongtu/client/spendFlow";
+import { CHAIN_FAILURE_REASSURANCE, type SpendOutcome } from "@bongtu/client/spend";
 import {
   consumerRunDeposit,
   consumerRunSpendChain,
@@ -40,7 +40,7 @@ import {
   type ConsumerDepositOutcome,
   type ConsumerSpendContext,
   type ConsumerSpendIo,
-} from "@bongtu/client/consumerFlows";
+} from "@bongtu/client/consumer";
 
 import {
   ActionMachine,

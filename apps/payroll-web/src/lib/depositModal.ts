@@ -16,7 +16,7 @@
 
 import type { Connection, SubmitResult } from "@bongtu/client/connection";
 import { mintTestToken, readGasBalance, readTokenState } from "@bongtu/client/connection";
-import type { DepositStage } from "@bongtu/client/depositFlow";
+import type { DepositStage } from "@bongtu/client/deposit";
 import { formatKkrw } from "@bongtu/client/money";
 import { GAS_TOKEN_PHRASE, NATIVE_CURRENCY } from "@bongtu/core/network";
 import { parseDepositAmount } from "./errors.js";

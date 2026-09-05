@@ -1,4 +1,4 @@
-// spend/spendBuilders.ts — the transfer / transfer10x2 / transfer10 (deprecated) /
+// ops/spend/builders.ts — the transfer / transfer10x2 / transfer10 (deprecated) /
 // withdraw ProvingRequest builders + the shared SpendMeta assembly (split from spend.ts).
 
 import { commitment } from "@bongtu/core/note";
@@ -13,8 +13,8 @@ import {
   type WithdrawInput,
 } from "@bongtu/core/proving";
 import type { WalletIdentity } from "@bongtu/client/derive";
-import { assembleInputs, type AssembledInputs } from "./spendAssemble.js";
-import type { MembershipWitness, SpendCrypto, SpendMeta, SpendResult, WalletInputNote } from "./spendPlan.js";
+import { assembleInputs, type AssembledInputs } from "./assemble.js";
+import type { MembershipWitness, SpendCrypto, SpendMeta, SpendResult, WalletInputNote } from "./plan.js";
 
 // --- transfer (2-in / 2-out) ----------------------------------------------------
 

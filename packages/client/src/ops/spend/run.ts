@@ -31,26 +31,27 @@ import {
   submitWithdraw,
   walletErrorMessage,
 } from "@bongtu/client/connection";
-import { submitWithdrawRelayed } from "@bongtu/client/relayerClient";
-import type { KeyCache } from "@bongtu/client/keyCache";
+import { submitWithdrawRelayed } from "@bongtu/client/relayer";
+import type { KeyCacheLike } from "@bongtu/client/keyCache";
 import { getHead, getSignedPath, type OwnerNote } from "@bongtu/core/indexerApi";
 import { pollUntil, type PollForActionOptions } from "@bongtu/client/refresh";
 import {
   buildTransferRequest,
   buildTransfer10x2Request,
   buildWithdrawRequest,
+} from "./builders.js";
+import {
   planDisburseChain,
   planSpendChain,
   pendingLegOf,
-  freshSpendCrypto,
-  randField,
   type SpendAction,
   type SpendCrypto,
   type SpendKind,
   type SpendLeg,
   type WalletInputNote,
   type MembershipWitness,
-} from "@bongtu/client/spend";
+} from "./plan.js";
+import { freshSpendCrypto, randField } from "./crypto.js";
 import type { WalletIdentity } from "@bongtu/client/derive";
 
 /** The coarse stages a spend leg passes through (no witness sub-stage — witness is
@@ -101,12 +102,12 @@ export interface SpendOutcome {
 
 /** The network/proving I/O a spend performs, injectable so the pure orchestration
  *  (guard order, stage order, leg order) is unit-testable with fakes — the same seam
- *  depositFlow.ts uses (RunDepositDeps). Defaults are the real edges. */
+ *  ops/deposit.ts uses (RunDepositDeps). Defaults are the real edges. */
 export interface RunSpendDeps {
   ensureChain: typeof ensureChain;
   assertPoolKemEpoch: typeof assertPoolKemEpoch;
   /** the wallet's lock — holds the spending key between actions (keyCache.ts). */
-  keyCache: KeyCache;
+  keyCache: KeyCacheLike;
   getHead: typeof getHead;
   getSignedPath: typeof getSignedPath;
   /** Turn a ProvingRequest into Groth16 calldata. The APP supplies this: wallet-web
@@ -117,7 +118,7 @@ export interface RunSpendDeps {
   submitTransfer10x2: typeof submitTransfer10x2;
   submitWithdraw: typeof submitWithdraw;
   /** reached only when ctx carries a relayerUrl, and only by the terminal
-   *  withdraw leg (relayerClient.ts). */
+   *  withdraw leg (io/relayer.ts). */
   submitWithdrawRelayed: typeof submitWithdrawRelayed;
   /** interval/cap/sleep for the between-legs wait — the wallet's one bounded-poll
    *  policy (refresh.ts), so tests can run a chain without real seconds. */
@@ -249,7 +250,7 @@ async function runLeg(
   // pay the gas without being able to redirect it. A configured-but-failing
   // relayer THROWS here rather than falling back to the wallet — silently
   // paying gas from the user's own account is the promise the relayer breaks
-  // (relayerClient.ts owns that WHY). Merge legs are transfer10x2 and take the
+  // (io/relayer.ts owns that WHY). Merge legs are transfer10x2 and take the
   // non-withdraw branch, so they can never relay by construction.
   const res =
     action.circuit === "withdraw"

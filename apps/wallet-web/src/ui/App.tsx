@@ -31,9 +31,11 @@ import {
   warmReconnect,
   watchWallet,
 } from "../lib/wagmi.js";
-import { runLogin } from "@bongtu/client/loginFlow";
+import { runLogin } from "@bongtu/client/login";
+import { SpendOps } from "@bongtu/client/spend";
 import { KEY_DERIVATION, deriveLoginIdentity } from "@bongtu/client/identity";
 import { keyCache } from "../lib/keyCache.js";
+import { proveInBrowser } from "../lib/prove.js";
 import type { WalletDescription } from "../lib/walletBrand.js";
 import { sumUnspent } from "@bongtu/client/balance";
 import {
@@ -131,12 +133,11 @@ export interface WalletContextValue {
    *  asked can say so locally, instead of a page-load failure blanking the feed
    *  that is already on screen. No-op when there is no next page. */
   loadMoreHistory: () => Promise<void>;
-  /** One read of the owner's notes, applied to the app as it lands. A spend chain
-   *  calls this between its transactions: it cannot build the leg that spends a
-   *  freshly merged note until the indexer says which leaf that note landed on. It
-   *  also leaves the screen holding fresh notes, so a chain that fails partway is
-   *  retried against what the wallet NOW holds — a shorter chain. */
-  reloadNotes: () => Promise<OwnerNote[]>;
+  /** The bound op facade for this login (null until connected): deposit /
+   *  spend / preview over the session's connection, lock, prover and note
+   *  source — constructed ONCE per login (issue #34, the C1 bind-once
+   *  precedent), so no screen re-threads engine inputs per call. */
+  ops: SpendOps | null;
 }
 
 const WalletContext = createContext<WalletContextValue | null>(null);
@@ -241,10 +242,15 @@ export function App(): ReactNode {
     [loadSelfScan],
   );
 
+  // The facade's note source reads THIS ref, not React state: a mid-chain pass
+  // must see the freshest applied notes without waiting for a re-render.
+  const notesRef = useRef<OwnerNote[]>([]);
+
   // Applying a snapshot RESETS the activity paging: the feed becomes the page that
   // was just read, and any pages "Load more" had appended are dropped. That is the
   // honest reset — the older pages were read against a feed that has since moved.
   const applySnapshot = useCallback((snap: OwnerSnapshot): void => {
+    notesRef.current = snap.notes;
     setBalance(sumUnspent(snap.notes));
     setNotes(snap.notes);
     setHistory(snap.history);
@@ -275,6 +281,7 @@ export function App(): ReactNode {
     setConnection(null);
     setSession(null);
     setBalance(null);
+    notesRef.current = [];
     setNotes([]);
     setHistory([]);
     setHistoryNextBefore(null);
@@ -523,6 +530,35 @@ export function App(): ReactNode {
     return snap.notes;
   }, [session, loadFirstPage, applySnapshot]);
 
+  // ONE facade per login: the engine inputs every op screen used to re-thread —
+  // connection, pool/token/explorer/relayer config, the lock, the in-browser
+  // prover, the session pubkey — bind here, and the screens call methods. The
+  // note source reads the notes REF (not React state) so a mid-chain pass
+  // always plans over the freshest applied snapshot, and its reload is the
+  // between-legs read above.
+  const ops = useMemo<SpendOps | null>(
+    () =>
+      connection && session
+        ? new SpendOps(
+            {
+              connection,
+              indexerUrl: INDEXER_URL,
+              pool: DEFAULTS.pool,
+              token: DEFAULTS.token,
+              explorer: DEFAULTS.explorer,
+              // Empty config means "no relayer" — the flow's undefined default
+              // (wallet self-submit); the flow itself relays only withdraw legs.
+              relayerUrl: DEFAULTS.relayerUrl || undefined,
+              keyCache,
+              prove: (request) => proveInBrowser(request, DEFAULTS.circuitBaseUrl),
+            },
+            session,
+            { notes: () => notesRef.current, reload: reloadNotes },
+          )
+        : null,
+    [connection, session, reloadNotes],
+  );
+
   const value = useMemo<WalletContextValue>(
     () => ({
       connection,
@@ -546,12 +582,12 @@ export function App(): ReactNode {
       refresh,
       refreshAfterAction,
       loadMoreHistory,
-      reloadNotes,
+      ops,
     }),
     [
       connection, wallet, session, balance, notes, history, historyNextBefore, historyLoadingMore,
       loading, syncing, dataError, dataNotice, scannedNextLeafIndex, connecting, connectError,
-      connectWallet, disconnect, refresh, refreshAfterAction, loadMoreHistory, reloadNotes,
+      connectWallet, disconnect, refresh, refreshAfterAction, loadMoreHistory, ops,
     ],
   );
 

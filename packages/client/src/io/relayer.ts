@@ -1,5 +1,5 @@
 // The wallet's client for the gas-sponsoring withdraw relayer (apps/relayer).
-// Its own module rather than connection.ts because connection.ts is, by its own
+// Its own module rather than io/connection because that subpath is, by its own
 // header, "everything that operates ON a live [Connection] over viem" — and a
 // relayed submit is the one submit with NO Connection in it: no wallet client,
 // no signature, no gas popup, just an HTTP POST of the already-proven calldata.
@@ -9,7 +9,7 @@
 //
 // Only WITHDRAW has a relayed submit. Transfers and deposits carry no
 // proof-bound recipient, so the relayer offers nothing for them (apps/relayer
-// src/relay.ts owns the full argument); spendFlow.ts routes only the terminal
+// src/relay.ts owns the full argument); ops/spend/run.ts routes only the terminal
 // withdraw leg here.
 
 import type { Calldata } from "@bongtu/core/proving";
@@ -19,7 +19,8 @@ import type { SubmitResult } from "@bongtu/client/connection";
 
 /**
  * Submit a proven withdraw THROUGH the relayer: POST /relay, map { txHash }
- * into the same SubmitResult shape submitWithdraw returns, so spendFlow and the
+ * into the same SubmitResult shape submitWithdraw returns, so the spend run
+ * (ops/spend/run.ts) and the
  * success screen cannot tell the two apart. A stealth run's announcement half
  * rides in the body; omitted, the relayer submits the plain-withdraw sentinel
  * (ZERO_EPHEMERAL / viewTag 0) exactly like a wallet-submitted plain withdraw.

@@ -30,8 +30,8 @@ import { ImtTree, foldToRoot } from "@bongtu/core/imt";
 import { deriveIdentityFromSignature } from "@bongtu/client/derive";
 import { ACCOUNT_MISMATCH_MESSAGE, assertSessionIdentity } from "@bongtu/client/identity";
 import { KeyCache } from "@bongtu/client/keyCache";
-import { runSpendChain, type SpendIo, type SpendContext } from "@bongtu/client/spendFlow";
-import { runDeposit, type DepositContext, type DepositIo } from "@bongtu/client/depositFlow";
+import { runSpendChain, type SpendIo, type SpendContext } from "@bongtu/client/spend";
+import { runDeposit, type DepositContext, type DepositIo } from "@bongtu/client/deposit";
 import type { OwnerNote } from "@bongtu/core/indexerApi";
 
 const SESSION_SIG = "0x" + "a1".repeat(32) + "b2".repeat(32) + "1c";

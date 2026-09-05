@@ -29,7 +29,7 @@ import {
   type RunSpendDeps,
   type SpendContext,
   type SpendIo,
-} from "@bongtu/client/spendFlow";
+} from "@bongtu/client/spend";
 import type { OwnerNote } from "@bongtu/core/indexerApi";
 import {
   planDisburseChain,

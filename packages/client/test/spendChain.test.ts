@@ -38,7 +38,7 @@ import {
   type RunSpendDeps,
   type SpendIo,
   type SpendContext,
-} from "@bongtu/client/spendFlow";
+} from "@bongtu/client/spend";
 import type { OwnerNote } from "@bongtu/core/indexerApi";
 import {
   legCircuit,

@@ -1,8 +1,8 @@
-// spend/spendCrypto.ts — fresh per-tx randomness + KEM draws (split from spend.ts).
+// ops/spend/crypto.ts — fresh per-tx randomness + KEM draws (split from spend.ts).
 
 import { ml_kem768, kemSsToLimbs, kemHexToBytes, kemBytesToHex } from "@bongtu/core/kem";
 import { ARBITER_KEM_PK, ARBITER_PUBKEY_X, ARBITER_PUBKEY_Y } from "@bongtu/core/network";
-import { MAX_INPUT_PADS, MAX_OUTPUT_PADS, type SpendCrypto } from "./spendPlan.js";
+import { MAX_INPUT_PADS, MAX_OUTPUT_PADS, type SpendCrypto } from "./plan.js";
 
 /** A fresh field element (decimal string) per call — the injectable randomness
  *  behind `freshSpendCrypto` (the platform CSPRNG via `randField` below; a
