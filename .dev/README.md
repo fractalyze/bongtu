@@ -20,3 +20,7 @@ Sorting rule: a document that answers **"what is true now"** goes in `docs/`; on
   plus the rejected alternatives.
 - [`ci.md`](ci.md) — CI design decisions: artifact-cache soundness argument, pins-file design,
   measured wall times, and the hosted-runner local-pass/CI-fail lessons.
+- [`intents/`](intents/README.md) — the intent chain: per-work-item intent/spec/plan artifacts,
+  their PR gates, and the stage commands (`/intent` … `/maintain`).
+- [`review.md`](review.md) — the stage-5 review rubric: passes, severity, and the
+  path→owning-docs routing table the `reviewer` sub-agent follows.

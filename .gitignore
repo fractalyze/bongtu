@@ -8,3 +8,5 @@ cache/
 build/
 .env
 .env.compose
+.claude/worktrees/
+.claude/settings.local.json
