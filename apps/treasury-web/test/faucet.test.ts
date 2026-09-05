@@ -19,7 +19,7 @@ import assert from "node:assert/strict";
 import type { Calldata } from "@bongtu/core/proving";
 import { DEFAULTS, testnetFromEnv } from "../src/config.js";
 import { deriveIdentityFromSignature } from "@bongtu/client/derive";
-import { FAUCET_AMOUNT } from "../src/lib/faucet.js";
+import { FAUCET_AMOUNT } from "@bongtu/ui/faucet";
 import { assertDepositAffordable } from "@bongtu/client/deposit";
 import { KeyCache } from "@bongtu/client/keyCache";
 import {

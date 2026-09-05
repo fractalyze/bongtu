@@ -25,7 +25,7 @@ import {
   type OwnerSnapshot,
   type RefreshSinks,
 } from "@bongtu/client/refresh";
-import { installGlobalErrorSurface, toasts, toastBug, BUG_TOAST_MESSAGE } from "../src/lib/toasts.js";
+import { installGlobalErrorSurface, toasts, toastBug, BUG_TOAST_MESSAGE } from "@bongtu/ui/toasts";
 
 const SNAP: OwnerSnapshot = { notes: [], history: [], historyNextBefore: null };
 const SESSION = { token: "v1.tok", compressedPubkey: "0xowner" };

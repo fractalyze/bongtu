@@ -45,7 +45,7 @@ import {
   POOL_ABI_FRAGMENTS,
 } from "@bongtu/core/network";
 import { liveChain } from "@bongtu/client/chain";
-import { buildConnectors } from "../src/lib/wagmi.js";
+import { buildConnectors } from "@bongtu/ui/wagmi";
 import {
   assertPoolKemEpoch,
   chainSwitchMessage,
@@ -57,7 +57,7 @@ import {
   type Connection,
 } from "@bongtu/client/connection";
 import type { ChainFailure } from "@bongtu/core/errors";
-import { describeWallet, NEUTRAL_WALLET_NAME } from "../src/lib/walletBrand.js";
+import { describeWallet, NEUTRAL_WALLET_NAME } from "@bongtu/ui/walletBrand";
 import type { Calldata } from "@bongtu/core/proving";
 
 const ACCOUNT = "0x00000000000000000000000000000000000000a1";

@@ -8,13 +8,14 @@
 // clock and per-step lines stay stage-key driven and flow-agnostic.
 
 import type { ReactNode } from "react";
-import { NEUTRAL_WALLET_NAME } from "../../lib/walletBrand.js";
+import { NEUTRAL_WALLET_NAME } from "@bongtu/ui/walletBrand";
 import { IconCheck } from "./icons.js";
 
-export interface StagedStep {
-  key: string;
-  label: string;
-}
+// StagedStep + withUnlock live with the shared action machine now
+// (@bongtu/ui/actionMachine, issue #46); re-exported here so step lists,
+// screens and tests keep importing them from the component that renders them.
+import { withUnlock, type StagedStep } from "@bongtu/ui/actionMachine";
+export { withUnlock, type StagedStep };
 
 export const SPEND_STEPS: StagedStep[] = [
   { key: "assemble", label: "Assembling" },
@@ -30,12 +31,6 @@ export const DEPOSIT_STEPS: StagedStep[] = [
   { key: "submit", label: "Submitting" },
 ];
 
-/** The same steps with the wallet-unlock signature in front. Screens switch to this
- *  only when a flow actually reports the "unlock" stage — a run that reuses the key
- *  already held never shows a step the user isn't asked to do. */
-export function withUnlock(steps: StagedStep[]): StagedStep[] {
-  return [{ key: "unlock", label: "Unlocking" }, ...steps];
-}
 
 /**
  * The steps a CHAINED spend shows: one per transaction, because one transaction is

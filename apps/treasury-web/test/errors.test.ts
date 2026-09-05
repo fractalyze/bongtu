@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { CHAIN_NAME, GAS_TOKEN_PHRASE } from "@bongtu/core/network";
-import { WALLET_FAILURE_COPY, walletWebErrorMessage } from "../src/lib/errors.js";
+import { TREASURY_FAILURE_COPY, treasuryErrorMessage } from "../src/lib/errors.js";
 import type { ChainFailure } from "@bongtu/core/errors";
 
 test("the failures a user hits each name their fix", () => {
@@ -19,34 +19,34 @@ test("the failures a user hits each name their fix", () => {
     [Object.assign(new Error("Failed to fetch"), { name: "HttpRequestError" }), /Check your connection/],
   ];
   for (const [thrown, expected] of cases) {
-    assert.match(walletWebErrorMessage(thrown), expected);
+    assert.match(treasuryErrorMessage(thrown), expected);
   }
 });
 
 test("a declined network switch is told apart from a failed one", () => {
   const declined = Object.assign(new Error("wallet_switchEthereumChain"), { code: 4001 });
-  assert.match(walletWebErrorMessage(declined), /rejected/);
-  assert.match(walletWebErrorMessage(new Error("wallet_switchEthereumChain unavailable")), /Could not switch/);
+  assert.match(treasuryErrorMessage(declined), /rejected/);
+  assert.match(treasuryErrorMessage(new Error("wallet_switchEthereumChain unavailable")), /Could not switch/);
 });
 
 test("anything the classifier cannot name keeps the words it already has", () => {
   // The engine's own lines pass through unharmed (the flows' money-state
   // reassurance rides them) ...
   assert.equal(
-    walletWebErrorMessage(new Error("Your balance just changed. Try again in a moment.")),
+    treasuryErrorMessage(new Error("Your balance just changed. Try again in a moment.")),
     "Your balance just changed. Try again in a moment.",
   );
   // ... and a precise revert beats a vague paraphrase of it.
-  assert.match(walletWebErrorMessage(new Error("execution reverted: InvalidProof")), /InvalidProof/);
+  assert.match(treasuryErrorMessage(new Error("execution reverted: InvalidProof")), /InvalidProof/);
 });
 
 test("the wallet copy table covers every ChainFailure kind, each with words", () => {
   assert.deepEqual(
-    Object.keys(WALLET_FAILURE_COPY).sort(),
+    Object.keys(TREASURY_FAILURE_COPY).sort(),
     ["chain_switch", "insufficient_gas", "other", "timeout", "transport", "user_rejected"],
     "a kind added to the classifier must get a wording decision here, not a fall-through",
   );
-  for (const [kind, words] of Object.entries(WALLET_FAILURE_COPY)) {
+  for (const [kind, words] of Object.entries(TREASURY_FAILURE_COPY)) {
     for (const rejected of [false, true]) {
       const failure = { kind, rejected, text: "engine line" } as unknown as ChainFailure;
       const message = (words as (f: ChainFailure, e: unknown) => string)(failure, new Error("engine line"));
@@ -54,5 +54,5 @@ test("the wallet copy table covers every ChainFailure kind, each with words", ()
     }
   }
   const declined = { kind: "chain_switch", rejected: true, text: null } as unknown as ChainFailure;
-  assert.match(WALLET_FAILURE_COPY.chain_switch(declined as never, declined), /^Network switch rejected in your wallet/);
+  assert.match(TREASURY_FAILURE_COPY.chain_switch(declined as never, declined), /^Network switch rejected in your wallet/);
 });

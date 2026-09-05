@@ -3,10 +3,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useAccount } from "wagmi";
-import { copyText } from "../lib/clipboard.js";
-import { toastError, COPY_FAILED_TOAST } from "../lib/toasts.js";
-import { isWalletUnlocked, subscribeLock } from "../lib/keyCache.js";
-import { describeWallet, type WalletDescription } from "../lib/walletBrand.js";
+import { copyText } from "@bongtu/ui/clipboard";
+import { toastError, COPY_FAILED_TOAST } from "@bongtu/ui/toasts";
+import { isWalletUnlocked, subscribeLock } from "@bongtu/ui/keyCache";
+import { describeWallet, type WalletDescription } from "@bongtu/ui/walletBrand";
 import { subscribeCircuitDownload, type CircuitDownloadState } from "../lib/prove.js";
 import type { BrowserCircuit } from "../config.js";
 

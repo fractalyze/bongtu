@@ -9,11 +9,30 @@
     "./toastQueue": "./src/toastQueue.ts",
     "./clipboard": "./src/clipboard.ts",
     "./Toast": "./src/Toast.tsx",
-    "./Banner": "./src/Banner.tsx"
+    "./Banner": "./src/Banner.tsx",
+    "./actionMachine": "./src/actionMachine.ts",
+    "./assets": "./src/assets.ts",
+    "./faucet": "./src/faucet.ts",
+    "./keyCache": "./src/keyCache.ts",
+    "./lockIntro": "./src/lockIntro.ts",
+    "./loginPending": "./src/loginPending.ts",
+    "./prove": "./src/prove.ts",
+    "./toasts": "./src/toasts.ts",
+    "./wagmi": "./src/wagmi.ts",
+    "./walletBrand": "./src/walletBrand.ts"
   },
   "scripts": {
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@bongtu/client": "*",
+    "@bongtu/core": "*",
+    "@rainbow-me/rainbowkit": "^2.2.11",
+    "ffjavascript": "^0.3.0",
+    "snarkjs": "^0.7.4",
+    "viem": "^2.55.10",
+    "wagmi": "^2.19.5"
   },
   "peerDependencies": {
     "react": "^18.3.1"

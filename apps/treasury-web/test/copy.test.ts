@@ -22,7 +22,7 @@ import { SyncDot, syncState } from "../src/ui/components/SyncDot.js";
 import { activeStep, chainSteps, StagedProgress, SPEND_STEPS, withUnlock } from "../src/ui/components/StagedProgress.js";
 import { SuccessPanel } from "../src/ui/components/SuccessPanel.js";
 import { EXPLORER_BASE } from "@bongtu/core/network";
-import { NEUTRAL_WALLET_NAME } from "../src/lib/walletBrand.js";
+import { NEUTRAL_WALLET_NAME } from "@bongtu/ui/walletBrand";
 
 const h = createElement;
 const TX_HASH = `0x${"ab".repeat(32)}`;

@@ -1,4 +1,4 @@
-// Headless gates for Onboarding's connect-then-login machine (lib/loginPending.ts).
+// Headless gates for Onboarding's connect-then-login machine (packages/ui/src/loginPending.ts).
 // The wave-1 review finding this pins: dismissing the connect modal without
 // connecting must CLEAR the pending flag — a stale flag would auto-fire a
 // signature popup at the next unrelated connect.
@@ -11,7 +11,7 @@ import {
   loginPendingStep,
   startLoginPending,
   type LoginPendingState,
-} from "../src/lib/loginPending.js";
+} from "../src/loginPending.js";
 
 function drive(
   start: LoginPendingState,

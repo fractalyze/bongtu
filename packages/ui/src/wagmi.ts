@@ -30,7 +30,11 @@ import { accountWatchHandler, type Connection, type WalletEdge, type WalletWatch
  * hence the defensive read (same pattern as config.ts).
  */
 export function walletConnectProjectId(): string | null {
-  const id = (import.meta.env?.VITE_WC_PROJECT_ID ?? "").trim();
+  // packages/ui carries no vite/client types (each app declares its own ImportMeta
+  // augmentation), so the build-time env is read through a local structural cast —
+  // undefined under tsc/tsx and in any non-Vite runner, exactly like before.
+  const meta = import.meta as unknown as { env?: { VITE_WC_PROJECT_ID?: string } };
+  const id = (meta.env?.VITE_WC_PROJECT_ID ?? "").trim();
   return id.length > 0 ? id : null;
 }
 

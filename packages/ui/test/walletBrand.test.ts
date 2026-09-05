@@ -1,4 +1,4 @@
-// Headless gates for identifying the connected wallet (src/lib/walletBrand.ts) — the
+// Headless gates for identifying the connected wallet (packages/ui/src/walletBrand.ts) — the
 // brand mark on Home and the wallet name in the lock/unlock copy both hang off this.
 //
 // The bug these lock down: nearly every injected wallet ALSO sets `isMetaMask: true`
@@ -13,7 +13,7 @@ import {
   walletBrand,
   describeWallet,
   NEUTRAL_WALLET_NAME,
-} from "../src/lib/walletBrand.js";
+} from "../src/walletBrand.js";
 
 const PNG_ICON = "data:image/png;base64,iVBORw0KGgo=";
 

@@ -24,20 +24,20 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ReactNode } from "react";
 import { DEFAULTS, isSelfScan } from "../config.js";
 import type { Connection } from "@bongtu/client/connection";
-import { walletWebErrorMessage } from "../lib/errors.js";
+import { treasuryErrorMessage } from "../lib/errors.js";
 import {
   endWalletConnection,
   requireConnection,
   restoreConnection,
   warmReconnect,
   watchWallet,
-} from "../lib/wagmi.js";
+} from "@bongtu/ui/wagmi";
 import { runLogin } from "@bongtu/client/login";
 import { SpendOps } from "@bongtu/client/spend";
 import { KEY_DERIVATION, deriveLoginIdentity } from "@bongtu/client/identity";
-import { keyCache } from "../lib/keyCache.js";
+import { keyCache } from "@bongtu/ui/keyCache";
 import { proveInBrowser } from "../lib/prove.js";
-import type { WalletDescription } from "../lib/walletBrand.js";
+import type { WalletDescription } from "@bongtu/ui/walletBrand";
 import { sumUnspent } from "@bongtu/client/balance";
 import {
   EMPTY_SCAN_STATE,
@@ -52,7 +52,7 @@ import { clearScanState, loadScanState, saveScanState } from "../lib/scanStore.j
 import { IndexerClient, type OwnerNote, type HistoryItem } from "@bongtu/core/indexerApi";
 import { appendHistoryPage } from "@bongtu/client/activity";
 import { SessionStore, type StoredSession } from "@bongtu/client/session";
-import { markLockIntroSeen, shouldShowLockIntro } from "../lib/lockIntro.js";
+import { markLockIntroSeen, shouldShowLockIntro } from "@bongtu/ui/lockIntro";
 import {
   loadOwnerSnapshot,
   pollForAction,
@@ -63,7 +63,7 @@ import {
   RECONNECT_NOTICE,
   type OwnerSnapshot,
 } from "@bongtu/client/refresh";
-import { installGlobalErrorSurface, toastError, toasts } from "../lib/toasts.js";
+import { installGlobalErrorSurface, toastError, toasts } from "@bongtu/ui/toasts";
 import { ToastHost } from "@bongtu/ui/Toast";
 import { useHashRoute, navigate, useWalletDescription } from "./hooks.js";
 import { Onboarding } from "./screens/Onboarding.js";
@@ -461,7 +461,7 @@ export function App(): ReactNode {
         setLockIntro(shouldShowLockIntro("connect"));
         navigate("home");
       } catch (e) {
-        setConnectError(walletWebErrorMessage(e));
+        setConnectError(treasuryErrorMessage(e));
       } finally {
         setConnecting(false);
       }

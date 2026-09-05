@@ -17,7 +17,7 @@ import {
   readGasBalance,
   type Connection,
 } from "@bongtu/client/connection";
-import { walletWebErrorMessage } from "../../lib/errors.js";
+import { treasuryErrorMessage } from "../../lib/errors.js";
 import { parseKkrw } from "@bongtu/client/money";
 import { shortenPubkey } from "../format.js";
 import { ExplorerLink } from "./ExplorerLink.js";
@@ -95,7 +95,7 @@ export function MintModal({
       setTx({ hash: res.txHash, explorerUrl: res.explorerUrl });
       await onMinted();
     } catch (e) {
-      setError(walletWebErrorMessage(e));
+      setError(treasuryErrorMessage(e));
     } finally {
       setPending(false);
     }
