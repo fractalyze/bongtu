@@ -39,6 +39,20 @@ A public GitHub issue is opened when an intent is accepted (bongtu tracks work a
 issues, no board); the issue links the folder and is the discussion surface, the files are the
 record.
 
+## Auto mode
+
+`/run-intent <slug>` drives an **accepted** intent through stages 2–5 to a finished PR with
+no per-stage gates: spec.md and plan.md are committed on the feature branch (the record is
+identical), verify and review run in parallel at the end, and the human gates collapse to
+two — the intent PR merge and the final feature PR. It stops and asks only for
+blocker-class concerns (security-model invariants, soundness, live-pool compatibility),
+unconverging gates, or anything touching the live chain. Manual stage commands stay
+available; capturing an intent is never automated.
+
+Parallel intents each run in their own `feat/<slug>` worktree; overlap is checked against
+other runs' plan.md file lists before building, and merge conflicts are resolved by the
+later run rebasing onto main and re-running verify + review (see the run-intent skill).
+
 ## When the chain applies
 
 Feature-scale work: anything that would get its own PR and issue anyway. Bugfixes and chores
