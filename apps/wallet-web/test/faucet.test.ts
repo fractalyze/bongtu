@@ -28,7 +28,7 @@ import {
   type DepositContext,
   type DepositIo,
   type RunDepositDeps,
-} from "@bongtu/client/depositFlow";
+} from "@bongtu/client/deposit";
 
 const SIG = "0x" + "a1".repeat(32) + "b2".repeat(32) + "1c";
 

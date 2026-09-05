@@ -8,7 +8,7 @@
 //
 //   apps/payroll-web/src/lib/payRun.ts   runPayRun   — merges + terminal disburse
 //   apps/payroll-web/src/lib/proverClient.ts         — the prover-service adapter
-//   @bongtu/client/depositFlow           runDeposit  — approve + prove + submit
+//   @bongtu/client/deposit           runDeposit  — approve + prove + submit
 //   @bongtu/client/connection            mintTestToken (the console's dev faucet)
 //   @bongtu/client/keyCache              KeyCache    — the real lock state machine
 //
@@ -53,11 +53,11 @@ import { liveChain } from "@bongtu/client/chain";
 import type { Connection } from "@bongtu/client/connection";
 import { mintTestToken, readTokenState } from "@bongtu/client/connection";
 import { deriveIdentityFromSignature } from "@bongtu/client/derive";
-import { runDeposit, type DepositStage } from "@bongtu/client/depositFlow";
+import { runDeposit, type DepositStage } from "@bongtu/client/deposit";
 import { KeyCache } from "@bongtu/client/keyCache";
 import { sumUnspent } from "@bongtu/client/balance";
 import { buildNotesUrl, fetchNotes, type OwnerNote } from "@bongtu/core/indexerApi";
-import type { LegProgress, SpendStage } from "@bongtu/client/spendFlow";
+import type { LegProgress, SpendStage } from "@bongtu/client/spend";
 import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
 
 import { proveViaService } from "../../apps/payroll-web/src/lib/proverClient.js";

@@ -24,7 +24,7 @@ import {
   type MintState,
 } from "../lib/depositModal.js";
 import { Button, shortHex, Spinner } from "./controls.js";
-import type { DepositStage } from "@bongtu/client/depositFlow";
+import type { DepositStage } from "@bongtu/client/deposit";
 
 export function DepositModal({
   state,

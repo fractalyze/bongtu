@@ -44,6 +44,6 @@
 // (test/selfscan.test.ts) drives recorded feeds through the whole engine.
 // This file stitches the split module back into the ONE stable public subpath
 // (@bongtu/client/selfscan); the implementation lives in the sibling scan* parts.
-export * from "./scanEngine.js";
-export * from "./scanRun.js";
+export * from "./engine.js";
+export * from "./run.js";
 

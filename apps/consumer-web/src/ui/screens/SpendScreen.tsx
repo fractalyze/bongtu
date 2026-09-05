@@ -25,15 +25,11 @@ import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { getAddress } from "viem";
 import { DEFAULTS } from "../../config.js";
-import { consumerRunSpendChain } from "@bongtu/client/consumerFlows";
-import type { SpendOutcome } from "@bongtu/client/spendFlow";
-import { consumerCircuitOf, type ConsumerRecipient } from "@bongtu/client/consumerBuild";
-import { previewSpend } from "@bongtu/client/spend";
+import type { SpendOutcome } from "@bongtu/client/spend";
+import { consumerCircuitOf, type ConsumerRecipient } from "@bongtu/client/consumer";
 import { normalizeName } from "@bongtu/core/indexerApi";
 import { resolveConsumerRecipient } from "../../lib/payName.js";
 import { consumerErrorMessage } from "../../lib/errors.js";
-import { keyCache } from "../../lib/keyCache.js";
-import { proveInBrowser } from "../../lib/prove.js";
 import { useWallet } from "../App.js";
 import { useActionMachine, stepsForRun } from "../actionMachine.js";
 import { formatKkrw, parseKkrw } from "@bongtu/client/money";
@@ -56,8 +52,7 @@ export const WITHDRAW_PROOF_BOUND_NOTE =
   "The payout address is locked into your proof. Once you confirm, it cannot be redirected by anyone.";
 
 export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactNode {
-  const { session, connection, wallet, indexerUrl, scanNotes, balance, reloadNotes, refreshAfterAction } =
-    useWallet();
+  const { connection, wallet, indexerUrl, notes, balance, ops, refreshAfterAction } = useWallet();
   const isTransfer = kind === "transfer";
 
   const [recipient, setRecipient] = useState("");
@@ -81,8 +76,10 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
   // simply cannot afford it. The circuit drives the one-time key download, so
   // the big arity-10 key is fetched only when the plan genuinely needs it.
   const plan = useMemo(
-    () => previewSpend(kind, scanNotes, amountWei.toString()),
-    [kind, scanNotes, amountWei],
+    () => (ops ? ops.preview(kind, amountWei.toString()) : { circuit: kind, blocker: null, legCount: 1, pieces: 0 }),
+    // `notes` is the reactivity key: the facade's note source reads the scan
+    // ref, and a landed scan updates `notes` in the same pass.
+    [ops, kind, amountWei, notes],
   );
   const circuit = consumerCircuitOf(plan.circuit);
   const action = useActionMachine<SpendOutcome>({ circuit, steps: SPEND_STEPS });
@@ -113,31 +110,21 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
   const review = formatKkrw(amountWei);
 
   function confirm(): void {
-    if (!connection || !session) return;
+    if (!ops) return;
     // The spending key comes from the wallet's lock INSIDE the flow — this
     // component never holds it. The notes are the self-scan result set, and the
-    // between-legs re-read is a self-scan pass too (App.reloadNotes).
+    // between-legs re-read is a self-scan pass too — both live behind the
+    // facade's note source (App constructs the ONE ConsumerOps per login).
     void action.submit(
       async (onStage) =>
-        consumerRunSpendChain(
+        ops.spend(
           kind,
-          {
-            connection,
-            indexerUrl,
-            explorer: DEFAULTS.explorer,
-            notes: scanNotes,
-            sessionPubkey: session.compressedPubkey,
-            reloadNotes,
-          },
           {
             to: activeResolve?.recipient,
             amount: amountWei.toString(),
             withdrawTo: withdrawDest ?? undefined,
           },
           onStage,
-          // The engine takes the app's lock + prover through its deps seam:
-          // proving is in-browser snarkjs over the same-origin circuit assets.
-          { keyCache, prove: (request) => proveInBrowser(request, DEFAULTS.circuitBaseUrl) },
         ),
       refreshAfterAction,
     );

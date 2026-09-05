@@ -1,4 +1,4 @@
-// spend/spendAssemble.ts — the family-shared input-side witness assembly
+// ops/spend/assemble.ts — the family-shared input-side witness assembly
 // (split from spend.ts).
 
 import {
@@ -8,7 +8,7 @@ import {
 import { H } from "@bongtu/core/network";
 import { foldToRoot } from "@bongtu/core/imt";
 import type { WalletIdentity } from "@bongtu/client/derive";
-import type { MembershipWitness, WalletInputNote } from "./spendPlan.js";
+import type { MembershipWitness, WalletInputNote } from "./plan.js";
 
 // --- helpers -------------------------------------------------------------------
 
@@ -16,7 +16,7 @@ import type { MembershipWitness, WalletInputNote } from "./spendPlan.js";
 // input's commitment + nullifier from the wallet key, pad the remaining slots up to
 // the circuit's arity with value-0 notes, and fold every real input to the shared
 // root. Exported (not just used here) because the consumer builders
-// (consumerBuild.ts) spend the SAME untyped notes — the input-side algebra is
+// (ops/consumer/requests.ts) spend the SAME untyped notes — the input-side algebra is
 // family-shared by construction, so reusing this function keeps it that way.
 export interface AssembledInputs {
   nullifiers: bigint[];

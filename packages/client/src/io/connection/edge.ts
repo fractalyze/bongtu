@@ -1,10 +1,10 @@
-// wallet/walletEdge.ts — the Connection shape, wallet failure copy, account
+// io/connection/edge.ts — the Connection shape, wallet failure copy, account
 // watch, chain guard and the deterministic key-derivation signature (split from
 // connection.ts; the subpath @bongtu/client/connection re-exports everything).
 import type { Address, WalletClient, PublicClient } from "viem";
 import { classifyChainFailure, errorCode, fallbackText, failureCopy, type FailureCopyTable } from "@bongtu/core/errors";
 import type { KeyDerivationTypedData } from "@bongtu/client/derive";
-import type { WalletTransport } from "@bongtu/client/loginGuard";
+import type { WalletTransport } from "@bongtu/client/session";
 import {
   CHAIN_ID,
   CHAIN_NAME,

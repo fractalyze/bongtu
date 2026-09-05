@@ -39,7 +39,7 @@ import type { Calldata } from "@bongtu/core/proving";
 
 import { deriveIdentityFromSignature } from "@bongtu/client/derive";
 import { KeyCache } from "@bongtu/client/keyCache";
-import { runSpendChain, type SpendIo, type SpendContext } from "@bongtu/client/spendFlow";
+import { runSpendChain, type SpendIo, type SpendContext } from "@bongtu/client/spend";
 import type { OwnerNote } from "@bongtu/core/indexerApi";
 import {
   buildTransfer10x2Request,

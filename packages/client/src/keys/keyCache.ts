@@ -49,6 +49,23 @@ import type { Connection, WalletEdge } from "@bongtu/client/connection";
 /** How long an unused spending key is kept before the wallet re-locks itself. */
 export const IDLE_WIPE_MS = 10 * 60 * 1000;
 
+/** The lock as the FLOWS consume it (issue #27): exactly the two methods a
+ *  prove+submit orchestration calls — the running-state read and the
+ *  session-checked key handout. Flow deps type against THIS, not the concrete
+ *  class, so a headless suite can hand a flow a plain-object fake without
+ *  constructing the whole state machine; the real KeyCache below satisfies it
+ *  implicitly (structural typing — no `implements` to drift). peek/seed/
+ *  subscribe/lock stay class-only on purpose: they are shell (login/indicator)
+ *  concerns no flow may touch. */
+export interface KeyCacheLike {
+  isUnlocked(): boolean;
+  unlock(
+    connection: Connection,
+    sessionPubkey: string,
+    onDerive?: () => void,
+  ): Promise<WalletIdentity>;
+}
+
 /** The I/O + clock the cache depends on, injectable so the whole state machine —
  *  including both idle-wipe layers — gates headlessly (test/keyCache.test.ts). */
 export interface KeyCacheDeps {

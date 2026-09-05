@@ -1,6 +1,6 @@
 // The consumer-family FLOW variants: consumerRunDeposit + consumerRunSpendChain,
 // the prove+submit orchestrations the consumer wallet app wires exactly like the
-// enterprise pair (depositFlow.ts runDeposit / spendFlow.ts runSpendChain) —
+// enterprise pair (ops/deposit.ts runDeposit / ops/spend/run.ts runSpendChain) —
 // same stage grammar, same ctx/deps seam shape, same failure-reassurance rule.
 //
 // ONE file for both flows, where the enterprise pair is two: the enterprise
@@ -10,15 +10,15 @@
 // what stops them drifting apart. The deltas, exactly:
 //
 //   - NO assertPoolKemEpoch — there is no arbiter KEM epoch to guard: consumer
-//     outputs seal to each RECIPIENT's registered triple (consumerBuild.ts),
+//     outputs seal to each RECIPIENT's registered triple (requests.ts),
 //     not to a chain-vouched authority key, so the guard has no subject.
 //   - membership is the AUTH-FREE path read (getPath / GET /path) — consumer
 //     batches serve /path openly (OPMOD §4.4 public batch fill), so no read
 //     needs the signed variant; the fake-IO suite pins that no signed fetch
 //     ever fires.
-//   - builders come from consumerBuild.ts (S2): per-output sealing, no
+//   - builders come from requests.ts (S2): per-output sealing, no
 //     authority envelope, kem cts surfaced in meta as `bytes[]` calldata.
-//   - submits go to the MODULE addresses via consumerSubmit.ts; token approve
+//   - submits go to the MODULE addresses via submit.ts; token approve
 //     still targets the POOL (the escrow holder — docs/consumer.md).
 //   - refresh-between-legs is a SELF-SCAN pass: consumer notes have no /notes
 //     oracle, so ctx.reloadNotes is typed against the selfscan surface
@@ -42,8 +42,8 @@ import {
   submitTransferPriv,
   submitTransfer10x2Priv,
   submitWithdrawPriv,
-} from "@bongtu/client/consumerSubmit";
-import type { KeyCache } from "@bongtu/client/keyCache";
+} from "./submit.js";
+import type { KeyCacheLike } from "@bongtu/client/keyCache";
 import { getHead, getPath } from "@bongtu/core/indexerApi";
 import { pollUntil, type PollForActionOptions } from "@bongtu/client/refresh";
 import {
@@ -60,6 +60,8 @@ import {
   buildConsumerTransferRequest,
   buildConsumerTransfer10x2Request,
   buildConsumerWithdrawRequest,
+} from "./requests.js";
+import {
   assertConsumerRecipient,
   consumerCircuitOf,
   freshConsumerDepositCrypto,
@@ -68,18 +70,18 @@ import {
   type ConsumerRecipient,
   type ConsumerSpendCircuit,
   type ConsumerSpendMeta,
-} from "@bongtu/client/consumerBuild";
+} from "./plan.js";
 import { assertDepositAffordable } from "@bongtu/client/deposit";
 import { isConsumerIdentity, type ScanNote } from "@bongtu/client/selfscan";
 import type { ConsumerWalletIdentity } from "@bongtu/client/derive";
-import { DEPOSIT_FAILURE_REASSURANCE, type DepositStage } from "@bongtu/client/depositFlow";
+import { DEPOSIT_FAILURE_REASSURANCE, type DepositStage } from "@bongtu/client/deposit";
 import {
   CHAIN_FAILURE_REASSURANCE,
   MERGE_NOT_INDEXED_MESSAGE,
   type LegProgress,
   type OnSpendStage,
   type SpendOutcome,
-} from "@bongtu/client/spendFlow";
+} from "@bongtu/client/spend";
 
 /** The unlock produces a full identity for every signature-derived key; only a
  *  synthetic enterprise-only identity (e.g. the sweeper's portal identity)
@@ -118,13 +120,13 @@ export interface ConsumerDepositOutcome {
 }
 
 /** The network/proving I/O consumerRunDeposit performs, injectable exactly as
- *  depositFlow.ts RunDepositDeps — minus assertPoolKemEpoch, which does not
+ *  ops/deposit.ts RunDepositDeps — minus assertPoolKemEpoch, which does not
  *  EXIST in this family's seam (a member nothing may call would only invite a
  *  fake to prove the wrong thing). */
 export interface RunConsumerDepositDeps {
   ensureChain: typeof ensureChain;
   /** the wallet's lock — holds the spending key between actions (keyCache.ts). */
-  keyCache: KeyCache;
+  keyCache: KeyCacheLike;
   readTokenState: typeof readTokenState;
   approveToken: typeof approveToken;
   /** Turn a ProvingRequest into Groth16 calldata (the APP supplies this —
@@ -166,7 +168,7 @@ export async function consumerRunDeposit(
   const V = BigInt(amount);
   if (V <= 0n) throw new Error(`deposit amount must be positive, got ${V}`);
   // Probe the triple BEFORE any token motion: a doomed deposit must not waste
-  // an approve tx (depositFlow.ts family rule) — sealing would only catch a
+  // an approve tx (ops/deposit.ts family rule) — sealing would only catch a
   // corrupt triple at the prove stage, after the approve landed.
   if (args.recipient) assertConsumerRecipient(args.recipient);
 
@@ -212,7 +214,7 @@ export async function consumerRunDeposit(
     );
     return { txHash: res.txHash, explorerUrl: res.explorerUrl, amount, approved };
   } catch (e) {
-    // depositFlow's money-state rule verbatim: once the approve landed, a later
+    // runDeposit's money-state rule verbatim (ops/deposit.ts): once the approve landed, a later
     // failure must say where the money stands.
     if (!approved) throw e;
     throw new Error(`${walletErrorMessage(e)} ${DEPOSIT_FAILURE_REASSURANCE}`);
@@ -245,7 +247,7 @@ export interface ConsumerSpendContext {
 export interface RunConsumerSpendDeps {
   ensureChain: typeof ensureChain;
   /** the wallet's lock — holds the spending key between actions (keyCache.ts). */
-  keyCache: KeyCache;
+  keyCache: KeyCacheLike;
   getHead: typeof getHead;
   /** the AUTH-FREE membership read — consumer batches serve /path openly. */
   getPath: typeof getPath;
@@ -274,7 +276,7 @@ const SPEND_DEFAULT_DEPS: Omit<RunConsumerSpendDeps, "keyCache" | "prove"> = {
   poll: {},
 };
 
-// Fresh per leg, because each leg moves the root — spendFlow's fetchMemberships
+// Fresh per leg, because each leg moves the root — ops/spend/run.ts fetchMemberships
 // with the signed read swapped for the open one (no owner key leaves the leg).
 async function fetchMemberships(
   io: RunConsumerSpendDeps,
@@ -290,7 +292,7 @@ async function fetchMemberships(
   return memberships;
 }
 
-/** spendFlow's openSpendSession minus the KEM-epoch guard: align the chain,
+/** ops/spend/run.ts openSpendSession minus the KEM-epoch guard: align the chain,
  *  then take the spending key from the lock (session-account-checked per LEG,
  *  so a mid-chain account switch blocks the remaining transactions). */
 async function openConsumerSession(
@@ -310,7 +312,7 @@ async function openConsumerSession(
 /** One planned leg resolved into what its builder takes. A merge is a
  *  transfer10x2Priv paying the wallet's OWN triple the whole fold; a terminal
  *  leg carries the user's ask. Inputs the plan left pending are the notes
- *  earlier merges have since created (same pendingLegOf protocol as spendFlow). */
+ *  earlier merges have since created (same pendingLegOf protocol as the spend run). */
 interface ConsumerAction {
   circuit: ConsumerSpendCircuit;
   inputs: WalletInputNote[];
@@ -424,7 +426,7 @@ async function awaitMergedNote(
 
 /**
  * Plan the consumer spend as a chain and run it: per leg, auth-free membership →
- * consumerBuild witness → proof → module submit; after a merge leg, the
+ * requests.ts witness build → proof → module submit; after a merge leg, the
  * "waiting" pause until a self-scan pass has found the note it created. Stage
  * grammar (unlock → assemble → prove → submit → waiting), leg numbering, and
  * the partial-failure reassurance are runSpendChain's, so the app renders both

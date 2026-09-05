@@ -44,8 +44,8 @@ import { getHead, getNullifiers, getPath, IndexerClient } from "@bongtu/core/ind
 import type { PointInput } from "@bongtu/core/babyjub";
 import { deriveIdentityFromSignature } from "@bongtu/client/derive";
 import type { ConsumerWalletIdentity } from "@bongtu/client/derive";
-import { buildConsumerTransferRequest, selfConsumerRecipient } from "@bongtu/client/consumerBuild";
-import { submitTransferPriv } from "@bongtu/client/consumerSubmit";
+import { buildConsumerTransferRequest, selfConsumerRecipient } from "@bongtu/client/consumer";
+import { submitTransferPriv } from "@bongtu/client/consumer";
 import type { Connection } from "@bongtu/client/connection";
 import type { Calldata } from "@bongtu/core/proving";
 import { runSelfScan, EMPTY_SCAN_STATE } from "@bongtu/client/selfscan";

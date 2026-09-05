@@ -64,7 +64,7 @@ endpoint, and none may be added.
   `@bongtu/client` `refresh.ts` (`runRefresh` — the one refresh path, with the
   never-toast/never-blank rules enforced headlessly), `src/lib/toasts.ts` (the app's
   queue + the class-5 global handlers), and one exhaustive wording table per app over
-  core's `FailureCopyTable` — `WALLET_FAILURE_COPY` (`@bongtu/client` `connection.ts`,
+  core's `FailureCopyTable` — `WALLET_FAILURE_COPY` (`@bongtu/client` `io/connection/edge.ts`,
   beside `chainSwitchMessage`) and `PAYROLL_FAILURE_COPY` (payroll `src/lib/errors.ts`)
   — so a `ChainFailure` kind added to the classifier is a tsc error in every app, never
   a silent fall-through to raw viem text. Surface wiring gates in

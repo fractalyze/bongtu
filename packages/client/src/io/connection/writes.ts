@@ -1,4 +1,4 @@
-// wallet/poolWrites.ts — the proof/token submits and reads that operate on a
+// io/connection/writes.ts — the proof/token submits and reads that operate on a
 // live Connection over viem: the ABI tables, the pool-KEM-epoch guard and the
 // gas/nonce discipline (split from connection.ts).
 import { parseAbi, type Abi, type Address } from "viem";
@@ -14,7 +14,7 @@ import {
 import { liveChain } from "@bongtu/client/chain";
 import { ZERO_EPHEMERAL, type StealthDerivation } from "@bongtu/core/stealth";
 import { KEM_CIPHERTEXT_BYTES } from "@bongtu/core/kem";
-import type { Connection } from "./walletEdge.js";
+import type { Connection } from "./edge.js";
 // The shared per-function ABI fragments (@bongtu/core/network) — only the pool
 // functions the wallet touches, parsed once for viem. deposit is the 0-in/2-out
 // mint (a,b,c,pub,kemCiphertext) the shield flow submits.
@@ -114,7 +114,7 @@ function assertKemCiphertext(kemCiphertext: string): void {
 }
 
 /** The proof calldata's decimal strings as the bigints viem's ABI encoder takes.
- *  Exported: consumerSubmit.ts rides the same belt — one home, not three copies
+ *  Exported: ops/consumer/submit.ts rides the same belt — one home, not three copies
  *  (the payroll copy predates this and migrates when that app is next touched). */
 export function asProofArgs(calldata: Calldata) {
   return {

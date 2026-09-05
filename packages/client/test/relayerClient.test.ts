@@ -17,7 +17,7 @@ import assert from "node:assert/strict";
 import type { Calldata } from "@bongtu/core/proving";
 import type { StealthDerivation } from "@bongtu/core/stealth";
 
-import { submitWithdrawRelayed } from "@bongtu/client/relayerClient";
+import { submitWithdrawRelayed } from "@bongtu/client/relayer";
 
 const CALLDATA: Calldata = {
   a: ["1", "2"],

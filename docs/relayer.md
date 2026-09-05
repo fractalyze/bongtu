@@ -33,7 +33,7 @@ scans logs and responses for the key hex. Run mechanics and env knobs:
 
 ## The client contract
 
-`@bongtu/client` (`relayerClient.ts` + the `spendFlow` withdraw leg) relays
+`@bongtu/client` (`io/relayer.ts` + the `ops/spend/run.ts` withdraw leg) relays
 exactly the terminal withdraw of a spend chain — merge legs are self-sends
 and never leave the wallet's own submission path. A configured relayer that
 fails **surfaces the failure**; there is no silent fallback to self-submit

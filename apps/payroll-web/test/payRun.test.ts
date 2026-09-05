@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 
 import { deriveKeypair } from "@bongtu/core/note";
 import { packPubkey } from "@bongtu/core/pubkey";
-import type { SpendContext } from "@bongtu/client/spendFlow";
+import type { SpendContext } from "@bongtu/client/spend";
 import { MAX_RECIPIENTS, PAY_RUN_FAILURE_REASSURANCE, runPayRun, type PayRunDeps } from "../src/lib/payRun.js";
 import type { RecipientRow } from "../src/lib/disburse.js";
 

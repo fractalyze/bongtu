@@ -14,11 +14,11 @@ import {
   deriveIdentityFromSignature,
   type WalletIdentity,
 } from "@bongtu/client/derive";
-import { assertDeterministicSignatures } from "@bongtu/client/loginGuard";
+import { assertDeterministicSignatures } from "@bongtu/client/login";
 import { signKeyDerivation, type Connection } from "@bongtu/client/connection";
 
 /** Whether this derivation has to prove the wallet is deterministic before trusting
- *  what it signed (loginGuard.loginNeedsDeterminismCheck decides). */
+ *  what it signed (session/login.ts loginNeedsDeterminismCheck decides). */
 export interface LoginSignaturePlan {
   doubleSign: boolean;
 }
@@ -69,9 +69,9 @@ export const KEY_DERIVATION: KeyDerivationConfig = {
  * `doubleSign` asks for that same signature a SECOND time and refuses the pair if the
  * bytes differ. It costs a second popup, so it is spent only where the determinism it
  * checks is not already established: the first login of a WalletConnect wallet this
- * browser has never derived under. See loginGuard.ts for the whole rule.
+ * browser has never derived under. See session/login.ts for the whole rule.
  *
- * The ONE derivation site: the login (via loginFlow.runLogin, which then seeds the
+ * The ONE derivation site: the login (via login.runLogin, which then seeds the
  * lock) and the lock's own lazy derive both come through here, so the two can never
  * drift into deriving different keys from the same account.
  */

@@ -1,6 +1,5 @@
-// consumer/consumerRequests.ts — the depositPriv / transferPriv /
-// transfer10x2Priv / withdrawPriv ProvingRequest builders (split from
-// consumerBuild.ts).
+// ops/consumer/requests.ts — the depositPriv / transferPriv /
+// transfer10x2Priv / withdrawPriv ProvingRequest builders.
 import { TRANSFER10_ARITY } from "@bongtu/core/envelope";
 import {
   toWire,
@@ -28,7 +27,7 @@ import {
   type ConsumerSpendMeta,
   type ConsumerSpendResult,
   type PlannedConsumerOutput,
-} from "./consumerPlan.js";
+} from "./plan.js";
 function consumerSpendMeta(
   ins: AssembledInputs,
   amount: string,

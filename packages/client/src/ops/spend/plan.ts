@@ -1,6 +1,6 @@
-// spend/spendPlan.ts — input shapes, note selection, circuit choice, chain
+// ops/spend/plan.ts — input shapes, note selection, circuit choice, chain
 // planning and the form preview (split from spend.ts; the subpath
-// @bongtu/client/spend re-exports everything via spend.ts).
+// @bongtu/client/spend re-exports everything via index.ts).
 
 import { TRANSFER10_ARITY } from "@bongtu/core/envelope";
 import type { ProvingRequest } from "@bongtu/core/proving";

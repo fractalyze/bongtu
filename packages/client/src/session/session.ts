@@ -13,7 +13,8 @@
 
 import { DEPLOYMENT_TAG } from "@bongtu/core/network";
 
-import type { WalletTransport } from "@bongtu/client/loginGuard";
+/** How the browser is talking to the wallet: an injected extension, or WalletConnect. */
+export type WalletTransport = "injected" | "walletconnect";
 
 /** What survives a page reload: enough to show Home + read data, nothing that spends. */
 export interface StoredSession {
@@ -51,7 +52,7 @@ export const SESSION_KEY = `bongtu.session.${DEPLOYMENT_TAG}`;
 // A SECOND record, deliberately outliving the session one. The session is dropped the
 // moment its token expires, but "account 0xa1 derives bjj key K" stays true forever —
 // and it is the only evidence that catches a wallet whose signatures are randomised
-// (loginGuard.ts): derive a different key from the same account and the login is
+// (session/login.ts): derive a different key from the same account and the login is
 // refused instead of silently presenting an empty balance.
 //
 // Public data only: an ethereum address and a compressed bjj PUBLIC key, the same pair
@@ -62,7 +63,7 @@ export const SESSION_KEY = `bongtu.session.${DEPLOYMENT_TAG}`;
 // Scoped to the deployment for the same reason as SESSION_KEY, and here the cost of
 // NOT scoping it is worse: the binding is a REFUSAL, so a pre-move entry would make
 // every returning user's login fail with "this wallet produced a different signing
-// key than last time" (loginGuard.ts) — accusing a perfectly good wallet, with no
+// key than last time" (session/login.ts) — accusing a perfectly good wallet, with no
 // in-app way out, when the truth is that the KDF domain moved. Deliberately NOT
 // migrated forward: carrying the old pubkey over is exactly that false mismatch.
 // Stale entries under a previous tag are left to linger; they are two public values.
@@ -105,7 +106,7 @@ function readBindings(storage: StorageLike | null): Bindings {
  * other's writes and constructing one is free. The storage arrives once, as a
  * constructor dep (the KeyCache wiring pattern: required deps up front, defaults
  * for the rest), instead of trailing every call as a defaulted param. Methods are
- * arrow properties so a caller (loginFlow's DEFAULT_DEPS) can pluck them off an
+ * arrow properties so a caller (session/login.ts DEFAULT_DEPS) can pluck them off an
  * instance without losing `this`.
  */
 export class SessionStore {

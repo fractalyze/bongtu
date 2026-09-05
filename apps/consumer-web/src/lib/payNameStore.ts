@@ -11,7 +11,7 @@
 // blocks storage just means the Receive screen starts on the register form.
 
 import type { NameRecord } from "@bongtu/core/indexerApi";
-import { consumerRecipientOf } from "@bongtu/client/consumerBuild";
+import { consumerRecipientOf } from "@bongtu/client/consumer";
 
 const key = (ownerCompressed: string): string => `bongtu.consumer.payname.${ownerCompressed}`;
 

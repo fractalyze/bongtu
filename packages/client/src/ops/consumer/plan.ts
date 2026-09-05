@@ -1,6 +1,6 @@
-// consumer/consumerPlan.ts — the recipient triple, per-tx crypto, circuit
-// mapping and output planning/sealing (split from consumerBuild.ts; the subpath
-// @bongtu/client/consumerBuild re-exports everything).
+// ops/consumer/plan.ts — the recipient triple, per-tx crypto, circuit
+// mapping and output planning/sealing (the subpath @bongtu/client/consumer
+// re-exports everything).
 import type { Point } from "@bongtu/core/babyjub";
 import { sealConsumerOutput, type SealedConsumerOutput } from "@bongtu/core/consumer";
 import { KEM_EK_ZERO, NOTE_VIEW_PUB_ZERO } from "@bongtu/core/eddsa";
@@ -165,10 +165,10 @@ export interface PlannedConsumerOutput {
 }
 
 /** unpack with a message naming the field the caller supplied, not the curve
- *  math that rejected it (mirrors spend.ts parsePayee). */
+ *  math that rejected it (mirrors ops/spend/builders.ts parsePayee). */
 /** Cheap validity probe for a recipient triple — the SAME parses sealing will
  *  do, run BEFORE any token motion so a corrupt hand-built triple cannot cost
- *  an approve tx (the family rule depositFlow.ts states). Registry-resolved
+ *  an approve tx (the family rule ops/deposit.ts states). Registry-resolved
  *  triples already passed consumerRecipientOf; this guards the manual path. */
 export function assertConsumerRecipient(recipient: ConsumerRecipient): void {
   parsePoint(recipient.owner, "recipient owner pubkey");
