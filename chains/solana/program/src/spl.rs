@@ -58,6 +58,37 @@ pub fn check_token_account(acc: &AccountInfo, mint: &[u8; 32]) -> Result<(), Poo
     Ok(())
 }
 
+/// SPL Mint account layout facts (consensus-fixed): 82 B,
+/// `is_initialized` at offset 45.
+pub const MINT_ACCOUNT_LEN: usize = 82;
+const OFF_MINT_STATE: usize = 45;
+
+/// Validate a mint account: token-program-owned, mint-sized, initialized —
+/// what `initialize` requires of the pool's mint before deriving the config
+/// PDA from its address.
+pub fn check_mint_account(acc: &AccountInfo) -> Result<(), PoolError> {
+    if acc.owner != &TOKEN_PROGRAM_ID {
+        return Err(PoolError::InvalidAccount);
+    }
+    let data = acc.try_borrow_data().map_err(|_| PoolError::InvalidAccount)?;
+    if data.len() != MINT_ACCOUNT_LEN || data[OFF_MINT_STATE] != 1 {
+        return Err(PoolError::InvalidAccount);
+    }
+    Ok(())
+}
+
+/// The token-level owner field of an (already-validated) token account —
+/// bytes 32..64 of the consensus-fixed layout.
+pub fn token_account_owner(acc: &AccountInfo) -> Result<[u8; 32], PoolError> {
+    let data = acc.try_borrow_data().map_err(|_| PoolError::InvalidAccount)?;
+    if data.len() != TOKEN_ACCOUNT_LEN {
+        return Err(PoolError::InvalidAccount);
+    }
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&data[32..64]);
+    Ok(out)
+}
+
 /// The proof-bound escrow amount as u64 (pub[0] is a 32 B big-endian field
 /// element; anything above u64 cannot move through SPL and rejects).
 pub fn amount_u64(public: &[u8; 32]) -> Result<u64, PoolError> {

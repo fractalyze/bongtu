@@ -1,25 +1,36 @@
 #!/usr/bin/env bash
-# The Solana consumer-client acceptance gate (SOLR §5.3's client row, the
-# heavy-gate sibling of deploy/gates/e2e_m0.sh): solana-test-validator + the
-# deployed program + genesis-seeded pool accounts, the indexer Solana backend
-# over live RPC, and the four consumer ops driven through the REAL client path
-# by gates/client_leg.ts (derive keys -> deposit -> transfer -> self-scan
-# balance -> withdraw, real CPU proofs). Heavy-gate discipline: run ONCE as
-# the final gate; the mollusk suite (gates/mollusk.sh) stays the iteration
-# loop.
+# The Solana local-validator e2e gate (SOLR §5.3 / §6 S6 row, the heavy-gate
+# sibling of deploy/gates/e2e_m0.sh), two legs:
 #
-#   bash chains/solana/gates/e2e_client.sh    # exits 0 iff every assertion holds
+#   consumer   gates/client_leg.ts — initialize (consumer profile) through
+#              the real instruction, then derive keys -> deposit -> transfer
+#              -> self-scan balance -> withdraw via the REAL client path
+#              (real CPU proofs), with the indexer Solana backend over live
+#              RPC serving the public feed;
+#   enterprise gates/enterprise_leg.ts — initialize (enterprise profile,
+#              B=256, fixture arbiter key), then the FULL enterprise family
+#              replayed from the committed realproof fixtures, ending with
+#              the 256-out disburse settling in ONE transaction and its
+#              institution-served disclosure blob refolded independently
+#              against the on-chain DisburseBatch anchor.
 #
-# Postgres-only indexer (U-I4): honors an exported SOLANA_E2E_DATABASE_URL,
-# otherwise spins a throwaway postgres:16-alpine in docker (trap-removed).
-# No Postgres possible is FATAL — the feed leg is the acceptance, never skip.
+# Heavy-gate discipline: run ONCE as the final gate; the mollusk suite
+# (gates/mollusk.sh) stays the iteration loop.
+#
+#   bash chains/solana/gates/e2e_s.sh    # exits 0 iff every assertion holds
+#
+# Postgres-only indexer: honors an exported SOLANA_E2E_DATABASE_URL (a
+# per-leg database is created next to it), otherwise spins a throwaway
+# postgres:16-alpine in docker (trap-removed). No Postgres possible is FATAL
+# — the feed/disclosure legs are the acceptance, never skip.
 set -uo pipefail
 cd "$(dirname "$0")/../../.."   # chains/solana/gates -> repo root
 
 # Transaction v1 (SIMD-0385, the 4,096 B format every op here needs) requires
 # an Agave 4.2+ validator; the repo's PINNED toolchain (active_release,
 # AGAVE_VERSION in .github/ci-pins.env) stays on the mollusk build and is NOT
-# flipped - this gate runs a side-by-side release instead:
+# flipped - this gate runs a side-by-side release instead (SOLANA_V1_VERSION
+# in ci-pins.env):
 #   mkdir -p "$HOME/.local/share/solana/install/releases/v4.2.2"
 #   curl -fL https://release.anza.xyz/v4.2.2/solana-release-x86_64-unknown-linux-gnu.tar.bz2 \
 #     | tar -xj -C "$HOME/.local/share/solana/install/releases/v4.2.2"
@@ -54,7 +65,7 @@ trap cleanup EXIT INT TERM
 if [ -z "${SOLANA_E2E_DATABASE_URL:-}" ]; then
   if command -v "$DOCKER" >/dev/null 2>&1 && "$DOCKER" info >/dev/null 2>&1; then
     PG_PORT="${SOLANA_E2E_PG_PORT:-$((22000 + (RANDOM % 20000)))}"
-    PG_NAME="bongtu-solana-client-pg-$$"
+    PG_NAME="bongtu-solana-e2e-pg-$$"
     echo "== start throwaway postgres:16-alpine on :$PG_PORT (container $PG_NAME) =="
     "$DOCKER" run -d --name "$PG_NAME" -e POSTGRES_PASSWORD=postgres \
       -p "127.0.0.1:${PG_PORT}:5432" postgres:16-alpine >/dev/null || fail "docker run postgres failed"
@@ -70,15 +81,39 @@ if [ -z "${SOLANA_E2E_DATABASE_URL:-}" ]; then
   fi
 fi
 
-# --- drive the leg ------------------------------------------------------------
+# One database per leg: the two indexer instances mirror different pools, and
+# a shared schema would read as a corrupted resume to whichever boots second.
+make_db() {
+  if [ -n "$PG_NAME" ]; then
+    "$DOCKER" exec "$PG_NAME" createdb -U postgres "$1" 2>/dev/null || true
+  elif command -v psql >/dev/null 2>&1; then
+    psql "$SOLANA_E2E_DATABASE_URL" -c "CREATE DATABASE $1" >/dev/null 2>&1 || true
+  else
+    fail "cannot create per-leg database '$1': need docker or psql against SOLANA_E2E_DATABASE_URL"
+  fi
+}
+make_db bongtu_consumer
+make_db bongtu_enterprise
+BASE_URL="${SOLANA_E2E_DATABASE_URL%/*}"
+
+# --- drive the legs -----------------------------------------------------------
 echo "== running the consumer client leg =="
-DATABASE_URL="$SOLANA_E2E_DATABASE_URL" "$NODE" --import tsx chains/solana/gates/client_leg.ts
-RC=$?
+DATABASE_URL="$BASE_URL/bongtu_consumer" "$NODE" --import tsx chains/solana/gates/client_leg.ts
+RC_CONSUMER=$?
+echo ""
+if [ "$RC_CONSUMER" -ne 0 ]; then
+  echo "SOLANA E2E GATE: FAIL (consumer leg rc=$RC_CONSUMER)"
+  exit "$RC_CONSUMER"
+fi
+
+echo "== running the enterprise leg =="
+DATABASE_URL="$BASE_URL/bongtu_enterprise" "$NODE" --import tsx chains/solana/gates/enterprise_leg.ts
+RC_ENTERPRISE=$?
 
 echo ""
-if [ "$RC" -eq 0 ]; then
-  echo "SOLANA CLIENT GATE: PASS"
+if [ "$RC_ENTERPRISE" -eq 0 ]; then
+  echo "SOLANA E2E GATE: PASS"
 else
-  echo "SOLANA CLIENT GATE: FAIL (rc=$RC)"
+  echo "SOLANA E2E GATE: FAIL (enterprise leg rc=$RC_ENTERPRISE)"
 fi
-exit "$RC"
+exit "$RC_ENTERPRISE"

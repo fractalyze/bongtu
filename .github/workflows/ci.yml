@@ -132,6 +132,7 @@ jobs:
       indexer: ${{ steps.filter.outputs.indexer }}
       image: ${{ steps.filter.outputs.image }}
       solana: ${{ steps.filter.outputs.solana }}
+      solanae2e: ${{ steps.filter.outputs.solanae2e }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -147,7 +148,7 @@ jobs:
             FILES=""
           fi
           if [ -z "$FILES" ]; then
-            for k in code contracts prover indexer image solana; do echo "$k=true" >> "$GITHUB_OUTPUT"; done
+            for k in code contracts prover indexer image solana solanae2e; do echo "$k=true" >> "$GITHUB_OUTPUT"; done
             exit 0
           fi
           has() { echo "$FILES" | grep -qE "$1" && echo true || echo false; }
@@ -158,6 +159,7 @@ jobs:
             echo "indexer=$(has '^apps/indexer/|^chains/evm/|^packages/core/|^package(-lock)?\.json|^\.github/')"
             echo "image=$(has '^apps/indexer/|^packages/|^package(-lock)?\.json|^\.github/')"
             echo "solana=$(has '^chains/solana/|^chains/evm/test/fixtures/|^\.github/')"
+            echo "solanae2e=$(has '^chains/solana/|^packages/core/|^packages/client/|^packages/client-solana/|^apps/indexer/|^chains/evm/test/fixtures/|^circuits/|^\.github/')"
           } >> "$GITHUB_OUTPUT"
 
   node-fast:
@@ -614,6 +616,95 @@ jobs:
           fail-on-cache-miss: true
       - name: M0 e2e gate (deposit -> disburse16 -> transfer -> withdraw, + portal + consumer legs)
         run: bash deploy/gates/e2e_m0.sh
+
+  e2e-solana:
+    # The Solana local-validator gate (chains/solana/gates/e2e_s.sh, SOLR §5.3):
+    # the consumer client leg (initialize -> deposit -> transfer -> self-scan ->
+    # withdraw via the real client path, CPU proofs) and the enterprise leg
+    # (full family from committed fixtures, the 1-tx disburse256, and the
+    # served-disclosure refold against the DisburseBatch anchor). Needs the
+    # circuits zkeys, the pinned Agave toolchain for cargo-build-sbf, and a
+    # side-by-side Agave 4.2+ release for the Transaction v1 validator
+    # (SOLANA_V1_VERSION pin — the mollusk toolchain is NOT flipped).
+    needs: [changes, circuits]
+    if: ${{ success() && needs.changes.outputs.solanae2e == 'true' && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:heavy')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      SOLANA_E2E_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: load toolchain pins
+        run: grep -E '^[A-Z0-9_]+=' .github/ci-pins.env >> "$GITHUB_ENV"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.17.1
+          cache: npm
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: nm
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: node-modules-v1-${{ hashFiles('package-lock.json') }}
+      - if: steps.nm.outputs.cache-hit != 'true'
+        run: npm ci
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: extdeps
+        with:
+          path: ~/.cache/bongtu-extdeps
+          key: extdeps-v1-${{ hashFiles('.github/ci-pins.env') }}
+      - if: steps.extdeps.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$HOME/.cache/bongtu-extdeps"
+          cd "$HOME/.cache/bongtu-extdeps"
+          printf '{}' > package.json
+          npm install --no-audit --no-fund --ignore-scripts \
+            "ethers@${ETHERS_VERSION}" "snarkjs@${SNARKJS_VERSION}" "circomlib@${CIRCOMLIB_VERSION}"
+      - run: echo "BONGTU_NODE_MODULES=$HOME/.cache/bongtu-extdeps/node_modules" >> "$GITHUB_ENV"
+      - name: restore circuits/out artifacts
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: circuits/out
+          key: ${{ needs.circuits.outputs.key }}
+          fail-on-cache-miss: true
+      - name: install Agave toolchain (AGAVE_VERSION pin in ci-pins.env)
+        run: |
+          sh -c "$(curl -sSfL "https://release.anza.xyz/${AGAVE_VERSION}/install")"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            chains/solana/target
+          key: solana-cargo-${{ runner.os }}-${{ env.AGAVE_VERSION }}-${{ hashFiles('chains/solana/Cargo.lock', 'chains/solana/rust-toolchain.toml') }}
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: v1release
+        with:
+          path: ~/.local/share/solana/install/releases
+          key: solana-v1-release-${{ runner.os }}-${{ env.SOLANA_V1_VERSION }}
+      - name: install the Agave 4.2+ validator release (Transaction v1)
+        if: steps.v1release.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$HOME/.local/share/solana/install/releases/${SOLANA_V1_VERSION}"
+          curl -fL "https://release.anza.xyz/${SOLANA_V1_VERSION}/solana-release-x86_64-unknown-linux-gnu.tar.bz2" \
+            | tar -xj -C "$HOME/.local/share/solana/install/releases/${SOLANA_V1_VERSION}"
+      - run: echo "SOLANA_V1_BIN=$HOME/.local/share/solana/install/releases/${SOLANA_V1_VERSION}/solana-release/bin" >> "$GITHUB_ENV"
+      - name: Solana e2e gate (consumer client leg + enterprise disburse leg)
+        run: bash chains/solana/gates/e2e_s.sh
 
   indexer-conformance:
     needs: circuits

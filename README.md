@@ -231,6 +231,7 @@ System guarantees and inter-component contracts live in [`docs/`](docs/), one fi
 - [Wallet](docs/wallet.md): the two wallets on one engine — the shared core (keys, lock, in-browser proving, spend chains), the enterprise wallet, the consumer wallet.
 - [Relayer](docs/relayer.md): the gas-sponsoring withdraw submitter and why a proof-bound recipient makes third-party submission safe.
 - [Portal](docs/portal.md): stealth deposits — a plain transfer from any wallet becomes a shielded note via CREATE2 destinations and the sweep bot.
+- [Solana rail](docs/solana-rail.md): the same op families on Solana — one program, PDA state, Transaction v1, the 1-tx disburse binding with institution-served disclosure.
 - [Consumer family](docs/consumer.md): the no-auditor op family — op-module core, the five consumer circuits, self-scan discovery, deploy profiles, op-level audit semantics.
 - [Error surfaces](docs/errors.md): the consequence-class taxonomy and its surfaces (toast = event, banner = state), the money-state line, the no-telemetry stance.
 - [Security model](docs/security-model.md): who sees what, the enforced-auditor-disclosure invariant, the zero-commitment guard, residual gaps and testnet caveats.
@@ -241,11 +242,13 @@ System guarantees and inter-component contracts live in [`docs/`](docs/), one fi
 How to run each piece is owned by its own README:
 
 - [Deploy](deploy/README.md): the reusable B=256 stack deploy — env config, local anvil gate, live-chain runbook.
+- [Deploy (Solana)](deploy/solana/README.md): the Solana cluster runbook — program deploy, the one-shot initialize, per-cluster address records.
 - [Prover service](prover/README.md): the resident-GPU proving service — wire contract, boot lifecycle, ops invariants (one instance per GPU), env knobs.
 - [Third-party notices](THIRD_PARTY_NOTICES.md): dependency licenses, GPL isolation for build tools, the wallet's deliberate in-browser snarkjs (GPL) shipment.
 - Folder READMEs (layout, run/test commands, API surface):
   [`packages/core`](packages/core/README.md) · [`apps/indexer`](apps/indexer/README.md) ·
   [`circuits`](circuits/README.md) · [`contracts`](chains/evm/README.md) ·
+  [`chains/solana`](chains/solana/README.md) ·
   [`apps/payroll-web`](apps/payroll-web/README.md) · [`apps/treasury-web`](apps/treasury-web/README.md) ·
   [`apps/wallet-web`](apps/wallet-web/README.md).
 

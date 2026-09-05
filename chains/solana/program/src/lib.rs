@@ -5,7 +5,9 @@
 //! `transfer10x2_priv`, `withdraw_priv` — each single-transaction (Groth16
 //! verify over alt_bn128 syscalls + sol_poseidon IMT + nullifier/root PDAs +
 //! SPL escrow motion + self-CPI event), plus the event handler they invoke.
-//! `initialize` / `set_family_flags` keep reserved discriminators 0/1.
+//! `set_family_flags` keeps reserved discriminator 1; `initialize` (0) landed
+//! with the S6 deploy profile — the one-shot pool initializer over PDA
+//! config/tree accounts (initialize.rs).
 //!
 //! S3 surface (SOLR §3.3, OPEN-1 decided as the FULL enterprise family): the
 //! enterprise op set — `deposit`, `withdraw`, `transfer`, `transfer10x2`
@@ -26,6 +28,7 @@ pub mod disburse256;
 pub mod error;
 pub mod event;
 pub mod generated;
+pub mod initialize;
 pub mod groth16;
 pub mod op_common;
 pub mod recipient_binding;
@@ -58,6 +61,9 @@ pub fn process_instruction(
         .split_first()
         .ok_or(ProgramError::from(error::PoolError::InvalidDiscriminator))?;
     match *discriminator {
+        initialize::DISCRIMINATOR => {
+            initialize::process(program_id, accounts, payload).map_err(Into::into)
+        }
         deposit_priv::DISCRIMINATOR => {
             deposit_priv::process(program_id, accounts, payload).map_err(Into::into)
         }

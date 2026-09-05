@@ -10,6 +10,7 @@
 import { AccountRole, getProgramDerivedAddress, type Address, type Instruction } from "@solana/kit";
 import {
   PROGRAM_ID_BASE58,
+  SEED_DISBURSE_BATCH,
   SEED_EVENT_AUTHORITY,
   SEED_KNOWN_ROOT,
   SEED_NULLIFIER,
@@ -44,6 +45,15 @@ export function knownRootPda(root: bigint): Promise<string> {
 /** Nullifier marker PDA: ["nf", nullifier 32 B BE]. */
 export function nullifierPda(nullifier: bigint): Promise<string> {
   return pda([ascii(SEED_NULLIFIER), fieldBytes(nullifier.toString())]);
+}
+
+/** DisburseBatch PDA: ["batch", start_leaf_index u64 LE] — the counter
+ *  convention, not the 32 B BE field encoding (state.rs SEED_DISBURSE_BATCH
+ *  note). */
+export function disburseBatchPda(startLeafIndex: number): Promise<string> {
+  const le = new Uint8Array(8);
+  for (const i of Array(8).keys()) le[i] = Math.floor(startLeafIndex / 2 ** (8 * i)) % 256;
+  return pda([ascii(SEED_DISBURSE_BATCH), le]);
 }
 
 /** The self-CPI event authority PDA: ["__event_authority"]. */

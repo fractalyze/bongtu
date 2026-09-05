@@ -68,6 +68,10 @@ pub enum PoolError {
     /// gadget; a config whose batch size implies a different attach level
     /// would mint an unspendable batch — refused before verify.
     WrongBatchSize = 21,
+    /// `initialize` against a pool whose config (or tree) PDA is already
+    /// program-owned — the one-shot initializer stance (SOLR §2.5): there is
+    /// no re-initialize and no parameter ladder.
+    AlreadyInitialized = 22,
 }
 
 impl From<PoolError> for ProgramError {

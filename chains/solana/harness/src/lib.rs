@@ -274,7 +274,7 @@ pub fn carried_offset(i: usize) -> usize {
     1 + bongtu_pool_solana::groth16::PROOF_LEN + 32 * i
 }
 
-fn mollusk_with_program(load_token_program: bool) -> Mollusk {
+pub fn mollusk_with_program(load_token_program: bool) -> Mollusk {
     let pid = program_id();
     std::env::set_var(
         "SBF_OUT_DIR",
