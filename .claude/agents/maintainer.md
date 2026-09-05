@@ -24,6 +24,10 @@ Checks:
 4. **Repo drift** — `apps/indexer/abi/BongtuPool.abi.json` vs the current `chains/evm` ABI
    (CI drift-gates it; run `npm test -w packages/core` for the network-record mirror test),
    and any README/docs fact contradicted by the deploy record.
+5. **Orphaned claims** — `feat/*` branches on origin with no open PR whose tip hasn't
+   moved in over a day, especially ones whose only commit past main is a claim commit: a
+   worker died after claiming and nobody will re-pick the intent. Report the slug so the
+   human can delete the branch (which puts the intent back in the pool) or resume it.
 
 For each finding worth acting on, write `.dev/intents/<slug>/intent.md` using the template in
 `.claude/skills/intent/SKILL.md`, with `Status: draft` and `Origin: maintainer`, the evidence
