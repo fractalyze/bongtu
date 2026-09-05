@@ -11,5 +11,5 @@ license header and Kaleido copyright and carry a notice describing the change
 (see the per-file headers and THIRD_PARTY_NOTICES.md).
 
 This product also bundles forge-std (https://github.com/foundry-rs/forge-std)
-under contracts/lib/forge-std/, dual-licensed under MIT and Apache-2.0
-(see contracts/lib/forge-std/LICENSE-MIT and LICENSE-APACHE).
+under chains/evm/lib/forge-std/, dual-licensed under MIT and Apache-2.0
+(see chains/evm/lib/forge-std/LICENSE-MIT and LICENSE-APACHE).

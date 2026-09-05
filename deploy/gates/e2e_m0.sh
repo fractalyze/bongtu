@@ -39,7 +39,7 @@ fail() { echo "FATAL: $*" >&2; exit 1; }
 
 # --- preflight: build artifacts + proving inputs exist ----------------------
 echo "== preflight: forge build + zkey/wasm presence =="
-( cd contracts && "$FORGE" build >/dev/null ) || fail "forge build failed"
+( cd chains/evm && "$FORGE" build >/dev/null ) || fail "forge build failed"
 for n in deposit disburse transfer withdraw depositPriv transferPriv withdrawPriv disbursePriv; do
   [ -f "circuits/out/${n}.zkey" ] || fail "missing circuits/out/${n}.zkey (run: cd circuits && bash build/prove_all.sh)"
   [ -f "circuits/out/${n}_js/${n}.wasm" ] || fail "missing circuits/out/${n}_js/${n}.wasm (run build/prove_all.sh)"

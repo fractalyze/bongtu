@@ -69,7 +69,7 @@ def _path(env_key: str, default: Path) -> Path:
 #
 # num_public values are pinned from the snarkjs vkey `nPublic` of the committed
 # builds (circuits/out/<name>.vkey.json == len(<name>.public.json)):
-#   disburse256  11  (also the committed contracts/test/fixtures/disburse256.public.json)
+#   disburse256  11  (also the committed chains/evm/test/fixtures/disburse256.public.json)
 #   disbursePriv256  8  (the consumer 1x256 batch, OPMOD §2)
 #   transfer10x2 68
 #   deposit      19

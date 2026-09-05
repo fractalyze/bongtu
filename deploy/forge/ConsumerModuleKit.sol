@@ -123,9 +123,9 @@ library ConsumerModuleKit {
     }
 
     /// @dev The modules record path for the current chain (scripts run from
-    ///      `contracts/`, mirroring AddressBook.path()).
+    ///      `chains/evm/`, mirroring AddressBook.path()).
     function path() internal view returns (string memory) {
-        return string.concat("../deploy/modules.", vm.toString(block.chainid), ".json");
+        return string.concat("../../deploy/modules.", vm.toString(block.chainid), ".json");
     }
 
     /// @notice Write the record (full rewrite: the whole set deploys together).

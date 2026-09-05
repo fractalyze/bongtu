@@ -11,7 +11,7 @@
 // fixture_lib.ts. The tree here is local and SINGLE-LEAF (leaf 0 = the spent
 // input note) — the proof verifies against the disburse256 vkey with its own
 // self-consistent root, no chain state involved, and the oracle generator
-// (contracts/test/fixtures/gen_disburse256_oracle.ts) reproduces the root with
+// (chains/evm/test/fixtures/gen_disburse256_oracle.ts) reproduces the root with
 // one appendLeaf.
 //
 //   npx tsx circuits/fixtures/gen_disburse256_input.ts     # writes fixtures/inputs/disburse256.json
@@ -38,7 +38,7 @@ function main(): void {
   const V = amounts.reduce((a, x) => a + x, 0n);
 
   // A single-leaf local tree: leaf 0 = the input note we spend. Single-leaf so
-  // contracts/test/fixtures/gen_disburse256_oracle.ts can reproduce the
+  // chains/evm/test/fixtures/gen_disburse256_oracle.ts can reproduce the
   // membership root with ONE appendLeaf (this input doubles as the committed
   // disburse256.input.json fixture the GPU proof is bound to).
   const tree = new ImtTree(H, B);

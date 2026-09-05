@@ -1,4 +1,7 @@
 # Solana rail — S1 design spec
+> 2026-09-05 (issue #35): the repo layout moved `solana/` -> `chains/solana/` and `contracts/` -> `chains/evm/`.
+> Path mentions below predate the move and are kept frozen; read them through that mapping.
+
 
 Design record, 2026-09-04. Status: **spec draft — no Solana code exists.** Target file:
 `.dev/solana-rail-design.md` (issue #8, milestone S1). Format precedent:

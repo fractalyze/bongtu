@@ -37,7 +37,7 @@ trap cleanup EXIT
 for _ in $(seq 1 50); do "$CAST" chain-id --rpc-url "$RPC" >/dev/null 2>&1 && break; sleep 0.2; done
 
 echo "== deploy (v1-initialized proxy) =="
-(cd contracts && "$FORGE" script ../deploy/forge/Deploy.s.sol:Deploy \
+(cd chains/evm && "$FORGE" script ../../deploy/forge/Deploy.s.sol:Deploy \
   --rpc-url "$RPC" --broadcast --skip-simulation) >/dev/null 2>&1 || fail "Deploy.s.sol failed"
 
 POOL=$(jf pool); PRE_VERIFIER=$(jf withdrawVerifier); PRE_IMPL=$(jf poolImpl)
@@ -46,7 +46,7 @@ POOL=$(jf pool); PRE_VERIFIER=$(jf withdrawVerifier); PRE_IMPL=$(jf poolImpl)
   || fail "fresh proxy is not at initializer version 1"
 
 echo "== upgrade (UpgradeV2.s.sol) =="
-(cd contracts && "$FORGE" script ../deploy/forge/UpgradeV2.s.sol:UpgradeV2 \
+(cd chains/evm && "$FORGE" script ../../deploy/forge/UpgradeV2.s.sol:UpgradeV2 \
   --rpc-url "$RPC" --broadcast --skip-simulation) || fail "UpgradeV2.s.sol failed"
 
 POST_VERIFIER=$(jf withdrawVerifier); POST_IMPL=$(jf poolImpl)
@@ -61,7 +61,7 @@ B=$("$CAST" call "$POOL" "B()(uint256)" --rpc-url "$RPC")
 [ "$B" = "256" ] || fail "B() != 256 after upgrade (got $B)"
 
 echo "== rerun refusal (reinitializer consumed) =="
-(cd contracts && "$FORGE" script ../deploy/forge/UpgradeV2.s.sol:UpgradeV2 \
+(cd chains/evm && "$FORGE" script ../../deploy/forge/UpgradeV2.s.sol:UpgradeV2 \
   --rpc-url "$RPC" --broadcast --skip-simulation) >/dev/null 2>&1 \
   && fail "second UpgradeV2 run must refuse (version guard)" \
   || echo "   PASS: second run refused"

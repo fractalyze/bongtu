@@ -178,13 +178,15 @@ constraints). Per-op gas and proof times: [`docs/performance.md`](docs/performan
 
 npm workspaces monorepo: workspace packages export **raw `src/*.ts`** (no build step) as `@bongtu/*`.
 Four kinds of directory, split by what runs the code. `apps/` and `packages/` are the npm world
-divided by role — apps are the things you run, packages are the things they import. `contracts/`,
-`circuits/` and `prover/` are toolchain islands, each owned by a non-npm toolchain (Foundry, circom,
+divided by role — apps are the things you run, packages are the things they import. `chains/` holds the
+per-chain consensus islands (`chains/evm/`, `chains/solana/`);
+`circuits/` and `prover/` are the shared toolchain islands, each owned by a non-npm toolchain (circom,
 Python). `deploy/` is the one-shot operations hand: nothing imports it, it acts on a chain.
 Each has its own README.
 
 - [`circuits/`](circuits/README.md): the circom circuits (transfer, disburse, withdraw, deposit) + their fixtures, build pipeline and soundness gates
-- [`contracts/`](contracts/README.md): Foundry `BongtuPool` + verifiers
+- [`chains/evm/`](chains/evm/README.md): Foundry `BongtuPool` + verifiers
+- [`chains/solana/`](chains/solana/README.md): the Solana rail program island (mollusk gates, conformance fixtures)
 - [`packages/core/`](packages/core/README.md): `@bongtu/core`: IMT, Poseidon, keys, note crypto, proving wire types
 - `packages/client/`: `@bongtu/client`: the browser-side engine both web apps drive — connection, key
   derivation/lock, deposit and spend flows, indexer reads
@@ -208,7 +210,7 @@ npx tsc --noEmit -p tsconfig.json         # type-check the whole tree
 How to build, test, and run each component lives in its own README:
 
 - **Core library**: [`packages/core/README.md`](packages/core/README.md)
-- **Contracts** (forge test, gas report): [`contracts/README.md`](contracts/README.md)
+- **Contracts** (forge test, gas report): [`chains/evm/README.md`](chains/evm/README.md)
 - **Circuits** (prove_all, soundness gates): [`circuits/README.md`](circuits/README.md)
 - **Indexer** (local + live chain, Postgres, docker compose): [`apps/indexer/README.md`](apps/indexer/README.md)
 - **Wallet** (dev server, in-browser proving): [`apps/wallet-web/README.md`](apps/wallet-web/README.md)
@@ -265,7 +267,7 @@ How to run each piece is owned by its own README:
   wallet's deliberate in-browser snarkjs (GPL) shipment.
 - Folder READMEs: each folder's own layout, run/test commands, and API surface:
   [`packages/core`](packages/core/README.md) · [`apps/indexer`](apps/indexer/README.md) ·
-  [`circuits`](circuits/README.md) · [`contracts`](contracts/README.md) ·
+  [`circuits`](circuits/README.md) · [`contracts`](chains/evm/README.md) ·
   [`apps/payroll-web`](apps/payroll-web/README.md) · [`apps/wallet-web`](apps/wallet-web/README.md) ·
   [`apps/consumer-web`](apps/consumer-web/README.md).
 

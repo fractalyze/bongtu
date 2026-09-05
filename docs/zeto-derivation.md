@@ -21,7 +21,7 @@ place:
 
 The **circuits are copied and modified** (below). `BongtuPool` shares no code with Zeto's contracts:
 it is a purpose-built rewrite over storage Zeto's tree does not have. It carries the flavor's three
-duties, each locatable in `contracts/src/BongtuPool.sol` — proof binding (`verifyProof` on all four
+duties, each locatable in `chains/evm/src/BongtuPool.sol` — proof binding (`verifyProof` on all four
 ops, with `authorityPublicKey` injected from storage and, on the three spending ops, `enabled[i]`
 derived by the contract from the proof's own nullifiers rather than taken from calldata; deposit has
 no `enabled` signal), nullifier spend

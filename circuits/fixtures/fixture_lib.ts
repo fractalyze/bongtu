@@ -9,7 +9,7 @@
 //     index-derived, so regenerating fixtures is byte-deterministic), including
 //     THE single AUTHORITY (arbiter) keypair — every fixture's authority
 //     envelope encrypts to this one key by construction, which is what lets
-//     contracts/test/fixtures/gen_realproofs.ts inject one stored arbiter key
+//     chains/evm/test/fixtures/gen_realproofs.ts inject one stored arbiter key
 //     for all four real proofs (its runtime cross-checks remain as a belt);
 //   - membership(): real ImtTree witnesses (root / pathElements / leafIndices);
 //   - the zeros path (ZERO_ROOT / ZERO_PATH): a genuine empty-tree membership

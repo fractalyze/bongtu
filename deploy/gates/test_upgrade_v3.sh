@@ -54,7 +54,7 @@ trap cleanup EXIT
 for _ in $(seq 1 50); do "$CAST" chain-id --rpc-url "$RPC" >/dev/null 2>&1 && break; sleep 0.2; done
 
 echo "== deploy (v1-initialized enterprise proxy, B=256) =="
-(cd contracts && "$FORGE" script ../deploy/forge/Deploy.s.sol:Deploy \
+(cd chains/evm && "$FORGE" script ../../deploy/forge/Deploy.s.sol:Deploy \
   --rpc-url "$RPC" --broadcast --skip-simulation) >/dev/null 2>&1 || fail "Deploy.s.sol failed"
 
 POOL=$(jf pool)
@@ -62,7 +62,7 @@ SLOT1=$("$CAST" storage "$POOL" "$INIT_SLOT" --rpc-url "$RPC")
 [ "$(printf '%d' "$SLOT1" 2>/dev/null || echo 0)" -eq 1 ] || fail "fresh proxy is not at initializer version 1"
 
 echo "== upgrade to v2 (UpgradeV2.s.sol, stealth withdraw — the live proxy's shipped state) =="
-(cd contracts && "$FORGE" script ../deploy/forge/UpgradeV2.s.sol:UpgradeV2 \
+(cd chains/evm && "$FORGE" script ../../deploy/forge/UpgradeV2.s.sol:UpgradeV2 \
   --rpc-url "$RPC" --broadcast --skip-simulation) >/dev/null 2>&1 || fail "UpgradeV2.s.sol failed"
 SLOT2=$("$CAST" storage "$POOL" "$INIT_SLOT" --rpc-url "$RPC")
 [ "$(printf '%d' "$SLOT2" 2>/dev/null || echo 0)" -eq 2 ] || fail "initializer version is not 2 after UpgradeV2 (got $SLOT2)"
@@ -72,7 +72,7 @@ SLOT2=$("$CAST" storage "$POOL" "$INIT_SLOT" --rpc-url "$RPC")
 PRE_IMPL=$(jf poolImpl); PRE_WV=$(jf withdrawVerifier)
 
 echo "== upgrade (UpgradeV3.s.sol, MODULE_PROFILE=consumer) =="
-(cd contracts && "$FORGE" script ../deploy/forge/UpgradeV3.s.sol:UpgradeV3 \
+(cd chains/evm && "$FORGE" script ../../deploy/forge/UpgradeV3.s.sol:UpgradeV3 \
   --rpc-url "$RPC" --broadcast --skip-simulation) || fail "UpgradeV3.s.sol failed"
 
 [ -f "$MODS" ] || fail "missing $MODS (upgrade did not record the module set)"
@@ -94,14 +94,14 @@ for M in depositPrivModule transferPrivModule transfer10x2PrivModule withdrawPri
 done
 
 echo "== enterprise smoke post-upgrade (real deposit fixture proof) =="
-(cd contracts && "$FORGE" script ../deploy/forge/Smoke.s.sol:Smoke \
+(cd chains/evm && "$FORGE" script ../../deploy/forge/Smoke.s.sol:Smoke \
   --rpc-url "$RPC" --broadcast --skip-simulation) || fail "post-upgrade enterprise Smoke failed"
 NLI=$("$CAST" call "$POOL" "nextLeafIndex()(uint256)" --rpc-url "$RPC")
 [ "$NLI" = "2" ] || fail "post-upgrade smoke deposit did not advance nextLeafIndex to 2 (got $NLI)"
 
 echo "== rerun refusal (reinitializer consumed) =="
 RERUN_LOG="$(mktemp)"
-(cd contracts && "$FORGE" script ../deploy/forge/UpgradeV3.s.sol:UpgradeV3 \
+(cd chains/evm && "$FORGE" script ../../deploy/forge/UpgradeV3.s.sol:UpgradeV3 \
   --rpc-url "$RPC" --broadcast --skip-simulation) >"$RERUN_LOG" 2>&1 \
   && { cat "$RERUN_LOG"; fail "second UpgradeV3 run must refuse (version guard)"; }
 # The refusal must be the _guards version check, not an anvil crash or any

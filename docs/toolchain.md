@@ -24,7 +24,7 @@ The **node-side** scripts get `snarkjs` at runtime from `BONGTU_NODE_MODULES` vi
 machine set the env var. The call sites are the proving paths `deploy/live/lib/proof_toolbox.ts` and
 `deploy/live/transfer10x2_e2e.ts`, the two circuit gates
 `circuits/gates/assert_attacks_throw.ts` and `circuits/gates/auditor_decrypt_check.ts`, and
-`contracts/test/fixtures/gen_realproofs.ts`. The `circuits/fixtures/gen_*.ts` fixture generators are
+`chains/evm/test/fixtures/gen_realproofs.ts`. The `circuits/fixtures/gen_*.ts` fixture generators are
 *not* on this path: they import only `@bongtu/core` and node builtins, so `build/prove_all.sh` runs
 without it. Chain access everywhere is viem, an ordinary dependency. The browser apps are separate:
 `apps/wallet-web` declares `snarkjs` as an ordinary dependency, bundled by Vite. `pot15_hez` is too
@@ -61,13 +61,13 @@ verifier into the committed `circuits/verifiers/`. `out/` is gitignored and rege
 with the same commands through `zkey export solidityverifier`, then prove on GPU0 with rabbitsnark —
 recipe and GPU hygiene rules are in the repo `CLAUDE.md`.
 
-Contract build/test invocations are owned by [`contracts/README.md`](../contracts/README.md); `$FORGE`
+Contract build/test invocations are owned by [`chains/evm/README.md`](../chains/evm/README.md); `$FORGE`
 above is the binary those commands need on PATH.
 
 ## Parity constant
 
-Every layer's Poseidon must agree. The gate value (`contracts/test/fixtures/poseidon_ref.txt`,
-asserted by `contracts/test/Poseidon.t.sol`):
+Every layer's Poseidon must agree. The gate value (`chains/evm/test/fixtures/poseidon_ref.txt`,
+asserted by `chains/evm/test/Poseidon.t.sol`):
 
 ```
 Poseidon([1,2]) == 7853200120776062878684798364095072458815029376092732009249414926327459813530

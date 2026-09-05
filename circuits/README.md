@@ -74,7 +74,7 @@ recommitting its verifier fails the build).
 - `out/` is **gitignored** (`.zkey` / `.wtns` / `.r1cs` / `*_js/`) and regenerated
   each run.
 - `verifiers/` is **committed**: the raw snarkjs solidity exports.
-  `contracts/src/verifiers/*.sol` are the same bytes with only the contract renamed
+  `chains/evm/src/verifiers/*.sol` are the same bytes with only the contract renamed
   (e.g. `Groth16Verifier` → `TransferVerifier`).
 - `disburse256` is **not** in `build/prove_all.sh`: its ~1.24 GB zkey takes a multi-minute
   setup and it is proven on GPU (rabbitsnark). The regen recipe after any circuit

@@ -1,5 +1,5 @@
 // The Slice ⑤ U-P4 portal-deposit leg of the M0 DoD gate (e2e_orchestrator.ts
-// calls it after the spend cycle) — the anvil twin of contracts/test/Portal.t.sol
+// calls it after the spend cycle) — the anvil twin of chains/evm/test/Portal.t.sol
 // with the REAL services in the loop instead of fixtures:
 //
 //   DEPLOY   PortalFactory on the gate anvil (owner = the orchestrator key,

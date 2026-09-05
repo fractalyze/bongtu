@@ -1,11 +1,11 @@
 # Contracts
 
-`contracts/src/BongtuPool.sol` is the whole consensus surface: one shielded pool holding the
+`chains/evm/src/BongtuPool.sol` is the whole consensus surface: one shielded pool holding the
 single-frontier IMT, the nullifier set, ERC-20 custody, the arbiter epoch list, six Groth16
 verifier calls, and the `applyOp` gate the consumer op modules drive. Everything else in
-`contracts/src/` is a generated verifier, an interface, a proxy/ownership util, the portal pair
+`chains/evm/src/` is a generated verifier, an interface, a proxy/ownership util, the portal pair
 ([portal.md](portal.md)), or a consumer op module ([below](#the-op-module-layer)). How to build
-and test the folder is owned by [`contracts/README.md`](../contracts/README.md).
+and test the folder is owned by [`chains/evm/README.md`](../chains/evm/README.md).
 
 ## Entry points
 
@@ -92,7 +92,7 @@ a length rule on free calldata.
   slot there is a real value-0 note with a salt, so its commitment is nonzero too.
   A zero leaf is a non-note; appending one would put a value-unbound leaf in the tree, which is
   precisely what the circuit-side zero-commitment guard forbids as a *spend* input. Closing it on
-  the write side too is defence in depth (`contracts/test/Enforcement.t.sol`).
+  the write side too is defence in depth (`chains/evm/test/Enforcement.t.sol`).
 - **Output uniqueness is deliberately absent.** Upstream Zeto's `validateOutputs` also rejects
   duplicate output commitments. Duplicates share one nullifier, so every copy past the first is
   unspendable — the sender burns their own funds and no one else is affected. It is a self-burn
@@ -218,7 +218,7 @@ old-proof/new-verifier atomicity constraint).
 
 ### The consumer modules
 
-Six contracts in `contracts/src/modules/`, each plain (non-proxied), holding no funds and no
+Six contracts in `chains/evm/src/modules/`, each plain (non-proxied), holding no funds and no
 consensus state, constructed over (core, verifier). `ConsumerOpModule` is the shared base:
 `KEM_CIPHERTEXT_LEN = 1088` with per-entry length and count checks
 (`WrongKemCiphertextLength(index, got, want)`, `WrongKemCiphertextCount` — the count equals the
@@ -269,7 +269,7 @@ arbiter epoch is ever minted, no KEM pk hash stored, no enterprise verifier wire
 the `initializer` version slot with `initialize` (a pool is one profile forever). On such a pool
 every enterprise entrypoint reverts (the arbiter-key injection has no epoch to read) and the
 registered modules are the whole op surface. "No key exists" was chosen over a burned
-placeholder key. Pinned by `contracts/test/ConsumerOnly.t.sol`; deploy profile:
+placeholder key. Pinned by `chains/evm/test/ConsumerOnly.t.sol`; deploy profile:
 [deployment.md](deployment.md#deploy-profiles-and-the-consumer-module-family).
 
 ## One initializer
@@ -315,10 +315,10 @@ meaning.
 ```
 
 - **Poseidon** is a deployed contract, not a library: the circomlibjs creation bytecode
-  (`contracts/test/fixtures/poseidon2.hex`) placed by inline `create`, giving the exact circomlib
-  constants the circuits and `@bongtu/core` use. `contracts/test/Poseidon.t.sol` pins its output.
+  (`chains/evm/test/fixtures/poseidon2.hex`) placed by inline `create`, giving the exact circomlib
+  constants the circuits and `@bongtu/core` use. `chains/evm/test/Poseidon.t.sol` pins its output.
 - **Verifiers** are the snarkjs solidity exports, renamed only (`Groth16Verifier` →
-  `TransferVerifier`, …). `contracts/test/VerifierDrift.t.sol` gates that copy: it re-applies the
+  `TransferVerifier`, …). `chains/evm/test/VerifierDrift.t.sol` gates that copy: it re-applies the
   one permitted substitution to each `circuits/verifiers/*.sol` and requires byte identity, so a
   regenerated circuit with a stale shipped verifier cannot pass `forge test`. They are fixed per implementation; a circuit change ships as
   `upgradeToAndCall`, which preserves the pool address and the entire tree/nullifier state.
@@ -328,7 +328,7 @@ meaning.
   migration would leave a window in which every affected op reverts.
 - New state goes at the **tail**, taking words off `uint256[47] __gap`, never inserted beside a
   logically-related slot: an insert re-strides every slot below it and would silently move the IMT
-  root, the nullifier set and the arbiter epochs. `contracts/test/Upgrade.t.sol` pins state
+  root, the nullifier set and the arbiter epochs. `chains/evm/test/Upgrade.t.sol` pins state
   preservation across a swap, owner-only upgrade, and the initializer running exactly once.
 
 The proxy owner is a single key on testnet. See [deployment.md](deployment.md) for the live

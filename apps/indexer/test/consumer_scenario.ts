@@ -1,11 +1,11 @@
 // Consumer op-module conformance scenario (OPMOD §4.4/§5 U5): a SECOND fresh
 // pool on the same anvil, driven with the COMMITTED consumer fixtures
-// (contracts/test/fixtures/consumer_realproofs.json — real Groth16 proofs
+// (chains/evm/test/fixtures/consumer_realproofs.json — real Groth16 proofs
 // against the real consumer verifiers), so the indexer's consumer leg ingests
 // exactly what a live chain would emit:
 //
 //   1. deploy pool (B=16) with always-accept enterprise verifier stubs (the
-//      seeding trick of contracts/test/ConsumerModules.t.sol: the disbursePriv
+//      seeding trick of chains/evm/test/ConsumerModules.t.sol: the disbursePriv
 //      fixture's membership root covers its two seed leaves, and a stubbed
 //      enterprise deposit mints them as genuine tree writes) + the REAL
 //      DepositPrivVerifier / DisbursePrivVerifier;
@@ -78,13 +78,13 @@ const concatHex = (parts: string[]): string => "0x" + parts.map((p) => p.replace
 export async function runConsumerScenario(): Promise<ConsumerScenarioResult> {
   const rig = connectAnvil();
   const fixtures = JSON.parse(
-    readFileSync(join(ROOT, "contracts", "test", "fixtures", "consumer_realproofs.json"), "utf8"),
+    readFileSync(join(ROOT, "chains", "evm", "test", "fixtures", "consumer_realproofs.json"), "utf8"),
   ) as Record<string, ConsumerFixture>;
   const depFx = fixtures.depositPriv;
   const disFx = fixtures.disbursePriv;
 
   // ---- deploy: poseidon + enterprise verifier stubs + real consumer stack ---
-  const posHex = readFileSync(join(ROOT, "contracts", "test", "fixtures", "poseidon2.hex"), "utf8").trim();
+  const posHex = readFileSync(join(ROOT, "chains", "evm", "test", "fixtures", "poseidon2.hex"), "utf8").trim();
   const posAddr = await rig.deploy([], posHex);
   const stub = async (name: string) => deploy(rig, "StubVerifiers", name);
   const [dv, wv, dsv, tv, tv10, tv10x2] = [

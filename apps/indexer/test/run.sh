@@ -81,7 +81,7 @@ fi
 
 # --- preflight: contract build + proving artifacts present -------------------
 echo "== preflight: forge build + zkey/wasm presence =="
-( cd "$ROOT/contracts" && "$FORGE" build >/dev/null ) || fail "forge build failed"
+( cd "$ROOT/chains/evm" && "$FORGE" build >/dev/null ) || fail "forge build failed"
 for n in deposit disburse transfer transfer10 withdraw; do
   [ -f "$ROOT/circuits/out/${n}.zkey" ] || fail "missing circuits/out/${n}.zkey (run: cd circuits && bash build/prove_all.sh)"
   [ -f "$ROOT/circuits/out/${n}_js/${n}.wasm" ] || fail "missing circuits/out/${n}_js/${n}.wasm"

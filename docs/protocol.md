@@ -3,8 +3,8 @@
 Note algebra, the append-only tree every note lives in, and the authority-envelope layouts
 that make every note creation and destruction auditor-openable. Source of truth:
 `packages/core/src/{note,imt,envelope}.ts` (the off-chain oracle) and
-`contracts/src/BongtuPool.sol` (the on-chain twin). The two are pinned equal by
-`contracts/test/Differential.t.sol`.
+`chains/evm/src/BongtuPool.sol` (the on-chain twin). The two are pinned equal by
+`chains/evm/test/Differential.t.sol`.
 
 ## Notes, commitments, nullifiers
 
@@ -26,8 +26,8 @@ TypeScript. The parity constant every layer is pinned against:
 Poseidon([1,2]) == 7853200120776062878684798364095072458815029376092732009249414926327459813530
 ```
 
-(`contracts/test/Poseidon.t.sol`; the on-chain hasher is the circomlibjs creation bytecode in
-`contracts/test/fixtures/poseidon2.hex`.)
+(`chains/evm/test/Poseidon.t.sol`; the on-chain hasher is the circomlibjs creation bytecode in
+`chains/evm/test/fixtures/poseidon2.hex`.)
 
 The commitment goes in the tree; the nullifier goes in a spent-set map. Because the nullifier is
 derived from the owner's *private* scalar over the same `(value, salt)`, a spend proves ownership
@@ -108,7 +108,7 @@ The close walks `LOG_B` levels, using bit `i` of `nextLeafIndex % B` to pick the
 at a time, which at `B = 256` would be up to 255 leaves × 32 hashes and put the transaction out of
 reach of any block limit. The sub-`LOG_B` frontier is left stale on purpose: `nextLeafIndex` is now
 `B`-aligned, so a fresh block overwrites those levels as a left child before any read.
-`_attachSubtree` in `contracts/src/BongtuPool.sol` and `ImtTree.attachSubtree` are the two sides.
+`_attachSubtree` in `chains/evm/src/BongtuPool.sol` and `ImtTree.attachSubtree` are the two sides.
 
 ## Authority envelopes
 
