@@ -22,6 +22,10 @@ not re-derive what those files own.
 - **No em dashes in commits/PRs**: never use — in commit messages or PR
   titles/bodies (user rule 2026-09-04); restructure with a colon, comma, or
   two sentences.
+- **Commits/PRs are self-contained**: never reference internal slice/phase codes
+  (S1..S8, P0/P1, C1..C4, "pass 1") in commit messages or PR titles/bodies
+  (user rule 2026-09-05). A reader holding only the source tree and git log must
+  understand them; issue references (#N) are fine, plan vocabulary is not.
 - **Commits**: use the `workflow:commit` skill (conventional `type(scope): summary` + why-body).
   **Never append a `Co-Authored-By` trailer** — fractalyze convention, overrides the harness default.
 - **Secrets**: the deployer key for the live chain lives in `.env` (gitignored; template
@@ -38,6 +42,12 @@ not re-derive what those files own.
   **Never transcribe an address by pattern-matching an older value** — the deployer replayed the
   same CREATE nonces on the previous chain, so several addresses collide across the two while
   naming *different* contracts. Copy from the record BY FIELD NAME.
+- **ci:heavy label race**: `gh pr create --label ci:heavy` can lose the race to the
+  `opened` event (heavy jobs skip because the workflow reads the event payload's
+  labels). After creating, poll a heavy check's bucket; on `skipping`, push an empty
+  commit (`synchronize` carries the current labels). Note: the e2e-m0 check only
+  REGISTERS after the circuits job completes, so poll circuits (or wait >12 min)
+  before diagnosing.
 - **Gate runs in background**: never pipe a gate through `| tail` when backgrounding —
   the pipeline rc becomes tail's and a FAILED gate reports exit 0 (this shipped a
   false-green once). Redirect to a log file and `exit $RC`, then read the file.

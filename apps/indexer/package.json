@@ -26,6 +26,7 @@
     "test:derivehistory": "node --import tsx --test test/deriveHistory.test.ts",
     "test:history": "node --import tsx --test test/history.test.ts",
     "test:consumer": "node --import tsx test/consumer.test.ts",
+    "test:solana": "node --import tsx test/solana.test.ts",
     "test:unit": "npm run test:tree && npm run test:disclosure && npm run test:ingest && npm run test:consumer && npm run test:config && npm run test:viewtoken && npm run test:names && npm run test:announcements && npm run test:portal && npm run test:derivehistory && npm run test:history",
     "test:pg": "bash test/pg_integration.sh",
     "typecheck": "tsc --noEmit",

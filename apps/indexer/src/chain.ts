@@ -134,6 +134,21 @@ export interface ChainConfig {
   // Parsed ONCE here at boot — garbage refuses to boot like every other knob;
   // routes read it off the Indexer, never process.env.
   kemGraceSeconds?: number;
+  // Directory of institution-held disclosure blobs ({startLeafIndex}.json,
+  // one JSON array of 32-byte hex elements per disburse batch) — the
+  // SOLR §3.3.2 serving store behind GET /disclosure. Unset => nothing held
+  // (an EVM backend never needs it; a PUBLIC Solana indexer may hold none and
+  // still verify blobs handed to it).
+  disclosureDir?: string | null;
+  // Seconds an unserved Solana disburse blob stays a non-alarm before it
+  // reads "withheld" on /alarms (env DISCLOSURE_GRACE_SECONDS, default 3600
+  // — the SOLR §3.3.2 grace window).
+  disclosureGraceSeconds?: number;
+  // Solana backend selection (SOLR §3.2): set (env SOLANA_RPC + SOLANA_TREE,
+  // optional SOLANA_PROGRAM) => index.ts boots the SolanaIndexer over this
+  // JSON-RPC endpoint instead of the EVM Indexer. Ids are base58 (the
+  // operator convention); the rpc adapter converts once at the edge.
+  solana?: { rpc: string; programId: string; treeAccount: string } | null;
   // Postgres connection string (env DATABASE_URL) — REQUIRED at runtime (U-I4
   // Postgres-only): the indexer persists its derived state (events / nullifiers /
   // leaves / notes / history + a block cursor) to Postgres and boot-RESUMES from
@@ -189,7 +204,25 @@ export function resolveConfig(): ChainConfig {
   // Portal deposits are opt-in per deployment: no factory address, no /pay.
   const portalFactory = process.env.PORTAL_FACTORY || null;
   const kemGraceSeconds = parseKemGraceSeconds(process.env.KEM_GRACE_SECONDS);
-  return { rpc, pool, startBlock, authorityKey, authorityKemKey, databaseUrl, portalFactory, kemGraceSeconds };
+  // Same fail-fast posture as the kem grace knob: garbage refuses to boot.
+  const disclosureGraceSeconds = ((): number => {
+    const raw = process.env.DISCLOSURE_GRACE_SECONDS;
+    if (raw === undefined || raw === "") return 3600;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) throw new Error(`DISCLOSURE_GRACE_SECONDS must be a number of seconds (got "${raw}")`);
+    return n;
+  })();
+  const disclosureDir = process.env.DISCLOSURE_DIR || null;
+  // SOLANA_RPC is the backend switch; the tree account is the one mandatory
+  // companion (PoolConfig resolves through its link, state.rs).
+  const solana = process.env.SOLANA_RPC
+    ? {
+        rpc: process.env.SOLANA_RPC,
+        programId: process.env.SOLANA_PROGRAM || "HGVVfVfRnHauJoQwUttgUoy6ucG47LAXj8e6YBbZkoCj",
+        treeAccount: process.env.SOLANA_TREE || (() => { throw new Error("SOLANA_RPC is set but SOLANA_TREE (the TreeState account) is not"); })(),
+      }
+    : null;
+  return { rpc, pool, startBlock, authorityKey, authorityKemKey, databaseUrl, portalFactory, kemGraceSeconds, disclosureDir, disclosureGraceSeconds, solana };
 }
 
 /** Parse AUTHORITY_KEM_KEY (the 2400-byte ML-KEM-768 decapsulation key) from

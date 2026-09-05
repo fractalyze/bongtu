@@ -42,6 +42,16 @@ CREATE TABLE IF NOT EXISTS ingest_cursor (
   last_block BIGINT  NOT NULL
 );
 
+-- Solana backend only (SOLR §3.2.2): the signature half of the ledger cursor.
+-- The slot rides ingest_cursor.last_block (the block-cursor analogue); the
+-- signature pins WHERE inside the slot's history the replay resumes, since
+-- getSignaturesForAddress paginates by signature, not slot. Both advance in
+-- the same transaction as the derived rows.
+CREATE TABLE IF NOT EXISTS solana_cursor (
+  id        INTEGER PRIMARY KEY,  -- always 1 (single-row table)
+  signature TEXT    NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS notes (
   leaf_index BIGINT PRIMARY KEY,   -- each note sits at a distinct tree leaf
   owner_key  TEXT    NOT NULL,     -- "x,y" decimal bjj pubkey

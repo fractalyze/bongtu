@@ -49,6 +49,7 @@ import { NameRegistry } from "./names.js";
 import { PortalRegistry } from "./portal.js";
 import { ModuleRegistry } from "./modules.js";
 import { KemChunkStore } from "./kemchunks.js";
+import { DisclosureRegistry } from "./solana/served.js";
 
 // A block pin for readContract: viem takes a bigint blockNumber or a named
 // blockTag, where ethers took a single `{ blockTag }` override.
@@ -228,10 +229,18 @@ export class Indexer {
   // process.env. Mutable on purpose: the conformance test flips it mid-run to
   // project the same incomplete batch as withheld deterministically.
   kemGraceSeconds: number;
+  // Institution-served disclosure blobs (SOLR §3.3.2): the registry behind
+  // GET /disclosure and the served-blob alarm classes. Only the Solana
+  // backend records batches into it — on EVM the disburse bytes are
+  // consensus-published — so it stays empty here and every route it feeds
+  // serves identical bytes across backends.
+  readonly disclosures: DisclosureRegistry;
   // The shared Postgres pool (set by bootPostgres; null only before first ingest).
   // Store and ledger are built on this ONE pool, so `persist` can acquire a single
   // client and commit the store rows, ledger rows, and cursor in ONE transaction.
-  private pgPool: Pool | null = null;
+  // Protected: the Solana backend subclass runs its own atomic persist over
+  // the same pool.
+  protected pgPool: Pool | null = null;
 
   // ---- tail-poll operational state (projected by GET /health) --------------
   // Recorded by pollOnce so "wedged since block N" vs "healthy" is machine-
@@ -260,6 +269,7 @@ export class Indexer {
     this.arbiterPriv = cfg.authorityKey ?? null;
     this.arbiterMode = this.arbiterPriv !== null;
     this.kemGraceSeconds = cfg.kemGraceSeconds ?? 3600;
+    this.disclosures = new DisclosureRegistry(cfg.disclosureDir ?? null, cfg.disclosureGraceSeconds ?? 3600);
   }
 
   /** A pinned readContract against the pool (the ONE place the address+ABI meet). */

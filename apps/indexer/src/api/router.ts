@@ -72,6 +72,7 @@ import { path } from "./routes/path.js";
 import { alarms } from "./routes/alarms.js";
 import { health } from "./routes/health.js";
 import { nullifiers } from "./routes/nullifiers.js";
+import { disclosure } from "./routes/disclosure.js";
 import { nameRegister, nameResolve } from "./routes/names.js";
 import { announcements } from "./routes/announcements.js";
 import { payPortal, portalAnnouncements, portalUnswept } from "./routes/portal.js";
@@ -109,7 +110,7 @@ export interface Route {
 // is public (always on); `/notes` + `/history` are ARBITER-ONLY and composed in
 // per-indexer by makeHandler, so public mode returns 404 for them (the endpoints
 // do not exist).
-export const routes: Route[] = [head, events, path, alarms, health, nullifiers, nameResolve, nameRegister, announcements, payPortal, portalAnnouncements, portalUnswept];
+export const routes: Route[] = [head, events, path, alarms, health, nullifiers, disclosure, nameResolve, nameRegister, announcements, payPortal, portalAnnouncements, portalUnswept];
 
 function writeJson(res: ServerResponse, status: number, body: unknown, headers?: Record<string, string>): void {
   const s = JSON.stringify(body, null, 2);
