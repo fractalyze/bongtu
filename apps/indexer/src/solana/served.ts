@@ -26,6 +26,16 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { verifyServedDisclosure, type DisclosureResult } from "../disclosure.js";
+import { emitAlarm, emitDisclosureAlarm } from "../alarms.js";
+import type { FeedEntry } from "../store.js";
+
+/** THE grace-window comparison (one predicate, both consumers: statusOf and
+ *  alarms): a batch whose blob has been unserved for MORE than graceSeconds
+ *  is past grace — an institutional-SLA breach; at exactly graceSeconds it is
+ *  still operational, so the two projections share one boundary. */
+export function pastGrace(recordedAt: number, nowSeconds: number, graceSeconds: number): boolean {
+  return nowSeconds - recordedAt > graceSeconds;
+}
 
 /** The chain-committed per-batch tuple (DisburseBatch PDA == the disburse
  *  self-CPI event, SOLR §3.3.1). */
@@ -97,8 +107,9 @@ export class DisclosureRegistry {
     if (opts.boot.persistedStatus === result.status) {
       state.baked = true;
     } else if (opts.boot.persistedStatus !== undefined) {
-      console.error(
-        `ALARM disclosure verdict CONFLICT: batch ${anchor.startLeafIndex} persisted "${opts.boot.persistedStatus}" but the held blob now refolds to "${result.status}" — the served bytes changed after ingest`,
+      emitAlarm(
+        "verdict-conflict",
+        `disclosure verdict CONFLICT: batch ${anchor.startLeafIndex} persisted "${opts.boot.persistedStatus}" but the held blob now refolds to "${result.status}" — the served bytes changed after ingest`,
       );
     }
     return null;
@@ -143,7 +154,26 @@ export class DisclosureRegistry {
     const state = this.batches.get(startLeafIndex);
     if (!state) return undefined;
     if (state.result) return state.result.status;
-    return nowSeconds - state.anchor.recordedAt > this.graceSeconds ? "withheld" : undefined;
+    return pastGrace(state.anchor.recordedAt, nowSeconds, this.graceSeconds) ? "withheld" : undefined;
+  }
+
+  /**
+   * The verdict-precedence rule, owned here: for an enterprise disburse feed
+   * entry the registry's CURRENT verdict overrides the baked-at-ingest fact —
+   * the baked verdict describes the bytes held at ingest, the registry's the
+   * bytes held NOW, and after a post-ingest blob swap only the latter is
+   * truthful. Registry silent (batch unknown to it — every EVM disburse — or
+   * unserved within grace) => the baked verdict stands. Non-disburse kinds
+   * never consult the registry: a consumer disbursePriv carries a batchId
+   * too, but its bytes are consensus-published and only ever baked.
+   */
+  currentStatus(
+    entry: { kind: FeedEntry["kind"]; batchId?: number; disclosure?: { status: DisclosureResult["status"] } },
+    nowSeconds: number,
+  ): DisclosureResult["status"] | undefined {
+    const baked = entry.disclosure?.status;
+    if (entry.kind !== "disburse" || entry.batchId === undefined) return baked;
+    return this.statusOf(entry.batchId, nowSeconds) ?? baked;
   }
 
   /**
@@ -160,7 +190,7 @@ export class DisclosureRegistry {
         if (state.result.status !== "verified" && !state.baked) out.push(state.result);
         continue;
       }
-      if (nowSeconds - state.anchor.recordedAt > this.graceSeconds) {
+      if (pastGrace(state.anchor.recordedAt, nowSeconds, this.graceSeconds)) {
         out.push({
           status: "withheld",
           txHash: state.anchor.txHash,
@@ -185,11 +215,7 @@ export class DisclosureRegistry {
     );
     state.elements = elements;
     state.result = result;
-    if (result.status !== "verified") {
-      console.error(
-        `ALARM disclosure ${result.status.toUpperCase()} (served blob) tx=${result.txHash} start=${result.startLeafIndex} recomputed=${result.recomputed} expected=${result.expected}`,
-      );
-    }
+    if (result.status !== "verified") emitDisclosureAlarm(result, "served blob");
     return result;
   }
 

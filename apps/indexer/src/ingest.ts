@@ -43,6 +43,7 @@ import { MirrorTree } from "./tree.js";
 import { poolAbi, abiKnowsKem, kemBootGuardError, staleOpAbiError, portalFactoryAbi, consumerModuleAbi, type ChainConfig } from "./chain.js";
 import { type FeedEntry, type Slice } from "./store.js";
 import { verifyDisclosure, verifyConsumerDisclosure } from "./disclosure.js";
+import { emitAlarm, emitDisclosureAlarm } from "./alarms.js";
 import { projectFeedEntry } from "./projection.js";
 import { connect, PostgresStore, PostgresLedger } from "./postgres.js";
 import { NameRegistry } from "./names.js";
@@ -932,9 +933,7 @@ export class Indexer extends IndexerHostBase {
           if (ct.length > B * 4) slices.push({ offset: B * 4, elts: ct.length - B * 4, leafIndex: null });
         }
         const disclosure = verifyDisclosure(ct, bn(l.args.disclosureHash), B, l.txHash, start);
-        if (disclosure.status !== "verified") {
-          console.error(`ALARM disclosure ${disclosure.status.toUpperCase()} tx=${l.txHash} start=${start} recomputed=${disclosure.recomputed} expected=${disclosure.expected}`);
-        }
+        if (disclosure.status !== "verified") emitDisclosureAlarm(disclosure);
         const dsEntry = this.store.addEvent({
           txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
           kind: "disburse", epoch: Number(bn(l.args.epoch)),
@@ -1075,9 +1074,7 @@ export class Indexer extends IndexerHostBase {
         // disclosureHash + the commitment run folded to the SubtreeAppended
         // subtreeRoot. All three green => the PUBLIC batch fill below.
         const verdict = verifyConsumerDisclosure(disclosure, bn(l.args.disclosureHash), st.subtreeRoot, B, l.txHash, start);
-        if (verdict.result.status !== "verified") {
-          console.error(`ALARM disclosure ${verdict.result.status.toUpperCase()} (consumer) tx=${l.txHash} start=${start} recomputed=${verdict.result.recomputed} expected=${verdict.result.expected}`);
-        }
+        if (verdict.result.status !== "verified") emitDisclosureAlarm(verdict.result, "consumer");
         const entry = this.store.addEvent(projectFeedEntry(l, {
           kind: "disbursePriv",
           ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
@@ -1121,8 +1118,12 @@ export class Indexer extends IndexerHostBase {
     // divergence: alarm-class warning, never a wedge.
     for (const [txHash, arr] of opAppliedByTx) {
       for (const op of arr) {
-        console.warn(
-          `ALARM OpApplied unconsumed: module=${op.module} tx=${txHash} start=${op.startLeafIndex} ` +
+        // consumer.test.ts pins this line byte-for-byte: the tail stays
+        // byte-identical under the renderer's `ALARM ` prefix, and the
+        // attribution-gap class keeps it on console.warn.
+        emitAlarm(
+          "attribution-gap",
+          `OpApplied unconsumed: module=${op.module} tx=${txHash} start=${op.startLeafIndex} ` +
             `nullifiers=${op.nullifierCount} leaves=${op.leafCount} — a module mutated the tree with no decodable family event`,
         );
       }

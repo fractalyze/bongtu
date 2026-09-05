@@ -37,17 +37,11 @@ export const events: Route = {
       encryptionNonce: e.encryptionNonce,
       slices: e.slices,
       ciphertext: e.ciphertext,
-      // A Solana disburse projects the served-blob registry's CURRENT verdict
-      // first: the baked entry verdict describes the bytes held at ingest,
-      // the registry's describes the bytes held NOW — after a post-ingest
-      // blob swap only the latter is truthful. Registry silent (no blob, or
-      // unserved within grace) => fall back to the baked verdict. EVM disburse
-      // entries always bake a verdict and record nothing in the registry, so
-      // only the fallback fires there.
-      disclosure:
-        e.kind === "disburse" && e.batchId !== undefined
-          ? ix.disclosures.statusOf(e.batchId, now) ?? e.disclosure?.status
-          : e.disclosure?.status,
+      // Verdict precedence is OWNED by the registry (DisclosureRegistry
+      // .currentStatus): its current verdict overrides the baked-at-ingest
+      // one, falling back to baked whenever the registry is silent (every
+      // EVM entry). The route asks one question.
+      disclosure: ix.disclosures.currentStatus(e, now),
       announcement: e.announcement,
       viewTags: e.viewTags,
       kemCiphertexts: e.kemCiphertexts,

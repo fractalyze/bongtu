@@ -1,22 +1,12 @@
 import type { Route } from "../router.js";
 import type { Alarm } from "@bongtu/core/indexerApi";
 
+import { currentAlarms } from "../../alarms.js";
+
 /**
- * The single discriminated alarm feed served by GET /alarms — one wire shape
- * for the auditor console, covering BOTH producers:
- *   - "disclosure": a non-passing disclosureHash check (public data; mismatch =
- *     proven tamper, unverifiable/withheld = publication gap to judge);
- *   - "envelope": an arbiter-mode envelope cross-check failure — the decrypted
- *     authority envelope does not reproduce the on-chain commitments, i.e. the
- *     proof that a publisher lied about note contents (SPEC §6b: first-class
- *     ALARM, never silently kept). Public mode has no ledger, so its feed only
- *     ever carries "disclosure" entries.
- *
- * The union itself is owned by @bongtu/core/indexerApi (the normative wire
- * shapes); typing `body` against it here is the server-adapter half of that
- * contract — internal DisclosureResult / EnvelopeAlarm drift breaks THIS line,
- * not the apps at runtime.
- */
+ * GET /alarms serves the aggregate owned by src/alarms.ts (currentAlarms) —
+ * what counts as an alarm, which sources feed it, and the wire typing against
+ * @bongtu/core/indexerApi all live THERE; /health counts the same call. */
 export type { Alarm } from "@bongtu/core/indexerApi";
 
 export const alarms: Route = {
@@ -27,12 +17,9 @@ export const alarms: Route = {
     // class: a late-loaded blob's mismatch, or a batch unserved past grace
     // ("withheld"). Empty on the EVM backend, so the feed is byte-identical
     // there.
-    const now = Math.floor(Date.now() / 1000);
-    const body: Alarm[] = [
-      ...ix.store.getAlarms().map((a) => ({ type: "disclosure" as const, ...a })),
-      ...ix.disclosures.alarms(now).map((a) => ({ type: "disclosure" as const, ...a })),
-      ...(ix.ledger?.getEnvelopeAlarms() ?? []).map((a) => ({ type: "envelope" as const, ...a })),
-    ];
+    // ONE aggregate (src/alarms.ts currentAlarms) builds the three-source
+    // union; /health counts the same call, so list and count cannot disagree.
+    const body: Alarm[] = currentAlarms(ix, Math.floor(Date.now() / 1000));
     return { status: 200, body };
   },
 };

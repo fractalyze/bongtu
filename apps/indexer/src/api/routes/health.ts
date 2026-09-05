@@ -1,5 +1,7 @@
 import type { Route } from "../router.js";
 
+import { currentAlarms } from "../../alarms.js";
+
 // A tail stuck this many polls in a row is "wedged", not momentarily unlucky —
 // one transient RPC hiccup (or a poll racing a fresh block) must not flip ok.
 const PERSISTENT_FAILURE_STREAK = 3;
@@ -22,13 +24,9 @@ export const health: Route = {
         lastBlock: ix.store.lastBlock,
         nextLeafIndex: ix.tree ? ix.tree.nextLeafIndex() : 0,
         batchSize: ix.batchSize,
-        // Same population as GET /alarms: disclosure alarms (store + the
-        // served-blob registry) plus, in arbiter mode, the ledger's envelope
-        // cross-check alarms.
-        alarms:
-          ix.store.getAlarms().length +
-          ix.disclosures.alarms(Math.floor(Date.now() / 1000)).length +
-          (ix.ledger?.getEnvelopeAlarms().length ?? 0),
+        // Same population as GET /alarms BY CONSTRUCTION: the one aggregate
+        // (src/alarms.ts currentAlarms), counted here instead of served.
+        alarms: currentAlarms(ix, Math.floor(Date.now() / 1000)).length,
         lastSuccessAt: ix.lastSuccessAt,
         lastError: ix.lastError,
         lastErrorAt: ix.lastErrorAt,

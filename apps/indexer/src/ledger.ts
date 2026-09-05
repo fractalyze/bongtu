@@ -46,6 +46,8 @@ import { ml_kem768, kemSsToLimbs, kemBindingOf } from "@bongtu/core/kem";
 import type { Point } from "@bongtu/core/babyjub";
 import { parseEnvelope, type OpKind, type ParsedEnvelope } from "@bongtu/core/envelope";
 
+import { emitAlarm } from "./alarms.js";
+
 const dec = (x: bigint): string => x.toString();
 
 /** A ledger note, exactly as served by GET /notes (no private key, ever). */
@@ -450,6 +452,6 @@ export function pushHistory(historyByOwner: Map<string, LedgerHistoryItem[]>, ow
 
 /** The auditor-console line for an envelope cross-check failure. */
 export function logEnvelopeAlarm(a: EnvelopeAlarm): void {
-  console.error(`ALARM envelope ${a.kind} tx=${a.txHash} ${a.detail} recomputed=${a.recomputed} expected=${a.expected}`);
+  emitAlarm("envelope", `envelope ${a.kind} tx=${a.txHash} ${a.detail} recomputed=${a.recomputed} expected=${a.expected}`);
 }
 
