@@ -27,6 +27,10 @@ export PATH=$HOME/.foundry/bin:$HOME/.nvm/versions/node/v22.17.1/bin:$PATH
 5. `deploy/gates/e2e_m0.sh` — spins an anvil + CPU proofs; use timeout ≥ 300000 ms.
 6. `cd apps/indexer && npm test` — the conformance suite.
 
+Full-scope runs take an exclusive lock so parallel workers don't fight over anvil ports
+and CPU: wrap steps 5–6 in `flock /tmp/bongtu-heavy-gate.lock <cmd>` and report the wait
+time if you queued.
+
 Rules:
 
 - Backgrounding a gate: redirect to a log file and `exit $RC`, then read the log. NEVER pipe

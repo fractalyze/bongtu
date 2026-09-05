@@ -53,10 +53,11 @@ Parallel intents each run in their own `feat/<slug>` worktree; overlap is checke
 other runs' plan.md file lists before building, and merge conflicts are resolved by the
 later run rebasing onto main and re-running verify + review (see the run-intent skill).
 
-`/watch-intents` makes pickup automatic: a standing session on the dev box (the only host
-whose gates run) polls origin/main and dispatches every newly accepted intent through
-run-intent as a background agent, notifying on completion or on a stop-and-ask. With the
-watcher alive, the loop is: merge an intent PR, get a finished feature PR back.
+`/intent-worker` makes pickup automatic: standing sessions on the dev box (the only host
+whose gates run) each loop over "claim the next accepted intent, run the chain, notify".
+Workers coordinate through git, not each other — a claim is an atomic push of the
+`feat/<slug>` branch, so a fleet of sessions never double-picks. With workers alive, the
+loop is: merge an intent PR, get a finished feature PR back.
 
 ## When the chain applies
 
