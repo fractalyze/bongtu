@@ -1,5 +1,5 @@
-// Success checkmark shared by the Deposit/Send/Withdraw done states — the locked
-// visual language bans glyph characters, so the mark is the Remix check icon.
+// The Remix check icon, not a checkmark character: glyph chars are banned by the
+// locked visual language.
 
 import type { ReactNode } from "react";
 import { IconCheck } from "./icons.js";

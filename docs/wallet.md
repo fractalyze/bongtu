@@ -1,8 +1,8 @@
 # Wallet
 
-bongtu ships **two wallet apps on one browser engine**. `apps/wallet-web` is the
+bongtu ships **two wallet apps on one browser engine**. `apps/treasury-web` is the
 **enterprise wallet**: notes read from an arbiter indexer over a view-token session, the
-audited pool entrypoints driven directly. `apps/consumer-web` is the **consumer
+audited pool entrypoints driven directly. `apps/wallet-web` is the **consumer
 wallet**: discovery by self-scan of the public feed, a tokenless session, and the
 no-auditor module family ([consumer.md](consumer.md)). Both are self-custody: a wallet
 in through the RainbowKit connect modal (every installed extension via EIP-6963, plus
@@ -15,7 +15,7 @@ web apps drive; the app shells are forked copies by recorded decision
 (`.dev/architecture-review.md`), not a shared UI package. Run commands and each app's
 test layout are owned by its own README.
 
-| | enterprise wallet ([`apps/wallet-web`](../apps/wallet-web/README.md)) | consumer wallet ([`apps/consumer-web`](../apps/consumer-web/README.md)) |
+| | enterprise wallet ([`apps/treasury-web`](../apps/treasury-web/README.md)) | consumer wallet ([`apps/wallet-web`](../apps/wallet-web/README.md)) |
 |---|---|---|
 | op family | the audited pool entrypoints: transfer, transfer10x2, withdraw, deposit | the P2P 4-op module family: depositPriv, transferPriv, transfer10x2Priv, withdrawPriv |
 | session | view token traded from the arbiter indexer | tokenless by construction |
@@ -313,7 +313,7 @@ into a version-keyed Cache Storage bucket (`src/lib/assets.ts`):
 Each app pins its OWN `CIRCUITS_VERSION` in its `src/config.ts`, computed over its own
 circuit set (the consumer `*Priv` set is a different byte family); the bucket and
 eviction rule are identical. Where the consumer assets are hosted, and the three-part
-companion rule a regen triggers there, is `apps/consumer-web/README.md`'s.
+companion rule a regen triggers there, is `apps/wallet-web/README.md`'s.
 
 **Stale-zkey hazard.** A regenerated zkey that keeps the old version string is served from disk
 forever and fails on-chain verification with no self-heal — the browser has no way to know the key
@@ -337,12 +337,12 @@ session, and the existing download panel — progress, ETA, disabled Confirm —
 unchanged. The consumer wallet applies the same rule to `transfer10x2Priv`, whose zkey is
 ~92 MB.
 
-## The enterprise wallet (`apps/wallet-web`)
+## The enterprise wallet (`apps/treasury-web`)
 
 The self-custody app against the audited pool: notes read from an arbiter indexer over a
 view-token session, and transfer / transfer10x2 / withdraw / deposit proved in the
 browser and submitted to the pool entrypoints directly. Run commands and the test layout
-are owned by `apps/wallet-web/README.md`.
+are owned by `apps/treasury-web/README.md`.
 
 ### The view-token session
 
@@ -541,12 +541,12 @@ confirm sheet shows both halves of the binding (the name AND the resolved
 owner address), because what the user approves is "this name pays this key".
 An unregistered name gets its own copy and keeps the form.
 
-## The consumer wallet (`apps/consumer-web`)
+## The consumer wallet (`apps/wallet-web`)
 
 The wallet for the no-auditor family ([consumer.md](consumer.md)): the P2P 4 ops
 (`depositPriv`, `transferPriv`, `transfer10x2Priv`, `withdrawPriv`) proved in the
 browser and submitted to the registered op modules (token approvals still target the
-pool, the escrow holder). The shell is wallet-web's, forked and trimmed to the profile
+pool, the escrow holder). The shell is treasury-web's, forked and trimmed to the profile
 that IS this product. What deliberately does not exist here (issue #13's v1 scope): the
 enterprise view-token session, owner-authed indexer reads, activity paging, the pool
 KEM-epoch guard, the relayer exit leg, the portal receive, and any disburse UI.
@@ -566,7 +566,7 @@ scan, and the wallet link.
 ### Self-scan discovery
 
 Balance and activity come only from the self-scan of the public feed: the same engine,
-acceptance rule and persisted-state contract as wallet-web's selfscan mode, described
+acceptance rule and persisted-state contract as treasury-web's selfscan mode, described
 under [Indexer dependency](#indexer-dependency), here as the only mode rather than a
 build-time choice. The scan store persists decrypted amounts per owner in localStorage
 (keys never), the sync dot compares the scan's `/head` stamp against the live `/head`,
@@ -614,4 +614,4 @@ circuits. Two enterprise knobs are ABSENT by design: there is no discovery-mode 
 authority key of any kind (a config test convicts one reappearing). The indexer base is
 the same relative `/indexer` contract as above, and it must resolve to a PUBLIC-mode
 indexer instance; the deployment knobs, the ops note on that route, and the proving-asset
-pipeline are [`apps/consumer-web/README.md`](../apps/consumer-web/README.md)'s.
+pipeline are [`apps/wallet-web/README.md`](../apps/wallet-web/README.md)'s.

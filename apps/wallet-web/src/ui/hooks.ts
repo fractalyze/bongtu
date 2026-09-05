@@ -10,7 +10,14 @@ import { describeWallet, type WalletDescription } from "../lib/walletBrand.js";
 import { subscribeCircuitDownload, type CircuitDownloadState } from "../lib/prove.js";
 import type { BrowserCircuit } from "../config.js";
 
-export type Route = "home" | "receive" | "send" | "withdraw" | "deposit" | "activity" | "settings";
+export type Route =
+  | "home"
+  | "receive"
+  | "send"
+  | "withdraw"
+  | "deposit"
+  | "activity"
+  | "settings";
 
 const ROUTES: readonly Route[] = ["home", "receive", "send", "withdraw", "deposit", "activity", "settings"];
 

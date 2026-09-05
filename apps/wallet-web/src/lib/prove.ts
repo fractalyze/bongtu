@@ -29,10 +29,10 @@ import {
   type PrefetchDeps,
 } from "./assets.js";
 
-// The circuits the public wallet proves in-browser on CPU (SPEC §6): the spends
-// (transfer, its 10-in/2-out form transfer10x2, and withdraw) plus the 0-in/2-out
-// deposit/shield. disburse is GPU-only (prover/); transfer10 (10-out) is
-// deprecated (2026-07-28) and is no longer a circuit the wallet proves.
+// The circuits the consumer wallet proves in-browser on CPU: exactly the P2P 4-op
+// family (config.ts BrowserCircuit) — the spends (transferPriv, its 10-in/2-out
+// form transfer10x2Priv, and withdrawPriv) plus the 0-in/2-out depositPriv mint.
+// Nothing else is provable from this bundle by construction.
 type CpuCircuit = BrowserCircuit;
 
 // Session-scoped in-flight prefetch, one per circuit: the version-keyed Cache Storage
@@ -78,22 +78,22 @@ export function subscribeCircuitDownload(
   return () => downloadListeners[circuit]?.delete(cb);
 }
 
-/** Whether `circuit` is one the wallet proves in-browser. The deprecated
- *  transfer10 deliberately fails this check: its assets left the download set,
- *  so proving it could only ever 404. */
+/** Whether `circuit` is one the consumer wallet proves in-browser. The
+ *  enterprise-family circuits deliberately fail this check: their assets are not
+ *  in this app's download set, so proving one could only ever 404. */
 export function isCpuCircuit(circuit: string): circuit is CpuCircuit {
   return (
-    circuit === "transfer" ||
-    circuit === "transfer10x2" ||
-    circuit === "withdraw" ||
-    circuit === "deposit"
+    circuit === "depositPriv" ||
+    circuit === "transferPriv" ||
+    circuit === "transfer10x2Priv" ||
+    circuit === "withdrawPriv"
   );
 }
 
 export function assertCpuCircuit(circuit: string): asserts circuit is CpuCircuit {
   if (!isCpuCircuit(circuit)) {
     throw new Error(
-      `the public wallet only proves transfer/transfer10x2/withdraw/deposit in-browser, not ${circuit}`,
+      `the consumer wallet only proves depositPriv/transferPriv/transfer10x2Priv/withdrawPriv in-browser, not ${circuit}`,
     );
   }
 }

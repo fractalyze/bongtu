@@ -7,7 +7,7 @@
 //
 // Copy placement rule (locked): only app-AGNOSTIC strings live here (there are
 // none today — the classifiers return structured verdicts). Each app maps a
-// verdict to its own words (wallet-web: connection.ts walletErrorMessage,
+// verdict to its own words (treasury-web: connection.ts walletErrorMessage,
 // refresh.ts classifyReadFailure), because "plain words, no jargon" is per-app
 // voice, not shared mechanics.
 

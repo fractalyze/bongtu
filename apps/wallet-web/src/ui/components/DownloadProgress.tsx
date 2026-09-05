@@ -1,7 +1,7 @@
 // The one-time proving-key download card (Deposit/Send/Withdraw screen open, cold
 // cache): a real progress bar + ETA instead of a bare banner line, because the
-// ~28 MB zkey takes long enough on ordinary links that a static notice reads as a
-// hang. While this renders, the owning screen also disables every proof-reaching
+// multi-MB zkey takes long enough on ordinary links that a static notice reads as
+// a hang. While this renders, the owning screen also disables every proof-reaching
 // button (the download and the proof share the same assets).
 
 import type { ReactNode } from "react";

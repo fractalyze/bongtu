@@ -5,7 +5,7 @@
 // the account cannot pay gas, what the amount field starts at — lives here so it
 // gates headlessly (test/depositModal.test.ts). The view only renders it.
 //
-// The mint follows the WALLET's grammar (wallet-web MintModal): the deployed kKRW
+// The mint follows the WALLET's grammar (treasury-web MintModal): the deployed kKRW
 // is MockERC20 whose `mint` is permissionless, so the operator self-mints and pays
 // their own gas — no faucet service, no operator key. A zero-gas account is
 // pre-checked and told plainly (with the faucet link) instead of failing inside

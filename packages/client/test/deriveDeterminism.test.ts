@@ -66,7 +66,7 @@ import { deriveLoginIdentity } from "@bongtu/client/identity";
  *  changing it. */
 const PIN_DIGEST = "0x07ea59d7abef0cfaa34cb72a2d41ee008eb6e2ab08af9fa0f72e0824650d51b3";
 
-/** The live deployment's KDF domain facts — what wallet-web's config.ts
+/** The live deployment's KDF domain facts — what treasury-web's config.ts
  *  KEY_DERIVATION threads into the engine (same one home: @bongtu/core/network). */
 const KDF = { chainId: CHAIN_ID, pool: POOL_ADDRESS, keyVersion: "1", stealthKeyVersion: "1" };
 

@@ -59,7 +59,7 @@ endpoint, and none may be added.
   polite, Copy details) over the headless `ToastQueue` (dedup, auto-dismiss, timing —
   gated without a DOM in `packages/ui/test/`), and `Banner` (the stateless state
   slot, warn/info tones). Classname-based on the apps' Tailwind tokens; each app
-  compiles its own CSS (wallet-web declares the package as a Tailwind `@source`).
+  compiles its own CSS (treasury-web declares the package as a Tailwind `@source`).
 - **Per-app wiring** — apps own their copy (plain words, no jargon) and the routing:
   `@bongtu/client` `refresh.ts` (`runRefresh` — the one refresh path, with the
   never-toast/never-blank rules enforced headlessly), `src/lib/toasts.ts` (the app's
@@ -68,5 +68,5 @@ endpoint, and none may be added.
   beside `chainSwitchMessage`) and `PAYROLL_FAILURE_COPY` (payroll `src/lib/errors.ts`)
   — so a `ChainFailure` kind added to the classifier is a tsc error in every app, never
   a silent fall-through to raw viem text. Surface wiring gates in
-  `apps/wallet-web/test/errorSurface.test.ts`; the tables' every-kind coverage gates in
+  `apps/treasury-web/test/errorSurface.test.ts`; the tables' every-kind coverage gates in
   each app's copy tests.

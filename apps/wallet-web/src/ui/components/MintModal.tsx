@@ -15,9 +15,9 @@ import { GAS_TOKEN_PHRASE, NATIVE_CURRENCY } from "@bongtu/core/network";
 import {
   mintTestToken,
   readGasBalance,
+  walletErrorMessage,
   type Connection,
 } from "@bongtu/client/connection";
-import { walletWebErrorMessage } from "../../lib/errors.js";
 import { parseKkrw } from "@bongtu/client/money";
 import { shortenPubkey } from "../format.js";
 import { ExplorerLink } from "./ExplorerLink.js";
@@ -95,7 +95,7 @@ export function MintModal({
       setTx({ hash: res.txHash, explorerUrl: res.explorerUrl });
       await onMinted();
     } catch (e) {
-      setError(walletWebErrorMessage(e));
+      setError(walletErrorMessage(e));
     } finally {
       setPending(false);
     }

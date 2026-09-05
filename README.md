@@ -151,7 +151,7 @@ constraints). Per-op gas and proof times: [`docs/performance.md`](docs/performan
 
 ```
 ┌─────────────────────────────┐        ┌─────────────────────────────┐
-│ wallet-web (browser)        │        │ payroll-web (employer)      │
+│ treasury-web (browser)      │        │ payroll-web (employer)      │
 │ MetaMask → bjj key          │        │ recipient list (≤256),      │
 │ snarkjs proves a tx         │        │ builds a /prove request     │
 └──────────────┬──────────────┘        └──────────────┬──────────────┘
@@ -194,8 +194,8 @@ Each has its own README.
 - [`prover/`](prover/README.md): GPU prover service — three circuits resident, in-process witness workers
 - [`apps/indexer/`](apps/indexer/README.md): event ingest, tree mirror, `/notes` + disclosure alarms (arbiter mode)
 - [`apps/payroll-web/`](apps/payroll-web/README.md): the employer pay console — MetaMask login, one worksheet, batch disburse
-- [`apps/wallet-web/`](apps/wallet-web/README.md): self-custody wallet, in-browser proving
-- [`apps/consumer-web/`](apps/consumer-web/README.md): the consumer self-scan wallet, no-auditor P2P ops (tokenless, in-browser proving)
+- [`apps/treasury-web/`](apps/treasury-web/README.md): self-custody wallet, in-browser proving
+- [`apps/wallet-web/`](apps/wallet-web/README.md): the consumer self-scan wallet, no-auditor P2P ops (tokenless, in-browser proving)
 - [`deploy/`](deploy/README.md): forge scripts, live-chain drivers, anvil gates — recorded addresses at the top
 - [`docs/`](docs/): reference docs, one file per topic (index below)
 - [`.dev/`](.dev/README.md): working docs: milestone trackers and decision records
@@ -213,8 +213,8 @@ How to build, test, and run each component lives in its own README:
 - **Contracts** (forge test, gas report): [`chains/evm/README.md`](chains/evm/README.md)
 - **Circuits** (prove_all, soundness gates): [`circuits/README.md`](circuits/README.md)
 - **Indexer** (local + live chain, Postgres, docker compose): [`apps/indexer/README.md`](apps/indexer/README.md)
-- **Wallet** (dev server, in-browser proving): [`apps/wallet-web/README.md`](apps/wallet-web/README.md)
-- **Consumer wallet** (self-scan, tokenless): [`apps/consumer-web/README.md`](apps/consumer-web/README.md)
+- **Wallet** (dev server, in-browser proving): [`apps/treasury-web/README.md`](apps/treasury-web/README.md)
+- **Consumer wallet** (self-scan, tokenless): [`apps/wallet-web/README.md`](apps/wallet-web/README.md)
 - **Payroll console**: [`apps/payroll-web/README.md`](apps/payroll-web/README.md)
 - **GPU prover service**: [`prover/README.md`](prover/README.md)
 - **Deploy + e2e** (local anvil, live-chain runbook): [`deploy/README.md`](deploy/README.md)
@@ -268,8 +268,8 @@ How to run each piece is owned by its own README:
 - Folder READMEs: each folder's own layout, run/test commands, and API surface:
   [`packages/core`](packages/core/README.md) · [`apps/indexer`](apps/indexer/README.md) ·
   [`circuits`](circuits/README.md) · [`contracts`](chains/evm/README.md) ·
-  [`apps/payroll-web`](apps/payroll-web/README.md) · [`apps/wallet-web`](apps/wallet-web/README.md) ·
-  [`apps/consumer-web`](apps/consumer-web/README.md).
+  [`apps/payroll-web`](apps/payroll-web/README.md) · [`apps/treasury-web`](apps/treasury-web/README.md) ·
+  [`apps/wallet-web`](apps/wallet-web/README.md).
 
 Milestone trackers and decision records (applied/deferred/rejected lists, layout and CI rationale) live in
 [`.dev/`](.dev/README.md): agent-facing working docs, kept out of `docs/`.

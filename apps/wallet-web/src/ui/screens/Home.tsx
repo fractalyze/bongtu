@@ -1,30 +1,30 @@
-// Home: the balance hero, the connected-wallet card, the primary actions, and the
-// recent activity head — sibling white cards in one vertical stack. This is the whole
-// app most of the time — other screens are pushed on top via the hash route. All
-// private data (balance, activity) comes from the configured discovery engine
-// (arbiter indexer, or the selfscan feed scan); a dataError renders a calm
-// connect-an-indexer panel instead of numbers. The
-// public kKRW token context lives on the Deposit screen only (where the flow needs it).
+// Home: the scan-driven balance hero, the connected-wallet card, the four live
+// actions, and the recent activity head — sibling white cards in one vertical
+// stack, byte-patterned on treasury-web's Home. All private data comes from the
+// self-scan of the public feed; a dataError renders the calm retry banner
+// instead of numbers, and the calm strip carries the scan's pending/locked
+// notices. Receive routes to the identity screen (#/receive): sends are
+// registry-name-only, so the thing to share is the NAME, not an address —
+// which is why the old share-address modal is gone rather than kept beside it.
 
-import { useState } from "react";
 import type { ReactNode } from "react";
 import { encodeAddress } from "@bongtu/core/pubkey";
 import { useWallet } from "../App.js";
-import { navigate } from "../hooks.js";
-import { DEFAULTS, isSelfScan } from "../../config.js";
+import { navigate, type Route } from "../hooks.js";
+import { DEFAULTS } from "../../config.js";
 import { shortenPubkey } from "../format.js";
 import { BalanceCard } from "../components/BalanceCard.js";
 import { ActivityList } from "../components/ActivityList.js";
-import { IndexerSyncDot, SelfScanSyncDot } from "../components/SyncDot.js";
+import { SelfScanSyncDot } from "../components/SyncDot.js";
 import { LockChip } from "../components/LockChip.js";
-import { ReceiveModal } from "../components/ReceiveModal.js";
 import { WalletMark } from "../components/WalletMark.js";
-import { Button, IconButton, TestnetTag } from "../components/controls.js";
+import { IconButton, TestnetTag } from "../components/controls.js";
 import { Banner } from "@bongtu/ui/Banner";
 import {
   EnvelopeLogo,
   IconGear,
   IconLink,
+  IconReceived,
   IconSend,
   IconWithdraw,
   IconDeposit,
@@ -33,17 +33,39 @@ import {
 // Home shows the head of the feed; the full flat list lives at #/activity.
 const RECENT_COUNT = 4;
 
+const ACTIONS: readonly { label: string; route: Route; Icon: (p: { size?: number }) => ReactNode }[] = [
+  { label: "Send", route: "send", Icon: IconSend },
+  { label: "Receive", route: "receive", Icon: IconReceived },
+  { label: "Withdraw", route: "withdraw", Icon: IconWithdraw },
+  { label: "Deposit", route: "deposit", Icon: IconDeposit },
+] as const;
+
+/** The action grid, LIVE (S6): every op has a real screen behind it. Pure and
+ *  prop-free so the copy gate renders it headlessly. */
+export function HomeActions(): ReactNode {
+  return (
+    <section className="grid grid-cols-4 gap-2" aria-label="Actions">
+      {ACTIONS.map(({ label, route, Icon }) => (
+        <button
+          key={label}
+          className="bg-surface border border-border rounded-xl pt-3 px-1 pb-2.5 text-primary text-sm [font-weight:650] cursor-pointer font-sans flex flex-col items-center gap-1.5 hover:border-border-strong"
+          onClick={() => navigate(route)}
+        >
+          <Icon />
+          <span>{label}</span>
+        </button>
+      ))}
+    </section>
+  );
+}
+
 export function Home(): ReactNode {
   const {
-    session, connection, wallet, balance, history, loading, syncing, dataError, dataNotice,
+    session, connection, wallet, balance, history, loading, dataError, dataNotice,
     scannedNextLeafIndex, indexerUrl, refresh,
   } = useWallet();
 
-  // Receive is a modal over Home (primary path — the #/receive route is a deep link).
-  const [receiveOpen, setReceiveOpen] = useState(false);
-
   if (!session) return null;
-  const refreshing = loading || syncing;
 
   return (
     <div className="flex flex-col gap-3 px-4.5 pt-4.5 pb-6.5">
@@ -53,28 +75,17 @@ export function Home(): ReactNode {
           <span className="font-bold text-[1.1rem] tracking-[-0.01em]">bongtu</span>
           {DEFAULTS.testnet && <TestnetTag />}
         </div>
-        {/* Icons only (U-W9): sync state, lock state, which wallet, settings — each
-            with its words in a hover tooltip. The sync dot is also the manual
-            refresh, so no separate refresh button competes with it. */}
+        {/* Icons only (the treasury-web U-W9 shape): sync state, lock state,
+            settings — each with its words in a hover tooltip. The dot measures the
+            SCAN CURSOR against the public /head; it is also the manual refresh. */}
         <div className="flex items-center gap-0.5">
-          {isSelfScan(DEFAULTS.discovery) ? (
-            // Selfscan: the dot measures the SCAN CURSOR against the public
-            // /head — no /health, no arbiter coupling.
-            <SelfScanSyncDot
-              indexerUrl={indexerUrl}
-              scannedNextLeafIndex={scannedNextLeafIndex}
-              refreshing={refreshing}
-              dataError={dataError !== null}
-              onRefresh={() => void refresh(true)}
-            />
-          ) : (
-            <IndexerSyncDot
-              indexerUrl={indexerUrl}
-              refreshing={refreshing}
-              dataError={dataError !== null}
-              onRefresh={() => void refresh(true)}
-            />
-          )}
+          <SelfScanSyncDot
+            indexerUrl={indexerUrl}
+            scannedNextLeafIndex={scannedNextLeafIndex}
+            refreshing={loading}
+            dataError={dataError !== null}
+            onRefresh={() => void refresh(true)}
+          />
           <LockChip walletName={wallet.name} />
           <IconButton aria-label="Settings" onClick={() => navigate("settings")}>
             <IconGear />
@@ -87,7 +98,7 @@ export function Home(): ReactNode {
         loading={loading}
         // Users only ever see (and copy) the base58check form; hex stays internal.
         pubkey={encodeAddress(session.compressedPubkey)}
-        onOpenReceive={() => setReceiveOpen(true)}
+        onOpenReceive={() => navigate("receive")}
       />
 
       {connection && (
@@ -96,7 +107,7 @@ export function Home(): ReactNode {
           aria-label="Connected wallet"
         >
           <IconLink size={16} />
-          {/* ICON-ONLY (user decision, viem wave): the wallet's mark carries the
+          {/* ICON-ONLY (user decision, kept): the wallet's mark carries the
               identity; its NAME lives in the tooltip/aria, never as visible text. */}
           <span
             className="inline-flex"
@@ -124,51 +135,14 @@ export function Home(): ReactNode {
         </section>
       )}
 
-      {/* A LOADED zero balance means Send/Withdraw can only fail — replace all
-          three actions with the one move that works: Deposit. Never over a
-          spinner or a data error (balance unknown there). */}
-      {!loading && !dataError && balance === 0n ? (
-        <section className="flex flex-col gap-2 bg-surface border border-border-strong rounded-xl p-3.5">
-          <p className="text-[0.95rem] font-bold">Deposit kKRW to get started</p>
-          <p className="text-sm text-muted">
-            Deposited kKRW becomes private. Then send and withdraw freely.
-          </p>
-          <Button variant="primary" block onClick={() => navigate("deposit")}>
-            Deposit kKRW
-          </Button>
-        </section>
-      ) : (
-        <div className="grid grid-cols-3 gap-2">
-          <button
-            className="bg-surface border border-border rounded-xl pt-3 px-1 pb-2.5 text-primary text-sm [font-weight:650] cursor-pointer font-sans flex flex-col items-center gap-1.5 hover:border-border-strong"
-            onClick={() => navigate("send")}
-          >
-            <IconSend />
-            <span>Send</span>
-          </button>
-          <button
-            className="bg-surface border border-border rounded-xl pt-3 px-1 pb-2.5 text-primary text-sm [font-weight:650] cursor-pointer font-sans flex flex-col items-center gap-1.5 hover:border-border-strong"
-            onClick={() => navigate("withdraw")}
-          >
-            <IconWithdraw />
-            <span>Withdraw</span>
-          </button>
-          <button
-            className="bg-surface border border-border rounded-xl pt-3 px-1 pb-2.5 text-primary text-sm [font-weight:650] cursor-pointer font-sans flex flex-col items-center gap-1.5 hover:border-border-strong"
-            onClick={() => navigate("deposit")}
-          >
-            <IconDeposit />
-            <span>Deposit</span>
-          </button>
-        </div>
-      )}
+      <HomeActions />
 
-      {/* The standardized state banner (class 4): set by a failed read, cleared by
+      {/* The standardized state banner (class 4): set by a failed scan, cleared by
           the next success — and the data already on screen stays below it (a failed
-          background read never blanks the screen). Retry is the MANUAL refresh, so
-          its own failure may toast. */}
+          background read never blanks the screen). Retry is the MANUAL refresh. */}
       {dataError && <Banner message={dataError} onRetry={() => void refresh(true)} />}
-      {/* Calm strip, not the warn banner: the data below is real, just frozen. */}
+      {/* Calm strip, not the warn banner: the data below is real — pending kem
+          delivery, or a locked wallet serving its last scan (scanStore.scanNotice). */}
       {!dataError && dataNotice && <p className="text-muted text-[0.85rem] px-0.5">{dataNotice}</p>}
       <ActivityList
         history={history.slice(0, RECENT_COUNT)}
@@ -176,10 +150,6 @@ export function Home(): ReactNode {
         explorerBase={DEFAULTS.explorer}
         onViewAll={() => navigate("activity")}
       />
-
-      {receiveOpen && (
-        <ReceiveModal pubkey={encodeAddress(session.compressedPubkey)} onClose={() => setReceiveOpen(false)} />
-      )}
     </div>
   );
 }

@@ -1,3 +1,7 @@
+// treasury-web's copy is identical below this header except the wording import
+// (consumerErrorMessage here, walletWebErrorMessage there) — the one delta,
+// stated so the pair stays honest until the shared-libs consolidation
+// (issue #46) gives the machine a single home.
 // The four-phase machine every value-moving screen runs: form → confirm → running →
 // done. Send, Withdraw and Deposit differ only in what they put ON the form and in
 // which flow function they call; the phase order, the stage reporting, the unlock
@@ -16,7 +20,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { DEFAULTS, type BrowserCircuit } from "../config.js";
 import { ensureCircuitAssets, prewarmProver } from "../lib/prove.js";
-import { walletWebErrorMessage } from "../lib/errors.js";
+import { consumerErrorMessage } from "../lib/errors.js";
 import { withUnlock, type StagedStep } from "./components/StagedProgress.js";
 import { useCircuitDownload, useElapsedSeconds, type CircuitDownloadView } from "./hooks.js";
 
@@ -175,7 +179,7 @@ export class ActionMachine<O extends ActionResult> {
       // Every abort — a mid-op account switch included: the S5 guard locks the
       // key, the flow's next unlock refuses, and the run lands HERE — returns
       // the screen to the form. No stage is ever stranded on screen.
-      this.set({ phase: "form", error: walletWebErrorMessage(e) });
+      this.set({ phase: "form", error: consumerErrorMessage(e) });
     } finally {
       this.gate.release(this.opToken);
     }

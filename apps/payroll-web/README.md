@@ -145,7 +145,7 @@ test/
   signOut.test.ts      sign-out drops the service session AND locks the key cache
   proverClient.test.ts adapter + pub-length pins + auth header + base-URL defaults
   serviceAuth.test.ts  the service session: Basic value, sign-in probe, holder
-  kdf.test.ts          identity coincidence with wallet-web (shared KEY_DERIVATION)
+  kdf.test.ts          identity coincidence with treasury-web (shared KEY_DERIVATION)
   assemble.test.ts     the disburse assembly gate (kept from the previous console)
   randomness.test.ts   recipient-count privacy: per-batch CSPRNG draws + shuffle
   payRun.test.ts       batch bounds + terminal-leg failure wording (injected I/O)

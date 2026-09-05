@@ -3,7 +3,7 @@
 //
 // Adapter pattern (the same seam discipline §6 locks for ProvingRequest in
 // proving.ts): the indexer's routes type their RESPONSE BODIES against these
-// shapes (server adapter), and payroll-web / wallet-web import the client instead
+// shapes (server adapter), and payroll-web / treasury-web import the client instead
 // of hand-copied types (consumer adapters). Adding a field to /events is a
 // one-type change here that tsc propagates to the route and both apps; silent
 // wire drift becomes a type error instead of a runtime surprise.

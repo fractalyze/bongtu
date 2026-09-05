@@ -8,7 +8,7 @@ bongtu included, can open a consumer note involuntarily. This page states the fa
 and guarantees; the full design record — every derivation, budget and rejected alternative — is
 [`.dev/op-module-design.md`](../.dev/op-module-design.md) (cited as `OPMOD §n`), which this page
 summarizes and does not replace. The consumer wallet app itself (custody, session,
-screens) is [wallet.md](wallet.md#the-consumer-wallet-appsconsumer-web)'s story; this
+screens) is [wallet.md](wallet.md#the-consumer-wallet-appswallet-web)'s story; this
 page owns the protocol family.
 
 Both families share **one pool**: one IMT, one nullifier set, one kKRW escrow. Notes are

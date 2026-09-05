@@ -17,7 +17,7 @@
 //   2. Facts the artifact does NOT carry (H, the gas pin, RPC/explorer
 //      bases, the POOL_ABI_FRAGMENTS fragment strings) are pinned byte-for-byte to the
 //      values previously hand-copied across apps/payroll-web/src/lib/chain.ts,
-//      apps/wallet-web/src/lib/metamask.ts, both app config.ts files, and
+//      apps/treasury-web/src/lib/metamask.ts, both app config.ts files, and
 //      the live disburse runner — the copies this module replaced.
 
 import { test } from "node:test";

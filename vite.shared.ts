@@ -1,5 +1,5 @@
 // The Vite config pieces BOTH browser apps need, owned once at the repo root.
-// apps/wallet-web and apps/payroll-web import this relatively (`../../vite.shared.js`):
+// apps/treasury-web and apps/payroll-web import this relatively (`../../vite.shared.js`):
 // Vite bundles its config file with esbuild before running it, so a relative import
 // from above the app directory is resolved at bundle time and needs no workspace
 // package. Anything only ONE app needs (the wallet's CIRCUITS_VERSION reader and

@@ -1,37 +1,39 @@
-// The shared Send (transfer) / Withdraw screen. Both prove in the browser and submit
-// through the connected wallet; the ONLY difference is transfer needs a recipient
-// pubkey and withdraw does not. Keeping them one component means the validate →
-// confirm → staged-prove → success flow lives in exactly one place.
+// The shared Send (transfer) / Withdraw screen, on the consumer flow variants:
+// both prove in-browser and self-submit to the op MODULES through the connected
+// wallet (no relayer in v1); the only differences are what identifies the payee
+// and which circuit the terminal leg lands on.
 //
-// The phases themselves are not written here: useActionMachine owns form → confirm →
-// running → done (and the asset prefetch that rides along), and ActionPanels renders
-// the three phases every action screen shares. What stays below is what a SPEND is —
-// its recipient field, its amount field, and its confirm rows.
+// SEND IS REGISTRY-NAME-ONLY (v1 product decision, locked): a consumer payment
+// seals to the payee's registered v2 triple — spend pubkey + note-layer view
+// pubkey + ML-KEM ek, ~1.2 KB — which is nothing a person could paste, so there
+// is no address field and no address grammar here. The name resolves at
+// Continue time through the ONE seam (lib/payName.ts): a v2 record pays, a
+// v1-only record refuses with the exact cannot-receive copy, a network failure
+// propagates instead of reading as "unregistered".
 //
-// CIRCUIT AUTO-PICK, AND HOW MANY TRANSACTIONS. The user never chooses a circuit, and
-// never has to go and tidy their notes first. previewSpend answers, from the amount
-// typed so far, which circuit this payment needs — driving the one-time key download,
-// so the ~114 MB arity-10 key is fetched only when it is genuinely needed — and how
-// many transactions it takes. A balance spread across more notes than one circuit can
-// spend does not block the form: the plan simply grows the merge legs that make it
-// fit, the confirm sheet says how many approvals that is, and the running screen
-// counts them off. Nothing about it is a separate screen the user has to visit.
+// WITHDRAW binds its payout target IN-PROOF: the L1 recipient is a public input
+// of withdrawPriv, so once the proof exists nobody — not even this wallet — can
+// swap where the money lands. The confirm sheet says so in plain words
+// (WITHDRAW_PROOF_BOUND_NOTE).
 //
-// Amounts: the form takes DECIMAL kKRW (parseKkrw, ≤6 fraction digits, 2^100 belt) and
-// converts to raw wei at the UI edge — the flow/witness layer still receives raw wei
-// strings, unchanged.
+// The phases are not written here: useActionMachine owns form → confirm →
+// running → done (plus the one-op gate and asset prefetch), ActionPanels renders
+// the shared phase shells, and previewSpend answers — from the amount typed so
+// far — which circuit is needed and how many transactions the chain takes.
 
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { getAddress } from "viem";
-import { decodeAddress, encodeAddress } from "@bongtu/core/pubkey";
 import { DEFAULTS } from "../../config.js";
 import type { SpendOutcome } from "@bongtu/client/spend";
-import { resolveName, type NameRecord } from "@bongtu/core/indexerApi";
+import { consumerCircuitOf, type ConsumerRecipient } from "@bongtu/client/consumer";
+import { normalizeName } from "@bongtu/core/indexerApi";
+import { resolveConsumerRecipient } from "../../lib/payName.js";
+import { consumerErrorMessage } from "../../lib/errors.js";
 import { useWallet } from "../App.js";
 import { useActionMachine, stepsForRun } from "../actionMachine.js";
 import { formatKkrw, parseKkrw } from "@bongtu/client/money";
-import { amountError, evmAddressError, recipientError, recipientName } from "../format.js";
+import { amountError, evmAddressError, shortenPubkey } from "../format.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
 import { activeStep, chainSteps, SPEND_STEPS } from "../components/StagedProgress.js";
 import { SuccessPanel } from "../components/SuccessPanel.js";
@@ -44,6 +46,11 @@ import {
 } from "../components/ActionPanels.js";
 import { AmountInput, Button, ErrorBanner, Field, TextInput } from "../components/controls.js";
 
+/** The proof-bound-recipient property, stated where the user confirms the
+ *  target: the payout address is a public input of the withdraw proof. */
+export const WITHDRAW_PROOF_BOUND_NOTE =
+  "The payout address is locked into your proof. Once you confirm, it cannot be redirected by anyone.";
+
 export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactNode {
   const { connection, wallet, indexerUrl, notes, balance, ops, refreshAfterAction } = useWallet();
   const isTransfer = kind === "transfer";
@@ -51,13 +58,11 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
   const [recipient, setRecipient] = useState("");
   const [amount, setAmount] = useState("");
   // Withdraw-only: an optional L1 payout address. Empty pays the connected
-  // account (today's default, and what the field's hint says); non-empty must
-  // be a real L1 address (evmAddressError) — an EOA, not a bongtu address.
+  // account (today's default, and what the field's hint says).
   const [destination, setDestination] = useState("");
-  // Pay-by-name (transfer-only): the directory record resolved for the CURRENT
-  // input at Continue time, plus the resolve step's own error (unregistered /
-  // network) — a judgment the form-shape recipientError cannot make.
-  const [resolved, setResolved] = useState<NameRecord | null>(null);
+  // The payee resolved for the CURRENT input at Continue time, plus the resolve
+  // step's own error — judgments no form-shape check can make.
+  const [resolved, setResolved] = useState<{ name: string; recipient: ConsumerRecipient } | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
 
   // The raw-wei amount the protocol layer receives; 0n while the input is invalid.
@@ -66,41 +71,39 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
     return p.ok ? p.wei : 0n;
   }, [amount]);
 
-  // Which circuit this amount needs, how many transactions, and whether the wallet
-  // simply cannot afford it.
+  // Which circuit this amount needs (mapped onto the consumer twin — the merge
+  // legs are transfer10x2Priv), how many transactions, and whether the wallet
+  // simply cannot afford it. The circuit drives the one-time key download, so
+  // the big arity-10 key is fetched only when the plan genuinely needs it.
   const plan = useMemo(
     () => (ops ? ops.preview(kind, amountWei.toString()) : { circuit: kind, blocker: null, legCount: 1, pieces: 0 }),
-    // `notes` is the reactivity key: the facade's note source reads the notes
-    // ref, and an applied snapshot updates `notes` in the same pass.
+    // `notes` is the reactivity key: the facade's note source reads the scan
+    // ref, and a landed scan updates `notes` in the same pass.
     [ops, kind, amountWei, notes],
   );
-  const action = useActionMachine<SpendOutcome>({ circuit: plan.circuit, steps: SPEND_STEPS });
+  const circuit = consumerCircuitOf(plan.circuit);
+  const action = useActionMachine<SpendOutcome>({ circuit, steps: SPEND_STEPS });
 
-  const rcptErr = isTransfer ? recipientError(recipient) : null;
-  // Which reading the input gets is unambiguous BY LENGTH (recipientName): a name
-  // normalizes to <=32 chars while both address encodings are longer (legacy hex
-  // 0x+64 chars, base58check 51), so a non-null name IS the name path and every
-  // other input stays on today's decodeAddress path untouched.
-  const typedName = isTransfer ? recipientName(recipient) : null;
-  // Stale-resolve guard: the stored record only counts while it still matches
-  // what the field says NOW (the name is re-derived from the input), so editing
-  // the field after a resolve can never pay the previously resolved name.
-  const activeRecord =
+  // Stale-resolve guard: the stored triple only counts while the field still
+  // names the same canonical name — editing after a resolve can never pay the
+  // previously resolved person.
+  const typedName = isTransfer ? normalizeName(recipient) : null;
+  const activeResolve =
     resolved !== null && typedName !== null && resolved.name === typedName ? resolved : null;
   const amtErr = amountError(amount, balance);
-  // The destination is judged as an L1 address (never recipientError's bjj
-  // grammar), and becomes an address exactly once: checksummed here, so the
+  const destErr = isTransfer ? null : evmAddressError(destination);
+  // The destination becomes an address exactly once: checksummed here, so the
   // string the confirm sheet shows IS the string the flow's proof binds. Null
   // means "defaulted" — the flow then pays the connected account on its own.
-  const destErr = isTransfer ? null : evmAddressError(destination);
   const withdrawDest =
     !isTransfer && destErr === null && destination.trim() !== ""
       ? getAddress(destination.trim())
       : null;
-  // Guard on a KNOWN balance: until /notes loads (balance===null) amountError can't
-  // catch over-spend, so don't let the user start a proof that would revert on-chain.
+  // Guard on a KNOWN balance: until the first scan lands (balance===null)
+  // amountError can't catch over-spend, so don't let the user start a proof
+  // that would revert on-chain.
   const formValid =
-    balance !== null && !amtErr && !plan.blocker && (!isTransfer || !rcptErr) && !destErr;
+    balance !== null && !amtErr && !plan.blocker && (!isTransfer || recipient.trim() !== "") && !destErr;
 
   const title = isTransfer ? "Send" : "Withdraw";
   const terminalWord = isTransfer ? "payment" : "withdrawal";
@@ -108,22 +111,16 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
 
   function confirm(): void {
     if (!ops) return;
-    // The spending key comes from the wallet's lock INSIDE runSpendChain — this
-    // component never holds it. The engine inputs (lock, prover, config, the
-    // notes and their between-legs re-read) are bound ONCE in the App's facade.
+    // The spending key comes from the wallet's lock INSIDE the flow — this
+    // component never holds it. The notes are the self-scan result set, and the
+    // between-legs re-read is a self-scan pass too — both live behind the
+    // facade's note source (App constructs the ONE ConsumerOps per login).
     void action.submit(
       async (onStage) =>
         ops.spend(
           kind,
-          // The flow/witness layer only ever sees the canonical hex form — a
-          // resolved name contributes its owner key through the same decodeAddress
-          // normalization a typed address gets; base58 and names stop at this edge.
-          // The withdraw destination rides the flow's proof-bound recipient param
-          // (withdrawTo); undefined is the flow's own connected-account default.
           {
-            to: isTransfer
-              ? decodeAddress(activeRecord ? activeRecord.owner : recipient.trim())
-              : undefined,
+            to: activeResolve?.recipient,
             amount: amountWei.toString(),
             withdrawTo: withdrawDest ?? undefined,
           },
@@ -133,27 +130,28 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
     );
   }
 
-  // Continue resolves a name BEFORE the confirm sheet opens — the sheet must show
-  // the name→owner binding, so the record has to exist first. A plain address goes
-  // straight to review as before. This small async wrapper stays OUTSIDE
-  // useActionMachine: resolution is a form-time concern, not an action phase.
+  // Continue resolves the name BEFORE the confirm sheet opens — the sheet must
+  // show who gets paid, so the record has to exist first. Withdraw has no name
+  // to resolve and reviews directly.
   async function handleContinue(): Promise<void> {
-    if (typedName === null) {
+    if (!isTransfer) {
       action.review();
       return;
     }
     setNameError(null);
     try {
-      const record = await resolveName(indexerUrl, typedName);
-      if (!record) {
-        setNameError("That name isn't registered.");
+      const out = await resolveConsumerRecipient(indexerUrl, recipient);
+      if (!out.ok) {
+        setNameError(out.message);
         return;
       }
-      setResolved(record);
+      setResolved(out);
       action.review();
     } catch (e) {
-      // A network/server failure surfaces its thrown message in the same slot.
-      setNameError(e instanceof Error ? e.message : String(e));
+      // A network/server failure lands in the same slot in the classified
+      // words (transport reads "could not reach", never a raw fetch line) —
+      // and "the indexer is down" must not read as "that name doesn't exist".
+      setNameError(consumerErrorMessage(e));
     }
   }
 
@@ -171,8 +169,9 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
 
   // --- running ---------------------------------------------------------------
   if (action.phase === "running") {
-    // A chain shows its TRANSACTIONS as the steps, each described by the stage it is
-    // in; a plain spend keeps the assemble/prove/submit rail it always had.
+    // A chain shows its TRANSACTIONS as the steps, each described by the stage it
+    // is in — the between-legs self-scan wait included ("waiting"); a plain spend
+    // keeps the assemble/prove/submit rail.
     const chained = action.legCount > 1;
     const steps = chained
       ? stepsForRun(chainSteps(action.legCount, isTransfer ? "Sending" : "Withdrawing"), action.unlocking)
@@ -199,31 +198,29 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
         amount={review}
         hint={!isTransfer ? <FlowHint direction="unshield" /> : undefined}
         note={
-          plan.legCount > 1 ? (
-            <ApprovalPlan pieces={plan.pieces} legCount={plan.legCount} terminal={terminalWord} />
-          ) : undefined
+          <>
+            {plan.legCount > 1 && (
+              <ApprovalPlan pieces={plan.pieces} legCount={plan.legCount} terminal={terminalWord} />
+            )}
+            {!isTransfer && <p className="text-sm text-muted">{WITHDRAW_PROOF_BOUND_NOTE}</p>}
+          </>
         }
         download={action.download}
         onCancel={action.cancel}
         onConfirm={confirm}
       >
-        {isTransfer && (
+        {isTransfer && activeResolve && (
           <>
             <dt className="text-muted text-sm">To</dt>
-            <dd className="font-mono text-right text-[0.9rem] [overflow-wrap:anywhere]">
-              {/* canonical base58 regardless of which form was typed — what the
-                  user confirms is the address, not their keystrokes. A resolved
-                  name shows BOTH halves of the binding (name AND owner address):
-                  what is confirmed is "this name pays this key". */}
-              {activeRecord ? (
-                <>
-                  <span className="font-sans font-semibold">{activeRecord.name}</span>
-                  <br />
-                  {encodeAddress(decodeAddress(activeRecord.owner))}
-                </>
-              ) : (
-                encodeAddress(decodeAddress(recipient.trim()))
-              )}
+            <dd className="text-right text-[0.9rem] [overflow-wrap:anywhere]">
+              {/* both halves of the binding: the name being paid, and the key the
+                  directory vouches for it — what is confirmed is "this name pays
+                  this key", not the keystrokes. */}
+              <span className="font-semibold">{activeResolve.name}</span>
+              <br />
+              <span className="font-mono text-muted text-[0.8rem]">
+                {shortenPubkey(activeResolve.recipient.owner)}
+              </span>
             </dd>
           </>
         )}
@@ -237,14 +234,6 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
             </dd>
           </>
         )}
-        {!isTransfer && DEFAULTS.relayerUrl && (
-          <>
-            {/* the relayed path shows no wallet gas popup after Confirm — say
-                why up front, or the missing popup reads as a hang. */}
-            <dt className="text-muted text-sm">Gas</dt>
-            <dd className="text-right text-[0.9rem]">Sponsored — submitted by the relayer</dd>
-          </>
-        )}
         <dt className="text-muted text-sm">Network</dt>
         <dd className="text-right text-[0.9rem] [overflow-wrap:anywhere]">
           {DEFAULTS.chainName} · chain {DEFAULTS.chainId}
@@ -254,11 +243,11 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
   }
 
   // --- form ------------------------------------------------------------------
-  // The one-time key download takes over the screen only for the circuit the screen
-  // OPENS on, where nothing is typed yet. The arity-10 key starts downloading while
-  // the user is mid-amount, and replacing the form then would strand them with no
-  // way to correct what they typed — the confirm sheet's own progress bar (and its
-  // disabled Confirm) covers that one.
+  // The one-time key download takes over the screen only for the circuit the
+  // screen OPENS on, where nothing is typed yet. The arity-10 key starts
+  // downloading while the user is mid-amount, and replacing the form then would
+  // strand them with no way to correct what they typed — the confirm sheet's own
+  // progress bar (and its disabled Confirm) covers that one.
   if (action.download.active && plan.circuit === kind) {
     return <DownloadingPanel title={title} download={action.download} />;
   }
@@ -285,15 +274,14 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
           </Field>
         )}
         {isTransfer && (
-          <Field label="Recipient" error={recipient.trim() ? (rcptErr ?? nameError) : null}>
+          <Field label="To (payment name)" error={recipient.trim() ? nameError : null}>
             <TextInput
-              mono
-              placeholder="bongtu address (3… or legacy 0x…) or name"
+              placeholder="Payment name, like alice"
               value={recipient}
               onChange={(e) => {
                 setRecipient(e.target.value);
                 // any edit invalidates the resolve result AND its error — the
-                // activeRecord guard would re-judge anyway; clearing keeps the
+                // activeResolve guard would re-judge anyway; clearing keeps the
                 // field honest immediately
                 setResolved(null);
                 setNameError(null);

@@ -1,8 +1,10 @@
 // The three phases Send, Withdraw and Deposit render identically: the one-time asset
 // download, the staged run, and the confirm sheet. Only the confirm ROWS differ per
-// action (a recipient, a source, a note about the extra approve tx), so those come in
-// as children; everything around them is written once here. The fourth phase, done,
-// is SuccessPanel — the same idea, already shared.
+// action (a recipient name, a payout address, a note about the extra approve tx), so
+// those come in as children; everything around them is written once here. The fourth
+// phase, done, is SuccessPanel — the same idea, already shared. Trimmed against
+// treasury-web's panels only where this profile removed the feature (no sponsored-gas
+// row: consumer v1 self-submits every leg).
 //
 // The machine that decides WHICH of these renders is src/ui/actionMachine.ts.
 
@@ -14,10 +16,18 @@ import { Button } from "./controls.js";
 import { IconShieldCheck, IconWallet } from "./icons.js";
 import type { CircuitDownloadView } from "../hooks.js";
 
-function Panel({ title, children }: { title: string; children: ReactNode }): ReactNode {
+function Panel({
+  title,
+  backDisabled = false,
+  children,
+}: {
+  title: string;
+  backDisabled?: boolean;
+  children: ReactNode;
+}): ReactNode {
   return (
     <div className="flex flex-col gap-4.5 px-4.5 pt-4.5 pb-6.5">
-      <ScreenHeader title={title} />
+      <ScreenHeader title={title} backDisabled={backDisabled} />
       <div className="flex flex-col gap-4">{children}</div>
     </div>
   );
@@ -69,7 +79,11 @@ export function RunningPanel({
   walletName: string;
 }): ReactNode {
   return (
-    <Panel title={title}>
+    // Back is disabled while the run is live: the flow keeps executing after an
+    // unmount (wallet popups with no app context behind them), and a remounted
+    // screen would show a fresh form over the hidden run — the OpGate refusal
+    // would then be the only trace an op exists. The run IS the screen.
+    <Panel title={title} backDisabled>
       <AmountHero amount={amount} />
       <StagedProgress
         stage={stage}
@@ -82,11 +96,8 @@ export function RunningPanel({
   );
 }
 
-/** The confirm sheet: the amount, the action's own detail rows, an optional note about
- *  what confirming will cost, and the Cancel / Confirm pair. Confirm stays disabled
- *  while the proving assets are still streaming in. */
-/** The one-glance direction of a confirm, drawn rather than listed (grill decision
- *  2026-07-28, variant A): two icon cards — wallet = Public kKRW, shield = Private
+/** The one-glance direction of a confirm, drawn rather than listed (the treasury-web
+ *  grill decision, kept): two icon cards — wallet = Public kKRW, shield = Private
  *  kKRW, the private side tinted as the protected one — joined by a dashed arrow
  *  whose dashes flow in the direction of the money. Deposit shields, withdraw
  *  unshields; the cards swap sides accordingly. */
@@ -149,6 +160,9 @@ export function ApprovalPlan({
   );
 }
 
+/** The confirm sheet: the amount, the action's own detail rows, an optional note about
+ *  what confirming will cost, and the Cancel / Confirm pair. Confirm stays disabled
+ *  while the proving assets are still streaming in. */
 export function ConfirmPanel({
   title,
   amount,

@@ -4,7 +4,7 @@
 // circuit tag. A prover is a PURE PROVER (SPEC §6): it turns this witness input
 // into a proof. It does NOT parse CSV, resolve ETH addresses to bjj pubkeys, build
 // merkle witnesses from chain state, or submit txs — the apps (payroll-web,
-// wallet-web) do all of that and hand the prover a finished input. So every
+// treasury-web) do all of that and hand the prover a finished input. So every
 // membership witness (root/pathElements/leafIndices/enabled) and every ciphertext
 // key (ecdhPrivateKey/encryptionNonce/authorityPublicKey) is already present in
 // the request.
@@ -15,7 +15,7 @@
 //     + deposit + the consumer disbursePriv (1×256, artifact stem
 //     disbursePriv256) — over HTTP; prover/prover_service/schema.py MIRRORS
 //     this file and must be kept in sync with it.
-//   - apps/wallet-web browser snarkjs: proves transfer/withdraw in-page (a
+//   - apps/treasury-web browser snarkjs: proves transfer/withdraw in-page (a
 //     self-custody wallet never sends spending-key witnesses to a server).
 //
 // The `input` field of each variant is EXACTLY the object the corresponding circom

@@ -1,4 +1,4 @@
-// Clipboard copy as a boolean-returning edge (the same contract wallet-web's
+// Clipboard copy as a boolean-returning edge (the same contract treasury-web's
 // lib/clipboard.ts established): browsers reject writeText outside a secure
 // context / user gesture, and headless tests have no navigator.clipboard at all.
 // The Copy-details affordance (Toast.tsx) claims "Copied" only on a true return.

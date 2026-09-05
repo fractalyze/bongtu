@@ -2,7 +2,7 @@
 // directly. The public wallet carries wagmi + RainbowKit because its users may
 // arrive with any extension or a phone over WalletConnect; the pay console is an
 // operator tool on the employer's desk — MetaMask-class extension, one account —
-// so it mirrors only the minimal part of wallet-web/src/lib/wagmi.ts: turn the
+// so it mirrors only the minimal part of treasury-web/src/lib/wagmi.ts: turn the
 // injected provider into the `Connection` shape @bongtu/client consumes (viem
 // wallet client over the provider for signatures/txs, viem public client on the
 // chain's RPC for reads/receipts), plus the live-account read the lock's session

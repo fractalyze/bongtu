@@ -33,7 +33,7 @@ deploy/cache
 # app trees the indexer image does not use
 prover
 apps/payroll-web
-apps/wallet-web
+apps/treasury-web
 
 # docs / misc
 docs

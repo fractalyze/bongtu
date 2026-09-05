@@ -11,7 +11,7 @@ One question decides where npm code lives: is it **deployed/run** (`apps/`) or
 **imported** by other workspace code (`packages/`)? So `apps/` holds the indexer (a
 deployed service, not a library — it moved out of the top level for exactly that
 reason) plus the two web apps, and `packages/` holds the core library (`@bongtu/core`). Renames rode along:
-`admin` → `admin-web` and `public` → `wallet-web`, because "public" said nothing about
+`admin` → `admin-web` and `public` → `wallet-web` (now `treasury-web`), because "public" said nothing about
 being the recipient wallet.
 
 At the refactor commit `packages/` also held `prover-cli`; one commit later
@@ -48,7 +48,7 @@ The refactor moved **cross-package** imports from deep-relative `../sdk/src/x.js
 **intra-package** imports still use NodeNext-style `./poseidon.js` specifiers pointing
 at sibling `.ts` files, and rollup resolves the literal `.js` first. The
 `tsJsResolve()` plugin (byte-identical in both app vite configs — see
-[`apps/wallet-web/vite.config.ts`](../apps/wallet-web/vite.config.ts)) rewrites a
+[`apps/treasury-web/vite.config.ts`](../apps/treasury-web/vite.config.ts)) rewrites a
 relative `.js` import to `.ts` whenever only the `.ts` exists. It stays until the
 intra-package specifier convention itself changes, which would be a repo-wide source
 migration, not a config tweak.

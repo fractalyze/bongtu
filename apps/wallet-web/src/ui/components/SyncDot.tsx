@@ -1,15 +1,13 @@
-// The nav's sync indicator: one colored dot that IS the refresh button. It replaced a
-// word-chip plus a separate refresh button (U-W9) — the header is icons only now, so
-// the state lives in the color and the words live in the tooltip.
-//
-// Two things feed one dot. The arbiter indexer's own liveness (GET /health, SPEC §6b)
-// says whether the mirror is caught up with the chain; the wallet's read state says
-// whether THIS page is mid-load or showing a failed read. Either being unhappy makes
-// the dot unhappy — a user who sees green must be able to trust the number above it.
+// The nav's sync indicator: one colored dot that IS the refresh button (the
+// treasury-web U-W9 shape, kept so the two wallets read identically). In THIS app
+// the freshness reference is the SELF-SCAN CURSOR measured against the public
+// `GET /head` — there is no /health coupling and no institutional read anywhere
+// in the dot's data path, because /head is the one fact the scan is measured
+// against and it is served key-free in every indexer mode.
 
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { fetchHealth, getHead, type Head, type Health } from "@bongtu/core/indexerApi";
+import { getHead, type Head } from "@bongtu/core/indexerApi";
 
 export type SyncState = "synced" | "syncing" | "stale";
 
@@ -33,25 +31,6 @@ const DOT: Record<SyncState, string> = {
   stale: "bg-err",
 };
 
-/**
- * One state out of the two inputs. A load in flight wins (it is the most recent
- * truth about the data on screen), then any failure — the read's own error, an
- * unreachable /health, or an indexer that reports itself behind. A health check that
- * has not answered yet reads as syncing, not as green: nothing is confirmed yet.
- */
-export function syncState(input: {
-  health: Health | null;
-  healthErrored: boolean;
-  refreshing: boolean;
-  dataError: boolean;
-}): SyncState {
-  if (input.refreshing) return "syncing";
-  if (input.dataError || input.healthErrored || (input.health !== null && !input.health.ok)) {
-    return "stale";
-  }
-  return input.health === null ? "syncing" : "synced";
-}
-
 /** The dot itself, state in / refresh out — pure, so every state gates headlessly. */
 export function SyncDot({ state, onRefresh }: { state: SyncState; onRefresh: () => void }): ReactNode {
   return (
@@ -69,11 +48,13 @@ export function SyncDot({ state, onRefresh }: { state: SyncState; onRefresh: () 
 }
 
 /**
- * The selfscan twin of syncState: the freshness reference is the SCAN CURSOR,
- * not the indexer's self-report. The dot is green only when the last completed
- * scan covered everything /head says exists (`scannedNextLeafIndex >=
- * head.nextLeafIndex`); a tree that has grown past the scan reads stale — tap
- * to rescan. Before either side has answered, nothing is confirmed: syncing.
+ * One state out of the scan's coverage vs the public head: the dot is green only
+ * when the last completed scan covered everything /head says exists
+ * (`scannedNextLeafIndex >= head.nextLeafIndex`); a tree that has grown past the
+ * scan reads stale — tap to rescan. A load in flight wins (it is the most recent
+ * truth about the data on screen), then any failure. Before either side has
+ * answered, nothing is confirmed: syncing — a user who sees green must be able
+ * to trust the number above it.
  */
 export function selfScanSyncState(input: {
   head: Head | null;
@@ -90,53 +71,9 @@ export function selfScanSyncState(input: {
 }
 
 /**
- * The dot Home renders: polls the indexer's health every 15 s and folds it together
- * with the page's own read state. `onRefresh` is the SAME manual-refresh path the
- * post-action poll lands on.
- */
-export function IndexerSyncDot({
-  indexerUrl,
-  refreshing,
-  dataError,
-  onRefresh,
-}: {
-  indexerUrl: string;
-  refreshing: boolean;
-  dataError: boolean;
-  onRefresh: () => void;
-}): ReactNode {
-  const [health, setHealth] = useState<Health | null>(null);
-  const [healthErrored, setHealthErrored] = useState(false);
-
-  useEffect(() => {
-    const alive = { current: true };
-    const poll = async (): Promise<void> => {
-      try {
-        const h = await fetchHealth(indexerUrl);
-        if (alive.current) {
-          setHealth(h);
-          setHealthErrored(false);
-        }
-      } catch {
-        if (alive.current) setHealthErrored(true);
-      }
-    };
-    void poll();
-    const id = setInterval(poll, 15_000);
-    return () => {
-      alive.current = false;
-      clearInterval(id);
-    };
-  }, [indexerUrl]);
-
-  return <SyncDot state={syncState({ health, healthErrored, refreshing, dataError })} onRefresh={onRefresh} />;
-}
-
-/**
- * The dot a SELFSCAN-mode Home renders: polls the public `GET /head` every 15 s
- * and compares it against the scan cursor's freshness stamp. No /health
- * dependency — /head is the one fact the scan is measured against, and it is
- * served key-free in every indexer mode.
+ * The dot Home renders: polls the public `GET /head` every 15 s and compares it
+ * against the scan cursor's freshness stamp. `onRefresh` is the SAME manual-
+ * refresh path every other retry lands on.
  */
 export function SelfScanSyncDot({
   indexerUrl,

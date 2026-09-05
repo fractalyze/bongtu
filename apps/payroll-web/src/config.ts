@@ -2,7 +2,7 @@
 // chainId, RPC/explorer, arbiter public key, H/B, gas floor, ABI fragments)
 // live in @bongtu/core/network — ONE home, equality-tested against the deploy
 // record — and the KDF domain facts in
-// @bongtu/client/identity KEY_DERIVATION (shared with wallet-web, so both apps
+// @bongtu/client/identity KEY_DERIVATION (shared with treasury-web, so both apps
 // derive the same key for the same account by construction). Everything here is
 // PUBLIC: the arbiter *public* key is the pool's stored authority pubkey — the
 // disburse/deposit circuits encrypt their authority envelope to it. No PRIVATE

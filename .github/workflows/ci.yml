@@ -1,10 +1,10 @@
 # bongtu CI — every gate a GitHub-hosted ubuntu runner can genuinely pass.
 #
 # INCLUDED
-#   node-fast/-payroll/-wallet
+#   node-fast/-payroll/-wallet/-treasury
 #                        npm ci + typecheck (root cross-tree tsc + every workspace
-#                        tsc) + unit tests (core, payroll-web, wallet-web) + the
-#                        two vite builds.
+#                        tsc) + unit tests (core, payroll-web, wallet-web, treasury-web) + the
+#                        three vite builds.
 #   indexer-units        the anvil-free indexer unit suite (tree + disclosure +
 #                        ingest) in its own parallel job: it needs extdeps +
 #                        a forge build (pool ABI), which would fatten the node
@@ -72,7 +72,7 @@
 #
 # LANES (2026-09-04): pull requests run the FAST lane only — the `changes`
 # router skips every job whose inputs did not change, and the node job is
-# split (node-fast / node-payroll / node-wallet) so the wall time is the
+# split (node-fast / node-payroll / node-wallet / node-treasury) so the wall time is the
 # slowest suite, not their sum. The HEAVY lane (circuits, e2e-m0,
 # indexer-conformance) runs on pushes to main, on workflow_dispatch, and on
 # PRs labeled `ci:heavy` — measured warm timings made the call: forge 33s,
@@ -248,7 +248,7 @@ jobs:
       - name: wallet-web build
         run: npm run build -w @bongtu/wallet-web
 
-  node-consumer:
+  node-treasury:
     needs: changes
     if: ${{ success() && needs.changes.outputs.code == 'true' }}
     runs-on: ubuntu-latest
@@ -269,10 +269,10 @@ jobs:
           key: node-modules-v1-${{ hashFiles('package-lock.json') }}
       - if: steps.nm.outputs.cache-hit != 'true'
         run: npm ci
-      - name: consumer-web tests
-        run: npm test -w @bongtu/consumer-web
-      - name: consumer-web build
-        run: npm run build -w @bongtu/consumer-web
+      - name: treasury-web tests
+        run: npm test -w @bongtu/treasury-web
+      - name: treasury-web build
+        run: npm run build -w @bongtu/treasury-web
 
   indexer-units:
     needs: changes

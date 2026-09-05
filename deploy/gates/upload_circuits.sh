@@ -11,12 +11,12 @@
 # pin committed in src/config.ts.
 #
 # Usage: BLOB_READ_WRITE_TOKEN=... deploy/gates/upload_circuits.sh [assets-dir]
-#   assets-dir defaults to apps/wallet-web/public/circuits next to this repo.
+#   assets-dir defaults to apps/treasury-web/public/circuits next to this repo.
 #   Token: `vercel env pull` in the linked wallet dir, or the store's RW token.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")/../.." && pwd)   # deploy/gates -> repo root
-ASSETS=${1:-"$HERE/apps/wallet-web/public/circuits"}
+ASSETS=${1:-"$HERE/apps/treasury-web/public/circuits"}
 # `vercel blob` reads BLOB_READ_WRITE_TOKEN from the env on its own — the
 # guard below only fails fast; the token is never passed as a flag, because
 # argv is world-readable in /proc for the duration of each upload.
@@ -30,7 +30,7 @@ for f in transfer.wasm transfer.zkey transfer10x2.wasm transfer10x2.zkey withdra
   test -s "$ASSETS/$f" || { echo "missing proving asset: $ASSETS/$f" >&2; exit 1; }
 done
 
-pinned=$(grep -oE 'CIRCUITS_VERSION = "[0-9a-f]+"' "$HERE/apps/wallet-web/src/config.ts" | grep -oE '[0-9a-f]{8}')
+pinned=$(grep -oE 'CIRCUITS_VERSION = "[0-9a-f]+"' "$HERE/apps/treasury-web/src/config.ts" | grep -oE '[0-9a-f]{8}')
 actual=$(cat "$ASSETS/transfer.zkey" "$ASSETS/transfer10x2.zkey" "$ASSETS/withdraw.zkey" "$ASSETS/deposit.zkey" | sha256sum | cut -c1-8)
 if [ "$pinned" != "$actual" ]; then
   echo "zkeys do not match CIRCUITS_VERSION: pinned=$pinned actual=$actual" >&2
