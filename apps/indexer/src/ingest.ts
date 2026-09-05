@@ -19,7 +19,6 @@
 // and the per-slice leafIndex a wallet needs to request a path after it
 // trial-decrypts. Every disburse also runs the disclosureHash check (§6b).
 
-import type { Pool } from "pg";
 import {
   BaseError,
   ContractFunctionRevertedError,
@@ -42,14 +41,15 @@ import { isStealthAnnouncement } from "@bongtu/core/stealth";
 
 import { MirrorTree } from "./tree.js";
 import { poolAbi, abiKnowsKem, kemBootGuardError, staleOpAbiError, portalFactoryAbi, consumerModuleAbi, type ChainConfig } from "./chain.js";
-import { type FeedEntry, InMemoryStore, type StorePort, type Slice } from "./store.js";
+import { type FeedEntry, type Slice } from "./store.js";
 import { verifyDisclosure, verifyConsumerDisclosure } from "./disclosure.js";
 import { connect, PostgresStore, PostgresLedger } from "./postgres.js";
 import { NameRegistry } from "./names.js";
 import { PortalRegistry } from "./portal.js";
 import { ModuleRegistry } from "./modules.js";
 import { KemChunkStore } from "./kemchunks.js";
-import { DisclosureRegistry } from "./solana/served.js";
+import { IndexerHostBase } from "./host.js";
+import { BlockCursor, persistAtomically, type PersistParticipant } from "./persist.js";
 
 // A block pin for readContract: viem takes a bigint blockNumber or a named
 // blockTag, where ethers took a single `{ blockTag }` override.
@@ -71,30 +71,6 @@ function isViemPreKemProbeError(e: unknown): boolean {
       (err) => err instanceof ContractFunctionZeroDataError || err instanceof ContractFunctionRevertedError,
     ) !== null
   );
-}
-
-/**
- * A tail poll racing the RPC's replicas, not a real failure: `getBlockNumber()`
- * was answered by a fresher replica than the `eth_getLogs` / pinned `eth_call`
- * that follows, so the pinned block is "beyond head" (or not yet visible) on the
- * laggier node — observed on the load-balanced public sepolia.base.org, whose
- * reported head regresses several blocks between consecutive requests. The
- * cursor stays unadvanced and the next poll re-derives a fresh head, so these
- * self-heal; counting them toward the /health failure streak would flip
- * ok:false during ordinary replica skew (2,175 hits in one 48h window).
- */
-function isTransientHeadRaceError(e: unknown): boolean {
-  const matches = (s: string) =>
-    s.includes("block range extends beyond current head block") || s.includes("block not found");
-  if (e instanceof BaseError) {
-    return (
-      e.walk((err) => {
-        const details = (err as { details?: unknown }).details;
-        return (typeof details === "string" && matches(details)) || (err instanceof Error && matches(err.message));
-      }) !== null
-    );
-  }
-  return e instanceof Error && matches(e.message);
 }
 
 const H = 32; // IMT height — a system-wide constant (SPEC §4)
@@ -185,79 +161,28 @@ export async function fetchBlockTimestamp(
   return 0;
 }
 
-export class Indexer {
-  readonly cfg: ChainConfig;
+export class Indexer extends IndexerHostBase {
+  // The EVM chain plumbing lives HERE, never on the shared host base: a
+  // Solana-only process must boot with no viem client and no Foundry artifact
+  // on disk (host.ts header).
   readonly publicClient: PublicClient;
   // The combined dual-ABI (built V2 artifact ++ frozen V1 op fragments) viem
   // decodeEventLog / readContract dispatch on. Exposed so the anvil-free unit
   // test can round-trip raw event encodings through the exact ABI ingest uses.
   readonly abi: Abi;
-  // The runtime store is ALWAYS PostgresStore (Postgres-only, U-I4), swapped in
-  // by bootPostgres at first ingest. The InMemoryStore default is the pre-boot
-  // placeholder (so /health can answer before the first ingest completes) and the
-  // pure applyLogs-level double the anvil-free unit test drives — it is the same
-  // read-model class PostgresStore itself wraps, never a selectable backend.
-  // Not `readonly` — bootPostgres replaces it in place, and the API reads
-  // `ix.store` live per request.
-  store: StorePort = new InMemoryStore();
-  tree!: MirrorTree;
-  batchSize = 0;
-  // Arbiter mode (SPEC §6b v2): set when the config carries the arbiter private
-  // key. The key lives only inside `ledger`; `arbiterMode` is the routing flag
-  // the API uses to register /notes + serve within-batch paths. The key itself
-  // is NEVER read back out for logging or HTTP.
-  readonly arbiterPriv: bigint | null;
-  readonly arbiterMode: boolean;
-  ledger: PostgresLedger | null = null;
-  // The name directory (names.ts) — always present so /names serves in every
-  // mode; bootPostgres swaps in the pool-backed one (pre-boot: memory-only).
-  names: NameRegistry = new NameRegistry(null);
-  // Portal issuance records (portal.ts) — always present so the /portal routes
-  // can answer in every mode; bootPostgres swaps in the pool-backed one. The
-  // routes themselves 404 when cfg.portalFactory is unset.
-  portal: PortalRegistry = new PortalRegistry(null);
   // The op-module registry mirror (modules.ts, OPMOD §1.4): derived from the
   // pool's balanced ModuleRegistered/ModuleRemoved stream, it drives the
   // module-address log watch-set. bootPostgres swaps in the pool-backed one.
+  // EVM-only (no op modules on the Solana rail), so it lives here, not on the
+  // host base.
   modules: ModuleRegistry = new ModuleRegistry(null);
-  // Consumer-disburse kem chunk assembly (kemchunks.ts, OPMOD §5): batch
-  // hashes + accepted chunk bytes, the /events kem projection, and the
-  // pending-module set the removed-module watch rule keys on.
-  kem: KemChunkStore = new KemChunkStore(null);
-  // The kem-pending → kem-withheld grace window in seconds (OPMOD §5) — parsed
-  // ONCE at boot (chain.ts KEM_GRACE_SECONDS); routes read it here, never
-  // process.env. Mutable on purpose: the conformance test flips it mid-run to
-  // project the same incomplete batch as withheld deterministically.
-  kemGraceSeconds: number;
-  // Institution-served disclosure blobs (SOLR §3.3.2): the registry behind
-  // GET /disclosure and the served-blob alarm classes. Only the Solana
-  // backend records batches into it — on EVM the disburse bytes are
-  // consensus-published — so it stays empty here and every route it feeds
-  // serves identical bytes across backends.
-  readonly disclosures: DisclosureRegistry;
-  // The shared Postgres pool (set by bootPostgres; null only before first ingest).
-  // Store and ledger are built on this ONE pool, so `persist` can acquire a single
-  // client and commit the store rows, ledger rows, and cursor in ONE transaction.
-  // Protected: the Solana backend subclass runs its own atomic persist over
-  // the same pool.
-  protected pgPool: Pool | null = null;
-
-  // ---- tail-poll operational state (projected by GET /health) --------------
-  // Recorded by pollOnce so "wedged since block N" vs "healthy" is machine-
-  // visible instead of a swallow-and-log line on a headless service.
-  lastError: string | null = null;
-  lastErrorAt: number | null = null; // ms epoch
-  consecutiveFailures = 0;
-  lastSuccessAt: number | null = null; // ms epoch
-  // Head-race retries (see isTransientHeadRace) — observability only, never part
-  // of the failure streak. lastSuccessAt is NOT stamped on a transient, so a
-  // tail that only ever head-races still shows a stale lastSuccessAt to callers.
-  transientHeadRaces = 0;
-  lastTransientAt: number | null = null; // ms epoch
-  private polling = false; // one in-flight tail attempt at a time
+  // The DECLARED persist participant set + its cursor (persist.ts), built by
+  // bootPostgres in flush == commit order.
+  private participants: PersistParticipant[] = [];
+  private blockCursor: BlockCursor | null = null;
 
   constructor(cfg: ChainConfig) {
-    this.cfg = cfg;
+    super(cfg);
     // Pool ABI ++ the PortalFactory fragments ++ the consumer op-module
     // fragments: decodeEventLog dispatches on topic0 across the set, so Swept
     // logs (scanned only when PORTAL_FACTORY is configured) and module-emitted
@@ -266,10 +191,6 @@ export class Indexer {
     // reads.
     this.abi = [...poolAbi(), ...portalFactoryAbi, ...consumerModuleAbi];
     this.publicClient = createPublicClient({ transport: http(cfg.rpc) });
-    this.arbiterPriv = cfg.authorityKey ?? null;
-    this.arbiterMode = this.arbiterPriv !== null;
-    this.kemGraceSeconds = cfg.kemGraceSeconds ?? 3600;
-    this.disclosures = new DisclosureRegistry(cfg.disclosureDir ?? null, cfg.disclosureGraceSeconds ?? 3600);
   }
 
   /** A pinned readContract against the pool (the ONE place the address+ABI meet). */
@@ -558,63 +479,22 @@ export class Indexer {
   }
 
   /**
-   * Atomic write-behind persist (Postgres backend) — the crash-safety core.
-   *
-   * Acquires ONE client from the shared pool and, in a single BEGIN/COMMIT, stages
-   * the store rows (events/nullifiers/leaf delta), the ledger rows
-   * (notes/history/alarms/applied-ops), and the block cursor. Because leaves and
-   * cursor commit together, a crash mid-persist ROLLs BACK both: the durable state
-   * is either fully at block H or fully at the previous cursor, never the wedged
-   * in-between (leaves at H, cursor behind) that made bootPostgres's reconstructed
-   * frontier disagree with the on-chain state at the cursor. Buffers are cleared
-   * and the in-memory cursor advanced ONLY after COMMIT, so a rolled-back batch is
-   * retried verbatim by the next poll (applyLogs + every module are replay-idempotent).
+   * Atomic write-behind persist: the EVM rail's DECLARED participant list
+   * (store rows, ledger rows in arbiter mode, portal, modules, kem, then the
+   * block cursor) handed to the ONE persistAtomically implementation
+   * (persist.ts owns the transaction and the commit-only-after-COMMIT rule).
+   * Because rows and cursor commit together, a crash mid-persist ROLLs BACK
+   * both: durable state is either fully at block H or fully at the previous
+   * cursor, never the wedged in-between (leaves at H, cursor behind) that made
+   * bootPostgres's reconstructed frontier disagree with the on-chain state at
+   * the cursor; a rolled-back batch is retried verbatim by the next poll
+   * (applyLogs + every participant are replay-idempotent).
    */
   private async persist(head: number): Promise<void> {
-    // ingest() always runs bootPostgres before its first persist, so the pool is set.
-    const client = await this.pgPool!.connect();
-    try {
-      await client.query("BEGIN");
-      await this.store.flushInto!(client);
-      await this.ledger?.flushInto(client);
-      await this.portal.flushInto(client);
-      await this.modules.flushInto(client);
-      await this.kem.flushInto(client);
-      await this.store.persistCursorInto!(client, head);
-      // TEST-ONLY fault injection: crash at the pre-COMMIT point (every row + the
-      // cursor staged but not yet durable) so the atomicity window is exercised
-      // deterministically. Never set outside test/pg_resume.ts.
-      if (process.env.BONGTU_CRASH_BEFORE_COMMIT === String(head)) {
-        throw new Error(`crash-before-commit fault injection @block ${head}`);
-      }
-      await client.query("COMMIT");
-    } catch (e) {
-      try {
-        await client.query("ROLLBACK");
-      } catch {
-        // The connection may already be dead (real crash) — keep the original error.
-      }
-      throw e;
-    } finally {
-      client.release();
-    }
-    // Durable now: drop the write-behind buffers and advance the in-memory cursor.
-    // A COMMIT failure skips this (both untouched), so pollOnce re-ingests the same
-    // range from the unadvanced cursor and re-persists.
-    this.store.commitFlush?.();
-    this.ledger?.commitFlush();
-    this.portal.commitFlush();
-    this.modules.commitFlush();
-    this.kem.commitFlush();
-    this.store.lastBlock = head;
-  }
-
-  /** Release the Postgres pool on a graceful shutdown (no-op before first ingest). */
-  async close(): Promise<void> {
-    if (this.pgPool) {
-      await this.pgPool.end();
-      this.pgPool = null;
-    }
+    // ingest() always runs bootPostgres before its first persist, so the pool,
+    // the cursor, and the participant list are set.
+    this.blockCursor!.advanceTo(head);
+    await persistAtomically(this.pgPool!, this.participants, String(head));
   }
 
   /**
@@ -646,6 +526,14 @@ export class Indexer {
     const kem = new KemChunkStore(pool);
     await kem.boot();
     this.kem = kem;
+    // The DECLARED persist participant set (persist.ts), in flush == commit
+    // order; the block cursor is itself a participant, LAST, so every row for
+    // block H is staged in the transaction before the cursor that claims H.
+    this.blockCursor = new BlockCursor(store);
+    // The list captures the boot-time instances on purpose: boot is one-shot,
+    // and persist must never desync from the store routes serve — do not
+    // reassign this.store after boot without rebuilding this list.
+    this.participants = [store, ...(this.ledger ? [this.ledger] : []), this.portal, this.modules, this.kem, this.blockCursor];
     // Accepted-unassembled recovery: an accepted chunk whose submit-tx calldata
     // could not be decoded at ingest time persisted with NULL bytes. Boot
     // re-attempts the fetch+decode once per such chunk — an RPC that failed or
@@ -717,49 +605,6 @@ export class Indexer {
       }
       this.kem.attachChunkData(c.batchId, c.chunkIndex, data);
     }
-  }
-
-  /**
-   * One guarded tail attempt: re-ingest from the cursor, recording success /
-   * failure state for GET /health. Never throws — a failing RPC or a genuine
-   * mirror-root divergence lands in `lastError` + `consecutiveFailures` instead
-   * of only a log line, and the cursor stays unadvanced so the next attempt
-   * retries the same range. Replica head-races are the one exception: they land
-   * in `transientHeadRaces` and never touch the failure streak. Concurrent
-   * calls coalesce (one in-flight attempt).
-   */
-  async pollOnce(): Promise<void> {
-    if (this.polling) return;
-    this.polling = true;
-    try {
-      await this.ingest(this.store.lastBlock + 1);
-      this.consecutiveFailures = 0;
-      this.lastSuccessAt = Date.now();
-    } catch (e) {
-      if (isTransientHeadRaceError(e)) {
-        // Replica head-race: retried from the same cursor next poll. One short
-        // line (not viem's multi-line dump), and no streak bump — see
-        // isTransientHeadRaceError for why this must not reach /health's ok.
-        this.transientHeadRaces++;
-        this.lastTransientAt = Date.now();
-        console.warn(`tail ingest head-race #${this.transientHeadRaces} (retrying next poll): ${(e as Error).message.split("\n", 1)[0]}`);
-      } else {
-        this.consecutiveFailures++;
-        this.lastError = (e as Error).message;
-        this.lastErrorAt = Date.now();
-        console.error("tail ingest error:", this.lastError);
-      }
-    } finally {
-      this.polling = false;
-    }
-  }
-
-  /** Start the incremental tail poll (one pollOnce per `pollMs`); returns a stopper. */
-  startTailPolling(pollMs: number): () => void {
-    const timer = setInterval(() => {
-      void this.pollOnce();
-    }, pollMs);
-    return () => clearInterval(timer);
   }
 
   /**

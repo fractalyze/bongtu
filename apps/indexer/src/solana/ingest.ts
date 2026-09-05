@@ -6,8 +6,8 @@
 // `applyLedgerTxs(SolanaLedgerTx[])` below is that layer's Solana double —
 // same tree, same store, same feed shapes — with only the fetch layer
 // (SolanaChainIo) rail-specific. Nothing here forks the read model: the API
-// routes read the inherited members (`store`, `tree`, `disclosures`, health
-// state) and cannot tell the backends apart.
+// routes read the shared host members (`store`, `tree`, `disclosures`, health
+// state — src/host.ts IndexerHost) and cannot tell the backends apart.
 //
 // Per-op mirror assertion (SOLR §3.2.1): every op's self-CPI event carries the
 // program's own resulting root, and the mirror is asserted against it PER OP —
@@ -26,8 +26,10 @@
 // (mirror == TreeState at head) — a normal RPC cannot serve historical
 // account state, so the at-cursor check completes at the first head assert.
 
+import type { PoolClient } from "pg";
 import { MirrorTree } from "../tree.js";
-import { Indexer } from "../ingest.js";
+import { IndexerHostBase } from "../host.js";
+import { BlockCursor, persistAtomically, type PersistParticipant } from "../persist.js";
 import { connect, PostgresStore } from "../postgres.js";
 import { NameRegistry } from "../names.js";
 import { isStealthAnnouncement } from "@bongtu/core/stealth";
@@ -61,13 +63,48 @@ export interface SolanaChainIo {
 
 const dec = (x: bigint): string => x.toString();
 
-export class SolanaIndexer extends Indexer {
+/**
+ * This rail's signature cursor as a persist PARTICIPANT (persist.ts): the
+ * solana_cursor upsert stages in the SAME transaction as the rows it pins,
+ * and the in-memory resume point advances only after COMMIT — no inline
+ * cursor SQL in any persist body.
+ */
+class SolanaSignatureCursor implements PersistParticipant {
+  private target: string | null = null;
+  constructor(private readonly onDurable: (signature: string) => void) {}
+
+  advanceTo(signature: string): void {
+    this.target = signature;
+  }
+
+  async flushInto(client: PoolClient): Promise<void> {
+    if (this.target === null) {
+      throw new Error("SolanaSignatureCursor.flushInto before advanceTo — the cursor participant has no target");
+    }
+    await client.query(
+      `INSERT INTO solana_cursor (id, signature) VALUES (1, $1)
+       ON CONFLICT (id) DO UPDATE SET signature = EXCLUDED.signature`,
+      [this.target],
+    );
+  }
+
+  commitFlush(): void {
+    if (this.target !== null) this.onDurable(this.target);
+  }
+}
+
+export class SolanaIndexer extends IndexerHostBase {
   private readonly io: SolanaChainIo;
   /** The pool program id as 0x-hex (the dispatch filter's byte form). */
   readonly solanaProgramId: string;
   /** The signature half of the ledger cursor (slot rides store.lastBlock). */
   cursorSignature: string | null = null;
   private booted = false;
+  // The DECLARED persist participant set + both cursor halves (persist.ts),
+  // built by boot() in flush == commit order.
+  private participants: PersistParticipant[] = [];
+  private blockCursor: BlockCursor | null = null;
+  private sigCursor: SolanaSignatureCursor | null = null;
 
   constructor(cfg: ChainConfig, io: SolanaChainIo, programIdHex: string) {
     super(cfg);
@@ -88,11 +125,11 @@ export class SolanaIndexer extends Indexer {
    *  arbiter half of its checklist cannot arise here (the constructor refuses
    *  arbiter mode outright); public-mode KEM epoch discipline is enforced by
    *  the program's config flags instead. */
-  override async kemBootGuard(): Promise<string | null> {
+  async kemBootGuard(): Promise<string | null> {
     return null;
   }
 
-  override async head(): Promise<{ root: bigint; nextLeafIndex: number }> {
+  async head(): Promise<{ root: bigint; nextLeafIndex: number }> {
     return this.io.treeHead();
   }
 
@@ -122,6 +159,17 @@ export class SolanaIndexer extends Indexer {
     this.names = names;
     const cur = await pool.query("SELECT signature FROM solana_cursor WHERE id = 1");
     this.cursorSignature = cur.rows.length > 0 ? String(cur.rows[0].signature) : null;
+    // The DECLARED persist participant set (persist.ts), in flush == commit
+    // order: rows first, then both cursor halves — the slot rides the shared
+    // block cursor, the signature is this rail's own participant.
+    this.blockCursor = new BlockCursor(store);
+    this.sigCursor = new SolanaSignatureCursor((signature) => {
+      this.cursorSignature = signature;
+    });
+    // Captures the boot-time store on purpose (boot is one-shot); a post-boot
+    // this.store reassignment would desync persist from the served store —
+    // rebuild this list if that ever becomes a thing.
+    this.participants = [store, this.blockCursor, this.sigCursor];
 
     // Served-blob registry rebuild + the per-batch boot invariant: every
     // persisted disburse anchor re-checks its institution-held blob against
@@ -183,7 +231,7 @@ export class SolanaIndexer extends Indexer {
    * meaningless here and ignored — the signature cursor owns the resume
    * point).
    */
-  override async ingest(): Promise<void> {
+  async ingest(): Promise<void> {
     await this.boot();
     const txs = await this.io.txsSince(this.cursorSignature);
     this.applyLedgerTxs(txs);
@@ -403,34 +451,15 @@ export class SolanaIndexer extends Indexer {
   }
 
   /**
-   * The atomic persist (EVM `persist` discipline): rows + the slot cursor +
-   * the signature cursor in ONE transaction, buffers dropped only after
-   * COMMIT — a crash retries the same signature gap verbatim.
+   * Atomic persist: this rail's DECLARED participant list (store rows, the
+   * slot cursor, the signature cursor) handed to the ONE persistAtomically
+   * implementation (persist.ts) — rows + both cursor halves in ONE
+   * transaction, buffers dropped only after COMMIT, so a crash retries the
+   * same signature gap verbatim.
    */
   private async persistSolana(slot: number, signature: string): Promise<void> {
-    const client = await this.pgPool!.connect();
-    try {
-      await client.query("BEGIN");
-      await this.store.flushInto!(client);
-      await this.store.persistCursorInto!(client, slot);
-      await client.query(
-        `INSERT INTO solana_cursor (id, signature) VALUES (1, $1)
-         ON CONFLICT (id) DO UPDATE SET signature = EXCLUDED.signature`,
-        [signature],
-      );
-      await client.query("COMMIT");
-    } catch (e) {
-      try {
-        await client.query("ROLLBACK");
-      } catch {
-        // dead connection: the original error stands
-      }
-      throw e;
-    } finally {
-      client.release();
-    }
-    this.store.commitFlush?.();
-    this.store.lastBlock = slot;
-    this.cursorSignature = signature;
+    this.blockCursor!.advanceTo(slot);
+    this.sigCursor!.advanceTo(signature);
+    await persistAtomically(this.pgPool!, this.participants, String(slot));
   }
 }
