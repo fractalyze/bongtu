@@ -156,25 +156,22 @@ Receiver ciphertexts are unaffected: they stay keyed by plain `ECDH(ephemeral, r
 
 ### Op shapes and epoch semantics
 
-Every op takes the KEM ciphertext alongside its public-signal vector, and each vector grew by one
-signal (`kemBinding`, declared last so no existing output index moved):
+Entry-point signatures, calldata rules and events are owned by
+[contracts.md](contracts.md#entry-points); exact public-signal index layouts by
+[circuits.md](circuits.md#public-surfaces). Going hybrid grew every public vector by one signal —
+`kemBinding`, declared last so no existing output index moved: deposit 18 → **19**, transfer
+36 → **37**, withdraw 25 → **26** (now `uint[27]` with the appended stealth `recipient`),
+disburse 10 → **11**.
 
-| op | signature | publics |
-|---|---|---|
-| deposit | `deposit(a,b,c, uint[19] pub, bytes kemCiphertext)` | 18 → **19** |
-| transfer | `transfer(a,b,c, uint[37] pub, bytes kemCiphertext)` | 36 → **37** |
-| withdraw | `withdraw(a,b,c, uint[26] pub, bytes kemCiphertext)` | 25 → **26** |
-| disburse | `disburseWithCiphertexts(a,b,c, uint[11] pub, uint256[] receiverCiphertexts, bytes kemCiphertext)` | 10 → **11** |
-
-Exact index layouts are in [circuits.md](circuits.md#public-surfaces).
-
-Arbiter epochs carry the KEM boundary. An epoch is `{keyX, keyY, activatedBlock}` in
+Arbiter epochs carry the KEM boundary: an epoch is `{keyX, keyY, activatedBlock}` in
 `arbiterEpochs` plus `arbiterKemPkHash[epoch]`, the keccak256 of that epoch's 1184-byte ML-KEM-768
-encapsulation key. Every epoch the pool mints carries a real hash — `initialize` and `rotateArbiter`
-both revert `ZeroKemPkHash` — so a **zero** hash means exactly one thing to a reader: that epoch
-index was never minted. There is no second, KEM-less regime to distinguish. Clients read
-`arbiterKemPkHash(currentEpoch())` and verify their bundled encapsulation key against it before
-encapsulating.
+encapsulation key. Every epoch the pool mints carries a real hash (`initialize` and
+`rotateArbiter` both revert `ZeroKemPkHash`), so a **zero** hash means exactly one thing to a
+reader: that epoch index was never minted — there is no second, KEM-less regime to distinguish.
+Clients read `arbiterKemPkHash(currentEpoch())` and verify their bundled encapsulation key against
+it before encapsulating. Storage and rotation mechanics: [contracts.md](contracts.md#arbiter-epochs).
+
+What each op's envelope contains — the layout this doc owns:
 
 | op | plaintext | len | authority ct |
 |---|---|---|---|

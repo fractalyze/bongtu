@@ -26,9 +26,9 @@ machine set the env var. The call sites are the proving paths `deploy/live/lib/p
 `circuits/gates/assert_attacks_throw.ts` and `circuits/gates/auditor_decrypt_check.ts`, and
 `chains/evm/test/fixtures/gen_realproofs.ts`. The `circuits/fixtures/gen_*.ts` fixture generators are
 *not* on this path: they import only `@bongtu/core` and node builtins, so `build/prove_all.sh` runs
-without it. Chain access everywhere is viem, an ordinary dependency. The browser apps are separate:
-`apps/treasury-web` declares `snarkjs` as an ordinary dependency, bundled by Vite. `pot15_hez` is too
-small — `transfer` alone is ~62K constraints.
+without it. Chain access everywhere is viem, an ordinary dependency. The browser apps are separate: both
+`apps/treasury-web` and `apps/wallet-web` declare `snarkjs` as an ordinary dependency, bundled by
+Vite. `pot15_hez` is too small — `transfer` alone is ~62K constraints.
 
 ## Include resolution roots
 

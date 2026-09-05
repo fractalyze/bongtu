@@ -1,136 +1,25 @@
 # @bongtu/indexer
 
-The bongtu read-side service: it ingests `BongtuPool` events from an RPC, maintains an
-off-chain mirror of the on-chain IMT, and serves the merkle-path / ciphertext-feed /
-alarm API that the wallet and admin apps depend on. It is read-only on-chain (opens no
-wallet, sends no transactions) and — post-Q4 — a convenience/availability layer, not
-trust-critical for funds. The normative API contract and the security model live in
-[`.dev/spec-decisions.md`](../../.dev/spec-decisions.md) §6b; the wire shapes are owned by
-[`@bongtu/core/indexerApi`](../../packages/core/README.md) and the routes type their
-response bodies against them.
+The bongtu read-side service: it ingests `BongtuPool` events from an RPC, mirrors the on-chain
+IMT, and serves the merkle-path / ciphertext-feed / alarm API the wallet apps depend on. It is
+read-only on-chain (opens no wallet, sends no transactions).
 
-## Two modes
+This README owns how to run, test and deploy it. The guarantees and the full wire contract — every
+route, the read-auth and view tokens, the two modes, the alarm classes, the consumer op family —
+are owned by [`docs/indexer.md`](../../docs/indexer.md); wire shapes by
+[`@bongtu/core/indexerApi`](../../packages/core/README.md).
 
-- **Public mode** (default, no key): serves only public chain data — feed, roots,
-  paths, nullifiers, disclosure alarms. Batch-interior merkle paths are structurally
-  unservable (siblings are encrypted to other recipients) and return 422.
-- **Arbiter mode** (`AUTHORITY_KEY` set to the arbiter bjj private key): additionally
-  decrypts every op's authority envelope into a per-owner note ledger and serves
-  `GET /notes?owner=` plus within-batch `/path`. Institution-internal by nature — the
-  key is held in memory only, never logged, never returned. See the repo
-  [`CLAUDE.md`](../../CLAUDE.md) "Indexer modes" rule.
-  **EVM backend only for now**: with `SOLANA_RPC` set, an `AUTHORITY_KEY` boot is
-  REFUSED with a pinned error ("arbiter surfaces are not yet supported on the Solana
-  backend") — the Solana backend builds no arbiter ledger, so serving would mean
-  `/notes`/`/history` 503ing forever and envelope alarms silently vanishing, exactly
-  the silent degrade the KEM boot guard exists to refuse.
-
-## Endpoints
-
-| endpoint | returns |
-|---|---|
-| `GET /head` | `{ root, nextLeafIndex }` — ingested mirror state |
-| `GET /events?cursor=&limit=` | the ciphertext feed a wallet trial-decrypts: `[{ seq, txHash, blockNumber, kind, epoch, ecdhPublicKey, encryptionNonce, slices:[{offset, elts, leafIndex}], ciphertext[], disclosure? }]`. Consumer (op-module) entries — kinds `depositPriv`/`transferPriv`/`transfer10x2Priv`/`withdrawPriv`/`disbursePriv` — additionally carry `viewTags[]` (the OPMOD §3.2 pre-filter), per-output `kemCiphertexts[]` (small ops), and for `disbursePriv` the `batchId`, the published `outputCommitments[]`, and `kem: { status: complete\|pending\|withheld\|accepted-unassembled, chunkCount, acceptedCount, kemCiphertexts? }` — the §5 chunk-transport state (grace window `KEM_GRACE_SECONDS`, default 3600) |
-| `GET /path/{leafIndex}` | `{ leafIndex, siblings[], pathIndices[], root }`; 404 out-of-range; **422** for an ENTERPRISE disburse-batch interior leaf in public mode (served in arbiter mode — to the leaf's proven owner only: `/notes` read-auth + ownership, else 400/401/403). A CONSUMER (`disbursePriv`) batch interior serves **auth-free in both modes**: its commitments were published as calldata and fold-checked against the proof's `subtreeRoot` before the fill (OPMOD §4.4), the same privacy class as single-append leaves |
-| `GET /alarms` | one discriminated feed: every non-passing disclosure (`{type:"disclosure"}`, status `mismatch` / `unverifiable` / `withheld` — the consumer §4.4 checks, incl. the canonical-form and fold-to-subtreeRoot failures, classify into the same statuses) plus, arbiter mode only, envelope cross-check failures (`{type:"envelope"}`). kem-`pending`/`withheld` is NOT an alarm (nothing on-chain-provable was violated) — it rides `/events` |
-| `GET /nullifiers` | `string[]` — the spent-nullifier set from events (public, key-free) |
-| `GET /disclosure/{startLeafIndex}` | PUBLIC (both modes): the institution-held disburse disclosure blob for one Solana batch (`{ startLeafIndex, elements[], disclosureHash, verdict }`, elements 32-byte hex in fold order, `disclosureHash` the chain-committed anchor, `verdict` the registry's current refold status) — any party refolds the elements against `disclosureHash` (SOLR §3.3.2; `.dev/solana-rail-design.md`). **409** (same body) when the held blob's verdict is non-passing, so known-tampered bytes never serve as a clean 200; 404 when no blob is held (with the anchor echoed when the batch is known); always 404 on an EVM backend (its disburse bytes are consensus-published on `/events`) |
-| `GET /health` | `{ ok, lastBlock, nextLeafIndex, batchSize, alarms, lastSuccessAt, lastError, lastErrorAt, consecutiveFailures }` — `ok` is false when the tail poll is persistently failing |
-| `GET /announcements?cursor=&limit=` | PUBLIC (both modes): the stealth-withdraw discovery feed `[{ seq, txHash, blockNumber, recipient, ephemeralPub, viewTag }]` — scan-all with your view key (`@bongtu/core/stealth`). With `?owner=&ts=&sig=` or `token=` (ARBITER MODE, `/notes` read-auth): only the caller's own announcements, no scanning |
-| `POST /pay/{name}` | PUBLIC (both modes; **404 unless `PORTAL_FACTORY` is set**): resolve-time portal issuance — derives a fresh stealth address for the name's meta-address, eth_calls `factory.addressOf(portalSalt(addr))` for the CREATE2 sweeper destination, records the announcement, returns `{ destination, ephemeralPub, viewTag, stealthAddr, factory }`. Unauthenticated by design (recorded PoC spam surface — see `src/api/routes/portal.ts`) |
-| `GET /portal/announcements?cursor=&limit=` | PUBLIC (both modes; 404 unless `PORTAL_FACTORY`): every portal issuance record `[{ kind:"portal", seq, name, owner, ephemeralPub, viewTag, stealthAddr, destination, createdAt, swept, sweptTxHash, sweptAmount }]` — the recipient's scan path |
-| `GET /portal/unswept?cursor=&limit=` | PUBLIC (both modes; 404 unless `PORTAL_FACTORY`): the unswept subset — the sweeper bot's work feed. Records flip `swept` when the factory's `Swept(salt, sweeper, amount)` log is ingested (salt = `portalSalt(stealthAddr)`) |
-| `GET /names/{name}` | PUBLIC (both modes): one name-directory record `{ name, owner, viewPub, spendPub, noteViewPub?, kemEk?, updatedAt }` — the owner's in-pool receive pubkey + stealth meta-address (`@bongtu/core/stealth`) + optionally the consumer triple (note-layer bjj view pubkey + ML-KEM-768 ek, OPMOD §6.1); 404 unknown, 400 non-canonical name |
-| `POST /names` `{name, owner, viewPub, spendPub, [noteViewPub, kemEk,] ts, sig}` | PUBLIC (both modes): owner-signed registration, payload-bound, `\|now−ts\| ≤ 300s`. Form selection is deterministic by payload shape (OPMOD §6.4): the consumer pair present (required together, else 400) → the 5-segment v2 binding under `bongtu/name-auth-v2` (zero-sentinels = a signed CLEAR); absent → legacy v1, which can never set/change/clear the consumer columns. First-come per name, same-owner update allowed; 401 bad sig/ts/cross-form, 409 taken by another owner |
-| `GET /notes?owner=&ts=&sig=` | **arbiter mode only** (the route does not exist otherwise → 404): one owner's decrypted notes `[{ value, salt, leafIndex, commitment, txHash, spent }]` |
-| `GET /history?owner=&ts=&sig=` | **arbiter mode only** (else 404): one owner's activity feed `[{ kind, counterparty, amount, txHash, blockTimestamp, seq }]`, newest-first. `kind` ∈ `received`/`sent`/`withdraw`/`deposit`/`self` — a pure self-send (every nonzero output back to the sender) emits a `sent` **and** a `received` row, both counterpartied to the sender's own key; `self` is read-only legacy, still served for rows stored before that pair landed. `counterparty` is a compressed pubkey (or null); derived from the same decrypted envelopes as `/notes` — same bjj read-auth |
-| `GET /auth/challenge?owner=` | **arbiter mode only**: `{ challenge, expiresAt }` — a single-use random field element (~2 min TTL) the owner signs to obtain a view token |
-| `POST /auth` `{owner, challenge, sig}` | **arbiter mode only**: `{ token, exp }` — an opaque HMAC view token (~24 h) after the signed challenge verifies; any failure is one undifferentiated 401 |
-
-`/notes` and `/history` share the same enforced read-auth, with TWO accepted
-proofs: (a) the signed query — `owner` is the compressed bjj pubkey
-(`@bongtu/core/pubkey`), `sig` a bjj EdDSA-Poseidon signature over
-`Poseidon(ownerPub.x, ownerPub.y, ts)` checked against the queried key
-(`@bongtu/core/eddsa`), and `|now − ts| ≤ 300s` bounds replay — or (b) a `token=`
-view token from `POST /auth` (same signature primitive, but over the
-domain-separated host-bound tuple `Poseidon(ownerPub.x, ownerPub.y, challenge,
-hostBinding, VIEWTOKEN_DOMAIN_TAG)` — so a `/notes` query signature can never be
-redeemed for a token, and a challenge relayed by a hostile indexer is signed
-against ITS origin and rejected here; minted as `HMAC(TOKEN_SECRET, owner‖exp)`,
-see `src/api/viewtoken.ts` and `PUBLIC_URL` below), which lets a wallet read
-WITHOUT re-holding its key. Tokens are view-only by
-construction — nothing else accepts them. Malformed owner → 400; no token and
-missing ts/sig → 400; wrong key, bad/expired token, or expired ts → 401.
-`buildNotesUrl` / `buildHistoryUrl` / `obtainViewToken` / `buildNotesTokenUrl` /
-`buildHistoryTokenUrl` (`@bongtu/core/indexerApi`) are the one client-side
-implementation, headless-tested against the same verifier the routes use.
-
-Routing is a plain ordered table (`src/api/router.ts`): each route is a pure function
-of the indexer + parsed params returning `{status, body}`; arbiter mode composes the
-`/notes` route in at build time, so a public indexer cannot serve it even by request
-path.
-
-## Consumer op family (op-module, OPMOD §4.4/§5)
-
-The consumer (no-auditor) ops arrive as MODULE-emitted events, so ingest keeps a
-**registry mirror** (`src/modules.ts`) of the pool's balanced
-`ModuleRegistered`/`ModuleRemoved` stream and scans a second, registry-derived
-address set per poll (a REMOVED disburse module stays watched until every batch
-of its has all kem chunks accepted — `submitDisburseKemChunk` outlives
-deregistration). `OpApplied` is the per-applyOp audit anchor: every consumer op
-event is cross-checked against its tx's `OpApplied` (module attribution, shape,
-resulting root), the same posture as the Appended commitment cross-check. For a
-`disbursePriv` the indexer — ANY indexer, **no arbiter key involved** — verifies
-the published `disclosure` (canonical form, the §4.2 extended fold vs the
-proof's `disclosureHash`, the commitment run folded to `subtreeRoot`) and on
-success fills the batch in PUBLIC mode, which is what makes consumer-batch
-`GET /path` auth-free. Kem ct bytes ride K calldata-only chunk txs
-(`src/kemchunks.ts`): each accept is fetched via `eth_getTransactionByHash`,
-keccak-rechecked, and assembled into the per-output ct array `/events` serves;
-a batch with chunks missing on-chain reads `kem-pending`, then `kem-withheld`
-past `KEM_GRACE_SECONDS`; all-accepted but bytes undecodable from calldata reads
-`accepted-unassembled` (boot re-attempts the fetch) — operational states, never
-alarms.
-
-## Mirror invariant
-
-`MirrorTree` (`src/tree.ts`) wraps the SDK `ImtTree` — the same class the contract's
-Foundry differential test pins against — and applies the two low-level tree events
-(`Appended`, batch attach), each of which carries the resulting on-chain root, so
-**the mirror is asserted against the contract per insert**, not just at head. All
-endpoints serve this ingested state, which keeps the API mutually consistent and
-available even when the RPC is not. For every `disburse` it also recomputes the
-Poseidon chain over the emitted ciphertext and compares it to the on-chain
-`disclosureHash` (`src/disclosure.ts`) — any failure surfaces on `/alarms`.
-
-## Storage (Postgres-only)
-
-The indexer has **one** storage backend: Postgres (`PostgresStore` / `PostgresLedger`,
-`src/postgres.ts`). `DATABASE_URL` is **mandatory** — the service refuses to boot
-without it (one-line error, nonzero exit; no in-memory fallback). The derived state
-(the event feed, nullifier set, the tree leaves, the arbiter notes/history/alarms) is
-persisted to Postgres, and a single-row **block cursor** lets a restart **RESUME**
-ingest from the cursor instead of replaying the whole chain. Each poll batch's rows AND
-the cursor advance in **one transaction** (`Indexer.persist`), so a crash can never
-leave the `leaves` table ahead of the cursor — the state a restart reconstructs is
-always mutually consistent (proved by `test/pg_resume.ts`). Leaf writes are a **delta**
-(only leaves recorded since the last flush), not a full re-snapshot. The `MirrorTree`
-is not stored as nodes — it is boot-**reconstructed** from the `leaves` table (`O(n)`);
-the note ledger is rehydrated from the `notes`/`history` tables. Reads are served from
-an in-process read model (so the API stays synchronous), with Postgres as the durable
-cache; `InMemoryStore` (`src/store.ts`) is that read-model component inside
-`PostgresStore`, not a selectable backend.
-
-The decrypt/derive step (envelope → notes/spent-marks/alarms/history) is ONE pure
-function (`deriveOp` in `ledger.ts`) that `PostgresLedger` calls once per op — crypto
-and recording never mix. Schema: [`src/schema.sql`](src/schema.sql)
-(idempotent `CREATE TABLE IF NOT EXISTS`, applied on every boot).
+The mode is decided at boot ([`docs/indexer.md` § Trust
+boundary](../../docs/indexer.md#trust-boundary-arbiter-mode)): **public** (default, no key — chain
+data only) or **arbiter** (`AUTHORITY_KEY` set, plus `AUTHORITY_KEM_KEY` against a hybrid pool),
+which decrypts every op's authority envelope and is institution-internal by nature — the keys are
+held in memory only, never logged, never returned (repo [`CLAUDE.md`](../../CLAUDE.md) rule).
 
 ## Run
 
-**Postgres is required** (`DATABASE_URL`); the recommended way to run is the compose
-stack below (`docker compose up --build`), which provides it. To run the process
-directly, point `DATABASE_URL` at any reachable Postgres:
+**Postgres is required** (`DATABASE_URL`); the recommended way to run is the compose stack below
+(`docker compose up --build`), which provides it. To run the process directly, point
+`DATABASE_URL` at any reachable Postgres:
 
 ```sh
 DATABASE_URL=postgres://… npm start                        # defaults: local anvil RPC, port 8600
@@ -148,24 +37,27 @@ Env knobs (`src/index.ts`):
 | `PORT` | `8600` | HTTP port |
 | `POLL_MS` | `3000` | incremental re-ingest interval (`0` = off) |
 | `AUTHORITY_KEY` | unset | arbiter bjj private key → arbiter mode |
+| `AUTHORITY_KEM_KEY` | unset | the arbiter's ML-KEM-768 decapsulation key — required in arbiter mode against a hybrid pool (the KEM boot guard refuses to boot without it, [`docs/indexer.md`](../../docs/indexer.md#the-kem-boot-guard)) |
 | `TOKEN_SECRET` | generated per boot | HMAC secret for `/auth` view tokens (arbiter mode). When generated, boot warns that issued tokens reset on restart — set it to keep wallet logins across restarts |
 | `PUBLIC_URL` | loopback listen address | comma-separated origin(s) clients reach this indexer on. `/auth` signatures are bound to one of them, so **a wallet served through the same-origin `/indexer` proxy must list the WALLET's origin(s)**, not the indexer's (`https://bongtu.fractalyze.io,https://…vercel.app`). A wrong value is not fatal but silently drops every login to the tokenless path (balance loads once, then cannot refresh); boot prints what was resolved |
 | `DATABASE_URL` | **required** | Postgres connection string (persist + boot-resume). Unset → the service refuses to boot |
 | `PORTAL_FACTORY` | unset | PortalFactory address → portal deposits live (`POST /pay/{name}` + `/portal/*`, Swept-log ingest). Unset → those routes 404 and boot logs one line saying so |
 | `LOG_CHUNK` | `50000` | getLogs chunk size in blocks — the one read-side tuning knob (auto-bisects on RPC range caps; `10000` suits rate-capped public RPC tail scanning) |
 | `KEM_GRACE_SECONDS` | `3600` | seconds an incomplete consumer-disburse chunk set reads kem-`pending` on `/events` before kem-`withheld` (OPMOD §5). Parsed once at boot — a non-numeric value refuses to boot |
-| `SOLANA_RPC` | unset | **backend switch**: set => the service ingests the SOLANA rail (`src/solana/`) instead of the EVM pool — signature-cursor ingest, inner-instruction dispatch, self-CPI event decode, per-op mirror assertion (SOLR §3.2). The API surface is identical; `RPC`/`POOL` are ignored. Requires `SOLANA_TREE` (the TreeState account, base58); `SOLANA_PROGRAM` defaults to the program's `declare_id!`. Refuses to boot combined with `AUTHORITY_KEY` (arbiter surfaces are not yet supported on the Solana backend — see "Two modes") |
+| `SOLANA_RPC` | unset | **backend switch**: set => the service ingests the SOLANA rail (`src/solana/`) instead of the EVM pool — signature-cursor ingest, inner-instruction dispatch, self-CPI event decode, per-op mirror assertion (SOLR §3.2). The API surface is identical; `RPC`/`POOL` are ignored. Requires `SOLANA_TREE` (the TreeState account, base58); `SOLANA_PROGRAM` defaults to the program's `declare_id!`. Refuses to boot combined with `AUTHORITY_KEY` ([`docs/indexer.md` § Trust boundary](../../docs/indexer.md#trust-boundary-arbiter-mode)) |
 | `DISCLOSURE_DIR` | unset | directory of institution-held disburse disclosure blobs (`{startLeafIndex}.json`, a JSON array of 32-byte hex elements) — what `GET /disclosure` serves and the per-batch boot invariant re-checks against `DisburseBatch.disclosureHash` (SOLR §3.3.2). A mismatching blob alarms `mismatch`; a batch unserved past `DISCLOSURE_GRACE_SECONDS` (default `3600`) alarms `withheld` |
 
-Workspace install and shared tooling: root [`README.md`](../../README.md). Loading the
-pool ABI and ethers goes through the external-`node_modules` seam (`BONGTU_NODE_MODULES`,
-see [`CLAUDE.md`](../../CLAUDE.md)) and needs a `forge build` artifact for the pool ABI.
+Workspace install and shared tooling: root [`README.md`](../../README.md). Chain access is viem, a
+normal dependency; the pool ABI loads from the Foundry artifact
+`chains/evm/out/BongtuPool.sol/BongtuPool.json` (run `forge build` in `chains/evm` first — the
+Docker image bakes in the committed copy [`abi/BongtuPool.abi.json`](abi/README.md) instead, which
+CI drift-gates against the built ABI).
 
-## Docker / compose (U-I3)
+## Docker / compose
 
 A 2-service stack — **postgres + indexer** — is defined at the repo root
-([`docker-compose.yml`](../../docker-compose.yml)); the prover (GPU) and the static web
-apps are deliberately out of scope.
+([`docker-compose.yml`](../../docker-compose.yml)); the prover (GPU) and the static web apps are
+deliberately out of scope.
 
 ```sh
 docker compose up --build                     # postgres (named volume + healthcheck) then
@@ -175,25 +67,22 @@ cp .env.compose.example .env.compose          # edit RPC / POOL / AUTHORITY_KEY 
 docker compose --env-file .env.compose up --build
 ```
 
-Compose starts postgres first (gated on `pg_isready`), then the indexer, which sets
-`DATABASE_URL` at the postgres service, **applies `schema.sql` on boot** (idempotent), and
-ingests. The named `pgdata` volume persists across `up`/`down`, so a restart **RESUMES**
-from the block cursor. Knobs are interpolated from the shell / `--env-file` with sane
-defaults (`.env.compose.example`); leave `POOL` empty to fall back to the baked-in
-`deploy/addresses.<CHAIN_ID>.json` (the sdk `CHAIN_ID` = the live pool). The indexer serves
-`GET /health` on **8600**, and the container's `HEALTHCHECK` reports healthy once
-`/health` returns `ok:true`. `AUTHORITY_KEY` flips the container to arbiter mode
-(institution-internal — see [`CLAUDE.md`](../../CLAUDE.md)).
+Compose starts postgres first (gated on `pg_isready`), then the indexer, which sets `DATABASE_URL`
+at the postgres service, applies `src/schema.sql` on boot (idempotent), and ingests. The named
+`pgdata` volume persists across `up`/`down`, so a restart **resumes** from the block cursor. Knobs
+are interpolated from the shell / `--env-file` with sane defaults (`.env.compose.example`); leave
+`POOL` empty to fall back to the baked-in `deploy/addresses.<CHAIN_ID>.json` (the sdk `CHAIN_ID` =
+the live pool). The indexer serves `GET /health` on **8600**, and the container's `HEALTHCHECK`
+reports healthy once `/health` returns `ok:true`. `AUTHORITY_KEY` flips the container to arbiter
+mode (institution-internal — see [`CLAUDE.md`](../../CLAUDE.md)).
 
-The image ([`apps/indexer/Dockerfile`](Dockerfile), context = repo root) is multi-stage:
-a builder trims the npm workspace to `packages/core` + `apps/indexer` (a lockfile-pinned
-`npm ci --workspace …`, no react/vite) and installs ethers into the
-`BONGTU_NODE_MODULES` seam; the slim non-root runtime copies the installed tree, the raw
-`.ts` source (run via `node --import tsx`), the addresses file, and the **committed pool
-ABI** ([`abi/BongtuPool.abi.json`](abi/README.md)) placed at
-`chains/evm/out/BongtuPool.sol/BongtuPool.json` so the image is self-contained (no foundry
-in the build) and reproducible. CI builds this image **build-only** (`indexer-image`
-job); `docker compose up` and the pg integration test below stay LOCAL gates.
+The image ([`apps/indexer/Dockerfile`](Dockerfile), context = repo root) is multi-stage: a builder
+trims the npm workspace to `packages/core` + `apps/indexer` (a lockfile-pinned
+`npm ci --workspace …`, no react/vite); the slim non-root runtime copies the installed tree, the
+raw `.ts` source (run via `node --import tsx`), the addresses file, and the committed pool ABI
+placed at `chains/evm/out/BongtuPool.sol/BongtuPool.json`, so the image is self-contained (no
+foundry in the build) and reproducible. CI builds this image **build-only** (`indexer-image` job);
+`docker compose up` and the pg integration test below stay LOCAL gates.
 
 ## Testing
 
@@ -205,53 +94,56 @@ npm run test:pg      # the Postgres resume/crash gate (bash test/pg_integration.
 ```
 
 `test:pg` is a **local** gate (not wired into hosted CI): it spins a throwaway
-`postgres:16-alpine` in docker on a random host port (trap-removed on exit), runs the
-scenario against a fresh anvil, ingests it with a `DATABASE_URL` + arbiter indexer,
-asserts `/head` `/notes` `/history`, then **kills and restarts** the indexer against the
-same postgres and asserts it **resumed from the block cursor** (logs `resume from block
-N`, N>0 — not a block-0 replay) serving byte-identical state. Requires docker + the CPU
-proving artifacts under `circuits/out/`. It is the **local correctness gate** for the
-containerised stack; hosted CI only build-tests the image (`indexer-image` job, above),
-never `docker compose up` — see the Docker / compose section.
+`postgres:16-alpine` in docker on a random host port (trap-removed on exit), runs the scenario
+against a fresh anvil, ingests it with a `DATABASE_URL` + arbiter indexer, asserts `/head`
+`/notes` `/history`, then **kills and restarts** the indexer against the same postgres and asserts
+it **resumed from the block cursor** (logs `resume from block N`, N>0 — not a block-0 replay)
+serving byte-identical state. Requires docker + the CPU proving artifacts under `circuits/out/`.
+It is the local correctness gate for the containerised stack; hosted CI only build-tests the image
+(`indexer-image` job, above), never `docker compose up`.
 
-The conformance gate starts its own anvil on port **8552** (override
-`INDEXER_E2E_PORT` if that port is taken), deploys a fresh B=16 pool, drives the full
-scenario (deposit → disburse → transfer → withdraw → tampered disburses), and asserts
-mirror==contract at every step, path folding, trial-decrypt, the alarm classes, and
-the arbiter-mode ledger + `/notes` + within-batch `/path`. Being Postgres-only, it
-ingests into **real Postgres**: `run.sh` honors an exported `TEST_DATABASE_URL`
-(admin connection string; CI provides a postgres **service container**) and otherwise
-spins a throwaway `postgres:16-alpine` docker container (trap-removed). If neither is
-possible it SKIPs with a loud banner — never a silent pass. It also needs the CPU
-proving artifacts under `circuits/out/` (`cd circuits && bash build/prove_all.sh` first) and
-runs as the `indexer-conformance` job in CI — treat it as a final gate, not a
-per-iteration loop (repo `CLAUDE.md` "Heavy gates").
+The conformance gate starts its own anvil on port **8552** (override `INDEXER_E2E_PORT` if that
+port is taken), deploys a fresh B=16 pool, drives the full scenario (deposit → disburse → transfer
+→ withdraw → tampered disburses), and asserts mirror==contract at every step, path folding,
+trial-decrypt, the alarm classes, and the arbiter-mode ledger + `/notes` + within-batch `/path`.
+Being Postgres-only, it ingests into **real Postgres**: `run.sh` honors an exported
+`TEST_DATABASE_URL` (admin connection string; CI provides a postgres **service container**) and
+otherwise spins a throwaway `postgres:16-alpine` docker container (trap-removed). If neither is
+possible it SKIPs with a loud banner — never a silent pass. It also needs the CPU proving
+artifacts under `circuits/out/` (`cd circuits && bash build/prove_all.sh` first) and runs as the
+`indexer-conformance` job in CI — treat it as a final gate, not a per-iteration loop (repo
+`CLAUDE.md` "Heavy gates").
 
 ## Layout
 
 ```
 src/
   index.ts        runnable service: env → ingest → serve (+ tail polling)
-  chain.ts        config resolution + RPC/ABI plumbing
+  chain.ts        config resolution + pool ABI (viem) plumbing
   ingest.ts       Indexer: event ingest, correlation, poll/retry state
   tree.ts         MirrorTree: ImtTree mirror + per-leaf records + batch subtrees + path builder + snapshot/rebuild (resume)
   store.ts        StorePort + InMemoryStore (PostgresStore's sync read-model component): events / alarms / nullifiers / cursor
   disclosure.ts   disclosureHash verify + alarm classification (chain fold from @bongtu/core/envelope)
   ledger.ts       pure deriveOp (all the ledger crypto) + record helpers + ledger types
+  modules.ts      the op-module registry mirror (consumer op family watch-set)
+  kemchunks.ts    consumer-disburse kem-ct chunk assembly (calldata fetch + keccak recheck)
+  names.ts        the name-directory records + v1/v2 signature forms
+  portal.ts       portal issuance records + swept/unswept state
   postgres.ts     PostgresStore + PostgresLedger (the ONE runtime backend): persist derived state + boot-reconstruct + resume (raw pg, no ORM)
   schema.sql      idempotent Postgres schema (events / nullifiers / leaves / cursor / notes / history / alarms)
-  api/            router + one file per route (see Endpoints above)
+  solana/         the Solana rail backend (SOLANA_RPC switch)
+  api/            router + readAuth + viewtoken + one file per route
 test/             unit tests + the anvil conformance scenario (run.sh) + the Postgres integration gate (pg_integration.sh)
 ```
 
 ## Ops — dev-box deployment (manual by choice)
 
-The public arbiter indexer runs on the fractalyze GPU dev box. Deploys are
-**manual** — indexer releases are infrequent and each one moves the live
-arbiter state, so a human runs them deliberately rather than on every push:
+The public arbiter indexer runs on the fractalyze GPU dev box. Deploys are **manual** — indexer
+releases are infrequent and each one moves the live arbiter state, so a human runs them
+deliberately rather than on every push:
 
-- **Deploy clone**: `/home/a41/bongtu-deploy` — a dedicated checkout (separate
-  from any dev working tree) that runs the compose stack above. Redeploy:
+- **Deploy clone**: `/home/a41/bongtu-deploy` — a dedicated checkout (separate from any dev
+  working tree) that runs the compose stack above. Redeploy:
 
   ```sh
   cd /home/a41/bongtu-deploy
@@ -260,15 +152,13 @@ arbiter state, so a human runs them deliberately rather than on every push:
   curl -fsS localhost:8600/health   # gate: "ok": true, cursor advancing
   ```
 
-  The stack itself is always-on (`restart: unless-stopped`; Postgres cursor
-  gap-resumes across any restart).
-- **Public endpoint**: Tailscale Funnel maps
-  `https://gpu-server.tailec11d1.ts.net:10000` → local `:8600`
-  (`tailscale funnel --bg --https=10000 http://127.0.0.1:8600`; ports 443/8443
-  on that node belong to other apps). The mapping persists across reboots.
-- **Secrets**: `AUTHORITY_KEY` (arbiter bjj key) and the RPC URL live ONLY in
-  the deploy clone's gitignored `.env.compose` (mode 600) — never in repo
-  history.
+  The stack itself is always-on (`restart: unless-stopped`; Postgres cursor gap-resumes across any
+  restart).
+- **Public endpoint**: Tailscale Funnel maps `https://gpu-server.tailec11d1.ts.net:10000` → local
+  `:8600` (`tailscale funnel --bg --https=10000 http://127.0.0.1:8600`; ports 443/8443 on that
+  node belong to other apps). The mapping persists across reboots.
+- **Secrets**: `AUTHORITY_KEY` (arbiter bjj key) and the RPC URL live ONLY in the deploy clone's
+  gitignored `.env.compose` (mode 600) — never in repo history.
 
 ## License
 

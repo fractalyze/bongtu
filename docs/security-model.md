@@ -7,13 +7,13 @@ guaranteed. Mechanisms live in [protocol.md](protocol.md), [circuits.md](circuit
 Naming: **arbiter**, **auditor**, and the circuit/contract identifiers `authority*` /
 `AUTHORITY_KEY` / `ARBITER_KEY_X/Y` all denote the SAME party — the holder of the key material every
 envelope is encrypted to. Docs prose says "arbiter"; "auditor" names its compliance role;
-`authority` is the upstream Zeto vocabulary the code inherits. That material is a **pair** from
-epoch 0 onward: the bjj private key plus an ML-KEM-768 decapsulation key (`AUTHORITY_KEM_KEY`).
-This pool has never had a classical-only epoch, so opening any envelope it has emitted needs both.
+`authority` is the upstream Zeto vocabulary the code inherits. From epoch 0 that material is a
+**pair** — the bjj private key plus an ML-KEM-768 decapsulation key (`AUTHORITY_KEM_KEY`) — and this
+pool has never had a classical-only epoch, so opening any envelope it has emitted needs both.
 
 ## Who sees what
 
-The table below covers the **enterprise** op family — the ops that carry an authority envelope.
+The table covers the **enterprise** op family — the ops that carry an authority envelope.
 Consumer-family deltas (no arbiter row exists for those ops) are in
 [the consumer-family section](#the-consumer-family-no-auditor-ops).
 
@@ -26,75 +26,63 @@ Consumer-family deltas (no arbiter row exists for those ops) are in
 | **chain observer** | nothing | commitments, nullifiers, roots, all ciphertext, transaction senders, and the **public** amounts: deposit `pub[0]` with the depositor address, withdraw `pub[0]` with the recipient address |
 
 Hidden from the chain observer: transfer amounts, transfer parties, disburse total, disburse
-recipients and their amounts, and the mapping from any nullifier to the leaf it spent.
+recipients and their amounts, and the mapping from any nullifier to the leaf it spent. Batch size is
+fixed — a disburse always emits exactly `B = 256` output commitments and exactly 2054 ciphertext
+elements, with zero-value pad notes addressed to distinct dummy keys — so the number of real
+recipients is not observable from calldata size or leaf count.
 
-The prover service's `/prove` sits behind two composed gates
-([prover/README.md](../prover/README.md)): the Origin allowlist (`PROVER_ALLOWED_ORIGINS`) stops
-browser drive-bys, and the shared-credential HTTP Basic auth (`PROVER_AUTH_SHA256` — the payroll
-console's service login) is the real gate: it holds against any client, browser or not. One shared
-operator credential is the single-employer PoC posture; production would use per-user SSO/OIDC.
+Two rows carry an operational boundary:
 
-An arbiter-mode **indexer** is a fourth thing: it holds the arbiter private key and therefore every
-owner's decrypted notes. Signature-gated `/notes` governs who may query it; it does not reduce what
-that instance can see. Treat it as institution-internal infrastructure
-([indexer.md](indexer.md#trust-boundary-arbiter-mode)).
-
-```
-   ┌── on-chain (public) ──────────────────────────────────────────────┐
-   │  commitments · nullifiers · roots · ciphertext · deposit/withdraw │
-   │  amounts + addresses                                              │
-   └───────────────────────────────────────────────────────────────────┘
-            │ arbiter private key            │ own spending key
-            v                                v
-   every note of every user            only this user's notes
-   (values, salts, owners)             (trial-decrypt or signed /notes)
-```
-
-Batch size is fixed: a disburse always emits exactly `B = 256` output commitments and exactly 2054
-ciphertext elements, with zero-value pad notes addressed to distinct dummy keys. The number of real
-recipients is therefore not observable from calldata size or leaf count.
+- The prover's `/prove` sits behind two composed gates ([prover/README.md](../prover/README.md)):
+  the Origin allowlist (`PROVER_ALLOWED_ORIGINS`) stops browser drive-bys; the shared-credential
+  HTTP Basic auth (`PROVER_AUTH_SHA256` — the payroll console's service login) is the real gate and
+  holds against any client, browser or not. One shared operator credential is the single-employer
+  PoC posture; production would use per-user SSO/OIDC.
+- An arbiter-mode **indexer** holds the arbiter private key and therefore every owner's decrypted
+  notes. Signature-gated `/notes` governs who may query it; it does not reduce what that instance
+  can see. Treat it as institution-internal infrastructure
+  ([indexer.md](indexer.md#trust-boundary-arbiter-mode)).
 
 ## Enforced auditor disclosure
 
 The invariant: **every note creation and destruction is auditor-openable from on-chain data alone.**
-
 It holds by construction, at three levels.
 
 1. **In-circuit.** All four circuits encrypt an authority envelope over the op's inputs and outputs
-   (owner, value, salt) under a key derived from `authorityPublicKey`. The envelope is not optional —
-   it is wired into the constraint system, so a proof without a well-formed envelope does not exist.
+   (owner, value, salt) under a key derived from `authorityPublicKey`. The envelope is wired into
+   the constraint system, so a proof without a well-formed envelope does not exist.
 2. **Key injection.** The contract overwrites `authorityPublicKey` in the public-signal vector with
-   the key stored in `arbiterEpochs` before every `verifyProof`. A sender cannot encrypt to its own
-   key: the proof simply fails. Each event carries the epoch index, so the auditor picks the right
-   key even at a rotation-boundary block.
+   the key stored in `arbiterEpochs` before every `verifyProof` — a sender encrypting to its own key
+   simply has no valid proof. Each event carries the epoch index, so the auditor picks the right key
+   even at a rotation-boundary block.
 3. **Publication.** deposit, transfer and withdraw carry their envelopes inside the verified public
    signals, which the contract copies verbatim into the event. disburse cannot — 2054 elements would
    dominate the verifier's public-input cost — so it publishes them as calldata and the contract
    enforces `receiverCiphertexts.length == disburseCiphertextLen`. There is no ciphertext-free
    disburse entry point.
 
-**Where the chain stops.** For disburse the chain enforces *length*, not *content*: re-hashing 2054
+**Where the chain stops.** For disburse the chain enforces *length*, not *content* — re-hashing 2054
 field elements on-chain is not affordable. Content is bound by `disclosureHash`, a public signal of
-the proof, and checked off-chain by the indexer, which recomputes the same Poseidon fold and raises
-a first-class alarm on `mismatch`, `unverifiable` or `withheld`. So a malicious discloser can publish
-length-correct junk: the transaction succeeds, the recipients' notes are undiscoverable, and the
-tamper is *provable and immediately visible*. That is the honest strength of the guarantee —
-detection, not prevention. Attribution is per-EOA: since the caller allowlist was retired
-(2026-07-28, disburse is permissionless like every spend), a junk publish traces to the submitting
-address, not to a pre-vetted employer identity. What openness does NOT cost is privacy — the batch
-payload is ciphertext either way, readable only by each recipient and the arbiter.
+the proof, checked off-chain by the indexer, which recomputes the same Poseidon fold and raises a
+first-class alarm on `mismatch`, `unverifiable` or `withheld`. A malicious discloser can therefore
+publish length-correct junk: the transaction succeeds, the recipients' notes are undiscoverable, and
+the tamper is *provable and immediately visible* — detection, not prevention, is the honest strength
+of the guarantee. Attribution is per-EOA: since the caller allowlist was retired (2026-07-28,
+disburse is permissionless like every spend), a junk publish traces to the submitting address, not
+to a pre-vetted employer identity. What openness does NOT cost is privacy — the batch payload is
+ciphertext either way, readable only by each recipient and the arbiter.
 
 ## The consumer family: no-auditor ops
 
 The op-module layer adds a second op family beside the six enterprise entrypoints: consumer ops
-(`depositPriv`, `transferPriv`, `transfer10x2Priv`, `withdrawPriv`, `disbursePriv256`), executed
-by registered module contracts through the core's `applyOp` gate. One topic doc owns the family
-end to end ([consumer.md](consumer.md)); this section states only what it changes in the
-security model. The enterprise guarantees on this page are unchanged: the six entrypoints are
-byte-untouched and never route through `applyOp`.
+(`depositPriv`, `transferPriv`, `transfer10x2Priv`, `withdrawPriv`, `disbursePriv256`), executed by
+registered module contracts through the core's `applyOp` gate. [consumer.md](consumer.md) owns the
+family end to end; this section states only what it changes in the security model. The enterprise
+guarantees above are unchanged: the six entrypoints are byte-untouched and never route through
+`applyOp`.
 
-**Who sees what, consumer ops.** There is no arbiter row — no party holds key material that
-opens a consumer op: not the pool owner, not the institution, not bongtu. What remains:
+**Who sees what, consumer ops.** There is no arbiter row — no party holds key material that opens a
+consumer op: not the pool owner, not the institution, not bongtu.
 
 | party | can read (consumer ops) |
 |---|---|
@@ -102,68 +90,59 @@ opens a consumer op: not the pool owner, not the institution, not bongtu. What r
 | **sender** | the ops it authored (its own recipients and amounts) and its own notes |
 | **chain observer** | the enterprise classes (commitments, nullifiers, roots, ciphertext, tx senders, deposit/withdraw public amounts) plus the per-output `viewTags`, the consumer batch's 256 published output commitments — and **which family and module each op used**. One-hop op-family provenance is public BY DESIGN: a consumer op is identifiably a consumer op, which is what makes the audited-only posture below checkable |
 
-Publishing a consumer batch's commitments does not weaken count-hiding: pads are full value-0
-notes with fresh salts and distinct throwaway owners, so a batch stays fixed-shape and a pad is
-indistinguishable from a funded output; the commitments were always in the tree — what changed
-is which parties can read batch-interior leaves (`.dev/op-module-design.md` §4.5).
+Publishing a consumer batch's commitments does not weaken count-hiding: pads are full value-0 notes
+with fresh salts and distinct throwaway owners, so a batch stays fixed-shape and a pad is
+indistinguishable from a funded output; the commitments were always in the tree — what changed is
+which parties can read batch-interior leaves (`.dev/op-module-design.md` §4.5).
 
-**The audit statement, honestly.** Audit semantics are OP-LEVEL. Notes are untyped and the
-anonymity set is shared, so the pool-level claim becomes a registration property:
+**The audit statement, honestly.** Audit semantics are OP-LEVEL — notes are untyped and the
+anonymity set is shared ([consumer.md](consumer.md#audit-semantics)) — so the pool-level claim
+becomes a registration property:
 
 - an **enterprise op** keeps the issuance-level enforced disclosure above, unchanged;
-- a **consumer op** cannot be opened by anyone, ever. There is no key, no escape hatch, and no
-  upgrade that retroactively creates one — a past op's ciphertexts encrypt to its recipients'
-  view identities and nothing else. That is the product, not a gap;
+- a **consumer op** cannot be opened by anyone, ever. No key, no escape hatch, and no upgrade that
+  retroactively creates one — a past op's ciphertexts encrypt to its recipients' view identities
+  and nothing else. That is the product, not a gap;
 - a pool that must guarantee "every op is auditable" registers no consumer module — the
-  **audited-only** deploy profile, the default — and that posture is publicly attestable from
-  the `ModuleRegistered`/`ModuleRemoved` event stream. The **consumer-only** profile goes the
-  other way: `initializeConsumerOnly` mints no arbiter epoch at all — "no key exists" rather
-  than "key is burned"
-  ([deployment.md](deployment.md#deploy-profiles-and-the-consumer-module-family)).
+  **audited-only** deploy profile, the default — and that posture is publicly attestable from the
+  `ModuleRegistered`/`ModuleRemoved` event stream. The **consumer-only** profile goes the other
+  way: `initializeConsumerOnly` mints no arbiter epoch at all — "no key exists" rather than "key
+  is burned" ([deployment.md](deployment.md#deploy-profiles-and-the-consumer-module-family)).
 
 **Soundness is family-identical.** Every input-side belt — enabled boolean, value belt,
 zero-commitment guard, `CheckPositive`, `CheckSum`, IMT membership — survives verbatim in every
-consumer base (the per-circuit preservation table is `.dev/op-module-design.md` §2.1), and the
-zero-commitment guard below applies to both families unchanged. The disburse base's deliberate
-belt omission carries its compensating obligation into the consumer disburse module
-(`ZeroNullifier` revert, then `enabled = 1` injection, then verify). The core's `applyOp`
-re-enforces the write-side invariants (known root, unused nonzero nullifiers, nonzero leaves,
-CEI escrow motion) on whatever a registered module passes; registration is `onlyOwner` and
-upgrade-equivalent power, so the trust boundary remains the owner key — same as today's
-`_authorizeUpgrade`.
+consumer base (preservation table: `.dev/op-module-design.md` §2.1), and the zero-commitment guard
+below applies to both families unchanged. The disburse base's deliberate belt omission carries its
+compensating obligation into the consumer disburse module (`ZeroNullifier` revert, then
+`enabled = 1` injection, then verify). The core's `applyOp` re-enforces the write-side invariants
+(known root, unused nonzero nullifiers, nonzero leaves, CEI escrow motion) on whatever a registered
+module passes; registration is `onlyOwner` and upgrade-equivalent power, so the trust boundary
+remains the owner key — same as today's `_authorizeUpgrade`.
 
-**Post-quantum: consumer receiver ciphertexts are hybrid.** Every consumer output ciphertext is
-keyed by a fold of the per-output ECDH secret and a per-output ML-KEM-768 shared secret under
-new domain tags (`bongtu/consumer-note/v1/*` — the arbiter tags are never reused), so the
-harvest-now-decrypt-later story of the next section now covers BOTH families' published
-ciphertext. The consumer family needs it more, not less: pay-by-name publishes `noteViewPub` in
-the directory, so an ECDH-only consumer ciphertext would be retro-decryptable from public data
-alone at a future ECDLP break. One asymmetry to the arbiter envelope is deliberate: there is no
-per-output `kemBinding` and no alarm — a junk consumer encapsulation self-sabotages only the
-sender's own delivery (the recipient's leaf-match rejects the garbage decrypt; the note's funds
-are intact), and there is no involuntary-disclosure duty for an alarm to protect.
+**Consumer receiver ciphertexts are hybrid.** Every consumer output ciphertext is keyed by a fold of
+the per-output ECDH secret and a per-output ML-KEM-768 shared secret under new domain tags
+(`bongtu/consumer-note/v1/*` — the arbiter tags are never reused), so the harvest-now-decrypt-later
+story of the next section covers BOTH families' published ciphertext. The consumer family needs it
+more, not less: pay-by-name publishes `noteViewPub` in the directory, so an ECDH-only consumer
+ciphertext would be retro-decryptable from public data alone at a future ECDLP break. One asymmetry
+to the arbiter envelope is deliberate: there is no per-output `kemBinding` and no alarm — a junk
+consumer encapsulation self-sabotages only the sender's own delivery (the recipient's leaf-match
+rejects the garbage decrypt; the note's funds are intact), and there is no involuntary-disclosure
+duty for an alarm to protect.
 
 ## Post-quantum: the hybrid authority-envelope key
 
 Everything bongtu encrypts is published on-chain and stays there. A classical-only envelope key
-would be `ECDH(ephemeralPrivateKey, arbiterPublicKey)` on BabyJubJub, with **both** points public —
+would be `ECDH(ephemeralPrivateKey, arbiterPublicKey)` on BabyJubJub with **both** points public —
 the ephemeral key is a public signal copied into every op event, the arbiter key is in
-`arbiterEpochs`. A future ECDLP break would therefore retro-decrypt every such envelope from chain
-data alone. Since the envelope carries the op-wide plaintext including every recipient pubkey, it is
-also the key that unlocks the receiver ciphertexts. That harvest-now-decrypt-later exposure is what
-the hybrid key closes.
+`arbiterEpochs` — so a future ECDLP break would retro-decrypt every such envelope from chain data
+alone, and with it the receiver ciphertexts (the envelope carries the op-wide plaintext including
+every recipient pubkey). That harvest-now-decrypt-later exposure is what the hybrid key closes.
 
 The live pool is hybrid from its first block: **arbiter epoch 0** carries both halves of the
-authority key, so the envelope key is a fold of
-the classical ECDH secret and an ML-KEM-768 shared secret, and the shared secret is bound into the
-proof:
-
-```
-kemSs[0..1]  = the 32-byte ML-KEM-768 shared secret as two LE 128-bit limbs   (private witness)
-hybridKey[i] = Poseidon(5)([TAG_Ki, ecdh.x, ecdh.y, kemSs[0], kemSs[1]])      (envelope key)
-kemBinding   = Poseidon(3)([TAG_BIND, kemSs[0], kemSs[1]])                    (public signal)
-```
-
+authority key, the envelope key is a Poseidon fold of the classical ECDH secret and an ML-KEM-768
+shared secret, and the shared secret is bound into the proof as the public signal `kemBinding`
+(derivation, limb encoding and domain tags: [protocol.md](protocol.md#the-hybrid-envelope-key)).
 Every op additionally carries the 1088-byte `kemCiphertext` as calldata, length-checked on-chain
 (`WrongKemCiphertextLength`) and re-emitted in the event so the arbiter never has to read calldata.
 An adversary who breaks ECDLP alone recovers one of four Poseidon preimage components and nothing
@@ -172,20 +151,22 @@ else; an adversary who breaks ML-KEM alone still faces the intact ECDH half.
 **The enforcement is asymmetric, and deliberately so.** The ECDH half keeps proof-fails-on-wrong-key:
 the contract injects the stored arbiter key before `verifyProof`, so an envelope encrypted to the
 wrong bjj key has no valid proof. The KEM half cannot get that guarantee — verifying an
-encapsulation on-chain would mean ML-KEM inside the circuit (order 5–10M constraints per op), so the
-chain checks the ciphertext's *length*, not its content. A junk-wrapped ciphertext therefore
-downgrades to alarm-enforcement: the arbiter decapsulates, recomputes `Poseidon(3)([TAG_BIND, …])`,
-finds it differs from the proof's `kemBinding`, and raises a first-class `envelope` alarm while
-withholding the envelope. That is the same detection-and-attribution outcome class as a
-length-padded junk disburse publish. Note what the attacker buys: the envelope is then unopenable by
-anyone, including themselves — an immediate, attributable alarm and nothing else. `kemBinding` is a
-circuit **output** computed from the witness `kemSs`, so a prover cannot claim a binding
-inconsistent with the secret it actually encrypted under; the only reachable attack is
-consistent-but-junk, which alarms.
+encapsulation on-chain would mean ML-KEM inside the circuit (order 5–10M constraints per op) — so
+the chain checks the ciphertext's *length*, not its content, and a junk-wrapped ciphertext
+downgrades to alarm-enforcement: the arbiter decapsulates, recomputes the binding, finds it differs
+from the proof's `kemBinding`, and raises a first-class `envelope` alarm while withholding the
+envelope. That is the same detection-and-attribution outcome class as a length-padded junk disburse
+publish — and the attacker buys nothing: the envelope is then unopenable by anyone, including
+themselves. `kemBinding` is a circuit **output** computed from the witness `kemSs`, so a prover
+cannot claim a binding inconsistent with the secret it actually encrypted under; the only reachable
+attack is consistent-but-junk, which alarms. Downgrade is structurally unavailable rather than
+merely discouraged: the circuits have no ECDH-only encryption path and the pool rejects any
+`kemCiphertext` that is not exactly 1088 bytes, so "opting out" degenerates into the
+consistent-but-junk case, i.e. an alarm.
 
 **False-tamper is the failure mode worth defending, and both ends do.** A client encapsulating to a
 stale KEM key, or an arbiter decapsulating with the wrong one, would stamp an honest operation as
-tampered. So neither end trusts its bundled copy: clients read `arbiterKemPkHash(currentEpoch())`
+tampered — so neither end trusts its bundled copy. Clients read `arbiterKemPkHash(currentEpoch())`
 from the pool **before** drawing KEM material and refuse on mismatch — or on a pre-KEM pool, which
 this build cannot produce proofs for — and the indexer refuses to boot at all unless the
 encapsulation key embedded in its own `AUTHORITY_KEM_KEY` hashes to the on-chain value. Fail-closed
@@ -196,41 +177,40 @@ Scope, stated honestly:
 - **Every envelope this pool has ever emitted is hybrid.** `initialize` mints epoch 0 carrying both
   halves, so there is no classical-only prefix to strand: `arbiterKemPkHash(0) != 0` is the
   on-chain, audit-facing statement of that. The client guard splits the two failures it can see
-  (`arbiterKemPkGuardError`, `packages/core/src/chain/network.ts`): a getter that is absent or reverts —
-  `isPreKemProbeError`, a `CALL_EXCEPTION` — is the pre-KEM pool this build refuses to produce
-  proofs for, while any hash that is *present* but not this build's, a zero among them, is refused
-  as a key mismatch. A zero on-chain never means "pre-KEM"; the pool refuses to store one, so it can
-  only mean an epoch that was never minted.
-- **Enterprise receiver ciphertexts are still ECDH-only.** Per-recipient KEM is deferred there: it costs ~38k gas per
-  recipient (≈ +9.7M on a 256-batch) and only helps an adversary who already holds candidate
-  recipient pubkeys — which appear nowhere on-chain in the clear. The interim defence is
-  operational: bongtu addresses are shared off-channel, never published.
+  (`arbiterKemPkGuardError`, `packages/core/src/chain/network.ts`): a getter that is absent or
+  reverts — `isPreKemProbeError`, a `CALL_EXCEPTION` — is the pre-KEM pool this build refuses to
+  produce proofs for, while any hash that is *present* but not this build's, a zero among them, is
+  refused as a key mismatch. A zero on-chain never means "pre-KEM"; the pool refuses to store one,
+  so it can only mean an epoch that was never minted.
+- **Enterprise receiver ciphertexts are still ECDH-only.** Per-recipient KEM is deferred there: it
+  costs ~38k gas per recipient (≈ +9.7M on a 256-batch) and only helps an adversary who already
+  holds candidate recipient pubkeys — which appear nowhere on-chain in the clear. The interim
+  defence is operational: bongtu addresses are shared off-channel, never published. Consumer
+  receiver ciphertexts are hybrid per output
+  ([the consumer-family section](#the-consumer-family-no-auditor-ops)).
 - **The KEM alarm is arbiter-attested, not publicly recomputable.** The disclosure alarm can be
   re-derived by anyone from public data; confirming a `kemBinding` mismatch requires decapsulating
   under the arbiter's secret key, so a third party can neither verify a raised alarm nor detect a
-  suppressed one. Publishing the mismatching secret would break the envelope. Accepted: the alarm's
-  consumer is the institution that operates the arbiter.
+  suppressed one — publishing the mismatching secret would break the envelope. Accepted: the
+  alarm's consumer is the institution that operates the arbiter.
 - **Signatures are unchanged.** Groth16 and the bjj EdDSA read-auth are classically sound; forgery
   is a forge-later problem, migratable before Q-day. ML-DSA is not part of this work.
-
-Downgrade is structurally unavailable rather than merely discouraged: the circuits have no
-ECDH-only encryption path, and the pool rejects any `kemCiphertext` that is not exactly 1088 bytes.
-"Opting out" degenerates into the consistent-but-junk case, i.e. an alarm.
 
 ## Why the zero-commitment guard exists
 
 Upstream Zeto's `CheckHashes` has a zero-commitment escape: at `commitment == 0` the value, salt and
 owner go unbound. That is sound in stock Zeto only because its value-keyed sparse Merkle tree makes
-a zero commitment structurally impossible as a member. bongtu's index-keyed IMT commits `zeros[0] =
-0` at every position ahead of the frontier and at every disburse pad slot, so **0 is a genuine,
-membership-provable leaf** — and `leafIndices` is a prover-controlled input. Without the guard an
-attacker spends a padded zero leaf at `enabled = 1` declaring an arbitrary value `X`: `CheckHashes`
-escapes, `CheckNullifiers` binds a fresh nullifier, membership holds, the value belt is vacuous at
-`enabled = 1`, and `CheckSum` mints `X` from nothing — a repeatable, permissionless drain through
-`withdraw` or `transfer`, and through `disburse` for a compromised discloser.
+a zero commitment structurally impossible as a member. bongtu's index-keyed IMT commits
+`zeros[0] = 0` at every position ahead of the frontier and at every disburse pad slot, so **0 is a
+genuine, membership-provable leaf** — and `leafIndices` is a prover-controlled input. Without the
+guard an attacker spends a padded zero leaf at `enabled = 1` declaring an arbitrary value `X`:
+`CheckHashes` escapes, `CheckNullifiers` binds a fresh nullifier, membership holds, the value belt
+is vacuous at `enabled = 1`, and `CheckSum` mints `X` from nothing — a repeatable, permissionless
+drain through `withdraw` or `transfer`, and through `disburse` for a compromised discloser.
 `enabled[i] * IsZero(inputCommitments[i]) === 0` restores the SMT's implicit invariant explicitly on
-every spending base. Regression gates: `circuits/gates/test_zero_leaf_unsat.sh` (witness unsatisfiable) and
-the contract enforcement tests. See [circuits.md](circuits.md#soundness-invariants).
+every spending base. Regression gates: `circuits/gates/test_zero_leaf_unsat.sh` (witness
+unsatisfiable) and the contract enforcement tests. See
+[circuits.md](circuits.md#soundness-invariants).
 
 ## Residual gaps
 
@@ -240,56 +220,53 @@ Present-tense, deliberate, and not fixed by anything in the tree today.
   public (amount plus depositor address). In a fresh institutional pool the employer is the only
   large-note source, so the disburse input note is de-facto linkable to a specific deposit —
   fact-of-funding and magnitude leak even though the split does not. Input-note unlinkability is
-  bounded by the number of independent depositors. Mitigations are operational: pre-fund well ahead,
-  split deposits. This grows with adoption; it is not a property of the cryptography.
-- **Arbiter rotation invalidates in-flight proofs.** `rotateArbiter` takes effect immediately and
-  there is no grace window, so any proof built against the previous key fails. It rotates the bjj
-  key and the KEM pk hash together, so a client that has cached the old KEM key is caught by the
+  bounded by the number of independent depositors. Mitigations are operational (pre-fund well
+  ahead, split deposits); this grows with adoption and is not a property of the cryptography.
+- **Arbiter rotation invalidates in-flight proofs.** `rotateArbiter` takes effect immediately with
+  no grace window, so any proof built against the previous key fails. It rotates the bjj key and
+  the KEM pk hash together, so a client with a cached old KEM key is caught by the
   pre-encapsulation guard rather than producing a false-tamper op.
-- **Enterprise receiver ciphertexts are not post-quantum.** In the enterprise family only the
-  authority envelope carries the hybrid key; per-recipient KEM is deferred on cost grounds. See
-  the post-quantum section above for why the residual exposure needs an adversary who already
-  holds recipient pubkeys. Consumer receiver ciphertexts are hybrid per output
-  ([the consumer-family section](#the-consumer-family-no-auditor-ops)).
-- **Two-time pad on duplicate output owners (disburse only).** All outputs of a disburse batch share
-  one ephemeral key and one nonce, so two outputs to the same owner would leak `m1 − m2`. This is
-  mitigated by assembly-time rejection (`assertDistinctOwnerPubkeys`), not by the constraint system.
-  The transfer circuit closed this structurally (U-X3): receiver ciphertext `i` is encrypted under
-  `encryptionNonce + i` in-circuit, so duplicate output owners — including transfer-to-self — are
-  safe there and the assembly-time ban no longer applies to transfer. The consumer family
-  encrypts every output at `nonce + i` in all five of its circuits, so the ban applies to the
-  enterprise disburse alone.
-- **Discovery liveness depends on the indexer.** All ciphertext is on-chain and OP Stack posts it to
-  L1, so the data is available; but reading it means `eth_getLogs` against an archive node or the
-  bongtu indexer. Funds safety never depends on the indexer — a user who keeps their notes can spend
-  without it — but the wallet has no fallback balance path in either discovery mode:
+- **Enterprise receiver ciphertexts are not post-quantum.** Per-recipient KEM is deferred on cost
+  grounds; see the post-quantum scope above for why the residual exposure needs an adversary who
+  already holds recipient pubkeys.
+- **Two-time pad on duplicate output owners (enterprise disburse only).** All outputs of a disburse
+  batch share one ephemeral key and one nonce, so two outputs to the same owner would leak
+  `m1 − m2`. Mitigated by assembly-time rejection (`assertDistinctOwnerPubkeys`), not by the
+  constraint system. The transfer circuit closed this structurally: receiver ciphertext `i` is
+  encrypted under `encryptionNonce + i` in-circuit, so duplicate output owners — including
+  transfer-to-self — are safe there; the consumer family encrypts every output at `nonce + i` in
+  all five of its circuits, so the ban applies to the enterprise disburse alone.
+- **Discovery liveness depends on the indexer.** All ciphertext is on-chain and OP Stack posts it
+  to L1, so the data is available; but reading it means `eth_getLogs` against an archive node or
+  the bongtu indexer. Funds safety never depends on the indexer — a user who keeps their notes can
+  spend without it — but the wallet has no fallback balance path in either discovery mode:
   arbiter-mode `/notes` and the consumer profile's self-scan both read indexer surfaces
   ([wallet.md](wallet.md#indexer-dependency)).
-- **No pause, no blacklist, no fine-grained roles.** The only emergency lever is a UUPS upgrade, and
-  the only privileged role is the `Ownable2Step` owner (upgrades + arbiter rotation); every
+- **No pause, no blacklist, no fine-grained roles.** The only emergency lever is a UUPS upgrade,
+  and the only privileged role is the `Ownable2Step` owner (upgrades + arbiter rotation); every
   spend path, disburse included, is permissionless.
-- **Signature equals spending key.** A wallet user who signs the derivation struct anywhere else has
-  handed over their spending key ([wallet.md](wallet.md#key-derivation)).
+- **Signature equals spending key.** A wallet user who signs the derivation struct anywhere else
+  has handed over their spending key ([wallet.md](wallet.md#key-derivation)).
 - **Prover distribution is undesigned.** disburse proving needs a 1.3 GB zkey and a private GPU
   build; "we prove" is the PoC's distribution model.
 
 ## Testnet caveats
 
 - **Single-party trusted setup.** The Groth16 zkeys come from a `groth16 setup` against a public
-  powers-of-tau file with no phase-2 ceremony. Whoever ran setup can forge proofs. A phase-2 MPC is
-  a mainnet prerequisite, and it must come *after* circuit freeze — any circuit edit re-runs setup
-  and redeploys the verifier.
+  powers-of-tau file with no phase-2 ceremony, so whoever ran setup can forge proofs. A phase-2 MPC
+  is a mainnet prerequisite, and it must come *after* circuit freeze — any circuit edit re-runs
+  setup and redeploys the verifier.
 - **Demo arbiter keys.** The live pool's stored arbiter bjj key and the epoch-0 ML-KEM-768
-  encapsulation key are both development keys whose private halves exist on a developer machine.
-  They are fixed at deploy and coupled to the committed proof fixtures
+  encapsulation key are both development keys whose private halves exist on a developer machine,
+  fixed at deploy and coupled to the committed proof fixtures
   ([deployment.md](deployment.md#the-arbiter-key-is-fixed-at-deploy-and-the-fixtures-are-bound-to-it)).
 - **Mock token.** The escrowed kKRW is `MockERC20` with a permissionless `mint`. Any production
   token must be non-fee-on-transfer and non-rebasing, or the pool is insolvent by construction.
 - **Single-key ownership.** The proxy owner, the upgrade authority and the arbiter-rotation
   authority are one testnet EOA. Mainnet calls for a multisig or timelock.
 - **The consumer family is live at genesis.** The live Maroo pool (chain 450815) registered the
-  five consumer modules inside its deploy broadcast (`deploy/modules.450815.json`), so the pool
-  is dual-mode from its first block: the pool-level "every op is arbiter-disclosable" guarantee
+  five consumer modules inside its deploy broadcast (`deploy/modules.450815.json`), so the pool is
+  dual-mode from its first block: the pool-level "every op is arbiter-disclosable" guarantee
   applies to the enterprise family only, and the consumer family carries the OPMOD posture.
 - **Testnet only.** The stack is deployed to the Maroo testnet; every address and measurement here
   is testnet. Nothing in this repo has been deployed to a mainnet.

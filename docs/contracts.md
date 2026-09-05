@@ -44,11 +44,11 @@ A proof made against different values simply fails verification (`InvalidProof`)
 belts that make this injection sufficient are in [circuits.md](circuits.md#soundness-invariants).
 
 `kemBinding` is deliberately **not** injected: it is read from the proof's own public signals,
-because the contract has nothing to check it against — verifying an ML-KEM encapsulation on-chain is
-not affordable. It is the arbiter, not the pool, that closes that loop.
+because the contract has nothing to check it against — verifying an ML-KEM encapsulation on-chain
+is not affordable. It is the arbiter, not the pool, that closes that loop.
 
-disburse additionally reverts `ZeroNullifier` before verification: its single input is always real,
-so `enabled` degenerates to a constant.
+disburse additionally reverts `ZeroNullifier` before verification: its single input is always
+real, so `enabled` degenerates to a constant.
 
 ## Nullifier spend and root acceptance
 
@@ -89,10 +89,10 @@ a length rule on free calldata.
 
 - **Zero output commitments are rejected** on every appending path (`ZeroOutputCommitment`), and on
   transfer10 that means all ten output slots — transfer10x2 both — not just the first: an unused
-  slot there is a real value-0 note with a salt, so its commitment is nonzero too.
-  A zero leaf is a non-note; appending one would put a value-unbound leaf in the tree, which is
-  precisely what the circuit-side zero-commitment guard forbids as a *spend* input. Closing it on
-  the write side too is defence in depth (`chains/evm/test/Enforcement.t.sol`).
+  slot there is a real value-0 note with a salt, so its commitment is nonzero too. A zero leaf is
+  a value-unbound non-note — the same thing the circuit-side zero-commitment guard forbids as a
+  *spend* input; closing it on the write side too is defence in depth
+  (`chains/evm/test/Enforcement.t.sol`).
 - **Output uniqueness is deliberately absent.** Upstream Zeto's `validateOutputs` also rejects
   duplicate output commitments. Duplicates share one nullifier, so every copy past the first is
   unspendable — the sender burns their own funds and no one else is affected. It is a self-burn
@@ -119,8 +119,8 @@ one exception is `DisburseCiphertexts`, whose payload is length-checked and hash
 
 Every op event carries the **epoch index**, so an auditor picks the exact arbiter key even at a
 rotation-boundary block. Without `ecdhPublicKey` + `encryptionNonce` no recipient can derive a
-decryption key at all, which is why they are in the event rather than off-chain. `kemCiphertext` is
-re-emitted rather than left in calldata for the same reason: the arbiter reads logs, not
+decryption key at all — which is why they ride in the event rather than off-chain, and why
+`kemCiphertext` is re-emitted rather than left in calldata: the arbiter reads logs, not
 transactions.
 
 Adding those two fields changed every op event's topic0, which is why a reader must carry both ABI
@@ -141,9 +141,10 @@ epochs across an upgrade. So the per-epoch ML-KEM-768 encapsulation-key hash liv
 `rotateArbiter(newKey, newKemPkHash)` writes both and emits both events. There is no bjj-only
 overload, and neither it nor `initialize` accepts a zero hash — so `arbiterKemPkHash[epoch] == 0`
 means exactly one thing to a reader: that epoch was never minted. A client that read a zero for a
-live epoch would have no way to tell an un-keyed epoch from an unallocated index, and would draw KEM
-material against nothing. The full 1184-byte key is distributed off-chain and verified by clients
-against this hash ([deployment.md](deployment.md#the-arbiter-key-is-fixed-at-deploy-and-the-fixtures-are-bound-to-it)).
+live epoch would have no way to tell an un-keyed epoch from an unallocated index, and would draw
+KEM material against nothing. The full 1184-byte key is distributed off-chain and verified by
+clients against this hash
+([deployment.md](deployment.md#the-arbiter-key-is-fixed-at-deploy-and-the-fixtures-are-bound-to-it)).
 
 ## The op-module layer
 
@@ -275,11 +276,11 @@ placeholder key. Pinned by `chains/evm/test/ConsumerOnly.t.sol`; deploy profile:
 ## One initializer
 
 `initialize` is the enterprise profile's one-call initializer (`initializeConsumerOnly` above is
-its consumer-only sibling on the same version slot), and it brings the pool up in its complete
-production shape: Poseidon and the token, **all six verifiers**, the IMT parameters, the reentrancy latch, the
-owner, and arbiter epoch 0 carrying both halves of the hybrid authority key. A deployed pool has
-every entry point it will ever serve already backed by a real verifier, so no operation is ever
-reachable-but-unbacked and a deploy is one transaction with no sequencing to get wrong.
+its consumer-only sibling on the same version slot). One call produces the complete production
+shape — Poseidon and the token, **all six verifiers**, the IMT parameters, the reentrancy latch,
+the owner, and arbiter epoch 0 carrying both halves of the hybrid authority key — so every entry
+point is backed by a real verifier from the first block, no operation is ever
+reachable-but-unbacked, and a deploy is one transaction with no sequencing to get wrong.
 
 Two rules make that shape enforceable rather than merely intended:
 
@@ -320,12 +321,11 @@ meaning.
 - **Verifiers** are the snarkjs solidity exports, renamed only (`Groth16Verifier` →
   `TransferVerifier`, …). `chains/evm/test/VerifierDrift.t.sol` gates that copy: it re-applies the
   one permitted substitution to each `circuits/verifiers/*.sol` and requires byte identity, so a
-  regenerated circuit with a stale shipped verifier cannot pass `forge test`. They are fixed per implementation; a circuit change ships as
-  `upgradeToAndCall`, which preserves the pool address and the entire tree/nullifier state.
-- An `nPublic`-changing circuit edit is breaking: new verifier, new `IVerifiers` arity, new impl. It
-  must ship as ONE atomic `upgradeToAndCall` carrying the implementation and the regenerated
-  verifiers together — old proofs and new verifiers disagree on public count, so a two-step
-  migration would leave a window in which every affected op reverts.
+  regenerated circuit with a stale shipped verifier cannot pass `forge test`. Verifiers are fixed
+  per implementation; a circuit change ships as `upgradeToAndCall`, which preserves the pool
+  address and the entire tree/nullifier state. An `nPublic`-changing edit is breaking — new
+  verifier, new `IVerifiers` arity, new implementation, shipped as ONE atomic `upgradeToAndCall`
+  ([deployment.md](deployment.md#upgrading) owns the operational rule and why).
 - New state goes at the **tail**, taking words off `uint256[47] __gap`, never inserted beside a
   logically-related slot: an insert re-strides every slot below it and would silently move the IMT
   root, the nullifier set and the arbiter epochs. `chains/evm/test/Upgrade.t.sol` pins state
