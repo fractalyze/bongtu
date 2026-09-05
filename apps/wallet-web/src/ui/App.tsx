@@ -37,15 +37,8 @@ import { keyCache } from "@bongtu/ui/keyCache";
 import { proveInBrowser } from "../lib/prove.js";
 import type { WalletDescription } from "@bongtu/ui/walletBrand";
 import { sumUnspent } from "@bongtu/client/balance";
-import {
-  EMPTY_SCAN_STATE,
-  isConsumerIdentity,
-  runSelfScan,
-  selfScanSnapshot,
-  type ScanNote,
-  type SelfScanState,
-} from "@bongtu/client/selfscan";
-import { clearScanState, loadScanState, saveScanState, scanNotice } from "../lib/scanStore.js";
+import { ScanSession, type ScanNote } from "@bongtu/client/selfscan";
+import { clearScanState, loadScanState, saveScanState } from "../lib/scanStore.js";
 import { accountGuard, forgetDevice } from "../lib/accountGuard.js";
 import { autoTickAllowed } from "../lib/refreshGate.js";
 import { IndexerClient, type OwnerNote, type HistoryItem } from "@bongtu/core/indexerApi";
@@ -143,6 +136,16 @@ const INDEXER_URL = DEFAULTS.indexerUrl;
 // head / path, all public) satisfies the engine's SelfScanIo seam structurally.
 const indexer = new IndexerClient(INDEXER_URL);
 
+// The self-scan round-trip (resume, key peek, one §3.6 pass, store writeback,
+// notice verdict) is the engine's ScanSession — module-scoped like the indexer
+// client it reads through, because its state belongs to the page, not to a
+// render (it replaces the old scanRef/scanOwnerRef pair).
+const scanSession = new ScanSession(
+  indexer,
+  { load: loadScanState, save: saveScanState, clear: clearScanState },
+  keyCache,
+);
+
 /** Access the wallet context (throws if used outside the provider — a wiring bug). */
 export function useWallet(): WalletContextValue {
   const ctx = useContext(WalletContext);
@@ -165,12 +168,9 @@ export function App(): ReactNode {
   const [dataError, setDataError] = useState<string | null>(null);
   const [dataNotice, setDataNotice] = useState<string | null>(null);
 
-  // The last completed scan (memory-first, localStorage-backed via scanStore)
-  // plus its /head freshness stamp, and which owner the cached scan belongs to
-  // (so sign-out can clear the right store row without making endSession depend
-  // on session state).
-  const scanRef = useRef<SelfScanState | null>(null);
-  const scanOwnerRef = useRef<string | null>(null);
+  // The /head freshness stamp of the last completed scan. The scan state itself
+  // (memory-first, localStorage-backed) and its owner stamp live in the
+  // module-level ScanSession, not in refs.
   const [scannedNextLeafIndex, setScannedNextLeafIndex] = useState<number | null>(null);
 
   const [connecting, setConnecting] = useState(false);
@@ -180,26 +180,20 @@ export function App(): ReactNode {
   // refined with vendor brand flags once the raw provider resolves (hooks.ts).
   const wallet = useWalletDescription();
 
-  /** ONE read: an incremental §3.6 scan, resumed from the stored cursor, served in
-   *  the OwnerSnapshot shape so everything downstream — applySnapshot,
-   *  snapshotChanged, sumUnspent — is engine-blind. Scanning needs the view keys,
-   *  and a background read must never pop a signature, so a LOCKED wallet serves
-   *  its last completed scan unchanged under the calm notice. The notice verdict
-   *  itself is the pure scanNotice fold (scanStore.ts): it lands after runRefresh's
-   *  setNotice(null), so a successful read keeps it. */
+  /** ONE read: an incremental §3.6 scan through the engine's ScanSession, which
+   *  owns the whole round-trip — resume from the per-owner store, the keyCache
+   *  peek + identity gate, the store writeback, and the pure scanNotice verdict
+   *  (scan/session.ts); this callback only wires the outcome to React state,
+   *  served in the OwnerSnapshot shape so everything downstream — applySnapshot,
+   *  snapshotChanged, sumUnspent — is engine-blind. Scanning needs the view
+   *  keys, and a background read must never pop a signature, so a LOCKED wallet
+   *  serves its last completed scan unchanged under the calm notice — which
+   *  lands after runRefresh's setNotice(null), so a successful read keeps it. */
   const loadSelfScan = useCallback(async (ownerCompressed: string): Promise<OwnerSnapshot> => {
-    const prev = scanRef.current ?? loadScanState(ownerCompressed) ?? EMPTY_SCAN_STATE;
-    const identity = keyCache.peek(ownerCompressed);
-    const state =
-      identity !== null && isConsumerIdentity(identity)
-        ? await runSelfScan(indexer, identity, prev)
-        : prev;
-    scanRef.current = state;
-    scanOwnerRef.current = ownerCompressed;
-    saveScanState(ownerCompressed, state);
-    setScannedNextLeafIndex(state.scannedNextLeafIndex);
-    setDataNotice(scanNotice(state, identity !== null));
-    return selfScanSnapshot(state, ownerCompressed);
+    const scan = await scanSession.scan(ownerCompressed);
+    setScannedNextLeafIndex(scan.scannedNextLeafIndex);
+    setDataNotice(scan.notice);
+    return scan.snapshot;
   }, []);
 
   const applySnapshot = useCallback((snap: OwnerSnapshot): void => {
@@ -216,26 +210,25 @@ export function App(): ReactNode {
     keyCache.lock(); // signing out drops the spending key too
     toasts.clear(); // stale event toasts must not follow the user to onboarding
     clearConsumerSession();
-    scanRef.current = null;
     setScannedNextLeafIndex(null);
     if (forget) {
       // The clean-device trio, sequenced as one pure plan (lib/accountGuard.ts
       // forgetDevice, gated headlessly): the determinism bindings, the stored
-      // scan (a clean device keeps no decrypted amounts either — scanStore),
-      // and the wagmi connector (for WalletConnect that ends the session, so
-      // the wallet app stops showing bongtu as connected).
+      // scan (the session clears the stamped owner's row — a clean device
+      // keeps no decrypted amounts either), and the wagmi connector (for
+      // WalletConnect that ends the session, so the wallet app stops showing
+      // bongtu as connected).
       forgetDevice({
         clearKeyBindings: () => keyBindings.clearKeyBindings(),
-        clearStoredScan: () => {
-          if (scanOwnerRef.current !== null) clearScanState(scanOwnerRef.current);
-        },
+        clearStoredScan: () => scanSession.forgetOwner(),
         endWalletLink: () => void endWalletConnection(),
       });
+    } else {
+      // The owner stamp dies with the session (scan/session.ts end): a stamp
+      // that outlived its session once let a later owner's Disconnect clear
+      // the PREVIOUS owner's stored row.
+      scanSession.end();
     }
-    // The owner stamp dies with the session: the forget sink above resolves
-    // scanOwnerRef at call time, and a stamp that outlived its session once
-    // let a later owner's Disconnect clear the PREVIOUS owner's stored row.
-    scanOwnerRef.current = null;
     setConnection(null);
     setSession(null);
     setBalance(null);
@@ -312,8 +305,9 @@ export function App(): ReactNode {
 
   // The switch/disconnect sequences are fixed in lib/accountGuard.ts (pure,
   // gated): any accountsChanged locks the key AND detaches the in-memory scan
-  // ref — the next pass resumes from the per-owner store, never from a ref
-  // whose owner the live wallet no longer vouches for — while the screen keeps
+  // state (scan/session.ts detach) — the next pass resumes from the per-owner
+  // store, never from memory whose owner the live wallet no longer vouches
+  // for — while the screen keeps
   // its last snapshot under the calm locked notice; `disconnected` signs out
   // for WalletConnect only (there it is the phone ending the session; an
   // extension's disconnect can be a mere provider hiccup).
@@ -323,9 +317,7 @@ export function App(): ReactNode {
         accountGuard(
           {
             lock: () => keyCache.lock(),
-            detachScan: () => {
-              scanRef.current = null;
-            },
+            detachScan: () => scanSession.detach(),
             signOut: (notice) => endSession(notice),
           },
           () => connection?.transport ?? null,
@@ -421,13 +413,13 @@ export function App(): ReactNode {
     }
     const snap = await loadSelfScan(session.compressedPubkey);
     applySnapshot(snap);
-    return scanRef.current?.notes ?? [];
+    return scanSession.notes();
   }, [session, loadSelfScan, applySnapshot]);
 
   // ONE facade per login: the engine inputs every op screen used to re-thread —
   // connection, pool/token/explorer config, the lock, the in-browser prover,
   // the session pubkey — bind here, and the screens call methods. The note
-  // source reads the scan REF (not React state) so a mid-chain pass always
+  // source reads the ScanSession (not React state) so a mid-chain pass always
   // plans over the freshest completed scan, and its reload IS the self-scan
   // pass above (the note-shape translation lives behind the seam).
   const ops = useMemo<ConsumerOps | null>(
@@ -445,7 +437,7 @@ export function App(): ReactNode {
               prove: (request) => proveInBrowser(request, DEFAULTS.circuitBaseUrl),
             },
             session,
-            { notes: () => scanRef.current?.notes ?? [], reload: reloadNotes },
+            { notes: () => scanSession.notes(), reload: reloadNotes },
           )
         : null,
     [connection, session, reloadNotes],

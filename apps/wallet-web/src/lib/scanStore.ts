@@ -13,8 +13,6 @@
 import {
   decodeScanState,
   encodeScanState,
-  SELF_SCAN_LOCKED_NOTICE,
-  SELF_SCAN_PENDING_NOTICE,
   type SelfScanState,
 } from "@bongtu/client/selfscan";
 
@@ -48,18 +46,4 @@ export function clearScanState(ownerCompressed: string): void {
   } catch {
     // nothing to clear where nothing could be stored
   }
-}
-
-/**
- * The calm-strip verdict one completed scan implies, in ONE pure place so the
- * shell cannot re-derive the precedence inline (and so it gates headlessly).
- * Pending wins over locked: kem chunks still in flight mean money may exist
- * that no unlock could reveal yet — the more actionable fact. A locked wallet
- * (no identity in the memory lock) is serving its last completed scan, which
- * the locked notice says plainly; an unlocked, fully-delivered scan needs no
- * strip at all.
- */
-export function scanNotice(state: SelfScanState, identityHeld: boolean): string | null {
-  if (state.pending.length > 0) return SELF_SCAN_PENDING_NOTICE;
-  return identityHeld ? null : SELF_SCAN_LOCKED_NOTICE;
 }

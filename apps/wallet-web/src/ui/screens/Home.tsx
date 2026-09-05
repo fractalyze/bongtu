@@ -142,7 +142,7 @@ export function Home(): ReactNode {
           background read never blanks the screen). Retry is the MANUAL refresh. */}
       {dataError && <Banner message={dataError} onRetry={() => void refresh(true)} />}
       {/* Calm strip, not the warn banner: the data below is real — pending kem
-          delivery, or a locked wallet serving its last scan (scanStore.scanNotice). */}
+          delivery, or a locked wallet serving its last scan (the engine's scanNotice, @bongtu/client/selfscan). */}
       {!dataError && dataNotice && <p className="text-muted text-[0.85rem] px-0.5">{dataNotice}</p>}
       <ActivityList
         history={history.slice(0, RECENT_COUNT)}
