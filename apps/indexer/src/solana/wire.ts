@@ -71,6 +71,14 @@ const le64 = (bytes: Uint8Array, off: number): number => {
 /** Family tags (event.rs: instruction discriminator - 1). */
 export const FAMILY_DISBURSE256 = 7;
 
+/** Arbiter epoch on this rail, pinned at genesis (the Rust program's
+ *  `state.rs ARBITER_EPOCH_GENESIS`; dated deviation in SOLR §3.3.1):
+ *  `rotateArbiter` is not yet a Solana instruction, and the per-op event
+ *  payload carries no epoch field, so ledger data cannot describe any other
+ *  epoch. The ingest pins enterprise transfer feed entries to this value and
+ *  trips loudly on the first disburse event that disproves the pin. */
+export const ARBITER_EPOCH_GENESIS = 0;
+
 /** The per-op anchor event (op_event_payload). */
 export interface OpEventAnchor {
   shape: "op";

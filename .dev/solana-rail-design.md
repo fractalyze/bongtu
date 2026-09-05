@@ -357,7 +357,11 @@ S3 notes (2026-09-05, implementation):
 - **epoch is pinned to 0**: arbiter rotation (`rotateArbiter`) is not yet a Solana
   instruction, so every batch records the genesis epoch. When rotation lands, the epoch
   moves into `PoolConfig` and this field starts advancing — the layout already carries it
-  so the account shape does not change.
+  so the account shape does not change. Code sites bound to this pin (grep before
+  shipping rotation): `program/src/state.rs ARBITER_EPOCH_GENESIS`, and the indexer's
+  `solana/wire.ts ARBITER_EPOCH_GENESIS` — enterprise transfer feed entries assume it
+  (op events carry no epoch field) and the ingest's disburse-branch tripwire fails
+  loudly on the first non-genesis batch (issue #44).
 - **Wire is 8 carried publics** (ecdh×2, disclosureHash, subtreeRoot, kemBinding,
   nullifier, root, nonce): `enabled` (pub[7]) is unconditionally 1 (ZeroNullifier-guarded
   1-in spend) and the arbiter key (pub[9..10]) is config-injected, so neither rides the
