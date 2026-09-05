@@ -108,9 +108,10 @@ export interface StorePort {
   addNullifiers(nfs: bigint[]): void;
   nullifiers(): string[];
   // ---- durable-backend hooks (Postgres only; the in-memory adapter omits them,
-  // making persistence a no-op). The indexer wraps the store's flushInto + the
-  // ledger's flushInto + persistCursorInto in ONE caller-owned transaction, so the
-  // cursor advances to block H iff every derived row for blocks <= H is durable.
+  // making persistence a no-op). persistAtomically (src/persist.ts) wraps every
+  // declared participant's flushInto in ONE transaction (the BlockCursor
+  // participant drives persistCursorInto), so the cursor advances to block H
+  // iff every derived row for blocks <= H is durable.
   /** Stage buffered event/nullifier/leaf rows into the caller's open txn. */
   flushInto?(client: PoolClient): Promise<void>;
   /** Stage the ingest cursor advance into the SAME txn as flushInto. */

@@ -22,6 +22,7 @@
 
 import type { Pool } from "pg";
 import type { NameRecord } from "@bongtu/core/indexerApi";
+import type { NonParticipantPersistence } from "./persist.js";
 
 // The name grammar (NAME_PATTERN + normalizeName) lives with the names
 // wire-contract in @bongtu/core/indexerApi, so the wallet's pay-by-name form
@@ -48,6 +49,11 @@ export interface ConsumerTripleWrite {
  * so served state is never ahead of durable state.
  */
 export class NameRegistry {
+  /** Declared NON-participant in the atomic ingest persist (persist.ts):
+   *  registrations are owner-signed HTTP POSTs with no chain event behind
+   *  them, so each write commits in its own transaction at accept time —
+   *  nothing is ever pending for an ingest flush. */
+  readonly persistence: NonParticipantPersistence = "write-through";
   private readonly byName = new Map<string, NameRecord>();
 
   constructor(private readonly pool: Pool | null = null) {}

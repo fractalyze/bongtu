@@ -87,7 +87,7 @@ foundry in the build) and reproducible. CI builds this image **build-only** (`in
 ## Testing
 
 ```sh
-npm run test:unit    # anvil-free units: tree + disclosure + ingest + config (fast inner loop)
+npm run test:unit    # anvil-free units: tree + disclosure + ingest + config + persist atomicity (fast inner loop)
 npm run typecheck    # tsc --noEmit
 npm test             # the full conformance gate (bash test/run.sh) — heavy, POSTGRES-backed
 npm run test:pg      # the Postgres resume/crash gate (bash test/pg_integration.sh) — LOCAL, docker
@@ -120,7 +120,9 @@ artifacts under `circuits/out/` (`cd circuits && bash build/prove_all.sh` first)
 src/
   index.ts        runnable service: env → ingest → serve (+ tail polling)
   chain.ts        config resolution + pool ABI (viem) plumbing
-  ingest.ts       Indexer: event ingest, correlation, poll/retry state
+  host.ts         IndexerHost (the 18-member read-model surface routes consume) + the engine-neutral base (poll/health, close)
+  persist.ts      declared persistence participants + the ONE atomic persist (flush order, crash hook, commit-after-COMMIT)
+  ingest.ts       Indexer (EVM engine): event ingest + correlation, applyLogs
   tree.ts         MirrorTree: ImtTree mirror + per-leaf records + batch subtrees + path builder + snapshot/rebuild (resume)
   store.ts        StorePort + InMemoryStore (PostgresStore's sync read-model component): events / alarms / nullifiers / cursor
   disclosure.ts   disclosureHash verify + alarm classification (chain fold from @bongtu/core/envelope)

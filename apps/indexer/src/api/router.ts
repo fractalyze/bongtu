@@ -65,7 +65,7 @@
 // trial-decrypt is the wallet's job (SPEC §7 client-side-decrypt model).
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import type { Indexer } from "../ingest.js";
+import type { IndexerHost } from "../host.js";
 import { head } from "./routes/head.js";
 import { events } from "./routes/events.js";
 import { path } from "./routes/path.js";
@@ -81,9 +81,11 @@ import { history } from "./routes/history.js";
 import { authChallenge, authRedeem } from "./routes/auth.js";
 import { resolvePublicUrls, resolveTokenSecret, ViewTokenService } from "./viewtoken.js";
 
-/** What a route handler receives: the indexer + the parsed request, no HTTP types. */
+/** What a route handler receives: the read-model host (src/host.ts — the exact
+ *  surface routes may consume, never an engine's chain plumbing) + the parsed
+ *  request, no HTTP types. */
 export interface RouteContext {
-  ix: Indexer;
+  ix: IndexerHost;
   /** view-token issue/verify (api/viewtoken.ts) — one service per server, and
    *  null in public mode, which has no token-authed route to serve. */
   tokens: ViewTokenService | null;
@@ -142,7 +144,7 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
  *  by whoever knows the origins it binds to — startApi, once the port is bound —
  *  so there is exactly ONE assembly point and no path that can mint tokens for an
  *  origin clients never dial. */
-export function makeHandler(ix: Indexer, tokens: ViewTokenService | null) {
+export function makeHandler(ix: IndexerHost, tokens: ViewTokenService | null) {
   const activeRoutes = ix.arbiterMode ? [...routes, notes, history, authChallenge, authRedeem] : routes;
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     try {
@@ -185,7 +187,7 @@ export function makeHandler(ix: Indexer, tokens: ViewTokenService | null) {
  *  listen callback because the PUBLIC_URL fallback needs the actually-bound port
  *  (callers pass 0 for an ephemeral one); no request can arrive before then. */
 export function startApi(
-  ix: Indexer,
+  ix: IndexerHost,
   port: number,
 ): Promise<{ port: number; publicUrls: string[]; stop: () => Promise<void> }> {
   const handlerRef: { current: ReturnType<typeof makeHandler> | null } = { current: null };

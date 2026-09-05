@@ -54,7 +54,10 @@ export async function handlePayPortal(
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): Promise<RouteResult> {
   const factory = ix.cfg.portalFactory ?? null;
-  if (!factory) return unconfigured();
+  // portalAddressOf is the EVM-only host capability (src/host.ts): absent on
+  // the Solana engine, where a configured factory address has no chain to
+  // resolve against — same 404 as an unset PORTAL_FACTORY.
+  if (!factory || !ix.portalAddressOf) return unconfigured();
   const name = normalizeName(params[0]);
   if (!name) {
     return { status: 400, body: { error: "invalid name: 3-32 chars, lowercase a-z 0-9, interior hyphens" } };
