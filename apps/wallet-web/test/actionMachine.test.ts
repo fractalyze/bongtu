@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { EXPLORER_BASE } from "@bongtu/core/network";
-import { ActionMachine, stepsForRun, type ActionResult } from "../src/ui/actionMachine.js";
+import { ActionMachine, OpGate, OP_IN_FLIGHT_MESSAGE, stepsForRun, type ActionResult } from "../src/ui/actionMachine.js";
 import { SPEND_STEPS, DEPOSIT_STEPS } from "../src/ui/components/StagedProgress.js";
 
 // Arbitrary fixture — the machine passes explorerUrl through without parsing it.
@@ -273,4 +273,54 @@ test("the action screens run the shared machine instead of hand-rolling the phas
       assert.doesNotMatch(text, hand, `${file} is re-growing a phase machine of its own`);
     }
   }
+});
+
+// ======================= (6) ONE-OP-AT-A-TIME ===============================
+// The gate consumer-web added (two wallet popups interleaving over one lock is
+// the confusion the guard exists to prevent) now guards this wallet too
+// (issue #45). Pure-machine cases; each test owns its gate.
+
+test("exactly one op runs at a time: a second submit refuses with the pinned copy and never starts its run", async () => {
+  assert.equal(
+    OP_IN_FLIGHT_MESSAGE,
+    "Another action is still running. Let it finish before starting a new one.",
+  );
+  const gate = new OpGate();
+  const a = new ActionMachine<ActionResult>(SPEND_STEPS[0].key, gate);
+  const b = new ActionMachine<ActionResult>(DEPOSIT_STEPS[0].key, gate);
+  const release: { fire: () => void } = { fire: () => {} };
+  const first = a.submit(
+    () =>
+      new Promise((resolve) => {
+        release.fire = () => resolve(OUTCOME);
+      }),
+    () => {},
+  );
+
+  const bRan = { current: false };
+  await b.submit(async () => {
+    bRan.current = true;
+    return OUTCOME;
+  }, () => {});
+
+  assert.equal(bRan.current, false, "the refused op's flow never runs");
+  assert.equal(b.snapshot().phase, "form");
+  assert.equal(b.snapshot().error, OP_IN_FLIGHT_MESSAGE);
+  assert.equal(a.snapshot().phase, "running", "the running op is untouched by the refusal");
+
+  release.fire();
+  await first;
+  assert.equal(a.snapshot().phase, "done");
+  assert.equal(gate.busy(), false, "the slot frees the moment the run ends");
+
+  await b.submit(async () => OUTCOME, () => {});
+  assert.equal(b.snapshot().phase, "done", "the next op runs once the slot is free");
+});
+
+test("a failed run releases the slot: no machine is ever stranded holding it", async () => {
+  const gate = new OpGate();
+  const m = new ActionMachine<ActionResult>(SPEND_STEPS[0].key, gate);
+  await m.submit(fails(new Error("boom")), () => {});
+  assert.equal(m.snapshot().phase, "form");
+  assert.equal(gate.busy(), false);
 });

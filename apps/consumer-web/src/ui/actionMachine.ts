@@ -1,6 +1,7 @@
-// Copied ahead of need: no S4 screen imports this yet (the op buttons are
-// disabled stubs). S5-S6 wire the op screens through it; wallet-web, whose
-// copy is byte-identical below this header, still gates the shared logic.
+// wallet-web's copy is identical below this header except the wording import
+// (consumerErrorMessage here, walletWebErrorMessage there) — the one delta,
+// stated so the pair stays honest until the shared-libs consolidation
+// (issue #46) gives the machine a single home.
 // The four-phase machine every value-moving screen runs: form → confirm → running →
 // done. Send, Withdraw and Deposit differ only in what they put ON the form and in
 // which flow function they call; the phase order, the stage reporting, the unlock
