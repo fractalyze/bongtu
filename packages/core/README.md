@@ -33,6 +33,8 @@ are the stable public names.
 | `indexerApi` | the spec-normative indexer read-API wire shapes (`FeedEvent`, `OwnerNote`, `Head`, `PathResult`, …), the typed fetch layer, the `/names` directory (`resolveName`, `registerName`, v2 registration), and the `IndexerClient` class binding a URL once with owner-scoped read capabilities — the import home for every indexer consumer since the client-side barrel was removed (issue #15) |
 | `errors` | the headless error-surface standard: the AppError consequence-class taxonomy plus the three shared boundary classifiers (indexer reads, chain submissions, in-browser proving) returning structured verdicts each app words itself |
 | `network` | the ONE home for the live pool's deployment-coupled chain facts (chain id, gas pin, pool/module/token addresses, `CONSUMER_MODULES`), mirrored field-for-field from `deploy/addresses.450815.json` by a record-equality test |
+| `solana` | the Solana rail's deployment-coupled facts (program id, PDA seeds, account layouts and offsets, genesis arbiter epoch, proof/KEM sizes, the base58 codec, the BE/LE encoding rule) — every mirrored constant pinned against the Rust program sources, read as text, by `test/solana.test.ts` |
+| `solanaOps` | the per-op public-signal layout table for all nine Solana ops (discriminator, publics count, named field map, derived carried composition and enabled spec, family tags/flags, wire lengths) — reconciled against the Rust op consts and the committed conformance fixtures by the same test |
 | `extern` | node-only `createRequire` loader for the deliberately repo-external heavy deps (snarkjs, circomlibjs) via `BONGTU_NODE_MODULES` — never import it from browser code |
 
 ## Who consumes it

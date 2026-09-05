@@ -7,58 +7,17 @@
 // driving the SAME apply layer (SOLR §5.3); this adapter is deliberately thin
 // — the e2e_s.sh validator gate (S6) is what exercises it end to end.
 
+import {
+  CONFIG_OFF_BATCH_B,
+  TREE_OFF_CONFIG,
+  TREE_OFF_NEXT,
+  TREE_OFF_ROOT,
+  base58ToBytes,
+  base58ToHex,
+  bytesToBase58,
+} from "@bongtu/core/solana";
 import { hexOfBytes, type SolanaInstructionRecord, type SolanaLedgerTx } from "./wire.js";
 import type { SolanaChainIo } from "./ingest.js";
-
-const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-
-export function base58ToBytes(s: string): Uint8Array {
-  const digits: number[] = [];
-  for (const ch of s) {
-    const v = ALPHABET.indexOf(ch);
-    if (v < 0) throw new Error(`base58: invalid character "${ch}"`);
-    const carry = digits.reduce((c, _, i) => {
-      const x = digits[i] * 58 + c;
-      digits[i] = x & 0xff;
-      return x >> 8;
-    }, v);
-    const push = (c: number): void => {
-      if (c > 0) {
-        digits.push(c & 0xff);
-        push(c >> 8);
-      }
-    };
-    push(carry);
-  }
-  const firstNonOne = [...s].findIndex((c) => c !== "1");
-  const zeros = firstNonOne === -1 ? s.length : firstNonOne;
-  return new Uint8Array([...Array.from({ length: zeros }, () => 0), ...digits.reverse()]);
-}
-
-export function base58ToHex(s: string): string {
-  return hexOfBytes(base58ToBytes(s));
-}
-
-export function bytesToBase58(bytes: Uint8Array): string {
-  const digits: number[] = [];
-  for (const byte of bytes) {
-    const carry = digits.reduce((c, _, i) => {
-      const x = digits[i] * 256 + c;
-      digits[i] = x % 58;
-      return Math.floor(x / 58);
-    }, byte);
-    const push = (c: number): void => {
-      if (c > 0) {
-        digits.push(c % 58);
-        push(Math.floor(c / 58));
-      }
-    };
-    push(carry);
-  }
-  const firstNonZero = [...bytes].findIndex((b) => b !== 0);
-  const zeros = firstNonZero === -1 ? bytes.length : firstNonZero;
-  return "1".repeat(zeros) + digits.reverse().map((d) => ALPHABET[d]).join("");
-}
 
 /** Backend selection config (chain.ts `solana`): ids stay base58 in env, the
  *  operator-facing convention. */
@@ -67,12 +26,6 @@ export interface SolanaRpcConfig {
   programId: string;
   treeAccount: string;
 }
-
-// TreeState fixed offsets (chains/solana/program state.rs).
-const TREE_OFF_CONFIG = 2;
-const TREE_OFF_NEXT = 34;
-const TREE_OFF_ROOT = 42;
-const CONFIG_OFF_BATCH_B = 100;
 
 interface RpcSignatureRow {
   signature: string;

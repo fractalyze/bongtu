@@ -27,6 +27,8 @@ import { fileURLToPath } from "node:url";
 
 import { ImtTree } from "@bongtu/core/imt";
 import { ml_kem768, kemSsToLimbs } from "@bongtu/core/kem";
+import { KEM_CT_LEN, PROOF_LEN, TREE_HEIGHT } from "@bongtu/core/solana";
+import type { SolanaEnabledSpec } from "@bongtu/core/solanaOps";
 import { deriveKeypair } from "@bongtu/core/note";
 import type { Keypair } from "@bongtu/core/note";
 import { toWire } from "@bongtu/core/proving";
@@ -34,7 +36,7 @@ import { toWire } from "@bongtu/core/proving";
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const OUT_DIR = join(HERE, "inputs");
 
-export const H = 32; // IMT depth (all circuits)
+export const H = TREE_HEIGHT; // IMT depth (all circuits; one owner: @bongtu/core/solana)
 
 // --- fixed test material (index-derived, PRNG-free) ------------------------
 
@@ -137,3 +139,83 @@ export function membership(commitments: bigint[]): Membership {
 const emptyTree = new ImtTree(H, 16);
 export const ZERO_ROOT = emptyTree.getRoot(); // == zeros[H]
 export const ZERO_PATH = emptyTree.zeros.slice(0, H); // zeros[0..H-1], length H
+
+// --- shared fixture assertion vocabulary -----------------------------------
+// The Solana conformance generators (chains/solana/scripts/gen_vectors.ts,
+// gen_enterprise_vectors.ts, gen_attach_vectors.ts) each re-declared this
+// ladder locally, synchronized only by comments. It lives here ONCE — the
+// same consolidation move as the key material above — with the wire-shape
+// facts (PROOF_LEN, KEM_CT_LEN, enabled derivation) imported from their
+// @bongtu/core/solana + solanaOps owners.
+
+/** `assertEq` shape every generator uses; `makeAssertEq` bakes in the
+ *  generator's name so failures still say which script convicted. */
+export type AssertEq = <T>(got: T, want: T, what: string) => void;
+
+export const makeAssertEq = (prefix: string): AssertEq => {
+  return <T>(got: T, want: T, what: string): void => {
+    if (got !== want) throw new Error(`${prefix}: ${what}: got ${got}, want ${want}`);
+  };
+};
+
+/** 32-byte big-endian 0x-hex — the rail's field-element wire form. */
+export const hex32 = (v: bigint): string => "0x" + v.toString(16).padStart(64, "0");
+
+/** The account-state shape the mollusk fixtures pin pre/post per op. */
+export interface TreeSnapshot {
+  nextLeafIndex: number;
+  currentRoot: string;
+  filledSubtrees: string[];
+}
+
+export const snapshot = (t: ImtTree): TreeSnapshot => ({
+  nextLeafIndex: t.getNextLeafIndex(),
+  currentRoot: hex32(t.getRoot()),
+  filledSubtrees: t.filledSubtrees.map(hex32),
+});
+
+/** Proof wire bytes (PROOF_LEN = 256 B): a.x||a.y || b || c.x||c.y. The
+ *  committed fixtures already store b in EVM/EIP-197 limb order (imaginary
+ *  limb first — the snarkjs exportSolidityCallData swap), which is exactly
+ *  the alt_bn128 pairing-syscall encoding, so the limbs concatenate
+ *  untouched. */
+export const proofHex = (
+  fx: { a: string[]; b: string[][]; c: string[] },
+  eq: AssertEq,
+): string => {
+  const strip = (h: string): string => h.replace(/^0x/, "");
+  const out =
+    "0x" +
+    [fx.a[0], fx.a[1], fx.b[0][0], fx.b[0][1], fx.b[1][0], fx.b[1][1], fx.c[0], fx.c[1]]
+      .map(strip)
+      .join("");
+  eq((out.length - 2) / 2, PROOF_LEN, "proof wire length");
+  return out;
+};
+
+/** One raw ML-KEM-768 ciphertext must be exactly KEM_CT_LEN bytes. */
+export const checkKemCtHex = (hex: string, eq: AssertEq): void => {
+  eq((hex.length - 2) / 2, KEM_CT_LEN, "kem ciphertext length");
+};
+
+export const checkKemCts = (cts: string[], want: number, eq: AssertEq): void => {
+  eq(cts.length, want, "kem ciphertext count");
+  for (const ct of cts) checkKemCtHex(ct, eq);
+};
+
+/** Assert the enabled run of a FULL public vector obeys its layout-table
+ *  derivation spec: enabled[i] == (nullifier[i] != 0), or the unconditional
+ *  1 of disburse256 (the no-derivable-publics wire rule the program
+ *  reconstructs, SOLR §2.3). */
+export const checkEnabled = (pub: string[], spec: SolanaEnabledSpec, eq: AssertEq): void => {
+  for (const i of Array(spec.arity).keys()) {
+    const want = spec.constantOne ? 1n : BigInt(pub[spec.nullifiersAt + i]) === 0n ? 0n : 1n;
+    eq(BigInt(pub[spec.enabledAt + i]), want, `enabled[${i}] derivation`);
+  }
+};
+
+/** Pretty-JSON a conformance artifact (1-space indent, trailing newline —
+ *  the byte shape every committed chains/solana/conformance file uses). */
+export const writeJson = (dir: string, name: string, obj: object): void => {
+  writeFileSync(join(dir, name), JSON.stringify(obj, null, 1) + "\n");
+};

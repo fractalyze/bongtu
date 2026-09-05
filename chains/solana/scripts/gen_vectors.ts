@@ -7,19 +7,26 @@
 // Run from the repo root:
 //   node_modules/.bin/tsx chains/solana/scripts/gen_vectors.ts
 //
-// Reads   packages/core (poseidon + ImtTree — the JS oracle),
+// Reads   packages/core (poseidon + ImtTree — the JS oracle; the rail facts
+//         and the per-op layout table: @bongtu/core/solana + solanaOps),
+//         circuits/fixtures/fixture_lib.ts (the shared fixture assertion
+//         vocabulary),
 //         chains/evm/test/fixtures/consumer_realproofs.json (committed EVM
 //         realproof fixtures: depositPriv, transferPriv, transfer10x2Priv),
 //         chains/evm/test/fixtures/consumer_realproofs_solana.json (the ONE
 //         re-proven withdrawPriv fixture, Solana-bound recipient — SOLR §5.2)
-// Writes  chains/solana/conformance/poseidon_vectors.json   (gate 1 vectors)
-//         chains/solana/conformance/<op>_fixture.json x4    (gates 2/3/5 harness input)
-//         chains/solana/program/src/generated/zeros.rs      (IMT empty-subtree constants)
+// Writes  chains/solana/conformance/poseidon_vectors.json    (gate 1 vectors)
+//         chains/solana/conformance/<op>_priv_fixture.json x4 (gates 2/3/5
+//                                                             harness input)
+//         chains/solana/program/src/generated/zeros.rs       (IMT empty-subtree
+//                                                             constants)
 //
 // Every value is asserted against the fixture's own committed anchors (the
 // membership-root public, rootAfter, the enabled-derivation rule, the OPEN-3
 // recipient binding) before anything is written — a drifted core or fixture
-// fails here, not in mollusk.
+// fails here, not in mollusk. Public-signal positions come from the ONE
+// layout table (@bongtu/core/solanaOps), the same table the ledger decoder
+// consumes — no local index literals.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -27,6 +34,19 @@ import { fileURLToPath } from "node:url";
 
 import { ImtTree } from "@bongtu/core/imt";
 import { poseidon2, poseidonN } from "@bongtu/core/poseidon";
+import { BATCH_B_CONSUMER, TREE_HEIGHT } from "@bongtu/core/solana";
+import { SOLANA_OPS } from "@bongtu/core/solanaOps";
+
+import {
+  checkEnabled,
+  checkKemCts,
+  hex32,
+  makeAssertEq,
+  proofHex,
+  snapshot,
+  writeJson,
+  type TreeSnapshot,
+} from "../../../circuits/fixtures/fixture_lib.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "..", "..", "..");
@@ -45,19 +65,15 @@ const GENERATED = join(HERE, "..", "program", "src", "generated");
 // Tree shape: height 32 shared protocol-wide; B=16 is the consumer fixture
 // profile (gen_consumer_realproofs.ts seeds with ImtTree(32, 16)). The P2P
 // ops never batch-attach, so B only labels the profile here.
-const H = 32;
-const B = 16;
+const H = TREE_HEIGHT;
+const B = BATCH_B_CONSUMER;
 
 // docs/protocol.md parity anchor: Poseidon([1, 2]).
 const CANONICAL_1_2 =
   7853200120776062878684798364095072458815029376092732009249414926327459813530n;
 
-const hex32 = (v: bigint): string => "0x" + v.toString(16).padStart(64, "0");
 const dec = (v: bigint): string => v.toString(10);
-
-function assertEq<T>(got: T, want: T, what: string): void {
-  if (got !== want) throw new Error(`gen_vectors: ${what}: got ${got}, want ${want}`);
-}
+const assertEq = makeAssertEq("gen_vectors");
 
 // --- gate 1: poseidon conformance vectors (arity 2..5) ----------------------
 function poseidonVectors(): object {
@@ -129,54 +145,6 @@ interface EvmFixture {
   kemCiphertexts: string[];
 }
 
-interface TreeSnapshot {
-  nextLeafIndex: number;
-  currentRoot: string;
-  filledSubtrees: string[];
-}
-
-// Proof wire bytes (256 B): a.x||a.y || b || c.x||c.y. The committed fixtures
-// already store b in EVM/EIP-197 limb order (imaginary limb first — the
-// exportSolidityCallData swap of snarkjs pi_b), which is exactly the
-// alt_bn128 pairing-syscall encoding, so the limbs concatenate untouched.
-function proofHex(fx: EvmFixture): string {
-  const strip = (h: string): string => h.replace(/^0x/, "");
-  const out =
-    "0x" +
-    [fx.a[0], fx.a[1], fx.b[0][0], fx.b[0][1], fx.b[1][0], fx.b[1][1], fx.c[0], fx.c[1]]
-      .map(strip)
-      .join("");
-  if ((out.length - 2) / 2 !== 256) throw new Error("gen_vectors: proof is not 256 bytes");
-  return out;
-}
-
-function snapshot(t: ImtTree): TreeSnapshot {
-  return {
-    nextLeafIndex: t.getNextLeafIndex(),
-    currentRoot: hex32(t.getRoot()),
-    filledSubtrees: t.filledSubtrees.map(hex32),
-  };
-}
-
-function checkKemCts(fx: EvmFixture, want: number): void {
-  assertEq(fx.kemCiphertexts.length, want, "kem ciphertext count");
-  for (const kem of fx.kemCiphertexts) {
-    assertEq((kem.length - 2) / 2, 1088, "kem ciphertext length");
-  }
-}
-
-/** Assert enabled[i] == (nullifier[i] != 0) for a run of publics — the
- *  no-derivable-publics wire rule the program reconstructs (SOLR §2.3). */
-function checkEnabled(fx: EvmFixture, nfAt: number, enAt: number, arity: number): void {
-  for (const i of Array(arity).keys()) {
-    assertEq(
-      BigInt(fx.pub[enAt + i]),
-      BigInt(fx.pub[nfAt + i]) === 0n ? 0n : 1n,
-      `enabled[${i}] derivation`,
-    );
-  }
-}
-
 /** Replay a fixture's tree with the JS oracle: seed leaves (asserting the
  *  membership-root public), append the outputs (asserting rootAfter). */
 function replay(
@@ -195,27 +163,29 @@ function replay(
   return { pre, post };
 }
 
-// transferPriv publics (20): [0..1]=ecdhPub [2..9]=cts [10..11]=viewTags
-// [12..13]=nf [14]=root [15..16]=enabled [17..18]=oc [19]=nonce
+// transferPriv: layout @bongtu/core/solanaOps (full publics field map +
+// carried composition + enabled derivation — one owner with the decoder).
 function transferFixture(fx: EvmFixture): object {
-  assertEq(fx.pub.length, 20, "transferPriv pub len");
-  checkKemCts(fx, 2);
-  checkEnabled(fx, 12, 15, 2);
-  const carried = [...fx.pub.slice(0, 15), ...fx.pub.slice(17, 20)];
-  assertEq(carried.length, 18, "transferPriv carried publics");
-  const { pre, post } = replay(fx, fx.seedLeaves!, fx.pub[14], [fx.pub[17], fx.pub[18]]);
+  const L = SOLANA_OPS.transferPriv;
+  assertEq(fx.pub.length, L.nPublic, "transferPriv pub len");
+  checkKemCts(fx.kemCiphertexts, L.kemCtCount, assertEq);
+  checkEnabled(fx.pub, L.enabled!, assertEq);
+  const nullifiers = L.fields.nullifiers.map((i) => fx.pub[i]);
+  const outputCommitments = L.fields.outputCommitments.map((i) => fx.pub[i]);
+  const spentRoot = fx.pub[L.fields.root[0]];
+  const { pre, post } = replay(fx, fx.seedLeaves!, spentRoot, outputCommitments);
   return {
     comment:
       "GENERATED by chains/solana/scripts/gen_vectors.ts from the committed EVM transferPriv " +
       "realproof fixture (chains/evm/test/fixtures/consumer_realproofs.json) + the " +
       "packages/core ImtTree oracle. Mollusk gates 2/5 input — SOLR §5.2.",
-    proof: proofHex(fx),
-    publicsCarried: carried,
+    proof: proofHex(fx, assertEq),
+    publicsCarried: L.carried.map((i) => fx.pub[i]),
     publicsFull: fx.pub,
     kemCiphertexts: fx.kemCiphertexts,
-    nullifiers: [fx.pub[12], fx.pub[13]],
-    outputCommitments: [fx.pub[17], fx.pub[18]],
-    spentRoot: fx.pub[14],
+    nullifiers,
+    outputCommitments,
+    spentRoot,
     newRoot: fx.rootAfter,
     startLeafIndex: pre.nextLeafIndex,
     preState: pre,
@@ -223,24 +193,25 @@ function transferFixture(fx: EvmFixture): object {
   };
 }
 
-// depositPriv publics (16): [0]=out [1..2]=ecdhPub [3..10]=cts[2][4]
-// [11..12]=viewTags [13..14]=oc [15]=nonce — a 0-in mint: nothing injected,
-// all 16 publics carried; tree starts empty (the fixture's own seed shape).
+// depositPriv: a 0-in mint — nothing injected, ALL publics carried; tree
+// starts empty (the fixture's own seed shape).
 function depositFixture(fx: EvmFixture): object {
-  assertEq(fx.pub.length, 16, "depositPriv pub len");
-  checkKemCts(fx, 2);
-  const { pre, post } = replay(fx, [], null, [fx.pub[13], fx.pub[14]]);
+  const L = SOLANA_OPS.depositPriv;
+  assertEq(fx.pub.length, L.nPublic, "depositPriv pub len");
+  checkKemCts(fx.kemCiphertexts, L.kemCtCount, assertEq);
+  const outputCommitments = L.fields.outputCommitments.map((i) => fx.pub[i]);
+  const { pre, post } = replay(fx, [], null, outputCommitments);
   assertEq(pre.nextLeafIndex, 0, "depositPriv pre-state is the empty tree");
   return {
     comment:
       "GENERATED by chains/solana/scripts/gen_vectors.ts from the committed EVM depositPriv " +
       "realproof fixture + the packages/core ImtTree oracle. Mollusk gates 2/5 input.",
-    proof: proofHex(fx),
-    publicsCarried: fx.pub,
+    proof: proofHex(fx, assertEq),
+    publicsCarried: L.carried.map((i) => fx.pub[i]),
     publicsFull: fx.pub,
     kemCiphertexts: fx.kemCiphertexts,
-    outputCommitments: [fx.pub[13], fx.pub[14]],
-    amount: fx.pub[0],
+    outputCommitments,
+    amount: fx.pub[L.fields.amount[0]],
     newRoot: fx.rootAfter,
     startLeafIndex: 0,
     preState: pre,
@@ -248,26 +219,26 @@ function depositFixture(fx: EvmFixture): object {
   };
 }
 
-// transfer10x2Priv publics (36): [0..1]=ecdhPub [2..9]=cts [10..11]=viewTags
-// [12..21]=nullifiers[10] [22]=root [23..32]=enabled[10] [33..34]=oc [35]=nonce
 function transfer10x2Fixture(fx: EvmFixture): object {
-  assertEq(fx.pub.length, 36, "transfer10x2Priv pub len");
-  checkKemCts(fx, 2);
-  checkEnabled(fx, 12, 23, 10);
-  const carried = [...fx.pub.slice(0, 23), ...fx.pub.slice(33, 36)];
-  assertEq(carried.length, 26, "transfer10x2Priv carried publics");
-  const { pre, post } = replay(fx, fx.seedLeaves!, fx.pub[22], [fx.pub[33], fx.pub[34]]);
+  const L = SOLANA_OPS.transfer10x2Priv;
+  assertEq(fx.pub.length, L.nPublic, "transfer10x2Priv pub len");
+  checkKemCts(fx.kemCiphertexts, L.kemCtCount, assertEq);
+  checkEnabled(fx.pub, L.enabled!, assertEq);
+  const nullifiers = L.fields.nullifiers.map((i) => fx.pub[i]);
+  const outputCommitments = L.fields.outputCommitments.map((i) => fx.pub[i]);
+  const spentRoot = fx.pub[L.fields.root[0]];
+  const { pre, post } = replay(fx, fx.seedLeaves!, spentRoot, outputCommitments);
   return {
     comment:
       "GENERATED by chains/solana/scripts/gen_vectors.ts from the committed EVM transfer10x2Priv " +
       "realproof fixture + the packages/core ImtTree oracle. Mollusk gates 2/5 input.",
-    proof: proofHex(fx),
-    publicsCarried: carried,
+    proof: proofHex(fx, assertEq),
+    publicsCarried: L.carried.map((i) => fx.pub[i]),
     publicsFull: fx.pub,
     kemCiphertexts: fx.kemCiphertexts,
-    nullifiers: fx.pub.slice(12, 22),
-    outputCommitments: [fx.pub[33], fx.pub[34]],
-    spentRoot: fx.pub[22],
+    nullifiers,
+    outputCommitments,
+    spentRoot,
     newRoot: fx.rootAfter,
     startLeafIndex: pre.nextLeafIndex,
     preState: pre,
@@ -275,11 +246,9 @@ function transfer10x2Fixture(fx: EvmFixture): object {
   };
 }
 
-// withdrawPriv publics (16): [0]=out [1..2]=ecdhPub [3..6]=ctChange
-// [7]=viewTag [8..9]=nf [10]=root [11..12]=enabled [13]=oc0(change)
-// [14]=nonce [15]=recipient. Source: the ONE re-proven Solana-recipient
-// fixture (consumer_realproofs_solana.json); pub[15] must equal the OPEN-3
-// truncate-253 binding of its recipientTokenAccount.
+// withdrawPriv. Source: the ONE re-proven Solana-recipient fixture
+// (consumer_realproofs_solana.json); the recipient public must equal the
+// OPEN-3 truncate-253 binding of its recipientTokenAccount.
 function withdrawFixture(
   fx: EvmFixture & {
     recipientTokenAccount: string;
@@ -287,35 +256,41 @@ function withdrawFixture(
     stealthViewTag: number;
   },
 ): object {
-  assertEq(fx.pub.length, 16, "withdrawPriv pub len");
-  checkKemCts(fx, 1);
-  checkEnabled(fx, 8, 11, 2);
+  const L = SOLANA_OPS.withdrawPriv;
+  assertEq(fx.pub.length, L.nPublic, "withdrawPriv pub len");
+  checkKemCts(fx.kemCiphertexts, L.kemCtCount, assertEq);
+  checkEnabled(fx.pub, L.enabled!, assertEq);
 
   const addr = BigInt(fx.recipientTokenAccount);
   assertEq((fx.recipientTokenAccount.length - 2) / 2, 32, "recipient token account length");
   const bound = addr & ((1n << 253n) - 1n);
-  assertEq(BigInt(fx.pub[15]), bound, "pub[15] vs truncate-253 recipient binding");
+  assertEq(
+    BigInt(fx.pub[L.fields.recipient[0]]),
+    bound,
+    "recipient public vs truncate-253 recipient binding",
+  );
   assertEq((fx.stealthEphemeralPub.length - 2) / 2, 32, "stealth ephemeral pub length");
 
-  const carried = [...fx.pub.slice(0, 11), fx.pub[13], fx.pub[14]];
-  assertEq(carried.length, 13, "withdrawPriv carried publics");
-  const { pre, post } = replay(fx, fx.seedLeaves!, fx.pub[10], [fx.pub[13]]);
+  const nullifiers = L.fields.nullifiers.map((i) => fx.pub[i]);
+  const changeCommitment = fx.pub[L.fields.changeCommitment[0]];
+  const spentRoot = fx.pub[L.fields.root[0]];
+  const { pre, post } = replay(fx, fx.seedLeaves!, spentRoot, [changeCommitment]);
   return {
     comment:
       "GENERATED by chains/solana/scripts/gen_vectors.ts from the re-proven Solana-recipient " +
       "withdrawPriv fixture (chains/evm/test/fixtures/consumer_realproofs_solana.json) + " +
       "the packages/core ImtTree oracle. Mollusk gates 2/5 input — SOLR §5.2's one exception.",
-    proof: proofHex(fx),
-    publicsCarried: carried,
+    proof: proofHex(fx, assertEq),
+    publicsCarried: L.carried.map((i) => fx.pub[i]),
     publicsFull: fx.pub,
     kemCiphertexts: fx.kemCiphertexts,
-    nullifiers: [fx.pub[8], fx.pub[9]],
-    changeCommitment: fx.pub[13],
-    amount: fx.pub[0],
+    nullifiers,
+    changeCommitment,
+    amount: fx.pub[L.fields.amount[0]],
     recipientTokenAccount: fx.recipientTokenAccount,
     stealthEphemeralPub: fx.stealthEphemeralPub,
     stealthViewTag: fx.stealthViewTag,
-    spentRoot: fx.pub[10],
+    spentRoot,
     newRoot: fx.rootAfter,
     startLeafIndex: pre.nextLeafIndex,
     preState: pre,
@@ -323,14 +298,10 @@ function withdrawFixture(
   };
 }
 
-function writeJson(name: string, obj: object): void {
-  writeFileSync(join(CONFORMANCE, name), JSON.stringify(obj, null, 1) + "\n");
-}
-
 function main(): void {
   const zeros = new ImtTree(H, B).zeros;
   writeFileSync(join(GENERATED, "zeros.rs"), zerosRs(zeros));
-  writeJson("poseidon_vectors.json", poseidonVectors());
+  writeJson(CONFORMANCE, "poseidon_vectors.json", poseidonVectors());
 
   const evm = JSON.parse(readFileSync(FIXTURE, "utf8")) as Record<string, EvmFixture>;
   const sol = JSON.parse(readFileSync(FIXTURE_SOLANA, "utf8")) as {
@@ -340,10 +311,10 @@ function main(): void {
       stealthViewTag: number;
     };
   };
-  writeJson("deposit_priv_fixture.json", depositFixture(evm.depositPriv));
-  writeJson("transfer_priv_fixture.json", transferFixture(evm.transferPriv));
-  writeJson("transfer10x2_priv_fixture.json", transfer10x2Fixture(evm.transfer10x2Priv));
-  writeJson("withdraw_priv_fixture.json", withdrawFixture(sol.withdrawPriv));
+  writeJson(CONFORMANCE, "deposit_priv_fixture.json", depositFixture(evm.depositPriv));
+  writeJson(CONFORMANCE, "transfer_priv_fixture.json", transferFixture(evm.transferPriv));
+  writeJson(CONFORMANCE, "transfer10x2_priv_fixture.json", transfer10x2Fixture(evm.transfer10x2Priv));
+  writeJson(CONFORMANCE, "withdraw_priv_fixture.json", withdrawFixture(sol.withdrawPriv));
   console.log(
     "wrote zeros.rs, poseidon_vectors.json, {deposit,transfer,transfer10x2,withdraw}_priv_fixture.json (anchors verified)",
   );

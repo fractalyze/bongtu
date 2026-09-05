@@ -20,6 +20,8 @@
     "./poseidon": "./src/crypto/poseidon.ts",
     "./proving": "./src/wire/proving.ts",
     "./pubkey": "./src/crypto/pubkey.ts",
+    "./solana": "./src/chain/solana.ts",
+    "./solanaOps": "./src/chain/solanaOps.ts",
     "./stealth": "./src/notes/stealth.ts"
   },
   "scripts": {
