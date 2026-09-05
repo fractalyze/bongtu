@@ -7,5 +7,6 @@
 export * from "./accounts.js";
 export * from "./budget.js";
 export * from "./data.js";
+export * from "./initialize.js";
 export * from "./size.js";
 export * from "./tree.js";

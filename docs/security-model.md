@@ -72,6 +72,24 @@ disburse is permissionless like every spend), a junk publish traces to the submi
 to a pre-vetted employer identity. What openness does NOT cost is privacy — the batch payload is
 ciphertext either way, readable only by each recipient and the arbiter.
 
+### Per-rail scope of "from on-chain data alone" (Solana)
+
+On the EVM rail, disburse disclosure publication is a consensus rule: the transaction does not
+exist without the full ciphertext array on-chain, so every note is auditor-openable *from chain
+data alone*. On the Solana rail's default (1-tx) disburse, the chain enforces the **binding** —
+`disclosureHash` is a verified public signal persisted per batch in the `DisburseBatch` account —
+but the **bytes** are served from institution storage. The guarantee downgrades from "auditable
+from chain alone" to "chain-verified bytes served from institution storage": any party can verify
+served bytes without trust; a withholding institution is detectable and attributable (an unfilled
+`withheld` request against a chain-committed hash) but not forced by consensus to publish.
+Deployments requiring consensus-forced publication use the staged full-DA variant
+(`.dev/solana-rail-design.md` §3.3.3) at ~19× the transaction count.
+
+What does *not* downgrade: non-repudiation (the envelope is inside the hashed blob; the
+institution cannot serve different bytes to different parties), count-hiding (the fixed 256-shape
+anchor holds no per-recipient record), and the in-circuit envelope enforcement (unchanged — the
+circuits are shared verbatim across rails).
+
 ## The consumer family: no-auditor ops
 
 The op-module layer adds a second op family beside the six enterprise entrypoints: consumer ops

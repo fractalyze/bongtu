@@ -123,7 +123,8 @@ config key to every derivation). Preconditions the future initialize and rotatio
 instructions must enforce: (a) a profile enabling `disburse256` requires `B == 256`,
 since the circuit's output subtree is a fixed depth-8 gadget; the program asserts
 `log_b == 8` on that path (`WrongBatchSize`) so a mismatched config fails loudly instead
-of minting an unspendable batch. (b) arbiter rotation must plumb the new epoch into
+of minting an unspendable batch ((a) enforced in `initialize.rs`, S6 2026-09-06;
+gate 8 drives every refusal row). (b) arbiter rotation must plumb the new epoch into
 `DisburseBatch` (today pinned to the genesis epoch 0) and mint the arbiter KEM pk hash
 (`PoolConfig` bytes 168..200, currently declared but unread by any op).
 
@@ -173,7 +174,7 @@ buys the bytes that make transfer10x2Priv fit (§3.1.2).
 
 | instruction | ix data (payload) | accounts (beyond config/tree/event-authority) | state effect |
 |---|---|---|---|
-| `initialize` / `initialize_consumer_only` | params | payer, mint | one-shot, mirrors the EVM one-initializer stance: complete profile in one tx |
+| `initialize` (landed S6 2026-09-06: ONE instruction, disc 0 — consumer-only = zeroed key, no second discriminator) | flags u16, B u32, arbiter key 2×32, kem pk hash 32 | payer, mint, vault, config/tree PDAs | one-shot, mirrors the EVM one-initializer stance: complete profile in one tx |
 | `set_family_flags` | flags | admin signer | registry analogue; admin-gated like `registerModule` |
 | `deposit_priv` | proof(256 B) + non-derivable publics of `uint[16]` + 2×1088 B kem cts | payer token acct, vault | pulls `pub[0]`, appends 2 leaves |
 | `transfer_priv` | proof + non-derivable publics of `uint[20]` + 2×1088 B | 2 Nullifier PDAs, 1 KnownRoot (read), 1 new KnownRoot | spends 2, appends 2 |
@@ -512,7 +513,10 @@ circuit).
   32-byte address — the submit belt re-derives the binding from the account and refuses a
   proof bound elsewhere. The client acceptance gate (`chains/solana/gates/e2e_client.sh`)
   seeds pool accounts as validator GENESIS images because `initialize` is still a reserved
-  discriminator; it migrates onto the real instruction when that lands (S6 deploy profile).
+  discriminator; it migrates onto the real instruction when that lands (S6 deploy profile). (DONE
+  S6 2026-09-06: `initialize` landed — disc 0, PDA config/tree, gate 8 — and both
+  e2e legs now initialize their profiles on-chain; genesis images remain only for
+  mint/vault/user token accounts and fixture spend-root markers.)
 - **chainId in publics — there is none.** Verified: no circuit binds a chain id in its
   public vector (the chain binding lives in the client KDF only). Consequence for
   fixtures: §5.2. Flip side, flagged explicitly: **OPEN-4** — nothing in the proof binds

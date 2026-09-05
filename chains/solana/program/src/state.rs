@@ -53,6 +53,12 @@ pub const SEED_DISBURSE_BATCH: &[u8] = b"batch";
 /// Vault owner PDA: the SPL token-level owner of the escrow vault
 /// (SOLR §2.2 — Vault = ATA of ["authority", config]).
 pub const SEED_VAULT_AUTHORITY: &[u8] = b"authority";
+/// PoolConfig PDA (SOLR §2.2): ["config", mint] — deterministic discovery
+/// from the mint, and one pool per mint per program deployment by the seed
+/// itself (the wider one-pool-per-program bound is the S3 note below).
+pub const SEED_CONFIG: &[u8] = b"config";
+/// TreeState PDA (SOLR §2.2): ["tree", config].
+pub const SEED_TREE: &[u8] = b"tree";
 
 /// PoolConfig layout:
 ///   0      tag (1)
@@ -71,6 +77,7 @@ pub const CONFIG_OFF_VAULT: usize = 68;
 pub const CONFIG_OFF_BATCH_B: usize = 100;
 pub const CONFIG_OFF_ARBITER_X: usize = 104;
 pub const CONFIG_OFF_ARBITER_Y: usize = 136;
+pub const CONFIG_OFF_KEM_PK_HASH: usize = 168;
 
 /// DisburseBatch layout (SOLR §3.3.1 — the durable per-batch audit anchor;
 /// account state readable forever, no ledger history needed):

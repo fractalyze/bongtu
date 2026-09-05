@@ -53,7 +53,7 @@ import {
   withdrawPrivInstruction,
   type SolanaPoolAccounts,
 } from "./txbuild/accounts.js";
-import { transactionBudgetOf } from "./txbuild/budget.js";
+import { transactionBudgetOf, type SolanaTxBudget } from "./txbuild/budget.js";
 import { encodeConsumerOpData, publicField, type ConsumerOpName } from "./txbuild/data.js";
 import { assertTransactionSize } from "./txbuild/size.js";
 import { appendedRoot, parseTreeState } from "./txbuild/tree.js";
@@ -96,6 +96,45 @@ function assertU64Amount(op: string, amount: bigint): void {
   }
 }
 
+/**
+ * Assemble, sign, and send ONE instruction as a Transaction v1 with an
+ * explicit header budget; resolves after confirmation. The consumer submits
+ * route through this, and the validator gates use it directly for the
+ * instructions no flow owns (initialize, enterprise fixture replays) — one
+ * v1-assembly path, so the mandatory-budget rule cannot fork.
+ */
+export async function sendV1Instruction(
+  connection: SolanaConnection,
+  ix: Instruction,
+  budget: SolanaTxBudget,
+  assertSize?: (serializedLen: number) => void,
+): Promise<string> {
+  const lifetime = await getLatestBlockhash(connection.rpcUrl);
+  // Version 1 (SIMD-0385): the ONLY format whose 4,096 B budget fits these
+  // payloads (legacy/v0 stay capped at 1,232 B, which no op on this rail
+  // fits, SOLR 3.1.2); needs Agave 4.2+ / @solana/kit 8+. On v1 the budget
+  // is MANDATORY header config, not ComputeBudget instructions — an unset
+  // CU or loaded-accounts field budgets ZERO and the op fails at execution
+  // (txbuild/budget.ts owns the values).
+  const message = appendTransactionMessageInstructions(
+    [ix],
+    setTransactionMessageLifetimeUsingBlockhash(
+      { blockhash: lifetime.blockhash as Blockhash, lastValidBlockHeight: lifetime.lastValidBlockHeight },
+      setTransactionMessageConfig(
+        budget,
+        setTransactionMessageFeePayer(connection.address as Address, createTransactionMessage({ version: 1 })),
+      ),
+    ),
+  );
+  const tx = compileTransaction(message);
+  // One fee-payer signature: signatures shortvec(1) + 64 B + the compiled
+  // message — the exact wire sendTransaction serializes.
+  assertSize?.(1 + 64 + tx.messageBytes.length);
+  const signature = await connection.signAndSendTransaction(tx);
+  await confirmSignature(connection.rpcUrl, signature);
+  return signature;
+}
+
 /** The four consumer submits over one bound config — spread into the engine's
  *  flow deps via @bongtu/client-solana/ops solanaConsumerIo. */
 export function solanaConsumerSubmits(cfg: SolanaConsumerConfig) {
@@ -114,33 +153,17 @@ export function solanaConsumerSubmits(cfg: SolanaConsumerConfig) {
     opIx: Instruction,
     explorerBase: string,
   ): Promise<SubmitResult> => {
-    const lifetime = await getLatestBlockhash(connection.rpcUrl);
-    // Version 1 (SIMD-0385): the ONLY format whose 4,096 B budget fits these
-    // payloads (legacy/v0 stay capped at 1,232 B, which no op on this rail
-    // fits, SOLR 3.1.2); needs Agave 4.2+ / @solana/kit 8+. On v1 the budget
-    // is MANDATORY header config, not ComputeBudget instructions — an unset
-    // CU or loaded-accounts field budgets ZERO and the op fails at execution
-    // (txbuild/budget.ts owns the values).
-    const message = appendTransactionMessageInstructions(
-      [opIx],
-      setTransactionMessageLifetimeUsingBlockhash(
-        { blockhash: lifetime.blockhash as Blockhash, lastValidBlockHeight: lifetime.lastValidBlockHeight },
-        setTransactionMessageConfig(
-          transactionBudgetOf(op, priorityFee),
-          setTransactionMessageFeePayer(connection.address as Address, createTransactionMessage({ version: 1 })),
-        ),
-      ),
+    const signature = await sendV1Instruction(
+      connection,
+      opIx,
+      transactionBudgetOf(op, priorityFee),
+      (serializedLen) =>
+        assertTransactionSize(op, {
+          accountCount: opIx.accounts?.length ?? 0,
+          dataLen: opIx.data?.length ?? 0,
+          serializedLen,
+        }),
     );
-    const tx = compileTransaction(message);
-    // One fee-payer signature: signatures shortvec(1) + 64 B + the compiled
-    // message — the exact wire sendTransaction serializes.
-    assertTransactionSize(op, {
-      accountCount: opIx.accounts?.length ?? 0,
-      dataLen: opIx.data?.length ?? 0,
-      serializedLen: 1 + 64 + tx.messageBytes.length,
-    });
-    const signature = await connection.signAndSendTransaction(tx);
-    await confirmSignature(connection.rpcUrl, signature);
     return { txHash: signature, explorerUrl: solanaExplorerTxUrl(signature, explorerBase) };
   };
 

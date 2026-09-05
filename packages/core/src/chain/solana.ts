@@ -61,6 +61,8 @@ export const SEED_KNOWN_ROOT = "root";
 export const SEED_EVENT_AUTHORITY = "__event_authority";
 export const SEED_DISBURSE_BATCH = "batch";
 export const SEED_VAULT_AUTHORITY = "authority";
+export const SEED_CONFIG = "config";
+export const SEED_TREE = "tree";
 
 // --- account layouts (state.rs: plain fixed-offset byte layouts, no serde) --
 
@@ -79,6 +81,7 @@ export const CONFIG_OFF_VAULT = 68;
 export const CONFIG_OFF_BATCH_B = 100;
 export const CONFIG_OFF_ARBITER_X = 104;
 export const CONFIG_OFF_ARBITER_Y = 136;
+export const CONFIG_OFF_KEM_PK_HASH = 168;
 
 /** TreeState (zero-copy single-frontier IMT): tag(1) version(1) config(32)
  *  next_leaf_index(u64 LE) current_root(32 BE) filled_subtrees[32]
@@ -112,6 +115,13 @@ export const PROOF_LEN = 256;
 /** ML-KEM-768 ciphertext bytes (FIPS 203 pins the ct size; per-op count is a
  *  layout fact in solanaOps.ts). */
 export const KEM_CT_LEN = 1088;
+
+/** `initialize` (discriminator 0, initialize.rs) — the one-shot deploy
+ *  instruction. Wire after the discriminator: family_flags (u16 LE) ||
+ *  batch B (u32 LE) || arbiter bjj key x,y (32 B BE each) || arbiter KEM pk
+ *  hash (32 B). Not an op: no proof, no publics, no event. */
+export const INITIALIZE_DISCRIMINATOR = 0;
+export const INITIALIZE_PAYLOAD_LEN = 102;
 
 /** Self-CPI event instruction discriminator (event.rs). */
 export const EVENT_DISCRIMINATOR = 0xf0;

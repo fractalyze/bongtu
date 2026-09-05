@@ -31,11 +31,14 @@ in issue #8. The five mollusk gate families (SOLR §3.1.3) gate every change.
 | `conformance/` | GENERATED vectors + fixture-derived state (committed; regenerate via `scripts/`). `ledger_{consumer,enterprise}.json` are the recorded-ledger fixtures driving the indexer's Solana conformance leg (`apps/indexer/test/solana.test.ts`, SOLR §5.3): per-op fixtures chained through mollusk from the empty tree, each tx carrying its op instruction(s), inner instructions (the self-CPI event bytes from the program's own `event::*_payload` builders + the foreign SPL CPI), and the post-op TreeState. The consumer ledger additionally records one multi-op tx (transferPriv + transfer10x2Priv) and the withdrawPriv as a wrapper-invoked INNER instruction with its account metas (the recorder doc comment explains the constructed shape). Regenerate: `cargo run -p bongtu-solana-harness --bin record_ledger` (after `cargo-build-sbf`) |
 | `scripts/` | generators (run from the repo root with `node_modules/.bin/tsx`) |
 | `gates/mollusk.sh` | the folder's gate: `cargo-build-sbf` + `cargo test --workspace` |
+| `gates/e2e_s.sh` | the local-validator e2e gate (SOLR §5.3): the consumer client leg + the enterprise disburse leg, each initializing its profile through the real instruction (drivers `client_leg.ts` / `enterprise_leg.ts`, shared plumbing `leg_common.ts`) |
 | `cu_budget.json` | per-op CU regression budgets, moved only by explicit commit |
 
 ## Instruction set
 
-Discriminator 0/1 reserved (`initialize` / `set_family_flags`, later work).
+`initialize` (0) is the one-shot pool initializer — PDA config/tree, the
+complete profile in one tx (`initialize.rs`; deploy/solana runbook).
+Discriminator 1 stays reserved (`set_family_flags`).
 Event self-CPI = 0xF0; family tag in the event = discriminator - 1.
 
 | ix | disc | wire payload | escrow |
@@ -196,10 +199,8 @@ sub-LOG_B frontier is deliberately STALE (the EVM `_attachSubtree` shape),
 so the committed post-state splices pre-state values below LOG_B — root and
 levels ≥ LOG_B are byte-identical to the ImtTree oracle.
 
-## Not yet here (later per SOLR §6)
+## Not yet here
 
-`initialize` / `set_family_flags` (discriminators reserved; harness seeds
-account images directly), arbiter rotation (epoch pinned to 0), the e2e
-`solana-test-validator` gate (`e2e_s.sh`), indexer ingest + disclosure
-serving/alarms, client tx building, the §3.3.3 ~19-tx full-DA disburse
-(documented option, by design not an instruction).
+`set_family_flags` (discriminator 1 reserved; the flag set is fixed at
+`initialize` for now), arbiter rotation (epoch pinned to 0), the §3.3.3
+~19-tx full-DA disburse (documented option, by design not an instruction).
