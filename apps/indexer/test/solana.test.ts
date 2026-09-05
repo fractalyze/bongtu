@@ -54,7 +54,7 @@ import { runSelfScan, EMPTY_SCAN_STATE, type SelfScanIo, type SelfScanState } fr
 import type { ConsumerWalletIdentity } from "@bongtu/client/derive";
 
 import { SolanaIndexer, type SolanaChainIo } from "../src/solana/ingest.js";
-import type { SolanaLedgerTx } from "../src/solana/wire.js";
+import { EVENT_DISCRIMINATOR, type SolanaLedgerTx } from "../src/solana/wire.js";
 import { verifyServedDisclosure } from "../src/disclosure.js";
 import { startApi } from "../src/api/router.js";
 import type { ChainConfig } from "../src/chain.js";
@@ -502,6 +502,33 @@ async function enterpriseLeg(disFx: Disburse256Fixture): Promise<void> {
   await again.close();
 }
 
+async function rotationTripwireLeg(): Promise<void> {
+  step("ROTATION TRIPWIRE: a non-genesis disburse epoch fails ingest loudly (issue #44)");
+  // Enterprise transfer feed entries pin the genesis arbiter epoch because op
+  // events carry no epoch field; the disburse event is the one ledger signal
+  // that can disprove the pin. Patch the recorded disburse event's epoch
+  // (u64 LE payload tail, byte offset 170) to 1 and expect ingest to refuse.
+  const ledger = loadLedger("ledger_enterprise.json");
+  const txs = JSON.parse(JSON.stringify(ledger.txs)) as RecordedTx[];
+  const DISBURSE_EVENT_HEX_LEN = 2 + 2 * (2 + 8 + 5 * 32 + 8);
+  const patched = txs.flatMap((tx) =>
+    tx.inner.flatMap((list) =>
+      list.filter((r) => r.data.length === DISBURSE_EVENT_HEX_LEN && parseInt(r.data.slice(2, 4), 16) === EVENT_DISCRIMINATOR),
+    ),
+  );
+  ok(patched.length === 1, "exactly one recorded disburse event to patch");
+  patched[0].data = patched[0].data.slice(0, 2 + 2 * 170) + "0100000000000000";
+  const dbUrl = await freshDatabase("bongtu_sol_tripwire");
+  const ix = new SolanaIndexer(cfgOf(dbUrl), new FixtureChain(txs, ledger.batchB), ledger.programId);
+  const thrown = await ix.ingest().then(
+    () => null,
+    (e) => (e as Error).message,
+  );
+  await ix.close();
+  ok(thrown !== null && thrown.startsWith("solana ingest: batch at leaf 256 records arbiter epoch 1; this backend pins the genesis epoch"),
+    `ingest refuses the non-genesis batch (got: ${thrown})`);
+}
+
 async function tamperedBlobLeg(disFx: Disburse256Fixture): Promise<void> {
   step("ALARM MAPPING: a tampered served blob -> the existing mismatch class");
   const ledger = loadLedger("ledger_enterprise.json");
@@ -634,6 +661,7 @@ async function main(): Promise<void> {
   await chainAheadLeg();
   await arbiterRefusalLeg();
   await enterpriseLeg(disFx);
+  await rotationTripwireLeg();
   await tamperedBlobLeg(disFx);
   await tamperAfterIngestLeg(disFx);
   await withheldBlobLeg(disFx);

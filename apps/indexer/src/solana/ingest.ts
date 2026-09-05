@@ -37,6 +37,7 @@ import {
   decodeEvent,
   decodeOp,
   programInstructionsOf,
+  ARBITER_EPOCH_GENESIS,
   EVENT_DISCRIMINATOR,
   type SolanaEventAnchor,
   type SolanaLedgerTx,
@@ -256,6 +257,17 @@ export class SolanaIndexer extends Indexer {
       ) {
         throw new Error(`solana ingest: disburse event anchor disagrees with instruction publics in tx ${tx.signature}`);
       }
+      // Rotation tripwire: the disburse event is the ONE place ledger data
+      // carries a real arbiter epoch on this rail. Enterprise transfer feed
+      // entries below assume the genesis pin (op events omit the field), so
+      // the moment a batch disproves the pin, ingest must stop rather than
+      // keep writing silently-wrong transfer epochs (issue #44).
+      if (ev.epoch !== ARBITER_EPOCH_GENESIS) {
+        throw new Error(
+          `solana ingest: batch at leaf ${ev.startLeafIndex} records arbiter epoch ${ev.epoch}; this backend pins the genesis epoch ` +
+            "(op events carry no epoch field) — plumb the epoch into the op events or this projection before ingesting past a rotation",
+        );
+      }
       this.tree.applyAttach(ev.startLeafIndex, ev.subtreeRoot, ev.resultingRoot);
       const verdict = this.disclosures.recordBatch(
         {
@@ -366,8 +378,14 @@ export class SolanaIndexer extends Indexer {
             { offset: 4, elts: 4, leafIndex: start + 1 },
             { offset: 8, elts: op.authorityCt.length, leafIndex: null },
           ];
+          // EVM parity gap, pinned on purpose: Transferred events carry the
+          // contract's epoch, but the Solana op event omits the field and
+          // rotation is not yet an instruction on this rail (state.rs
+          // ARBITER_EPOCH_GENESIS, SOLR §3.3.1). The disburse branch's
+          // tripwire above fails ingest loudly the moment ledger data
+          // disproves this pin.
           return this.store.addEvent({
-            ...base, kind: "transfer", epoch: 0,
+            ...base, kind: "transfer", epoch: ARBITER_EPOCH_GENESIS,
             ecdhPublicKey: ecdh, encryptionNonce: nonce,
             slices, ciphertext: [...op.receiverCts, ...op.authorityCt].map(dec),
           });
@@ -379,7 +397,7 @@ export class SolanaIndexer extends Indexer {
             { offset: 8, elts: op.authorityCt.length, leafIndex: null },
           ];
           return this.store.addEvent({
-            ...base, kind: "transfer10x2", epoch: 0,
+            ...base, kind: "transfer10x2", epoch: ARBITER_EPOCH_GENESIS,
             ecdhPublicKey: ecdh, encryptionNonce: nonce,
             slices, ciphertext: [...op.receiverCts, ...op.authorityCt].map(dec),
           });
