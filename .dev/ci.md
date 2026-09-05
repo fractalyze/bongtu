@@ -75,3 +75,13 @@ Rule going forward: when adding or changing a CI-run test, check it against a cl
 environment — no `BONGTU_NODE_MODULES` fallback, no prebuilt `circuits/out` or
 `contracts/out`, no generous-timeout assumptions — and re-run the fresh-clone
 simulation for circuits-side changes.
+
+## Restored cargo caches can serve stale build ARTIFACTS
+
+The solana cargo cache (`chains/solana/target`) is keyed on Cargo.lock +
+rust-toolchain.toml, so a source-only program change restores a target dir
+whose `deploy/*.so` was built from ANOTHER commit. Any gate that skips its
+build when the artifact file exists will run the stale binary (e2e-solana
+failed InvalidDiscriminator this way on PR #69 while solana-mollusk passed,
+because mollusk.sh always rebuilds). Rule: gates build unconditionally and
+rely on cargo's incremental no-op, never on artifact-file existence.

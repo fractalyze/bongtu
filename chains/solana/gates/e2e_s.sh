@@ -51,10 +51,12 @@ for n in depositPriv transferPriv transfer10x2Priv withdrawPriv; do
   [ -f "circuits/out/${n}.zkey" ] || fail "missing circuits/out/${n}.zkey (run: cd circuits && bash build/prove_all.sh)"
   [ -f "circuits/out/${n}_js/${n}.wasm" ] || fail "missing circuits/out/${n}_js/${n}.wasm"
 done
-if [ ! -f chains/solana/target/deploy/bongtu_pool_solana.so ]; then
-  echo "== building the program (cargo-build-sbf) =="
-  cargo-build-sbf --manifest-path chains/solana/program/Cargo.toml || fail "cargo-build-sbf failed"
-fi
+# Always build: a pre-existing .so can be a restored CI cache from another
+# commit (the cargo cache key hashes Cargo.lock/toolchain, not sources), and a
+# stale program fails ops with InvalidDiscriminator. Incremental build is
+# sub-second when nothing changed.
+echo "== building the program (cargo-build-sbf) =="
+cargo-build-sbf --manifest-path chains/solana/program/Cargo.toml || fail "cargo-build-sbf failed"
 
 # --- postgres for the indexer -------------------------------------------------
 PG_NAME=""
