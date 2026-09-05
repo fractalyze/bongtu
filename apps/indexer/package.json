@@ -19,6 +19,7 @@
     "test:tree": "node --import tsx test/tree.test.ts",
     "test:disclosure": "node --import tsx test/disclosure.test.ts",
     "test:ingest": "node --import tsx test/ingest.test.ts",
+    "test:projection": "node --import tsx --test test/projection.test.ts",
     "test:config": "node --import tsx test/config.test.ts",
     "test:viewtoken": "node --import tsx --test test/viewtoken.test.ts",
     "test:names": "node --import tsx --test test/names.test.ts",
@@ -28,7 +29,7 @@
     "test:consumer": "node --import tsx test/consumer.test.ts",
     "test:solana": "node --import tsx test/solana.test.ts",
     "test:persist": "node --import tsx --test test/persist.test.ts",
-    "test:unit": "npm run test:tree && npm run test:disclosure && npm run test:ingest && npm run test:consumer && npm run test:config && npm run test:viewtoken && npm run test:names && npm run test:announcements && npm run test:portal && npm run test:derivehistory && npm run test:history && npm run test:persist",
+    "test:unit": "npm run test:tree && npm run test:disclosure && npm run test:ingest && npm run test:projection && npm run test:consumer && npm run test:config && npm run test:viewtoken && npm run test:names && npm run test:announcements && npm run test:portal && npm run test:derivehistory && npm run test:history && npm run test:persist",
     "test:pg": "bash test/pg_integration.sh",
     "typecheck": "tsc --noEmit",
     "test:portal": "node --import tsx --test test/portal.test.ts"

@@ -74,8 +74,10 @@ export interface FeedEntry {
    *  0x-hex, in output order. A consumer disburse's ride the chunk transport
    *  instead (KemChunkStore; projected onto /events once assembled). */
   kemCiphertexts?: string[];
-  /** consumer disburse only: the batch's startLeafIndex — the batchId the
-   *  chunk transport and the /events kem projection key on. */
+  /** the disburse batch's startLeafIndex. The consumer disburse keys the kem
+   *  chunk transport and the /events kem projection on it; the Solana
+   *  enterprise disburse sets it too (boot rebuilds the served-blob registry
+   *  per batch from it). */
   batchId?: number;
   /** consumer disburse only (§4.1): the published commitment run (decimal, leaf
    *  order) — what boot re-fills the public batch from. */

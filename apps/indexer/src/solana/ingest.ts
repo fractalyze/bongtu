@@ -34,7 +34,8 @@ import { connect, PostgresStore } from "../postgres.js";
 import { NameRegistry } from "../names.js";
 import { isStealthAnnouncement } from "@bongtu/core/stealth";
 import type { ChainConfig } from "../chain.js";
-import type { FeedEntry, Slice } from "../store.js";
+import type { FeedEntry } from "../store.js";
+import { projectFeedEntry } from "../projection.js";
 import { ARBITER_EPOCH_GENESIS, EVENT_DISCRIMINATOR, TREE_HEIGHT } from "@bongtu/core/solana";
 import {
   decodeEvent,
@@ -368,8 +369,6 @@ export class SolanaIndexer extends IndexerHostBase {
     this.tree.applyOpAppend(start, leaves, ev.resultingRoot);
 
     const base = { txHash: tx.signature, blockNumber: tx.slot, logIndex: ordinal };
-    const ecdh: [string, string] = [dec(op.ecdhPublicKey[0]), dec(op.ecdhPublicKey[1])];
-    const nonce = dec(op.encryptionNonce);
     const announcementOf = (stealth: StealthTail, recipient: string | null) =>
       isStealthAnnouncement(stealth.ephemeralPub)
         ? { recipient: recipient ?? "0x" + "0".repeat(64), ephemeralPub: stealth.ephemeralPub, viewTag: stealth.viewTag }
@@ -380,71 +379,44 @@ export class SolanaIndexer extends IndexerHostBase {
         case "depositPriv":
         case "transferPriv":
         case "transfer10x2Priv":
-          return this.store.addEvent({
-            ...base, kind: op.kind, epoch: null,
-            ecdhPublicKey: ecdh, encryptionNonce: nonce,
-            slices: [
-              { offset: 0, elts: 4, leafIndex: start },
-              { offset: 4, elts: 4, leafIndex: start + 1 },
-            ],
-            ciphertext: op.cts.map(dec),
-            viewTags: op.viewTags.map(dec),
-            kemCiphertexts: op.kemCiphertexts,
-          });
+          return this.store.addEvent(projectFeedEntry(base, {
+            kind: op.kind,
+            ecdhPublicKey: op.ecdhPublicKey, encryptionNonce: op.encryptionNonce,
+            outputLeafIndices: [start, start + 1],
+            cts: op.cts, viewTags: op.viewTags, kemCiphertexts: op.kemCiphertexts,
+          }));
         case "withdrawPriv":
-          return this.store.addEvent({
-            ...base, kind: "withdrawPriv", epoch: null,
-            ecdhPublicKey: ecdh, encryptionNonce: nonce,
-            slices: [{ offset: 0, elts: 4, leafIndex: start }],
-            ciphertext: op.cts.map(dec),
-            viewTags: op.viewTags.map(dec),
-            kemCiphertexts: op.kemCiphertexts,
+          return this.store.addEvent(projectFeedEntry(base, {
+            kind: "withdrawPriv",
+            ecdhPublicKey: op.ecdhPublicKey, encryptionNonce: op.encryptionNonce,
+            changeLeafIndex: start,
+            cts: op.cts, viewTags: op.viewTags, kemCiphertexts: op.kemCiphertexts,
             announcement: announcementOf(op.stealth, op.recipientTokenAccount),
-          });
+          }));
         case "deposit":
           // EVM parity: enterprise envelope bytes never join the PUBLIC feed
           // entry for deposit/withdraw (the arbiter ledger reads them
           // separately) — bare entries, byte-identical shape across rails.
-          return this.store.addEvent({
-            ...base, kind: "deposit", epoch: null,
-            ecdhPublicKey: null, encryptionNonce: null, slices: [], ciphertext: [],
-          });
+          return this.store.addEvent(projectFeedEntry(base, { kind: "deposit" }));
         case "withdraw":
-          return this.store.addEvent({
-            ...base, kind: "withdraw", epoch: null,
-            ecdhPublicKey: null, encryptionNonce: null, slices: [], ciphertext: [],
+          return this.store.addEvent(projectFeedEntry(base, {
+            kind: "withdraw",
             announcement: announcementOf(op.stealth, op.recipientTokenAccount),
-          });
-        case "transfer": {
-          const slices: Slice[] = [
-            { offset: 0, elts: 4, leafIndex: start },
-            { offset: 4, elts: 4, leafIndex: start + 1 },
-            { offset: 8, elts: op.authorityCt.length, leafIndex: null },
-          ];
+          }));
+        case "transfer":
+        case "transfer10x2":
           // EVM parity gap, pinned on purpose: Transferred events carry the
           // contract's epoch, but the Solana op event omits the field and
           // rotation is not yet an instruction on this rail (state.rs
           // ARBITER_EPOCH_GENESIS, SOLR §3.3.1). The disburse branch's
           // tripwire above fails ingest loudly the moment ledger data
           // disproves this pin.
-          return this.store.addEvent({
-            ...base, kind: "transfer", epoch: ARBITER_EPOCH_GENESIS,
-            ecdhPublicKey: ecdh, encryptionNonce: nonce,
-            slices, ciphertext: [...op.receiverCts, ...op.authorityCt].map(dec),
-          });
-        }
-        case "transfer10x2": {
-          const slices: Slice[] = [
-            { offset: 0, elts: 4, leafIndex: start },
-            { offset: 4, elts: 4, leafIndex: start + 1 },
-            { offset: 8, elts: op.authorityCt.length, leafIndex: null },
-          ];
-          return this.store.addEvent({
-            ...base, kind: "transfer10x2", epoch: ARBITER_EPOCH_GENESIS,
-            ecdhPublicKey: ecdh, encryptionNonce: nonce,
-            slices, ciphertext: [...op.receiverCts, ...op.authorityCt].map(dec),
-          });
-        }
+          return this.store.addEvent(projectFeedEntry(base, {
+            kind: op.kind, epoch: ARBITER_EPOCH_GENESIS,
+            ecdhPublicKey: op.ecdhPublicKey, encryptionNonce: op.encryptionNonce,
+            outputLeafIndices: [start, start + 1],
+            receiverCts: op.receiverCts, authorityCt: op.authorityCt,
+          }));
       }
     })();
     if (entry && opNfs.length > 0) this.store.addNullifiers(opNfs);
