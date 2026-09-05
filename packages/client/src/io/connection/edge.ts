@@ -113,7 +113,7 @@ export function accountWatchHandler(
 }
 
 /**
- * The app-side wallet adapter, as one named shape. wallet-web (wagmi + RainbowKit
+ * The app-side wallet adapter, as one named shape. treasury-web (wagmi + RainbowKit
  * + WalletConnect) and payroll-web (the injected provider, directly) each reach a
  * wallet their own way; naming the quartet keeps the two adapters from drifting
  * apart (an edge that stops satisfying it is a tsc error in its app). Today the

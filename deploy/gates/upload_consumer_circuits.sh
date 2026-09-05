@@ -2,14 +2,14 @@
 # Upload the CONSUMER wallet's proving assets (the four *Priv wasm+zkey pairs) to
 # the bongtu-circuits Vercel Blob store under a CIRCUITS_VERSION-named path. The
 # consumer sibling of upload_circuits.sh: same store, same 3-part companion rule
-# (the pin in apps/consumer-web/src/config.ts, this upload, and the vercel.json
+# (the pin in apps/wallet-web/src/config.ts, this upload, and the vercel.json
 # /circuits rewrite all move in ONE change), its own version bucket. Assets come
-# straight from circuits/out: unlike wallet-web there is no public/circuits
+# straight from circuits/out: unlike treasury-web there is no public/circuits
 # staging copy, so circuits/out is the build the pinned sizes and hash refer to
 # and the blob store is the one serve path.
 #
 # The identity guard: the upload refuses assets whose combined zkey hash does not
-# match the pin committed in apps/consumer-web/src/config.ts.
+# match the pin committed in apps/wallet-web/src/config.ts.
 #
 # The pin identifies the ARTIFACT, not the source: circuits/out is gitignored
 # and `groth16 setup` draws fresh randomness, so a clean rebuild produces
@@ -33,11 +33,11 @@ for n in "${CIRCUITS[@]}"; do
   test -s "$OUT/${n}_js/$n.wasm" || { echo "missing proving asset: $OUT/${n}_js/$n.wasm" >&2; exit 1; }
 done
 
-pinned=$(grep -oE 'CIRCUITS_VERSION = "[0-9a-f]+"' "$HERE/apps/consumer-web/src/config.ts" | grep -oE '[0-9a-f]{8}')
+pinned=$(grep -oE 'CIRCUITS_VERSION = "[0-9a-f]+"' "$HERE/apps/wallet-web/src/config.ts" | grep -oE '[0-9a-f]{8}')
 actual=$(cat "$OUT/depositPriv.zkey" "$OUT/transferPriv.zkey" "$OUT/transfer10x2Priv.zkey" "$OUT/withdrawPriv.zkey" | sha256sum | cut -c1-8)
 if [ "$pinned" != "$actual" ]; then
   echo "zkeys do not match consumer CIRCUITS_VERSION: pinned=$pinned actual=$actual" >&2
-  echo "regen left apps/consumer-web/src/config.ts and $OUT out of sync: fix before uploading" >&2
+  echo "regen left apps/wallet-web/src/config.ts and $OUT out of sync: fix before uploading" >&2
   exit 1
 fi
 
@@ -46,7 +46,7 @@ fi
 # under the same path. Refuse any wasm whose size disagrees with the committed
 # CIRCUIT_ASSET_BYTES row (sizes, not hashes: that is what the app pins too).
 for n in "${CIRCUITS[@]}"; do
-  want=$(grep -oE "$n: \{ wasm: [0-9]+" "$HERE/apps/consumer-web/src/config.ts" | grep -oE '[0-9]+$')
+  want=$(grep -oE "$n: \{ wasm: [0-9]+" "$HERE/apps/wallet-web/src/config.ts" | grep -oE '[0-9]+$')
   got=$(stat -c %s "$OUT/${n}_js/$n.wasm")
   if [ "$want" != "$got" ]; then
     echo "wasm size mismatch for $n: config.ts pins $want, $OUT has $got" >&2

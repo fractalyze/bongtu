@@ -13,7 +13,7 @@
 // arity. ML-KEM-768 itself comes from @noble/post-quantum (re-exported here so
 // @bongtu/core is the ONE owner of the dependency; ct 1088 B, ek 1184 B).
 //
-// Browser-safe: no node builtins (wallet-web/payroll-web encapsulate in-page).
+// Browser-safe: no node builtins (treasury-web/payroll-web encapsulate in-page).
 
 import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
 

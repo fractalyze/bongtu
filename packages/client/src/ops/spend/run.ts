@@ -110,7 +110,7 @@ export interface RunSpendDeps {
   keyCache: KeyCacheLike;
   getHead: typeof getHead;
   getSignedPath: typeof getSignedPath;
-  /** Turn a ProvingRequest into Groth16 calldata. The APP supplies this: wallet-web
+  /** Turn a ProvingRequest into Groth16 calldata. The APP supplies this: treasury-web
    *  injects in-browser snarkjs (prove.ts proveInBrowser with its circuit asset
    *  base URL applied); payroll-web will inject its prover-service adapter. */
   prove: (request: ProvingRequest) => Promise<Calldata>;

@@ -49,13 +49,13 @@ tooling/server-side use of snarkjs stay external and un-bundled (out-of-process
 subprocess or `createRequire` from an external `node_modules`).
 
 **Deliberate exception — the public wallet ships snarkjs.** Per the recorded
-SPEC §6 decision (a), `apps/wallet-web` distributes snarkjs (GPL-3.0) to the
+SPEC §6 decision (a), `apps/treasury-web` distributes snarkjs (GPL-3.0) to the
 browser for in-browser proving — a self-custody wallet must not send its
 spending-key witnesses to a server, so server-side isolation cannot apply there.
 snarkjs is dynamically imported into its own build chunk, and distribution of the
 built wallet bundle must comply with GPL-3.0 for that code. The decision and its
 alternatives are recorded in
-[`apps/wallet-web/README.md`](apps/wallet-web/README.md) ("GPL decision"). The
+[`apps/treasury-web/README.md`](apps/treasury-web/README.md) ("GPL decision"). The
 sdk contains no snarkjs code — only the node-only runtime loader
 (`packages/core/src/extern.ts`), which the web bundles never import. No other
 distributed artifact bundles GPL code.

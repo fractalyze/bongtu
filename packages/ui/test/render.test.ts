@@ -1,5 +1,5 @@
 // Render gates for the two error surfaces (react-dom/server — output is a pure
-// function of the queue/props, same pattern as wallet-web's copy.test.ts):
+// function of the queue/props, same pattern as treasury-web's copy.test.ts):
 //   TOAST — the host IS the polite live region (present before any toast), a bug
 //     toast grows "Copy details", every toast has a dismiss button;
 //   BANNER — message + optional Retry, warn vs info tones.

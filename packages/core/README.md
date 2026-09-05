@@ -39,7 +39,7 @@ are the stable public names.
 
 - `apps/indexer` — `ImtTree` for the mirror, `envelope` for the arbiter ledger's
   decrypt + the disclosure chain, `indexerApi` for the route response types.
-- `apps/payroll-web` / `apps/wallet-web` — commitments/ciphertext, `envelope` for the
+- `apps/payroll-web` / `apps/treasury-web` — commitments/ciphertext, `envelope` for the
   disburse assembly + auditor ledger (admin), `proving` request assembly, the
   `indexerApi` client, `pubkey` + `eddsa` for the signed `/notes` read.
 - `circuits/` generators and `chains/evm/test/fixtures/` generators — witness inputs and

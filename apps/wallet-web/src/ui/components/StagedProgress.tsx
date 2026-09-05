@@ -94,11 +94,16 @@ function stepDescription(key: string, walletName: string, elapsed: number): Reac
     case "submit":
       return <>Sending to the network and waiting for it to confirm.</>;
     case "waiting":
-      return <>Waiting for the network to record the combined note.</>;
+      return <>{WAITING_SCAN_LINE}</>;
     default:
       return null;
   }
 }
+
+/** Exported so the copy gate pins it: this family's between-legs pause is a
+ *  self-scan pass, not an oracle wait — the words must not claim otherwise. */
+export const WAITING_SCAN_LINE =
+  "Scanning the network for your combined note. This wallet finds its own money.";
 
 const STEP_STATE = {
   done: "text-ink",

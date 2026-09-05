@@ -130,7 +130,7 @@ export interface RunConsumerDepositDeps {
   readTokenState: typeof readTokenState;
   approveToken: typeof approveToken;
   /** Turn a ProvingRequest into Groth16 calldata (the APP supplies this —
-   *  wallet-web's in-browser snarkjs with its asset base applied). */
+   *  treasury-web's in-browser snarkjs with its asset base applied). */
   prove: (request: ProvingRequest) => Promise<Calldata>;
   submitDepositPriv: typeof submitDepositPriv;
 }

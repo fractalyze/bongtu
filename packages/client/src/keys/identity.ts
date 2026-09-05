@@ -49,7 +49,7 @@ const STEALTH_KEY_VERSION = "1";
 /**
  * THIS deployment's KDF domain facts — the ONE home both apps derive under.
  * Built from the sdk deployment facts (@bongtu/core/network, equality-tested
- * against the deploy record), so wallet-web and payroll-web deriving
+ * against the deploy record), so treasury-web and payroll-web deriving
  * the same key for the same account holds by construction: neither app carries
  * its own copy of these values.
  */

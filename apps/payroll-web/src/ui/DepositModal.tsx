@@ -148,7 +148,7 @@ export function DepositModal({
   );
 }
 
-/** The wallet's mint grammar (wallet-web MintModal), in payroll's own controls:
+/** The wallet's mint grammar (treasury-web MintModal), in payroll's own controls:
  *  an empty amount the operator fills, one Mint press, then a completion view
  *  with the transaction — never a second Mint button after a confirmed mint. */
 function MintPopup({

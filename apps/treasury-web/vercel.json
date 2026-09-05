@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/indexer/:path*",
+      "destination": "https://gpu-server.tailec11d1.ts.net:10000/:path*"
+    },
+    {
+      "source": "/circuits/:path*",
+      "destination": "https://hbttd0nloguhlykr.public.blob.vercel-storage.com/circuits/bb0115c4/:path*"
+    }
+  ]
+}

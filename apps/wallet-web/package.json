@@ -1,7 +1,7 @@
 {
   "name": "@bongtu/wallet-web",
   "version": "0.0.0",
-  "description": "bongtu public wallet PoC — a self-custody wallet (SPEC §7 public app): connect any installed extension (EIP-6963) or WalletConnect through the RainbowKit modal (wagmi v2 + viem), derive a BabyJubJub spending key from an eth_signTypedData_v4 signature over a domain-separated struct (deterministic), show balance from the arbiter indexer (signed /notes), and assemble + prove + submit transfer / withdraw. Imports unbuilt @bongtu/* workspace source directly so the crypto is byte-identical.",
+  "description": "bongtu consumer wallet — the self-scan P2P wallet (issue #13): connect any installed extension (EIP-6963) or WalletConnect through the RainbowKit modal (wagmi v2 + viem), derive a BabyJubJub spending key from an eth_signTypedData_v4 signature (deterministic), and discover balance + activity by scanning the PUBLIC feed with the wallet's own keys (OPMOD §3.6 self-scan against a public-mode indexer) — tokenless by construction, with no institutional read path reachable from the app code (dead view-token bytes still ride the shared engine until the login default deps split). The 4 consumer ops (depositPriv/transferPriv/transfer10x2Priv/withdrawPriv) prove in-browser and submit to the registered op modules. Imports unbuilt @bongtu/* workspace source directly so the crypto is byte-identical.",
   "type": "module",
   "private": true,
   "license": "Apache-2.0",

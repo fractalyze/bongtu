@@ -1,0 +1,44 @@
+{
+  "name": "@bongtu/treasury-web",
+  "version": "0.0.0",
+  "description": "bongtu public wallet PoC — a self-custody wallet (SPEC §7 public app): connect any installed extension (EIP-6963) or WalletConnect through the RainbowKit modal (wagmi v2 + viem), derive a BabyJubJub spending key from an eth_signTypedData_v4 signature over a domain-separated struct (deterministic), show balance from the arbiter indexer (signed /notes), and assemble + prove + submit transfer / withdraw. Imports unbuilt @bongtu/* workspace source directly so the crypto is byte-identical.",
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --import tsx --test --test-force-exit test/*.test.ts"
+  },
+  "dependencies": {
+    "@bongtu/client": "*",
+    "@bongtu/core": "*",
+    "@bongtu/ui": "*",
+    "@rainbow-me/rainbowkit": "^2.2.11",
+    "@remixicon/react": "^4.9.0",
+    "@tanstack/react-query": "^5.101.4",
+    "@vercel/analytics": "^2.0.1",
+    "ffjavascript": "^0.3.0",
+    "poseidon-lite": "^0.3.0",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "snarkjs": "^0.7.4",
+    "viem": "^2.55.10",
+    "wagmi": "^2.19.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^22.0.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vite": "^5.4.0"
+  }
+}

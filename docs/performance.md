@@ -185,7 +185,7 @@ range checks — which is +22% on `deposit` and under +0.1% on `disburse256`.
   prime-ir deliberately, and circom's `<--` hints rule out the levelized R1CS solver on principle).
 - **Browser transfer** (headless Chromium, real): warm proof **3.5–5.4 s** on a 24-thread desktop,
   measured 2026-07-26 on the pre-KEM transfer circuit; the hybrid circuit adds ~4% constraints.
-  The laptop figure carried alongside it in `apps/wallet-web/src/lib/prove.ts` — 7–20 s — is a
+  The laptop figure carried alongside it in `apps/treasury-web/src/lib/prove.ts` — 7–20 s — is a
   budget, not a measurement. COOP/COEP had no effect and are not set.
 - CPU `groth16 setup` for disburse256 is a multi-minute step producing the 1.3 GB zkey; it is not in
   the per-change loop ([toolchain.md](toolchain.md)).

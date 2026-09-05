@@ -23,7 +23,7 @@ export interface LoginContext {
 
 /** Every I/O edge a login touches, injectable so the refusals gate headlessly. */
 export interface RunLoginDeps {
-  /** The wallet the connect modal just opened (wallet-web wagmi.ts
+  /** The wallet the connect modal just opened (treasury-web wagmi.ts
    *  requireConnection). Its `transport` decides the determinism rule below — a
    *  WalletConnect wallet this browser has never derived under pays the double
    *  signature. */

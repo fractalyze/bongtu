@@ -14,8 +14,6 @@ export function SuccessPanel({
   headline,
   amount,
   explorerUrl,
-  doneLabel = "Done",
-  onDone,
 }: {
   /** The screen header (Send / Withdraw / Deposit) — unchanged from the form. */
   title: string;
@@ -23,11 +21,6 @@ export function SuccessPanel({
   /** Already formatted kKRW. */
   amount: string;
   explorerUrl: string;
-  /** true while the post-action poll waits for the indexer to catch up. */
-  doneLabel?: string;
-  /** Where the button goes. Defaults home; a merge overrides it to hand the user
-   *  back to the payment they were making when they were sent to merge. */
-  onDone?: () => void;
 }): ReactNode {
   return (
     <div className="flex flex-col gap-4.5 px-4.5 pt-4.5 pb-6.5">
@@ -39,13 +32,8 @@ export function SuccessPanel({
           {amount} <span className="text-[0.62em] font-semibold text-muted ml-1">kKRW</span>
         </p>
         <ExplorerLink href={explorerUrl} />
-        <Button
-          variant="primary"
-          block
-          className="mt-2"
-          onClick={onDone ?? (() => navigate("home"))}
-        >
-          {doneLabel}
+        <Button variant="primary" block className="mt-2" onClick={() => navigate("home")}>
+          Done
         </Button>
       </div>
     </div>

@@ -71,7 +71,7 @@ import {
 } from "./run.js";
 
 /** The owner-note source SpendOps plans and spends over: the CURRENT unspent set
- *  on demand, and the between-legs reload a chain waits on (wallet-web wraps its
+ *  on demand, and the between-legs reload a chain waits on (treasury-web wraps its
  *  arbiter /notes read + screen state into `reload`). The seam owns the note
  *  supply, so the app stops threading the array into every call. */
 export interface SpendNoteSource {

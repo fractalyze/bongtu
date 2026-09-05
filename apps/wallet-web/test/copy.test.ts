@@ -1,479 +1,207 @@
-// Gates for what the screens SAY and SHOW. Two kinds of check, for two kinds of fact:
+// Gates for what the SHELL says and ships. Two kinds of check, for two kinds of
+// fact (the treasury-web copy.test.ts pattern):
 //
-//   RENDERED — components whose output is a pure function of their props go through
-//     react-dom/server, so the assertions read the real markup (button sets, the
-//     explorer link's icon, an interpolated wallet name).
-//   SOURCE — a retired line is an ABSENCE, and the phases it used to live in (confirm,
-//     success) sit behind component state that no headless render can reach. Scanning
-//     the screen sources is the honest gate for "this copy is gone and stays gone".
+//   RENDERED — components whose output is a pure function of their props go
+//     through react-dom/server, so the assertions read the real markup (the
+//     stubbed action grid).
+//   SOURCE — the not-coming-along list (issue #13) is a set of ABSENCES, and an
+//     absence sits behind no renderable state. Scanning the app sources is the
+//     honest gate for "this coupling is gone and stays gone".
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
-import { createElement } from "react";
+import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import { HomeActions } from "../src/ui/screens/Home.js";
+import { SyncDot } from "../src/ui/components/SyncDot.js";
 import { ActivityList } from "../src/ui/components/ActivityList.js";
-import { ApprovalPlan, ConfirmPanel, FlowHint, RunningPanel } from "../src/ui/components/ActionPanels.js";
-import { ExplorerLink } from "../src/ui/components/ExplorerLink.js";
-import { LockChip } from "../src/ui/components/LockChip.js";
-import { MintModal, MintSuccess } from "../src/ui/components/MintModal.js";
-import { SyncDot, syncState } from "../src/ui/components/SyncDot.js";
-import { activeStep, chainSteps, StagedProgress, SPEND_STEPS, withUnlock } from "../src/ui/components/StagedProgress.js";
-import { SuccessPanel } from "../src/ui/components/SuccessPanel.js";
-import { EXPLORER_BASE } from "@bongtu/core/network";
-import { NEUTRAL_WALLET_NAME } from "../src/lib/walletBrand.js";
+import { chainSteps, StagedProgress, WAITING_SCAN_LINE } from "../src/ui/components/StagedProgress.js";
+import { OP_IN_FLIGHT_MESSAGE } from "../src/ui/actionMachine.js";
+import { WITHDRAW_PROOF_BOUND_NOTE } from "../src/ui/screens/SpendScreen.js";
+import { DEPOSIT_RECIPIENT_HINT } from "../src/ui/screens/Deposit.js";
+import {
+  RECIPIENT_NOT_REGISTERED_MESSAGE,
+  RECIPIENT_V1_ONLY_MESSAGE,
+} from "../src/lib/payName.js";
+import {
+  ACTIVITY_EMPTY_TEXT,
+  ACTIVITY_LOADING_TEXT,
+  activityEmptyLine,
+} from "../src/ui/activityView.js";
+import { WALLET_ENDED_NOTICE } from "../src/lib/accountGuard.js";
+import { SELF_SCAN_LOCKED_NOTICE, SELF_SCAN_PENDING_NOTICE } from "@bongtu/client/selfscan";
 
-const h = createElement;
-const TX_HASH = `0x${"ab".repeat(32)}`;
-// Any explorer base would do here — taken from the sdk rather than typed out, so a
-// chain move stays confined to network.ts plus the deploy record.
-const TX_URL = `${EXPLORER_BASE}/tx/${TX_HASH}`;
+const SRC_DIR = new URL("../src/", import.meta.url).pathname;
 
-// The rendered SVG carries no readable name, so the icon is identified by its path
-// data — the one thing that differs between Remix glyphs.
-const EXTERNAL_LINK_ICON = /<svg[^>]*>[\s\S]*?<\/svg>/;
-
-const UI_DIR = new URL("../src/ui/", import.meta.url).pathname;
-
-function uiSources(): { file: string; text: string }[] {
+function appSources(): { file: string; text: string }[] {
   const out: { file: string; text: string }[] = [];
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = `${dir}${entry.name}`;
       if (entry.isDirectory()) walk(`${path}/`);
-      else if (entry.name.endsWith(".tsx")) out.push({ file: path, text: readFileSync(path, "utf8") });
+      else if (/\.tsx?$/.test(entry.name)) out.push({ file: path, text: readFileSync(path, "utf8") });
     }
   };
-  walk(UI_DIR);
+  walk(SRC_DIR);
   return out;
 }
 
-// ======================= (1) SUCCESS SCREENS ================================
-
-test("SuccessPanel shows the headline, the amount and an explorer link with its icon", () => {
-  const html = renderToStaticMarkup(
-    h(SuccessPanel, {
-      title: "Deposit",
-      headline: "Deposit completed",
-      amount: "1,000",
-      explorerUrl: TX_URL,
-    }),
-  );
-  assert.match(html, /Deposit completed/);
-  assert.match(html, /1,000/);
-  assert.match(html, new RegExp(TX_URL.replace(/[/.]/g, "\\$&")));
-  assert.match(html, /View on explorer/);
-  assert.match(html, EXTERNAL_LINK_ICON);
-  // The Done button is the only way on; nothing promises anything about the balance
-  // while the indexer has not caught up yet.
-  assert.match(html, />Done</);
-  assert.doesNotMatch(html, /Now in your private balance/);
-});
-
-test("the success screen never shows a loading indicator (the tx is done)", () => {
-  // A spinner on a success screen reads as "not actually done" (user feedback
-  // 2026-07-28). The post-action refresh still runs; the HOME sync dot owns its
-  // visibility. The success screen states only the finished fact.
-  const html = renderToStaticMarkup(
-    h(SuccessPanel, {
-      title: "Send",
-      headline: "Payment sent",
-      amount: "5",
-      explorerUrl: TX_URL,
-    }),
-  );
-  assert.doesNotMatch(html, /Updating your balance/);
-  assert.doesNotMatch(html, /animate-spin/);
-});
-
-test("the confirm sheets draw the shield direction, not a From/To list", () => {
-  // Variant A (grill 2026-07-28): wallet card = Public kKRW, shield card =
-  // Private kKRW, dashes flowing between. Deposit shields; withdraw unshields.
-  const shield = renderToStaticMarkup(h(FlowHint, { direction: "shield" }));
-  assert.match(shield, /aria-label="Public kKRW to Private kKRW"/);
-  const unshield = renderToStaticMarkup(h(FlowHint, { direction: "unshield" }));
-  assert.match(unshield, /aria-label="Private kKRW to Public kKRW"/);
-  for (const html of [shield, unshield]) {
-    assert.match(html, /Public kKRW/);
-    assert.match(html, /Private kKRW/);
-    assert.match(html, /animate-flow-dash/);
+test("the action grid is live: Send/Receive/Withdraw/Deposit, every op behind a real screen", () => {
+  const html = renderToStaticMarkup(h(HomeActions));
+  for (const label of ["Send", "Receive", "Withdraw", "Deposit"]) {
+    assert.match(html, new RegExp(`>${label}<`), `${label} renders`);
   }
-  const deposit = readFileSync(`${UI_DIR}screens/Deposit.tsx`, "utf8");
-  const spend = readFileSync(`${UI_DIR}screens/SpendScreen.tsx`, "utf8");
-  assert.match(deposit, /direction="shield"/);
-  assert.match(spend, /direction="unshield"/);
-  assert.doesNotMatch(deposit, />From</);
-  assert.doesNotMatch(deposit, />To</);
+  assert.equal((html.match(/<button/g) ?? []).length, 4);
+  assert.equal((html.match(/disabled=""/g) ?? []).length, 0, "nothing is stubbed anymore");
 });
 
-test("the success headlines are the corrected ones", () => {
-  const deposit = readFileSync(`${UI_DIR}screens/Deposit.tsx`, "utf8");
-  const spend = readFileSync(`${UI_DIR}screens/SpendScreen.tsx`, "utf8");
-  assert.match(deposit, /headline="Deposit completed"/);
-  assert.doesNotMatch(deposit, /Deposit complete[^d]/);
-  // "sent" headlines were already correct and stay untouched.
-  assert.match(spend, /"Payment sent"/);
-  assert.match(spend, /"Withdrawal sent"/);
-});
+// ======================= (2) THE NOT-COMING-ALONG LIST =======================
 
-test("ExplorerLink is the ONE explorer link — no screen hand-rolls a bare one", () => {
-  const html = renderToStaticMarkup(h(ExplorerLink, { href: TX_URL }));
-  assert.match(html, /target="_blank"/);
-  assert.match(html, /rel="noreferrer"/);
-  assert.match(html, /View on explorer/);
-  assert.match(html, EXTERNAL_LINK_ICON);
-  for (const { file, text } of uiSources()) {
-    if (file.endsWith("ExplorerLink.tsx")) continue;
-    assert.doesNotMatch(text, /on explorer\s*</, `${file} renders an explorer link of its own`);
-  }
-});
+// Each token names a coupling issue #13 keeps OUT of this bundle: the authority
+// key, the view-token session machinery, signed membership reads, owner-authed
+// reads, activity paging, the discovery-mode knob, and the sponsored-exit
+// client. A hit anywhere in src/ is a regression toward the enterprise wallet.
+const BANNED_TOKENS = [
+  "arbiterPubKey",
+  "obtainViewToken",
+  "buildNotesTokenUrl",
+  "ARBITER_PUBKEY",
+  "ARBITER_KEM",
+  "getSignedPath",
+  "assertPoolKemEpoch",
+  "asOwner(",
+  "historyPage",
+  "loadMoreHistory",
+  "relayerClient",
+  "relayerUrl",
+  "VITE_DISCOVERY",
+  "DiscoveryMode",
+];
 
-// ======================= (2) MINT DIALOG ====================================
-
-test("the mint dialog says what minting does, and starts with an EMPTY amount", () => {
-  const html = renderToStaticMarkup(
-    h(MintModal, { connection: null, onClose: () => {}, onMinted: () => {} }),
-  );
-  assert.match(html, /Mints test kKRW to your connected account — you only pay gas\./);
-  assert.match(html, /Amount \(kKRW\)/);
-  assert.match(html, />Mint</);
-  assert.match(html, /value=""/, "the amount field is the user's to fill in");
-  assert.doesNotMatch(html, /1,000,000/, "no prefilled faucet ration");
-  assert.doesNotMatch(html, /free test kKRW/);
-  assert.doesNotMatch(html, /Minted — view on explorer/);
-});
-
-test("the mint dialog's completed state names the tx, links it, and offers only Close", () => {
-  const html = renderToStaticMarkup(
-    h(MintSuccess, { txHash: TX_HASH, explorerUrl: TX_URL, onClose: () => {} }),
-  );
-  assert.match(html, /Test kKRW added to your account/);
-  // the hash itself, middle-shortened and mono — the receipt, not just a link
-  assert.match(html, /0xababab…abab/);
-  assert.match(html, /font-mono/);
-  assert.match(html, />Close</);
-  assert.doesNotMatch(html, />Mint</);
-  assert.doesNotMatch(html, /Minting/);
-  // the tx is still reachable from the completed state
-  assert.match(html, /View on explorer/);
-  assert.match(html, new RegExp(TX_URL.replace(/[/.]/g, "\\$&")));
-});
-
-// ======================= (3) RETIRED LINES ==================================
-
-test("the on-your-device reassurance is gone from the action screens", () => {
-  for (const { file, text } of uiSources()) {
-    assert.doesNotMatch(text, /Everything happens on your device/, `${file} still repeats it`);
-  }
-});
-
-test("Confirm Send / Confirm Withdraw no longer restate the source of the money", () => {
-  const spend = readFileSync(`${UI_DIR}screens/SpendScreen.tsx`, "utf8");
-  assert.doesNotMatch(spend, /Your private balance/);
-  // the rows that carry real information stay
-  assert.match(spend, />To</);
-  assert.match(spend, />Network</);
-});
-
-// ======================= (4) WALLET NAME IN COPY ============================
-
-test("the unlock line names the connected wallet, and falls back to neutral words", () => {
-  const named = renderToStaticMarkup(
-    h(StagedProgress, {
-      stage: "unlock",
-      elapsed: 0,
-      steps: withUnlock(SPEND_STEPS),
-      walletName: "Rabby",
-    }),
-  );
-  assert.match(named, /Confirm once in Rabby to open your wallet/);
-  assert.doesNotMatch(named, /MetaMask/);
-
-  const anonymous = renderToStaticMarkup(
-    h(StagedProgress, { stage: "unlock", elapsed: 0, steps: withUnlock(SPEND_STEPS) }),
-  );
-  assert.match(anonymous, new RegExp(`Confirm once in ${NEUTRAL_WALLET_NAME} to open`));
-});
-
-test("the lock chip's tooltip names the connected wallet", () => {
-  const named = renderToStaticMarkup(h(LockChip, { walletName: "OKX Wallet" }));
-  assert.match(named, /Locked/);
-  assert.match(named, /confirm once in OKX Wallet/);
-
-  const anonymous = renderToStaticMarkup(h(LockChip, {}));
-  assert.match(anonymous, new RegExp(`confirm once in ${NEUTRAL_WALLET_NAME}`));
-});
-
-// ======================= (5) THE NAV IS ICONS ONLY ==========================
-
-test("the padlock renders NO text label — the words live in the tooltip and the label", () => {
-  const html = renderToStaticMarkup(h(LockChip, { walletName: "Rabby" }));
-  assert.doesNotMatch(html, />Locked</, "the visible Locked/Unlocked word is retired");
-  assert.doesNotMatch(html, />Unlocked</);
-  assert.doesNotMatch(html, /hidden sm:inline/, "and it is not merely hidden on small screens");
-  // still announced, and still a live-region status
-  assert.match(html, /role="status"/);
-  assert.match(html, /aria-label="Wallet locked"/);
-  assert.match(html, /title="Locked/);
-});
-
-test("the sync dot carries its status in a tooltip and stays a refresh button", () => {
-  const synced = renderToStaticMarkup(h(SyncDot, { state: "synced", onRefresh: () => {} }));
-  assert.match(synced, /title="Synced"/);
-  assert.match(synced, /aria-label="Refresh balance \(synced\)"/);
-  assert.match(synced, /bg-pos/);
-  assert.doesNotMatch(synced, />Synced</, "no chip text — the header is icons only");
-  assert.doesNotMatch(synced, /disabled=""/, "a synced dot is pressable: it forces a refresh");
-
-  const syncing = renderToStaticMarkup(h(SyncDot, { state: "syncing", onRefresh: () => {} }));
-  assert.match(syncing, /title="Syncing…"/);
-  assert.match(syncing, /bg-warn/);
-  assert.match(syncing, /disabled=""/, "no re-entry while a load is already running");
-
-  const stale = renderToStaticMarkup(h(SyncDot, { state: "stale", onRefresh: () => {} }));
-  assert.match(stale, /title="Out of sync. Tap to refresh"/);
-  assert.match(stale, /bg-err/);
-});
-
-test("the sync state folds the page's read state together with the indexer's health", () => {
-  const ok = { ok: true } as never;
-  const behind = { ok: false } as never;
-  const base = { health: ok, healthErrored: false, refreshing: false, dataError: false };
-  assert.equal(syncState(base), "synced");
-  assert.equal(syncState({ ...base, refreshing: true }), "syncing", "a load in flight wins");
-  assert.equal(syncState({ ...base, dataError: true }), "stale", "a failed read is not green");
-  assert.equal(syncState({ ...base, healthErrored: true }), "stale", "an unreachable indexer either");
-  assert.equal(syncState({ ...base, health: behind }), "stale", "nor one that reports itself behind");
-  assert.equal(
-    syncState({ ...base, health: null }),
-    "syncing",
-    "an unanswered first health check is not yet a promise",
-  );
-});
-
-test("Home's nav is exactly three icons — sync, lock, settings — no words", () => {
-  // The wallet-brand mark left the nav (user decision 2026-07-28); the connected-
-  // wallet CARD below the balance is where brand identity lives.
-  const home = readFileSync(`${UI_DIR}screens/Home.tsx`, "utf8");
-  const nav = home.slice(home.indexOf("<header"), home.indexOf("</header>"));
-  const order = ["IndexerSyncDot", "LockChip", "IconGear"];
-  order.reduce((at, mark) => {
-    const i = nav.indexOf(mark);
-    assert.ok(i > at, `${mark} is missing from the nav or out of order`);
-    return i;
-  }, -1);
-  assert.doesNotMatch(nav, /WalletMark/, "the brand mark lives in the wallet card, not the nav");
-  assert.doesNotMatch(nav, /IconRefresh/, "the standalone refresh button is retired");
-  assert.doesNotMatch(nav, /wallet\.named/, "the wallet's NAME never renders in the nav");
-});
-
-// ======================= (6) ACTIVITY ROWS ==================================
-
-const HISTORY_ROW = {
-  seq: 7,
-  kind: "sent" as const,
-  amount: "100000000000000000000",
-  counterparty: `0x${"11".repeat(32)}`,
-  txHash: `0x${"cd".repeat(32)}`,
-  blockTimestamp: Math.floor(Date.now() / 1000),
-};
-
-test("an activity amount names the token, and the sign keeps its direction", () => {
-  const html = renderToStaticMarkup(
-    h(ActivityList, {
-      history: [HISTORY_ROW, { ...HISTORY_ROW, seq: 8, kind: "received" as const }],
-      loading: false,
-      explorerBase: EXPLORER_BASE,
-    }),
-  );
-  assert.match(html, /-100<span[^>]*>kKRW<\/span>/, "outgoing reads -100 kKRW");
-  assert.match(html, /\+100<span[^>]*>kKRW<\/span>/, "incoming reads +100 kKRW");
-  // the symbol is the muted sidekick of the number, as on the balance hero
-  assert.match(html, /<span class="text-muted font-semibold text-\[0\.72rem\] ml-1">kKRW<\/span>/);
-});
-
-test("the row list is ruled at BOTH edges, so its gaps read evenly", () => {
-  const html = renderToStaticMarkup(
-    h(ActivityList, {
-      history: [HISTORY_ROW],
-      loading: false,
-      explorerBase: EXPLORER_BASE,
-    }),
-  );
-  // a closing rule under the last row ...
-  assert.match(html, /flex flex-col border-b border-border/);
-  // ... and the first row keeps its own top rule (no first:border-t-0 escape)
-  const source = readFileSync(`${UI_DIR}components/ActivityList.tsx`, "utf8");
-  assert.doesNotMatch(source, /first:border-t-0/);
-  assert.match(html, /border-t border-border/);
-});
-
-// ======================= (7) SETTINGS IS FACTS + LOGOUT =====================
-
-test("Settings keeps the three facts and Disconnect — the rest is retired", () => {
-  const settings = readFileSync(`${UI_DIR}screens/Settings.tsx`, "utf8");
-  assert.match(settings, /label="Network"/);
-  assert.match(settings, /label="Pool"/);
-  assert.match(settings, /label="Token \(kKRW\)"/, "the token row names the token");
-  assert.match(settings, /Disconnect\s*<\/Button>/);
-  assert.match(settings, /Disconnecting signs you out/);
-
-  for (const gone of [
-    "Arbiter indexer URL",
-    "Save Indexer URL",
-    "setIndexerUrl",
-    'label="Token"',
-    'label="Batch size"',
-    'label="Key version"',
-    'label="Arbiter key"',
-    'label="Your address"',
-  ]) {
-    assert.ok(!settings.includes(gone), `Settings still carries "${gone}"`);
-  }
-});
-
-test("nothing in the app can still set an indexer URL at runtime", () => {
-  for (const { file, text } of uiSources()) {
-    assert.doesNotMatch(text, /setIndexerUrl/, `${file} still wires the retired override`);
-  }
-});
-
-// ======================= (8) THE SHARED ACTION PHASES =======================
-// The confirm sheet and the staged run are one component per phase (ActionPanels), so
-// their copy is a pure function of props — RENDERED assertions, not source scans.
-
-const IDLE_DOWNLOAD = { active: false, received: 0, total: null, etaSeconds: null };
-
-test("the confirm sheet names the action, shows the amount, and offers Cancel or Confirm", () => {
-  const html = renderToStaticMarkup(
-    h(ConfirmPanel, {
-      title: "Send",
-      amount: "1,000",
-      download: IDLE_DOWNLOAD,
-      onCancel: () => {},
-      onConfirm: () => {},
-      children: [h("dt", { key: "k" }, "To"), h("dd", { key: "v" }, "3abc…")],
-    }),
-  );
-  assert.match(html, /Confirm Send/);
-  assert.match(html, /1,000/);
-  assert.match(html, />To</, "the action's own rows land inside the detail list");
-  assert.match(html, />Cancel</);
-  assert.match(html, />Confirm</);
-  assert.doesNotMatch(html, /Preparing/);
-});
-
-test("Confirm waits while the proving assets are still streaming in", () => {
-  const html = renderToStaticMarkup(
-    h(ConfirmPanel, {
-      title: "Deposit",
-      amount: "5",
-      download: { active: true, received: 1024, total: null, etaSeconds: null },
-      onCancel: () => {},
-      onConfirm: () => {},
-      children: h("dt", null, "From"),
-    }),
-  );
-  assert.match(html, />Preparing…</);
-  assert.match(html, /disabled=""/, "and it cannot be pressed until they land");
-  assert.match(html, /Downloading security files/, "the download says why the wait exists");
-});
-
-test("a multi-transaction spend says how many approvals it takes, and what each is for", () => {
-  const send = renderToStaticMarkup(
-    h(ApprovalPlan, { pieces: 20, legCount: 3, terminal: "payment" }),
-  );
-  assert.match(
-    send.replace(/<!-- -->/g, ""),
-    /Your balance is in 20 pieces, so this takes 3 approvals: 2 to combine them, then the payment\./,
-  );
-  const withdraw = renderToStaticMarkup(
-    h(ApprovalPlan, { pieces: 3, legCount: 2, terminal: "withdrawal" }),
-  );
-  assert.match(withdraw.replace(/<!-- -->/g, ""), /takes 2 approvals: 1 to combine them, then the withdrawal\./);
-});
-
-test("a one-transaction spend says nothing about approvals — there is nothing to explain", () => {
-  // The sheet renders ApprovalPlan only past one leg (SpendScreen), so the plain send
-  // keeps the confirm sheet it has always had.
-  const spend = readFileSync(`${UI_DIR}screens/SpendScreen.tsx`, "utf8");
-  assert.match(spend, /plan\.legCount > 1 \?/);
-});
-
-test("the standalone merge detour is gone — a scattered balance is no longer a dead end", () => {
-  for (const { file, text } of uiSources()) {
-    for (const retired of [
-      /Your balance is split across too many notes/,
-      /Merge your notes/,
-      /Merge your pieces into one/,
-      /largest pieces into a single/,
-      /Notes merged/,
-    ]) {
-      assert.doesNotMatch(text, retired, `${file} still offers the retired merge detour`);
+test("no enterprise coupling survives in the app sources", () => {
+  for (const { file, text } of appSources()) {
+    for (const token of BANNED_TOKENS) {
+      assert.ok(!text.includes(token), `${file} still carries "${token}"`);
     }
   }
 });
 
-test("the running panel shows the amount in play and the stage the run has reached", () => {
-  const html = renderToStaticMarkup(
-    h(RunningPanel, {
-      title: "Withdraw",
-      amount: "250",
-      stage: "prove",
-      elapsed: 7,
-      steps: SPEND_STEPS,
-      walletName: "Rabby",
-    }),
-  );
-  assert.match(html, /Withdraw/);
-  assert.match(html, /250/);
-  assert.match(html, /Assembling/);
-  assert.match(html, /Proving/);
-  assert.match(html, /Usually 5 to 20 seconds/, "never a promise of sub-5s");
-  assert.match(html, /· 7s/, "the honest elapsed clock");
+test("the shell is always self-scan: the consumer dot only, no health-report dot", () => {
+  const home = readFileSync(`${SRC_DIR}ui/screens/Home.tsx`, "utf8");
+  assert.match(home, /SelfScanSyncDot/);
+  assert.doesNotMatch(home, /IndexerSyncDot/);
+  const dot = readFileSync(`${SRC_DIR}ui/components/SyncDot.tsx`, "utf8");
+  assert.doesNotMatch(dot, /fetchHealth/, "freshness is the scan cursor vs /head, nothing else");
 });
 
-test("a chained run's steps are its TRANSACTIONS, described by the stage inside one", () => {
-  // Two folds then the payment: the rail counts approvals, and the line under the
-  // active one says what that approval is currently doing.
-  const steps = chainSteps(3, "Sending");
-  assert.deepEqual(steps.map((s) => s.label), ["Combining (1 of 2)", "Combining (2 of 2)", "Sending"]);
-
-  const midChain = { stage: "waiting", legIndex: 1, legCount: 3 };
-  assert.deepEqual(activeStep(midChain), { stage: "leg1", describeKey: "waiting" });
-  const html = renderToStaticMarkup(
-    h(RunningPanel, {
-      title: "Send",
-      amount: "2,000",
-      ...activeStep(midChain),
-      elapsed: 0,
-      steps,
-      walletName: "Rabby",
-    }),
-  );
-  assert.match(html, /Combining \(2 of 2\)/);
-  assert.match(html, /Waiting for the network to record the combined note\./);
-
-  // The unlock signature stays its own step in front, not one of the transactions.
-  assert.deepEqual(
-    activeStep({ stage: "unlock", legIndex: 0, legCount: 3 }),
-    { stage: "unlock", describeKey: "unlock" },
-  );
-  // A single-transaction run is untouched: its stage IS its step.
-  assert.deepEqual(
-    activeStep({ stage: "prove", legIndex: 0, legCount: 1 }),
-    { stage: "prove", describeKey: "prove" },
-  );
+test("activity is the whole scan-derived feed: no pager copy anywhere", () => {
+  for (const { file, text } of appSources()) {
+    assert.ok(!text.includes("Load more"), `${file} offers a pager the scan cannot honor`);
+  }
 });
+
+test("logins are tokenless by construction: the engine's tokenless variant, tokens never persist", () => {
+  const app = readFileSync(`${SRC_DIR}ui/App.tsx`, "utf8");
+  assert.match(app, /runTokenlessLogin/);
+  const store = readFileSync(`${SRC_DIR}lib/sessionStore.ts`, "utf8");
+  assert.match(store, /token: ""/, "the loaded record states the tokenless truth");
+});
+
+// ======================= (3) WALLET-WEB RULES THAT CARRY OVER ================
 
 test("no screen hardcodes a wallet brand in what the user reads", () => {
-  for (const { file, text } of uiSources()) {
-    // icons.tsx draws the fox and WalletMark.tsx decides when it is the right mark;
-    // Onboarding offers the MetaMask mobile app deep link — the one case where there
-    // is no installed wallet to detect.
-    const brandAware = ["icons.tsx", "WalletMark.tsx", "Onboarding.tsx"];
+  for (const { file, text } of appSources()) {
+    // icons.tsx draws the fox and WalletMark.tsx decides when it is the right
+    // mark; Onboarding offers the mobile-app deep link — the one case where
+    // there is no installed wallet to detect; wagmi.ts documents that link;
+    // faucet.ts's provenance comment (a verbatim treasury-web copy) names the
+    // wallet the mint was measured in, never in user-facing copy.
+    const brandAware = ["icons.tsx", "WalletMark.tsx", "Onboarding.tsx", "wagmi.ts", "walletBrand.ts", "faucet.ts"];
     if (brandAware.some((f) => file.endsWith(f))) continue;
     assert.doesNotMatch(text, /MetaMask/, `${file} names a brand instead of the detected wallet`);
   }
+});
+
+// ======================= (4) DISCOVERY-SURFACE COPY PINS =====================
+
+// Every notice the discovery screens surface, word-for-word: the calm strips
+// come from the engine (selfscan.ts), the disconnect notice from the guard —
+// a drift here silently changes what users are told about their money.
+test("the discovery notices are pinned word-for-word", () => {
+  assert.equal(
+    SELF_SCAN_PENDING_NOTICE,
+    "Some incoming payments are still being delivered. They'll appear once delivery completes.",
+  );
+  assert.equal(
+    SELF_SCAN_LOCKED_NOTICE,
+    "Wallet locked. Showing your last scan. Unlock to check for new payments.",
+  );
+  assert.equal(WALLET_ENDED_NOTICE, "Your wallet ended the connection. Connect again to continue.");
+});
+
+test("the sync dot carries its status in a tooltip and stays a refresh button", () => {
+  const dot = (state: "synced" | "syncing" | "stale"): string =>
+    renderToStaticMarkup(h(SyncDot, { state, onRefresh: () => {} }));
+  assert.ok(dot("synced").includes('title="Synced"'));
+  assert.ok(dot("syncing").includes('title="Syncing…"'));
+  assert.ok(dot("stale").includes('title="Out of sync. Tap to refresh"'));
+  // While a refresh is already running the button disarms; stale keeps it live —
+  // the tap IS the recovery.
+  assert.ok(dot("syncing").includes('disabled=""'));
+  assert.ok(!dot("stale").includes('disabled=""'));
+});
+
+// ======================= (5) OP-SURFACE COPY PINS ============================
+
+test("the op-surface copy is pinned: the self-scan wait, the proof-bound payout, the one-op refusal", () => {
+  assert.equal(
+    WAITING_SCAN_LINE,
+    "Scanning the network for your combined note. This wallet finds its own money.",
+  );
+  assert.equal(
+    WITHDRAW_PROOF_BOUND_NOTE,
+    "The payout address is locked into your proof. Once you confirm, it cannot be redirected by anyone.",
+  );
+  assert.equal(
+    OP_IN_FLIGHT_MESSAGE,
+    "Another action is still running. Let it finish before starting a new one.",
+  );
+  assert.match(DEPOSIT_RECIPIENT_HINT, /payment name/);
+  // the waiting line renders under the active leg of a chained run
+  const html = renderToStaticMarkup(
+    h(StagedProgress, { stage: "leg0", describeKey: "waiting", elapsed: 0, steps: chainSteps(2, "Sending") }),
+  );
+  assert.ok(html.includes(WAITING_SCAN_LINE));
+});
+
+test("the registry-rule copy is pinned word-for-word", () => {
+  assert.equal(
+    RECIPIENT_NOT_REGISTERED_MESSAGE,
+    "That name isn't registered. Check the spelling with the recipient.",
+  );
+  assert.equal(
+    RECIPIENT_V1_ONLY_MESSAGE,
+    "This recipient can’t receive private payments yet. Ask them to register their payment name from their own consumer wallet first.",
+  );
+});
+
+test("sends are registry-name-only: no address grammar reaches the op screens, one resolve seam", () => {
+  const spend = readFileSync(`${SRC_DIR}ui/screens/SpendScreen.tsx`, "utf8");
+  const deposit = readFileSync(`${SRC_DIR}ui/screens/Deposit.tsx`, "utf8");
+  assert.doesNotMatch(spend, /decodeAddress/, "no pasteable address path exists in v1");
+  assert.match(spend, /resolveConsumerRecipient/);
+  assert.match(deposit, /resolveConsumerRecipient/);
+});
+
+test("the empty feed says loading while a scan runs, and 'No activity yet.' after", () => {
+  assert.equal(ACTIVITY_LOADING_TEXT, "Loading activity…");
+  assert.equal(ACTIVITY_EMPTY_TEXT, "No activity yet.");
+  assert.equal(activityEmptyLine(true), ACTIVITY_LOADING_TEXT);
+  assert.equal(activityEmptyLine(false), ACTIVITY_EMPTY_TEXT);
+  const empty = (loading: boolean): string =>
+    renderToStaticMarkup(h(ActivityList, { history: [], loading, explorerBase: "https://scan.test" }));
+  assert.ok(empty(true).includes(ACTIVITY_LOADING_TEXT));
+  assert.ok(empty(false).includes(ACTIVITY_EMPTY_TEXT));
 });

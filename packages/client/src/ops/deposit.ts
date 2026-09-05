@@ -219,7 +219,7 @@ export interface RunDepositDeps {
   ensureChain: typeof ensureChain;
   /** the wallet's lock — holds the spending key between actions (keyCache.ts). */
   keyCache: KeyCacheLike;
-  /** Turn a ProvingRequest into Groth16 calldata. The APP supplies this: wallet-web
+  /** Turn a ProvingRequest into Groth16 calldata. The APP supplies this: treasury-web
    *  injects in-browser snarkjs (prove.ts proveInBrowser with its circuit asset
    *  base URL applied); payroll-web will inject its prover-service adapter. */
   prove: (request: ProvingRequest) => Promise<Calldata>;

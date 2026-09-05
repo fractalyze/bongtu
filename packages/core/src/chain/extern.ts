@@ -8,7 +8,7 @@
 // node_modules (env BONGTU_NODE_MODULES; default = the docs/toolchain.md path).
 // They come back as `any`: we type OUR code (notes, keys, tree), not theirs.
 //
-// NODE-ONLY: this module touches node:module. Browser bundles (wallet-web proves
+// NODE-ONLY: this module touches node:module. Browser bundles (treasury-web proves
 // in-page with its own bundled snarkjs) must never import it — the sdk's per-file
 // "./*" exports mean it is only pulled in by files that ask for `@bongtu/core/extern`.
 
