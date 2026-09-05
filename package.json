@@ -20,6 +20,7 @@
   "dependencies": {
     "@bongtu/client": "*",
     "@bongtu/client-evm": "*",
+    "@bongtu/client-solana": "*",
     "@bongtu/core": "*"
   }
 }

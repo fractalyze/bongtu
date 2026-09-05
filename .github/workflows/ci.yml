@@ -193,6 +193,8 @@ jobs:
         run: npm test -w @bongtu/client
       - name: client-evm tests
         run: npm test -w @bongtu/client-evm
+      - name: client-solana tests
+        run: npm test -w @bongtu/client-solana
       - name: relayer tests
         run: npm test -w @bongtu/relayer
       - name: sweeper tests

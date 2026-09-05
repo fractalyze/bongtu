@@ -116,7 +116,7 @@ export class SolanaRpcIo implements SolanaChainIo {
     for (const signature of signatures) {
       const t = await this.call<RpcTransaction | null>("getTransaction", [
         signature,
-        { encoding: "json", maxSupportedTransactionVersion: 0 },
+        { encoding: "json", maxSupportedTransactionVersion: 1 },
       ]);
       if (t === null || t.meta === null || t.meta.err !== null) continue; // failed txs move no state
       const keys = [
