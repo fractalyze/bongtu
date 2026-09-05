@@ -43,6 +43,7 @@ import { MirrorTree } from "./tree.js";
 import { poolAbi, abiKnowsKem, kemBootGuardError, staleOpAbiError, portalFactoryAbi, consumerModuleAbi, type ChainConfig } from "./chain.js";
 import { type FeedEntry, type Slice } from "./store.js";
 import { verifyDisclosure, verifyConsumerDisclosure } from "./disclosure.js";
+import { projectFeedEntry } from "./projection.js";
 import { connect, PostgresStore, PostgresLedger } from "./postgres.js";
 import { NameRegistry } from "./names.js";
 import { PortalRegistry } from "./portal.js";
@@ -781,11 +782,7 @@ export class Indexer extends IndexerHostBase {
         // authority envelope (ecdhPublicKey/encryptedValuesForAuthority/nonce)
         // directly. The ledger dedups replays on (txHash, logIndex) itself; the
         // Store first-sight gates here are belt-and-braces.
-        const dEntry = this.store.addEvent({
-          txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
-          kind: "deposit", epoch: null, ecdhPublicKey: null, encryptionNonce: null,
-          slices: [], ciphertext: [],
-        });
+        const dEntry = this.store.addEvent(projectFeedEntry(l, { kind: "deposit" }));
         if (dEntry && this.ledger) {
           this.ledger.apply({
             kind: "deposit", txHash: l.txHash, logIndex: l.logIndex, blockTimestamp: l.blockTimestamp,
@@ -803,24 +800,19 @@ export class Indexer extends IndexerHostBase {
         const i1 = takeAppend(l.txHash, oc1, "Transferred#out1").leafIndex;
         this.tree.recordLeaf(i0, oc0);
         this.tree.recordLeaf(i1, oc1);
-        // ciphertext layout: receiver0[4] ++ receiver1[4] ++ authority[16]
-        const ct: bigint[] = [
-          ...(l.args.encryptedValuesForReceiver0 as unknown[]).map(bn),
-          ...(l.args.encryptedValuesForReceiver1 as unknown[]).map(bn),
-          ...(l.args.encryptedValuesForAuthority as unknown[]).map(bn),
-        ];
-        const slices: Slice[] = [
-          { offset: 0, elts: 4, leafIndex: i0 },
-          { offset: 4, elts: 4, leafIndex: i1 },
-          { offset: 8, elts: 16, leafIndex: null }, // authority envelope (not a leaf)
-        ];
-        const tEntry = this.store.addEvent({
-          txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
+        // ciphertext layout: receiver0[4] ++ receiver1[4] ++ authority[16] —
+        // slice/ct composition is projection-table fact (projection.ts).
+        const tEntry = this.store.addEvent(projectFeedEntry(l, {
           kind: "transfer", epoch: Number(bn(l.args.epoch)),
-          ecdhPublicKey: [dec(bn(l.args.ecdhPublicKey[0])), dec(bn(l.args.ecdhPublicKey[1]))],
-          encryptionNonce: dec(bn(l.args.encryptionNonce)),
-          slices, ciphertext: ct.map(dec),
-        });
+          ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
+          encryptionNonce: bn(l.args.encryptionNonce),
+          outputLeafIndices: [i0, i1],
+          receiverCts: [
+            ...(l.args.encryptedValuesForReceiver0 as unknown[]).map(bn),
+            ...(l.args.encryptedValuesForReceiver1 as unknown[]).map(bn),
+          ],
+          authorityCt: (l.args.encryptedValuesForAuthority as unknown[]).map(bn),
+        }));
         if (tEntry) {
           this.store.addNullifiers([bn(l.args.nullifiers[0]), bn(l.args.nullifiers[1])]);
           if (this.ledger) {
@@ -853,17 +845,16 @@ export class Indexer extends IndexerHostBase {
         }));
         for (const lf of leaves) this.tree.recordLeaf(lf.leafIndex, lf.commitment);
         const authorityCt = (l.args.encryptedValuesForAuthority as unknown[]).map(bn);
-        // ciphertext layout: receivers[nOut][4] (flat) ++ authority tail
-        const ct: bigint[] = [...(l.args.encryptedValuesForReceivers as unknown[]).map(bn), ...authorityCt];
-        const slices: Slice[] = leaves.map((lf, i) => ({ offset: i * 4, elts: 4, leafIndex: lf.leafIndex }));
-        slices.push({ offset: 4 * leaves.length, elts: authorityCt.length, leafIndex: null }); // authority envelope (not a leaf)
-        const t10Entry = this.store.addEvent({
-          txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
+        // ciphertext layout: receivers[nOut][4] (flat) ++ authority tail —
+        // slice/ct composition is projection-table fact (projection.ts).
+        const t10Entry = this.store.addEvent(projectFeedEntry(l, {
           kind, epoch: Number(bn(l.args.epoch)),
-          ecdhPublicKey: [dec(bn(l.args.ecdhPublicKey[0])), dec(bn(l.args.ecdhPublicKey[1]))],
-          encryptionNonce: dec(bn(l.args.encryptionNonce)),
-          slices, ciphertext: ct.map(dec),
-        });
+          ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
+          encryptionNonce: bn(l.args.encryptionNonce),
+          outputLeafIndices: leaves.map((lf) => lf.leafIndex),
+          receiverCts: (l.args.encryptedValuesForReceivers as unknown[]).map(bn),
+          authorityCt,
+        }));
         if (t10Entry) {
           // Padded slots carry nullifier 0; addNullifiers drops those, exactly as
           // the contract's _spendNullifier skips them.
@@ -885,11 +876,7 @@ export class Indexer extends IndexerHostBase {
         this.tree.recordLeaf(ci, chg);
         // Public feed shape unchanged; the arbiter ledger reads the raw Withdrawn
         // authority envelope directly. Both input nullifiers join the public set.
-        const wEntry = this.store.addEvent({
-          txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
-          kind: "withdraw", epoch: null, ecdhPublicKey: null, encryptionNonce: null,
-          slices: [], ciphertext: [],
-        });
+        const wEntry = this.store.addEvent(projectFeedEntry(l, { kind: "withdraw" }));
         if (wEntry) {
           const wq = withdrawEntriesByTx.get(l.txHash) ?? [];
           wq.push(wEntry);
@@ -993,23 +980,18 @@ export class Indexer extends IndexerHostBase {
         // output kem cts — everything a scanner needs, and NOTHING for a
         // ledger: consumer ops carry no authority envelope by construction, so
         // the arbiter ledger never sees them (no arbiter key involved).
-        const ct = [
-          ...(l.args.ctReceiver0 as unknown[]).map(bn),
-          ...(l.args.ctReceiver1 as unknown[]).map(bn),
-        ];
-        this.store.addEvent({
-          txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
-          kind: "depositPriv", epoch: null,
-          ecdhPublicKey: [dec(bn(l.args.ecdhPublicKey[0])), dec(bn(l.args.ecdhPublicKey[1]))],
-          encryptionNonce: dec(bn(l.args.encryptionNonce)),
-          slices: [
-            { offset: 0, elts: 4, leafIndex: p0.leafIndex },
-            { offset: 4, elts: 4, leafIndex: p1.leafIndex },
+        this.store.addEvent(projectFeedEntry(l, {
+          kind: "depositPriv",
+          ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
+          encryptionNonce: bn(l.args.encryptionNonce),
+          outputLeafIndices: [p0.leafIndex, p1.leafIndex],
+          cts: [
+            ...(l.args.ctReceiver0 as unknown[]).map(bn),
+            ...(l.args.ctReceiver1 as unknown[]).map(bn),
           ],
-          ciphertext: ct.map(dec),
-          viewTags: (l.args.viewTags as unknown[]).map((x) => dec(bn(x))),
+          viewTags: (l.args.viewTags as unknown[]).map(bn),
           kemCiphertexts: (l.args.kemCiphertexts as unknown[]).map(String),
-        });
+        }));
       } else if (l.name === "TransferredPriv") {
         const oc0 = bn(l.args.outputCommitments[0]);
         const oc1 = bn(l.args.outputCommitments[1]);
@@ -1021,23 +1003,18 @@ export class Indexer extends IndexerHostBase {
         takeOpApplied(l, { startLeafIndex: p0.leafIndex, nullifierCount: nfs.filter((x) => x !== 0n).length, leafCount: 2, subtreeRoot: 0n, root: p1.root });
         this.tree.recordLeaf(p0.leafIndex, oc0);
         this.tree.recordLeaf(p1.leafIndex, oc1);
-        const ct = [
-          ...(l.args.ctReceiver0 as unknown[]).map(bn),
-          ...(l.args.ctReceiver1 as unknown[]).map(bn),
-        ];
-        const entry = this.store.addEvent({
-          txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
-          kind: "transferPriv", epoch: null,
-          ecdhPublicKey: [dec(bn(l.args.ecdhPublicKey[0])), dec(bn(l.args.ecdhPublicKey[1]))],
-          encryptionNonce: dec(bn(l.args.encryptionNonce)),
-          slices: [
-            { offset: 0, elts: 4, leafIndex: p0.leafIndex },
-            { offset: 4, elts: 4, leafIndex: p1.leafIndex },
+        const entry = this.store.addEvent(projectFeedEntry(l, {
+          kind: "transferPriv",
+          ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
+          encryptionNonce: bn(l.args.encryptionNonce),
+          outputLeafIndices: [p0.leafIndex, p1.leafIndex],
+          cts: [
+            ...(l.args.ctReceiver0 as unknown[]).map(bn),
+            ...(l.args.ctReceiver1 as unknown[]).map(bn),
           ],
-          ciphertext: ct.map(dec),
-          viewTags: (l.args.viewTags as unknown[]).map((x) => dec(bn(x))),
+          viewTags: (l.args.viewTags as unknown[]).map(bn),
           kemCiphertexts: (l.args.kemCiphertexts as unknown[]).map(String),
-        });
+        }));
         if (entry) this.store.addNullifiers(nfs);
       } else if (l.name === "Transferred10x2Priv") {
         const oc0 = bn(l.args.outputCommitments[0]);
@@ -1048,20 +1025,15 @@ export class Indexer extends IndexerHostBase {
         takeOpApplied(l, { startLeafIndex: p0.leafIndex, nullifierCount: nfs.filter((x) => x !== 0n).length, leafCount: 2, subtreeRoot: 0n, root: p1.root });
         this.tree.recordLeaf(p0.leafIndex, oc0);
         this.tree.recordLeaf(p1.leafIndex, oc1);
-        const ct = (l.args.ctReceivers as unknown[]).map(bn); // flat [2][4], leaf order
-        const entry = this.store.addEvent({
-          txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
-          kind: "transfer10x2Priv", epoch: null,
-          ecdhPublicKey: [dec(bn(l.args.ecdhPublicKey[0])), dec(bn(l.args.ecdhPublicKey[1]))],
-          encryptionNonce: dec(bn(l.args.encryptionNonce)),
-          slices: [
-            { offset: 0, elts: 4, leafIndex: p0.leafIndex },
-            { offset: 4, elts: 4, leafIndex: p1.leafIndex },
-          ],
-          ciphertext: ct.map(dec),
-          viewTags: (l.args.viewTags as unknown[]).map((x) => dec(bn(x))),
+        const entry = this.store.addEvent(projectFeedEntry(l, {
+          kind: "transfer10x2Priv",
+          ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
+          encryptionNonce: bn(l.args.encryptionNonce),
+          outputLeafIndices: [p0.leafIndex, p1.leafIndex],
+          cts: (l.args.ctReceivers as unknown[]).map(bn), // flat [2][4], leaf order
+          viewTags: (l.args.viewTags as unknown[]).map(bn),
           kemCiphertexts: (l.args.kemCiphertexts as unknown[]).map(String),
-        });
+        }));
         if (entry) this.store.addNullifiers(nfs);
       } else if (l.name === "WithdrawnPriv") {
         const chg = bn(l.args.changeCommitment);
@@ -1069,16 +1041,17 @@ export class Indexer extends IndexerHostBase {
         const nfs = (l.args.nullifiers as unknown[]).map(bn);
         takeOpApplied(l, { startLeafIndex: pc.leafIndex, nullifierCount: nfs.filter((x) => x !== 0n).length, leafCount: 1, subtreeRoot: 0n, root: pc.root });
         this.tree.recordLeaf(pc.leafIndex, chg);
-        const entry = this.store.addEvent({
-          txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
-          kind: "withdrawPriv", epoch: null,
-          ecdhPublicKey: [dec(bn(l.args.ecdhPublicKey[0])), dec(bn(l.args.ecdhPublicKey[1]))],
-          encryptionNonce: dec(bn(l.args.encryptionNonce)),
-          slices: [{ offset: 0, elts: 4, leafIndex: pc.leafIndex }],
-          ciphertext: (l.args.ctChange as unknown[]).map(bn).map(dec),
-          viewTags: [dec(bn(l.args.viewTag))],
+        // announcement deliberately NOT passed: this rail attaches it after
+        // addEvent through the per-tx WithdrawAnnouncement queue below.
+        const entry = this.store.addEvent(projectFeedEntry(l, {
+          kind: "withdrawPriv",
+          ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
+          encryptionNonce: bn(l.args.encryptionNonce),
+          changeLeafIndex: pc.leafIndex,
+          cts: (l.args.ctChange as unknown[]).map(bn),
+          viewTags: [bn(l.args.viewTag)],
           kemCiphertexts: (l.args.kemCiphertexts as unknown[]).map(String),
-        });
+        }));
         if (entry) {
           // The module emits the same WithdrawAnnouncement pair as the pool —
           // the existing announcement branch attaches it via this queue.
@@ -1105,25 +1078,13 @@ export class Indexer extends IndexerHostBase {
         if (verdict.result.status !== "verified") {
           console.error(`ALARM disclosure ${verdict.result.status.toUpperCase()} (consumer) tx=${l.txHash} start=${start} recomputed=${verdict.result.recomputed} expected=${verdict.result.expected}`);
         }
-        const full = disclosure.length === 6 * B;
-        const entry = this.store.addEvent({
-          txHash: l.txHash, blockNumber: l.blockNumber, logIndex: l.logIndex,
-          kind: "disbursePriv", epoch: null,
-          ecdhPublicKey: [dec(bn(l.args.ecdhPublicKey[0])), dec(bn(l.args.ecdhPublicKey[1]))],
-          encryptionNonce: dec(bn(l.args.encryptionNonce)),
-          slices: full
-            ? Array.from({ length: B }, (_, i) => ({ offset: i * 4, elts: 4, leafIndex: start + i }))
-            : [],
-          ciphertext: disclosure.slice(0, 4 * B).map(dec),
-          disclosure: verdict.result,
-          ...(full
-            ? {
-                viewTags: disclosure.slice(4 * B, 5 * B).map(dec),
-                outputCommitments: disclosure.slice(5 * B, 6 * B).map(dec),
-              }
-            : {}),
-          batchId: start,
-        });
+        const entry = this.store.addEvent(projectFeedEntry(l, {
+          kind: "disbursePriv",
+          ecdhPublicKey: [bn(l.args.ecdhPublicKey[0]), bn(l.args.ecdhPublicKey[1])],
+          encryptionNonce: bn(l.args.encryptionNonce),
+          startLeafIndex: start, batchSize: B,
+          disclosure, verdict: verdict.result,
+        }));
         if (entry) {
           this.store.addNullifiers([bn(l.args.nullifier)]);
           this.kem.recordBatch({
