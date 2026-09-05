@@ -1,0 +1,32 @@
+{
+  "name": "@bongtu/client-solana",
+  "version": "0.0.0",
+  "description": "bongtu Solana rail client — the @solana/kit-typed layer beside @bongtu/client-evm: the signMessage key-derivation payload (the Solana analogue of the EIP-712 seed) and login identity wiring with the stricter first-derivation determinism guard, consumer op transaction building (instruction encoding from the @bongtu/core/solanaOps layout table, the mandatory SIMD-0385 v1 header-config budget from the committed CU budgets (no ComputeBudget instructions on the wire), pre-send Transaction v1 size assertion), the consumer submit io bundle, and the public-feed self-scan adapter. Depends on the rail-agnostic engine (@bongtu/client) and satisfies its structural rail seam; the engine never imports this package (gated by the engine's railFree suite).",
+  "type": "module",
+  "license": "Apache-2.0",
+  "private": true,
+  "exports": {
+    "./connection": "./src/connection/index.ts",
+    "./consumer": "./src/consumer.ts",
+    "./derive": "./src/derive.ts",
+    "./identity": "./src/identity.ts",
+    "./ops": "./src/ops.ts",
+    "./selfscan": "./src/selfscan.ts",
+    "./txbuild": "./src/txbuild/index.ts"
+  },
+  "scripts": {
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@bongtu/client": "*",
+    "@bongtu/core": "*",
+    "@solana/kit": "^8.2.0"
+  },
+  "devDependencies": {
+    "@noble/curves": "^2.2.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

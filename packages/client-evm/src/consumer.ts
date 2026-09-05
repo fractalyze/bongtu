@@ -116,6 +116,10 @@ export function submitTransfer10x2Priv(
   return submitModule(connection, "transfer10x2Priv", calldata, kemCiphertexts, explorerBase, [], moduleAddress);
 }
 
+/** withdrawPriv public index the module range-checks as the payout address
+ *  (WithdrawPrivModule.sol: pub[15]). */
+const WITHDRAW_RECIPIENT_PUB = 15;
+
 /** Submit a proven withdrawPriv (2-in / 1-out change + proof-bound payout).
  *
  *  The trailing (bytes32 stealthEphemeralPub, uint8 viewTag) pair is the
@@ -125,13 +129,24 @@ export function submitTransfer10x2Priv(
  *  nothing to announce: the wrapper pins the "no announcement" sentinel
  *  (zero32/0 — byte-identical to deploy/gates/consumer_leg.ts) rather than
  *  exposing a parameter nothing may set yet. */
-export function submitWithdrawPriv(
+export async function submitWithdrawPriv(
   connection: Connection,
   calldata: Calldata,
   kemCiphertexts: string[],
   explorerBase: string,
   moduleAddress?: string,
 ): Promise<SubmitResult> {
+  // The recipient belt, re-worn client-side: the shared builder admits the
+  // widest value any rail can bind (nonzero under 2^253 — the Solana edge
+  // truncates to 253 bits), but THIS rail's module range-checks uint160
+  // on-chain, so an over-wide address would spend a full proof only to
+  // revert InvalidRecipient. Fail it before the wallet sees anything.
+  const recipient = BigInt(calldata.pub[WITHDRAW_RECIPIENT_PUB]);
+  if (recipient === 0n || recipient >> 160n !== 0n) {
+    throw new Error(
+      `withdraw recipient must be a nonzero 20-byte EVM address (uint160), got ${recipient}`,
+    );
+  }
   return submitModule(
     connection,
     "withdrawPriv",

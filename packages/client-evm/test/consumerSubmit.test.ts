@@ -158,3 +158,19 @@ test("an explicit moduleAddress retargets the write (the fresh-stack gate seam);
   assert.equal(w.writes[0].address, fresh, "the override lands the SAME encode path on the gate's own module");
   assert.equal(w.writes[0].functionName, "transferPriv");
 });
+
+test("the withdraw recipient belt fails an over-uint160 address BEFORE any wallet write", async () => {
+  const w = world();
+  const wide = calldata(16);
+  wide.pub[15] = (1n << 160n).toString(); // one past uint160 — on-chain this is a guaranteed InvalidRecipient revert
+  await assert.rejects(
+    submitWithdrawPriv(w.connection, wide, [CTS[0]], "https://x"),
+    /uint160/,
+  );
+  assert.equal(w.writes.length, 0, "an over-wide recipient spends no proof on a doomed submit");
+
+  const fit = calldata(16);
+  fit.pub[15] = ((1n << 160n) - 1n).toString(); // the widest fitting address
+  await submitWithdrawPriv(w.connection, fit, [CTS[0]], "https://x");
+  assert.equal(w.writes.length, 1, "a fitting recipient passes the belt through to the wallet");
+});

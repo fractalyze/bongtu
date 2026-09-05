@@ -235,8 +235,15 @@ export function buildConsumerWithdrawRequest(
   recipient: string,
 ): ConsumerSpendResult<"withdrawPriv"> {
   const recipientBig = BigInt(recipient);
-  if (recipientBig === 0n || recipientBig > (1n << 160n) - 1n) {
-    throw new Error(`withdraw recipient must be a nonzero L1 address, got ${recipient}`);
+  // Rail-agnostic bound (2026-09-05, the Solana client landing): `recipient`
+  // is ONE field element the circuit binds verbatim; each rail narrows it at
+  // its own chain edge (the EVM module range-checks uint160 on-chain, the
+  // Solana program injects truncate-253 of the recipient token account —
+  // recipient_binding.rs), so the builder's belt is the widest any rail can
+  // bind: nonzero and under 2^253. An EVM caller's mistyped over-wide address
+  // now fails at the module's on-chain range check instead of here.
+  if (recipientBig === 0n || recipientBig >> 253n !== 0n) {
+    throw new Error(`withdraw recipient must be a nonzero proof-bindable address, got ${recipient}`);
   }
   const ins = assembleInputs(identity, inputs, memberships, crypto.padSalts, 2);
 

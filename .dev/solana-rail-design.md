@@ -498,6 +498,21 @@ circuit).
   recorded on issue #8): option (i) with 253 bits, truncate-253. The program binds the low
   253 bits of the recipient token account address; mask spec: addr[0] &= 0x1F on the
   big-endian bytes.
+- **Client landing notes (dated 2026-09-05, the S5 row)** — OPEN-2 implemented as decided:
+  the payload template lives in ONE module (`packages/client-solana/src/derive.ts`, spec
+  quoted; frozen-bytes pin in `test/derivePayload.test.ts`), the determinism guard is the
+  stricter always-double-sign-when-unbound rule (`identity.ts`), and per-rail identities
+  (OPEN-2b) hold by domain construction. Two recorded deviations: (1) the engine's
+  withdraw-recipient client belt widened from uint160 to nonzero-under-2^253
+  (`packages/client/src/ops/consumer/requests.ts`) — the rail edge keeps the narrow check
+  (EVM module on-chain uint160; Solana truncate-253 injection), since one builder now
+  serves both encodings; (2) the Solana withdraw payout token account is bound at
+  io-construction time (`SolanaConsumerConfig.withdrawTokenAccount`) rather than per call:
+  the engine submit seam carries calldata only, and truncate-253 is not invertible to the
+  32-byte address — the submit belt re-derives the binding from the account and refuses a
+  proof bound elsewhere. The client acceptance gate (`chains/solana/gates/e2e_client.sh`)
+  seeds pool accounts as validator GENESIS images because `initialize` is still a reserved
+  discriminator; it migrates onto the real instruction when that lands (S6 deploy profile).
 - **chainId in publics — there is none.** Verified: no circuit binds a chain id in its
   public vector (the chain binding lives in the client KDF only). Consequence for
   fixtures: §5.2. Flip side, flagged explicitly: **OPEN-4** — nothing in the proof binds
