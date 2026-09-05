@@ -165,11 +165,17 @@ pub fn check_spend(
 /// Hand-rolled SystemInstruction::CreateAccount (bincode: u32 tag 0 LE,
 /// lamports u64 LE, space u64 LE, owner) — the wire format is consensus-fixed,
 /// and building it directly avoids a second solana-interface dependency line.
-fn create_account_ix(payer: &Pubkey, new: &Pubkey, lamports: u64, owner: &Pubkey) -> Instruction {
+fn create_account_ix(
+    payer: &Pubkey,
+    new: &Pubkey,
+    lamports: u64,
+    space: u64,
+    owner: &Pubkey,
+) -> Instruction {
     let mut data = Vec::with_capacity(52);
     data.extend_from_slice(&0u32.to_le_bytes());
     data.extend_from_slice(&lamports.to_le_bytes());
-    data.extend_from_slice(&0u64.to_le_bytes()); // space: 0-data PDA
+    data.extend_from_slice(&space.to_le_bytes());
     data.extend_from_slice(owner.as_ref());
     Instruction {
         program_id: SYSTEM_PROGRAM_ID,
@@ -219,7 +225,54 @@ fn assign_ix(pda: &Pubkey, owner: &Pubkey) -> Instruction {
 
 /// Rent-exempt lamports for a 0-data marker PDA.
 pub fn marker_rent() -> Result<u64, PoolError> {
-    Ok(Rent::get().map_err(|_| PoolError::InvalidAccount)?.minimum_balance(0))
+    rent_for(0)
+}
+
+/// Rent-exempt lamports for a data PDA of `space` bytes (DisburseBatch).
+pub fn rent_for(space: usize) -> Result<u64, PoolError> {
+    Ok(Rent::get().map_err(|_| PoolError::InvalidAccount)?.minimum_balance(space))
+}
+
+/// Create a program-owned PDA of `space` bytes at the given seeds.
+pub fn create_pda<'a>(
+    program_id: &Pubkey,
+    payer: &AccountInfo<'a>,
+    pda: &AccountInfo<'a>,
+    system: &AccountInfo<'a>,
+    seeds: &[&[u8]],
+    space: usize,
+    rent_lamports: u64,
+) -> Result<(), PoolError> {
+    let held = pda.lamports();
+    if held == 0 {
+        // Empty-account fast path: one-CPI CreateAccount.
+        let ix = create_account_ix(payer.key, pda.key, rent_lamports, space as u64, program_id);
+        return invoke_signed(&ix, &[payer.clone(), pda.clone(), system.clone()], &[seeds])
+            .map_err(|_| PoolError::InvalidAccount);
+    }
+    // Pre-funded PDA: the address is a pure function of public state (nf,
+    // root, batch start index), so anyone can send lamports to it BEFORE the
+    // op lands and CreateAccount would then fail AccountAlreadyInUse,
+    // freezing the note forever (griefing DoS, S2 review finding). Standard
+    // hardening: top up to rent-exempt if short, then Allocate + Assign
+    // signed by the PDA. The callers' preconditions (system-owned, 0 data)
+    // still hold: only lamport transfers can touch an address without its
+    // signature.
+    if held < rent_lamports {
+        invoke(
+            &transfer_ix(payer.key, pda.key, rent_lamports - held),
+            &[payer.clone(), pda.clone(), system.clone()],
+        )
+        .map_err(|_| PoolError::InvalidAccount)?;
+    }
+    invoke_signed(
+        &allocate_ix(pda.key, space as u64),
+        &[pda.clone(), system.clone()],
+        &[seeds],
+    )
+    .map_err(|_| PoolError::InvalidAccount)?;
+    invoke_signed(&assign_ix(pda.key, program_id), &[pda.clone(), system.clone()], &[seeds])
+        .map_err(|_| PoolError::InvalidAccount)
 }
 
 /// Create a 0-data PDA owned by this program; its existence is the state bit
@@ -235,31 +288,7 @@ pub fn create_marker_pda<'a>(
     rent_lamports: u64,
 ) -> Result<(), PoolError> {
     let seeds: &[&[u8]] = &[seed_prefix, seed_value, &[bump]];
-    let held = pda.lamports();
-    if held == 0 {
-        // Empty-account fast path: unchanged one-CPI CreateAccount.
-        let ix = create_account_ix(payer.key, pda.key, rent_lamports, program_id);
-        return invoke_signed(&ix, &[payer.clone(), pda.clone(), system.clone()], &[seeds])
-            .map_err(|_| PoolError::InvalidAccount);
-    }
-    // Pre-funded PDA: the marker address is a pure function of the note
-    // (nf/root), so anyone can send lamports to it BEFORE the op lands and
-    // CreateAccount would then fail AccountAlreadyInUse, freezing the note
-    // forever (griefing DoS, S2 review finding). Standard hardening: top up
-    // to rent-exempt if short, then Allocate + Assign signed by the PDA. The
-    // callers' preconditions (system-owned, 0 data) still hold: only lamport
-    // transfers can touch an address without its signature.
-    if held < rent_lamports {
-        invoke(
-            &transfer_ix(payer.key, pda.key, rent_lamports - held),
-            &[payer.clone(), pda.clone(), system.clone()],
-        )
-        .map_err(|_| PoolError::InvalidAccount)?;
-    }
-    invoke_signed(&allocate_ix(pda.key, 0), &[pda.clone(), system.clone()], &[seeds])
-        .map_err(|_| PoolError::InvalidAccount)?;
-    invoke_signed(&assign_ix(pda.key, program_id), &[pda.clone(), system.clone()], &[seeds])
-        .map_err(|_| PoolError::InvalidAccount)
+    create_pda(program_id, payer, pda, system, seeds, 0, rent_lamports)
 }
 
 /// Mark every spent nullifier by creating its marker PDA.
@@ -303,6 +332,40 @@ pub fn append_leaves(
     }
     frontier.store(&mut data);
     Ok((start, frontier.current_root))
+}
+
+/// Attach a disburse B-leaf subtree at level `log_b` (the append_leaves
+/// sibling for the SOLR §3.3 batch shape); returns the batch's start leaf
+/// index and the resulting root.
+pub fn attach_subtree(
+    tree: &AccountInfo,
+    subtree_root: &[u8; 32],
+    log_b: usize,
+) -> Result<(u64, [u8; 32]), PoolError> {
+    let mut data = tree.try_borrow_mut_data().map_err(|_| PoolError::InvalidAccount)?;
+    if data.len() != TREE_STATE_LEN {
+        return Err(PoolError::InvalidAccount);
+    }
+    let mut frontier = Frontier::load(&data)?;
+    let start = frontier.attach_subtree(*subtree_root, log_b)?;
+    frontier.store(&mut data);
+    Ok((start, frontier.current_root))
+}
+
+/// Read the enterprise arbiter key from `PoolConfig` with the belt checks
+/// every enterprise op shares: a zeroed key means a consumer-only profile
+/// (the family flag alone cannot enable enterprise ops — SOLR §2.2), and a
+/// non-canonical key half is a corrupt config, refused before it can reach
+/// the verifier as an aliased public input.
+pub fn arbiter_key(config: &AccountInfo) -> Result<[[u8; 32]; 2], PoolError> {
+    let key = state::config_arbiter_key(config)?;
+    if groth16::is_zero(&key[0]) && groth16::is_zero(&key[1]) {
+        return Err(PoolError::ArbiterKeyUnset);
+    }
+    if !groth16::is_canonical_scalar(&key[0]) || !groth16::is_canonical_scalar(&key[1]) {
+        return Err(PoolError::InvalidAccount);
+    }
+    Ok(key)
 }
 
 /// Register the post-op root as a KnownRoot PDA (the `knownRoots[root] = true`

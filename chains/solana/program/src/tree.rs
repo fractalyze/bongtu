@@ -94,4 +94,40 @@ impl Frontier {
     pub fn append_leaf(&mut self, leaf: [u8; 32]) -> Result<u64, PoolError> {
         self.insert_node(leaf, 0)
     }
+
+    /// Disburse batch attach — the EVM `_attachSubtree` mirror (BongtuPool
+    /// §5.1 / ImtTree.attachSubtree): close the pending partial block up to a
+    /// B boundary, then attach `subtree_root` at level `log_b`. Returns the
+    /// batch's start leaf index.
+    ///
+    /// The close is O(LOG_B) folds, NOT O(B) zero-leaf inserts: the partial
+    /// block's level-LOG_B node is computed treating positions rem..B-1 as
+    /// zeros — bit i of rem selects the real left sibling filled_subtrees[i]
+    /// (path node is a right child) or an empty right sibling ZEROS[i].
+    /// Root-identical to padding one leaf at a time (pinned by the ImtTree
+    /// oracle replay in the disburse256 conformance fixture). The sub-LOG_B
+    /// frontier is left STALE, which is safe: next_leaf_index is B-aligned
+    /// afterwards, so a fresh block overwrites filled_subtrees[i] (i < LOG_B)
+    /// as a left child before any read — same argument as the EVM pool.
+    pub fn attach_subtree(
+        &mut self,
+        subtree_root: [u8; 32],
+        log_b: usize,
+    ) -> Result<u64, PoolError> {
+        let b = 1u64 << log_b;
+        let rem = self.next_leaf_index % b;
+        if rem != 0 {
+            let mut node = ZEROS[0];
+            for i in 0..log_b {
+                node = if (rem >> i) & 1 == 1 {
+                    poseidon2(&self.filled_subtrees[i], &node)?
+                } else {
+                    poseidon2(&node, &ZEROS[i])?
+                };
+            }
+            self.next_leaf_index -= rem; // back to the B-aligned block start
+            self.insert_node(node, log_b)?; // place the closed partial block
+        }
+        self.insert_node(subtree_root, log_b)
+    }
 }

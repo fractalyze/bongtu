@@ -6,6 +6,8 @@
 //! wire-shaped instruction. Tests mutate the returned `Env` to drive each
 //! invariant-gate row.
 
+pub mod enterprise;
+
 use {
     bongtu_pool_solana::{spl, state, groth16},
     mollusk_svm::Mollusk,
@@ -134,6 +136,43 @@ pub fn load_transfer10x2_fixture() -> TransferFixture {
 }
 pub fn load_withdraw_fixture() -> WithdrawFixture {
     load_json("withdraw_priv_fixture.json")
+}
+
+// --- attach differential vectors (attach_vectors.json, gen_attach_vectors.ts) --
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachStep {
+    pub subtree_leaves: Vec<String>,
+    pub subtree_root: String,
+    pub expected_start_leaf_index: u64,
+    pub post_root: String,
+    pub post_state: TreeSnapshot,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachCase {
+    pub name: String,
+    pub rem: u64,
+    pub pre_leaves: Vec<String>,
+    pub pre_state: TreeSnapshot,
+    pub attaches: Vec<AttachStep>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachVectors {
+    pub tree_height: usize,
+    pub batch_b: u64,
+    pub log_b: usize,
+    pub cases: Vec<AttachCase>,
+}
+
+/// The gate-7 attach differential vectors: `Frontier::attach_subtree` vs the
+/// ImtTree oracle at every close-loop rem shape (SOLR §4.1).
+pub fn load_attach_vectors() -> AttachVectors {
+    load_json("attach_vectors.json")
 }
 
 pub fn load_cu_budget(op: &str) -> u64 {
