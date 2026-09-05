@@ -5,6 +5,10 @@ node, env-driven — the same two scripts run on a local anvil and on the live
 testnet, given the RPC, a funded key, and the two arbiter KEM variables that anvil
 defaults but a live chain requires (see [Config](#config-env-with-defaults)).
 
+This file owns the EVM stack; the Solana rail's cluster deploy (program,
+one-shot `initialize`, per-cluster address records, upgrade-authority policy)
+lives in [`solana/`](solana/README.md).
+
 ## What it deploys
 
 `forge/Deploy.s.sol` broadcasts, from a single deployer:
