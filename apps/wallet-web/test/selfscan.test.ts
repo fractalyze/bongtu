@@ -24,11 +24,12 @@ import { BalanceCard } from "../src/ui/components/BalanceCard.js";
 import { ActivityList } from "../src/ui/components/ActivityList.js";
 import type { HistoryItem } from "@bongtu/core/indexerApi";
 import { selfScanSyncState } from "../src/ui/components/SyncDot.js";
-import { clearScanState, loadScanState, saveScanState, scanNotice } from "../src/lib/scanStore.js";
+import { clearScanState, loadScanState, saveScanState } from "../src/lib/scanStore.js";
 import {
   EMPTY_SCAN_STATE,
   SELF_SCAN_LOCKED_NOTICE,
   SELF_SCAN_PENDING_NOTICE,
+  scanNotice,
   type PendingDiscovery,
   type SelfScanState,
 } from "@bongtu/client/selfscan";

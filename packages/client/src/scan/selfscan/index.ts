@@ -43,7 +43,9 @@
 // above the SelfScanIo seam is synchronous and PRNG-free, so the headless suite
 // (test/selfscan.test.ts) drives recorded feeds through the whole engine.
 // This file stitches the split module back into the ONE stable public subpath
-// (@bongtu/client/selfscan); the implementation lives in the sibling scan* parts.
+// (@bongtu/client/selfscan); the implementation lives in the sibling scan*
+// parts, plus the ScanSession round-trip owner one level up (scan/session.ts).
 export * from "./engine.js";
 export * from "./run.js";
+export * from "../session.js";
 
