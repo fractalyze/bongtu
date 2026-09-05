@@ -26,6 +26,9 @@ not re-derive what those files own.
   (S1..S8, P0/P1, C1..C4, "pass 1") in commit messages or PR titles/bodies
   (user rule 2026-09-05). A reader holding only the source tree and git log must
   understand them; issue references (#N) are fine, plan vocabulary is not.
+- **Docs audience**: `.dev/` may be agent-dense (specs, decision logs); `docs/`,
+  READMEs, and CLAUDE.md prose are human-first and concise while staying
+  agent-consumable (user rule 2026-09-05).
 - **Commits**: use the `workflow:commit` skill (conventional `type(scope): summary` + why-body).
   **Never append a `Co-Authored-By` trailer** — fractalyze convention, overrides the harness default.
 - **Secrets**: the deployer key for the live chain lives in `.env` (gitignored; template

@@ -15,12 +15,13 @@ decision record is `.dev/milestone-stealth.md` slice ⑤.
    (`portalSalt`, one padding rule on both sides, pinned by a parity vector
    the Solidity side generates), so resolver, bot and recipient all
    recompute the same destination from the same announcement the withdraw
-   scan machinery already carries (docs/circuits.md, `@bongtu/core/stealth`).
+   scan machinery already carries ([circuits.md](circuits.md),
+   `@bongtu/core/stealth`).
 2. **The announcement is recorded at issuance, not by the payer.** A CEX
-   sender can never announce, so `POST /pay/{name}` (docs/indexer.md) derives
-   the destination server-side — discarding the ephemeral scalar immediately;
-   the resolver can derive, never spend — and persists the portal record in
-   the same breath.
+   sender can never announce, so `POST /pay/{name}`
+   ([indexer.md](indexer.md)) derives the destination server-side —
+   discarding the ephemeral scalar immediately; the resolver can derive,
+   never spend — and persists the portal record in the same breath.
 3. **The bot proves the deposit FOR the recipient.** `pool.deposit` is
    permissionless and the deposit circuit binds no owner secret, so
    `apps/sweeper` can mint notes addressed to the recipient's published bjj

@@ -68,7 +68,7 @@ the `authorityPublicKey` the real GPU 256-disburse proof was made against — so
 real 256 disburse verifies against the deployed pool's stored key out of the box.
 Override the two env vars for a production key.
 
-## Run locally (the U6 gate)
+## Run locally
 
 ```sh
 cd bongtu && bash deploy/gates/deploy_local.sh    # exits 0 iff deploy + smoke pass
@@ -84,7 +84,7 @@ the tokens. Proves the full stack is live and correctly wired.
 
 Overridable: `DEPLOY_PORT` (default 8550), `RPC`, `CHAINID`, `FORGE`/`ANVIL`/`CAST`.
 
-## Deploy to the live testnet (done — the live stack)
+## Deploy to the live testnet
 
 The live B=256 stack is already deployed with this pipeline; its addresses are in
 the committed `deploy/addresses.450815.json` (the retired Base Sepolia stack stays
@@ -191,7 +191,7 @@ Canonical data stays at the top; everything else is grouped by what runs it.
 
 `gates/` — the pass/fail scripts (CI and pre-release):
 
-- `deploy_local.sh` — anvil + Deploy + getter reads + Smoke, the U6 gate (also the CI `forge` job's deploy gate).
+- `deploy_local.sh` — anvil + Deploy + getter reads + Smoke (also the CI `forge` job's deploy gate).
 - `test_upgrade_v3.sh` — the op-module upgrade drill (v1 proxy → UpgradeV3 → modules registered,
   enterprise Smoke still accepted, rerun refused).
 - `e2e_m0.sh` / `e2e_orchestrator.ts` — the M0 full spend-cycle e2e on a fresh anvil, including the

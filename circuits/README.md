@@ -47,7 +47,7 @@ the input generators and their committed JSON, `build/` the compile + prove
 pipeline, `gates/` the pass/fail security checks, `verifiers/` the committed
 snarkjs exports, `out/` the gitignored build products.
 
-## Build + prove (the U2 gate)
+## Build + prove
 
 ```sh
 cd circuits && bash build/prove_all.sh              # 13x "snarkJS: OK" and exit 0

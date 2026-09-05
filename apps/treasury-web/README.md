@@ -1,93 +1,22 @@
-# bongtu treasury wallet (public PoC)
+# bongtu treasury wallet
 
-A minimal, functional self-custody wallet (SPEC §7 public app) — connect any installed
-extension (EIP-6963) or WalletConnect through the RainbowKit modal. No seed to
-store: the wallet **derives** a BabyJubJub spending key from a wallet signature, so
-the same account regenerates the same key every session. It imports the `@bongtu/core`
-**source directly** (the indexer is reached over HTTP only), so every commitment /
-nullifier / Poseidon-sponge ciphertext it builds is byte-identical to what the
-provers prove and the contract verifies. All proving happens **in the browser** —
-a self-custody wallet never sends spending-key witnesses to a server.
+The institution-side self-custody wallet (SPEC §7 public app): connect any installed
+extension (EIP-6963) or WalletConnect through the RainbowKit modal, derive a BabyJubJub
+spending key from an `eth_signTypedData_v4` signature (no seed to store — the same
+account regenerates the same key every session), and drive the audited pool entrypoints
+(transfer / transfer10x2 / withdraw / deposit) with proofs generated **in the browser** —
+a self-custody wallet never sends spending-key witnesses to a server. Balance and
+activity read from an arbiter indexer over a view-token session. It imports the
+`@bongtu/*` workspace **source directly**, so every commitment / nullifier /
+Poseidon-sponge ciphertext it builds is byte-identical to what the provers prove and the
+contract verifies. The custody and UX story in depth — key derivation, the lock,
+WalletConnect, spend chains, discovery, portal receive, pay-by-name — is
+[`docs/wallet.md`](../../docs/wallet.md); its enterprise-wallet section names what is
+specific to this app.
 
-Vite + TypeScript + React, minimal deps (`wagmi` v2 + `viem` v2 + RainbowKit for the
-wallet edge, `poseidon-lite` via the sdk, `snarkjs` for in-browser proving).
-
-## The flow
-
-### 1 · Identity — derive the spending key from a MetaMask signature (SPEC §6)
-
-Connect MetaMask → the wallet asks the account to sign a **domain-separated EIP-712
-struct** via `eth_signTypedData_v4`, then derives the bjj key from that signature:
-
-```
-domain  = { name: "bongtu", version, chainId: <live chain id>, verifyingContract: <pool> }
-types   = { BongtuSpendingKey: [ {statement}, {warning} ] }
-message = { statement: "Derive my bongtu … spending key …", warning: "… only sign in the official wallet" }
-
-s   = keccak256(signature)  mod  L          # L = the bjj prime-order subgroup order
-key = deriveKeypair(s)  ->  { formattedPrivateKey: s, publicKey: s·Base8 }
-```
-
-- **Deterministic.** `eth_signTypedData_v4` over EIP-712 is RFC-6979 ECDSA, so a fixed
-  (account, domain, message) yields a fixed 65-byte signature — and therefore the same
-  key — every time. Same account + same pool + same `keyVersion` ⇒ same key.
-- **Why typed, not `personal_sign`** (SPEC §6): the domain binds `chainId` + the pool
-  address + a key `version`, so a signature harvested for one pool/chain/version cannot
-  derive another's key, and a phishing page cannot present a raw string that silently
-  yields the spending key.
-- **Threat model** (SPEC §5.1): *the signature IS the spending key.* v1 = EOA +
-  deterministic ECDSA only (MetaMask pinned); 4337 accounts need a different derivation
-  (v1.1). Code: `src/lib/derive.ts` (pure) + `src/lib/connection.ts` (the signing edge).
-
-### Receive address (the receive-key UX)
-
-The wallet shows the user's **compressed bjj pubkey** (`@bongtu/core/pubkey` — a 32-byte hex
-string, e.g. `0x05c818db…3c1f96`) as the **receive address**. Share it so others can
-pay you: an employer disburses to it, a peer transfers to it. It is deterministic from
-your MetaMask account, so it is stable across sessions and devices.
-
-### 2 · Balance — sum unspent notes (SPEC §7)
-
-One path (`src/lib/balance.ts`): **signed `GET /notes`** against an arbiter-mode
-indexer that has already decrypted every op's authority envelope into a per-owner
-directory. The wallet proves control of its own key with an EdDSA-Poseidon read-auth
-signature (`@bongtu/core/eddsa`, bound to `Poseidon(ownerPub.x, ownerPub.y, ts)`), so
-only it can read its row even though the arbiter holds everyone's. Balance =
-`sum(value)` over `!spent` notes. **A reachable arbiter indexer is required** — if
-`/notes` fails, the wallet shows an error; there is no fallback path.
-
-> **2026-07-25 decision (architecture-review #17, option b):** the key-only `/events`
-> trial-decrypt *fallback wrapper* was removed as unwired dead code — no adapter ever
-> built its `leafCommitments` map, and the product scenario depends on the indexer.
-> The pure `trialDecryptEvents` core **stays** (and stays tested): it proves the SPEC
-> §7/§11-7 protocol property that every receiver ciphertext slice is key-only
-> recoverable — ECDH-decrypt `[value, salt]`, rebuild the commitment, accept iff it
-> equals the on-chain leaf (the Poseidon sponge has no MAC, so the leaf-match is the
-> "is this mine" test) — and is the seed for future recovery tooling.
-
-### 3 · Transfer (2-in / 2-out) · 4 · Withdraw (2-in / 1-out)
-
-The small CPU circuits, provable in-browser (SPEC §6). `src/lib/spend.ts` (pure)
-assembles the witness the same way `deploy/gates/e2e_orchestrator.ts` does by hand, in
-`ProvingRequest` form (`@bongtu/core/proving`):
-
-- Spend 1–2 of the wallet's notes (a single note pads input[1] to `{nullifier:0,
-  value:0, enabled:0}` — the §5.2 value belt forces the disabled input's value to 0).
-- **transfer**: pay the recipient `amount`, change back to self; `sum(inputs) == amount
-  + change`; the two output owners (recipient, self) MAY coincide — the circuit
-  encrypts receiver ciphertext `i` under `encryptionNonce + i` (§11-8 v1.1, U-X3),
-  so a self-pay is no longer a two-time pad.
-- **withdraw**: push `amount` of the underlying ERC-20; the circuit's `out` public =
-  `sum(inputs) − sum(outputs) = amount`, change = total − amount (a full withdrawal
-  leaves a value-0, non-zero-commitment change note).
-- Both encrypt an **authority envelope** to the pool's stored arbiter key (non-repudiation
-  on every op); the contract injects the same key before verifying, so a mismatch fails.
-- The ciphertext rides in the circuit's **public signals**, so the tx is just
-  `(a, b, c, pub)` — no separate ciphertext arg (unlike disburse).
-
-Then **prove in-browser** (`src/lib/prove.ts`, `snarkjs.groth16.fullProve` over the
-transfer/withdraw `wasm` + `zkey`) → **submit** `pool.transfer` / `pool.withdraw` through
-the connected wallet (`src/lib/connection.ts`, viem `writeContract` at the pinned gas floor).
+Vite + TypeScript + React; `wagmi` v2 + `viem` v2 + RainbowKit at the wallet edge, the
+`@bongtu/client` protocol engine and `@bongtu/ui` shared app modules, `snarkjs` for
+in-browser proving.
 
 ## Run
 
@@ -95,81 +24,110 @@ the connected wallet (`src/lib/connection.ts`, viem `writeContract` at the pinne
 export PATH=$HOME/.foundry/bin:$HOME/.nvm/versions/node/v22.17.1/bin:$PATH
 cd apps/treasury-web
 npm install
-npm run dev        # Vite dev server → open the printed URL (needs MetaMask + a reachable indexer)
+npm run dev        # Vite dev server -> open the printed URL (needs a wallet extension
+                   #   + a reachable arbiter-mode indexer)
 ```
 
 Gates:
 
 ```sh
-npm test           # pure-logic gates (no MetaMask/chain/assets): deterministic derivation,
-                   #   balance sum + trial-decrypt, transfer/withdraw witness assembly
+npm test           # headless node:test gates (no wallet/chain/assets), see Layout
 npm run typecheck  # tsc --noEmit
 npm run build      # vite production build (snarkjs splits into its own dynamic chunk)
 ```
 
-### Gate reality (what is tested vs the un-tested edge)
+**Gate reality.** A wallet extension and the live circuit assets are not present in the
+build env, so the connect → sign → prove → submit I/O edge is wired but not exercised
+here. Everything pure and security-critical gates headless: derivation determinism,
+balance summing and the receiver-ciphertext trial decrypt, transfer/withdraw witness
+assembly (`@bongtu/core/proving` `ProvingRequest` form — the same shape
+`deploy/gates/e2e_orchestrator.ts` drives by hand), the action machine, error surfaces,
+copy pins, and the selfscan wiring (see Layout).
 
-MetaMask and the live circuit assets are not present in the build env, so the
-**connect → sign → prove → submit** I/O edge (`connection.ts`, `prove.ts`) is wired but
-not exercised here. The **pure, security-critical logic IS covered** headless
-(`test/wallet.test.ts`, 18 tests): (1) a fixed signature hex derives a stable, pinned
-bjj keypair; a different signature a different key; (2) mock notes (some spent) sum to
-the right unspent balance, and the `/events` trial-decrypt discovers exactly the
-wallet's notes (rejecting a stranger's envelope) with correct spent flags; (3) transfer
-and withdraw witnesses whose output commitments == `sdk commitment()`, whose value is
-conserved, whose owners are distinct, whose membership folds to root, plus the padded
-single-input path.
+## Env knobs
 
-### Circuit assets (documented boundary, SPEC §6 "one-time zkey download")
+All are build-time Vite injects: an existing deployment does not pick up a change.
 
-In-browser proving needs the transfer/withdraw `wasm` + `zkey` served at
-`config.circuitBaseUrl` (`${base}/{transfer,withdraw}.wasm` and `.zkey`). They are **not
-bundled** (`transfer.zkey` ~28 MB, `withdraw.zkey` ~24 MB): copy
-`circuits/out/{transfer_js/transfer.wasm, transfer.zkey, withdraw_js/withdraw.wasm,
-withdraw.zkey}` under the app's public dir or a CDN and point `circuitBaseUrl` at them.
+| var | default | meaning |
+|---|---|---|
+| `VITE_DISCOVERY` | `arbiter` | only the literal `selfscan` flips the no-auditor self-scan profile ([docs/wallet.md](../../docs/wallet.md#indexer-dependency)) |
+| `VITE_INDEXER_URL` | `/indexer` (relative, same-origin) | where every indexer read goes; an absolute URL bypasses the proxy/rewrite path entirely |
+| `VITE_INDEXER_PROXY_TARGET` | `http://localhost:8600` | dev only: where the Vite `/indexer` proxy forwards (root `vite.shared.ts`) |
+| `VITE_TESTNET` | `true` | the literal `false` switches every testnet-only affordance (mint/faucet UI, Testnet chips) off in one place |
+| `VITE_WC_PROJECT_ID` | unset | unset, the connect modal lists installed extensions only; set, the WalletConnect QR / deep-link path joins it ([docs/wallet.md](../../docs/wallet.md#connecting-and-walletconnect)) |
 
-### GPL decision (SPEC §6, explicit)
+## Circuit assets
+
+In-browser proving needs each circuit's `wasm` + `zkey` at
+`${circuitBaseUrl}/<circuit>.{wasm,zkey}` (default `/circuits`). They are not bundled
+(`transfer.zkey` ≈ 29 MB, `withdraw.zkey` ≈ 25 MB, `transfer10x2.zkey` ≈ 95 MB) and have
+one home in every environment: the `bongtu-circuits` blob store under
+`circuits/<CIRCUITS_VERSION>/`. Deployments reach it through the `vercel.json`
+`/circuits` rewrite (which carries the same version in its destination path); local dev
+reaches it through the proxy in `vite.config.ts`, which reads the version pin out of
+`src/config.ts` so a bump re-points dev automatically. A circuit regen is one atomic
+diff: upload the new assets (`deploy/gates/upload_circuits.sh`, which refuses assets
+whose combined zkey hash does not match the pin), bump `CIRCUITS_VERSION`, and repoint
+the `vercel.json` rewrite together. The stale-zkey hazard is
+[docs/wallet.md](../../docs/wallet.md#proving-in-the-browser)'s.
+
+## GPL decision
 
 Shipping `snarkjs` (GPL-3.0) to the page **is** distribution, so no server-side
-isolation applies (and a self-custody wallet must not delegate its proving anyway).
-The PoC takes option **(a): accept GPL for the public app.** `snarkjs` is dynamically imported (`import("snarkjs")` in `prove.ts`)
-so it loads only when the user actually proves. A non-GPL WASM prover (b) or a local
-helper (c) are the documented alternatives.
+isolation applies (and a self-custody wallet must not delegate its proving anyway). The
+recorded SPEC §6 decision is option **(a): accept GPL for the public app**; `snarkjs` is
+dynamically imported so it loads only when the user actually proves. A non-GPL WASM
+prover (b) or a local helper (c) are the documented alternatives. See
+[`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md).
 
-## Defaults (the live deployment — `deploy/addresses.450815.json`)
+## Defaults (the live deployment)
 
-`src/config.ts` ships the live deployment's facts — the pool address, the chain id, the
-pool's **public** arbiter key (the authority-envelope target — public, safe to ship) — plus
-`keyVersion` (part of the EIP-712 domain; bumping it rotates every derived key). It
-transcribes none of them: `deploy/addresses.<chainId>.json` is the record and
-`packages/core/src/chain/network.ts` is the one place the app reads them from. Quoting an
-address in prose is precisely how the cross-chain CREATE-nonce collision bites — the same
-deployer replayed the same nonces on both chains, so an address that named the pool on one
-names a *different* contract on the other. No private key ever lives in the wallet — the
-spending key is derived at runtime and never persisted.
+`src/config.ts` ships the live deployment's public facts — pool and token addresses,
+chain id, RPC/explorer bases, the pool's **public** arbiter keys — re-exposed from
+`@bongtu/core/network`, the one home equality-tested against
+`deploy/addresses.450815.json`. It transcribes none of them, and neither should you: the
+previous chain's replayed CREATE nonces make several addresses collide across the two
+chains while naming *different* contracts, so copy addresses from the record by field
+name, never from prose. `keyVersion` (the KDF rotation lever — bumping it rotates every
+derived key) is pinned in `@bongtu/client/identity`
+([docs/wallet.md](../../docs/wallet.md#key-derivation)). No private key ever lives in
+the wallet.
 
 ## Layout
 
 ```
 src/
-  config.ts            live deployment defaults (public data only) + keyVersion + circuitBaseUrl
-  main.ts              the wallet UI (identity → balance → transfer/withdraw)
-  snarkjs.d.ts         minimal ambient decl for the dynamically-imported GPL prover
+  config.ts            app knobs: DEFAULTS (chain facts from @bongtu/core/network),
+                       discovery + testnet ENV rules, CIRCUITS_VERSION pin +
+                       per-asset byte table, circuitBaseUrl
+  main.tsx             React entry + the desktop-only gate
   lib/
-    derive.ts          PURE: EIP-712 struct + keccak256(sig) mod L -> bjj identity
-    balance.ts         PURE: sumUnspent + /events trial-decrypt; signed /notes orchestration
-    spend.ts           PURE: input notes + recipient + membership -> transfer/withdraw ProvingRequest
-    indexerClient.ts   /head /path /events /nullifiers + signed /notes URL (@bongtu/core/eddsa)
-    chain.ts           the live chain as a viem object + the parsed gas pin
-    wagmi.ts           the one wagmi config (EIP-6963 discovery + flag-guarded WalletConnect)
-    connection.ts      Connection + eth_signTypedData_v4 + pool submits (wagmi + viem)
-    prove.ts           browser snarkjs.groth16.fullProve over fetched wasm/zkey
-    dom.ts             tiny framework-free DOM helpers
-test/
-  wallet.test.ts       the three headless gates (derivation, balance, spend witness)
+    assets.ts          app binding of @bongtu/ui/assets to this circuit family
+    prove.ts           app binding of @bongtu/ui/prove (CPU circuit allow-list + wording)
+    payName.ts         name lookup + the one-time deposit address (portal) client
+    scanStore.ts       persisted self-scan state per owner (selfscan mode)
+    errors.ts          the wording boundary over the shared failure classifier
+  ui/
+    App.tsx            the shell: login, discovery mode, routing
+    actionMachine.ts   React adapter over @bongtu/ui/actionMachine + treasury wording
+    hooks.ts, format.ts
+    screens/           Onboarding, LockIntro, Home, Activity, Settings, Deposit,
+                       SpendScreen (Send + Withdraw), Receive (portal addresses)
+    components/        balance card, activity list, sync dot, staged/download progress,
+                       receive panel, mint modal, modals, controls
+test/                  15 headless gates: wallet.test.ts (derivation, balance + trial
+                       decrypt, spend witnesses), actionMachine, assets cache,
+                       connection + wagmi guards, copy pins, download progress, error
+                       surfaces (errors + errorSurface), faucet, format, lock intro,
+                       portal addresses, prove allow-list, selfscan wiring,
+                       transfer10x2 fold
 ```
+
+The lock, wagmi config, wallet branding, lock intro, toasts and the shared
+proving/asset/action machinery come from `@bongtu/ui`; protocol flows from
+`@bongtu/client`.
 
 ## License
 
-Apache-2.0 — see the root [`LICENSE`](../../LICENSE); for snarkjs, see the GPL
-decision section above (SPEC §6).
+Apache-2.0 — see the root [`LICENSE`](../../LICENSE); for snarkjs, see the GPL decision
+above.

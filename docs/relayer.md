@@ -7,12 +7,12 @@ user-controlled address ever appears as the transaction sender.
 ## Why it can be trusted with the submission
 
 The withdraw circuit binds the payout address into the proof (`recipient`,
-pub[26] — docs/circuits.md). The relayer therefore holds a proof it can
-submit but not redirect: tampering with any public signal fails Groth16
-verification, and the announcement fields it could alter ride outside the
-proof where changing them can only break discovery, never move funds
-(docs/contracts.md). "Who submits" is a free variable, and the relayer is
-just somebody who pays.
+pub[26] — [circuits.md](circuits.md)). The relayer therefore holds a proof
+it can submit but not redirect: tampering with any public signal fails
+Groth16 verification, and the announcement fields it could alter ride
+outside the proof where changing them can only break discovery, never move
+funds ([contracts.md](contracts.md)). "Who submits" is a free variable, and
+the relayer is just somebody who pays.
 
 That is also why the service is **withdraw-only by design**: deposit and the
 transfer arities have no recipient binding — their outputs are in-pool notes
@@ -33,11 +33,11 @@ scans logs and responses for the key hex. Run mechanics and env knobs:
 
 ## The client contract
 
-`@bongtu/client` (`io/relayer.ts` + the `ops/spend/run.ts` withdraw leg) relays
-exactly the terminal withdraw of a spend chain — merge legs are self-sends
-and never leave the wallet's own submission path. A configured relayer that
-fails **surfaces the failure**; there is no silent fallback to self-submit
-(docs/wallet.md "Withdraw destination").
+`@bongtu/client` (`io/relayer.ts` + the `ops/spend/run.ts` withdraw leg)
+relays exactly the terminal withdraw of a spend chain — merge legs are
+self-sends and never leave the wallet's own submission path. A configured
+relayer that fails **surfaces the failure**; there is no silent fallback to
+self-submit ([wallet.md](wallet.md) "Withdraw destination").
 
 ## PoC boundaries
 

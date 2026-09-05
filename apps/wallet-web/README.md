@@ -55,7 +55,7 @@ wallet's whole contract is that it only ever reads the public endpoints, but the
 institution-internal arbiter box; repointing it is an ops task recorded on issue #13
 ("Needs the user / ops"), not a code change.
 
-## Circuit assets (the S7 pipeline)
+## Circuit assets (the blob-store pipeline)
 
 In-browser proving needs each circuit's `wasm` + `zkey` at
 `${circuitBaseUrl}/<circuit>.{wasm,zkey}` (default `/circuits`). They are not bundled
@@ -86,20 +86,19 @@ src/
                        no discovery knob, no authority key (absent by design)
   main.tsx             React entry + the desktop-only gate
   lib/
-    assets.ts          version-keyed Cache Storage prefetch for the proving assets
-    keyCache.ts        the one in-memory lock (engine createKeyCache; key never persists)
+    assets.ts          app binding of @bongtu/ui/assets (version-keyed prefetch)
+    prove.ts           app binding of @bongtu/ui/prove (browser snarkjs proving)
     sessionStore.ts    the tokenless login record (routing data only, deployment-scoped)
     scanStore.ts       persisted self-scan state per owner (decrypted amounts, never keys)
     payName.ts         pay-by-name resolution + the wallet's words for each refusal
     payNameStore.ts    the device's own-name pointer (a hint; the live record decides)
     accountGuard.ts    account-switch lock/detach + the explicit-Disconnect forget plan
     refreshGate.ts     the auto-refresh gate (hidden tab runs no pass, no overlap)
-    prove.ts           browser snarkjs proving over the fetched wasm/zkey
     errors.ts          the wording boundary for chain/op failures
-    faucet.ts, wagmi.ts, walletBrand.ts, lockIntro.ts, loginPending.ts,
-    clipboard.ts, toasts.ts
   ui/
     App.tsx            the shell: tokenless login, the self-scan world state, routing
+    actionMachine.ts   React adapter over @bongtu/ui/actionMachine
+    homeView.ts / activityView.ts   pure screen presenters
     screens/           Onboarding, LockIntro, Home, Activity, Settings, Deposit,
                        SpendScreen (Send + Withdraw), Receive (identity + v2 registration)
     components/        balance card, activity list, sync dot, staged progress, download
@@ -114,6 +113,10 @@ test/
   receive.test.ts      own-name status table, v2-only registration, name-not-triple sharing
   copy.test.ts         pinned user-facing copy + the no-enterprise-coupling source scan
 ```
+
+The lock (engine `createKeyCache`; the key never persists), wagmi config, wallet
+branding, lock intro, login pending, clipboard and toasts come from `@bongtu/ui`;
+protocol flows from `@bongtu/client`.
 
 ## License
 

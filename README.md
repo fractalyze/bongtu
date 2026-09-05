@@ -4,10 +4,9 @@
 
 A private stablecoin transfer layer for institutions, built on
 [Zeto](https://github.com/hyperledger-labs/zeto) with **enforced auditor disclosure**. Private
-peer-to-peer transfers already exist, but institutions need more than that, and no one has made
-**private payments work at scale.** bongtu does: one transaction pays up to **256 recipients**, so a
-100,000-person payroll settles in minutes for a few dollars, every amount hidden from the public and
-readable by an auditor.
+peer-to-peer transfers already exist; no one has made **private payments work at scale**. bongtu
+does: one transaction pays up to **256 recipients**, so a 100,000-person payroll settles in minutes
+for a few dollars, every amount hidden from the public and readable by an auditor.
 
 A digital 월급봉투: everyone sees the envelopes handed out, only the recipient sees the amount
 inside, and a designated authority can open every envelope. Each is encrypted to a fixed authority
@@ -16,13 +15,12 @@ any transaction while the public chain and other users cannot.
 
 ## The problem
 
-Stablecoins settle **tens of trillions of dollars a year**, more raw volume than PayPal and on the
+Stablecoins settle **tens of trillions of dollars a year** — more raw volume than PayPal and on the
 order of Visa ([a16z](https://a16zcrypto.com/posts/article/state-of-crypto-report-2025/)). For them
-to carry everyday money like salaries, vendor payments, and payouts, a few things have to hold at
-once: no one wants their income or spending public, and paying many people has to stay fast and
-cheap. A public chain gives neither. It exposes *"individual salaries, bonus structures, and
-corporate treasury balances to public view,"* and existing private systems can't do a large payout
-without splitting it into hundreds of transactions.
+to carry everyday money (salaries, vendor payments, payouts), no one's income or spending can be
+public, and paying many people must stay fast and cheap. A public chain gives neither: it exposes
+*"individual salaries, bonus structures, and corporate treasury balances to public view,"* and
+existing private systems can't do a large payout without splitting it into hundreds of transactions.
 
 When you use a bank, you take four things for granted:
 
@@ -74,10 +72,10 @@ read.
 **How the 256 fit in one transaction.** The disburse circuit proves, in a single proof, that the 256
 output notes already form a depth-8 subtree, together with value conservation (the input note equals
 the sum of the outputs). The contract then grafts that whole subtree onto the main Merkle tree at
-level 8 (an **O(log 256)** operation) instead of appending 256 leaves one at a time, which is O(256)
-and would not fit in a block. It pads the batch to a fixed 256 with no per-leaf event (so the
-real recipient count stays hidden) and publishes all 256 ciphertexts on-chain for the auditor,
-bound by one aggregated disclosure hash the proof commits to.
+level 8 — **O(log 256)** instead of appending 256 leaves one at a time, which is O(256) and would
+not fit in a block. It pads the batch to a fixed 256 with no per-leaf event (so the real recipient
+count stays hidden) and publishes all 256 ciphertexts on-chain for the auditor, bound by one
+aggregated disclosure hash the proof commits to.
 
 One such batch, measured live against the same circuits and the same hybrid ML-KEM envelope:
 **3,905,519 L2 gas** — **15,256 per recipient**. That measurement was taken two chains back and
@@ -86,8 +84,8 @@ because no chain move changed an executable line in any operation path, only the
 ([`docs/performance.md`](docs/performance.md) shows the check). The other four operations were
 re-measured on Base Sepolia and are in that file.
 
-A **100,000-person payroll** is 391 of those batches, priced at the measuring chain's own 0.006 gwei quote —
-not at the higher gas price our deploy scripts pin for themselves:
+A **100,000-person payroll** is 391 of those batches, priced at the measuring chain's own 0.006 gwei
+quote — not at the higher gas price our deploy scripts pin for themselves:
 
 | | per 256-batch | ×391 (100,000 people) |
 |---|---|---|
@@ -105,15 +103,15 @@ are 391× one measured batch, not a single live 100k run.)*
 
 ## What is built
 
-Every surface below is built. The wallet path has run end to end against the retired Base Sepolia
-deployment — deposits, a `transfer10x2` merge and a `transfer10x2` payment all landed there and
-the arbiter indexer surfaced the resulting notes. The fresh Maroo pool in [Status](#status) has
-passed its deploy smoke (a real proof-carrying deposit); the app flows and the 256-recipient
-disburse have not been re-run on it yet:
+Every surface below is built. The wallet path ran end to end against the retired Base Sepolia
+deployment (deposits, a `transfer10x2` merge and a `transfer10x2` payment landed; the arbiter
+indexer surfaced the resulting notes). The fresh Maroo pool in [Status](#status) has passed its
+deploy smoke — a real proof-carrying deposit — but the app flows and the 256-recipient disburse
+have not been re-run on it yet.
 
 | surface | what it is |
 |---|---|
-| [**Bongtu Wallet**](https://bongtu.fractalyze.io) | Self-custody private wallet: spending key derived from a MetaMask signature, proofs generated in the browser, private balance / send / withdraw, per-user activity feed. Desktop-only. |
+| [**Bongtu Wallet**](https://bongtu.fractalyze.io) | The institution wallet (`apps/treasury-web`): self-custody, spending key derived from a MetaMask signature, proofs generated in the browser, private balance / send / withdraw, per-user activity feed. Desktop-only. |
 | [**Employer Payroll Test Console**](https://payroll.fractalyze.io) | The mass-payout console (testnet tool, access-gated): deposit public kKRW into the pool, generate a 255-recipient worksheet, and settle it as **one** private disburse, whose proof the GPU prover below returns in seconds when that service is up. |
 | **GPU prover service** | The employer-side proving box: three circuits held resident on one GPU, in-process witness workers, ~0.5 s warm proof for the 256-batch. Auth- and origin-gated, so only the employer's own console can reach it. Run on demand rather than kept up: it holds ~25 GB of GPU while resident, and the payroll console is the only surface that needs it — the wallet proves in the browser. |
 | **Indexer (arbiter mode)** | Mirrors the on-chain tree, decrypts every authority envelope, serves per-owner `/notes` + `/history` behind signature read-auth, and raises disclosure alarms when a batch's ciphertext disagrees with the chain. |
@@ -177,12 +175,11 @@ constraints). Per-op gas and proof times: [`docs/performance.md`](docs/performan
 ## Layout
 
 npm workspaces monorepo: workspace packages export **raw `src/*.ts`** (no build step) as `@bongtu/*`.
-Four kinds of directory, split by what runs the code. `apps/` and `packages/` are the npm world
-divided by role — apps are the things you run, packages are the things they import. `chains/` holds the
-per-chain consensus islands (`chains/evm/`, `chains/solana/`);
-`circuits/` and `prover/` are the shared toolchain islands, each owned by a non-npm toolchain (circom,
-Python). `deploy/` is the one-shot operations hand: nothing imports it, it acts on a chain.
-Each has its own README.
+Four kinds of directory, split by what runs the code: `apps/` and `packages/` are the npm world
+divided by role (apps are the things you run, packages are the things they import); `chains/` holds
+the per-chain consensus islands; `circuits/` and `prover/` are the shared toolchain islands, each
+owned by a non-npm toolchain (circom, Python); `deploy/` is the one-shot operations hand — nothing
+imports it, it acts on a chain. Each has its own README.
 
 - [`circuits/`](circuits/README.md): the circom circuits (transfer, disburse, withdraw, deposit) + their fixtures, build pipeline and soundness gates
 - [`chains/evm/`](chains/evm/README.md): Foundry `BongtuPool` + verifiers
@@ -194,7 +191,7 @@ Each has its own README.
 - [`prover/`](prover/README.md): GPU prover service — three circuits resident, in-process witness workers
 - [`apps/indexer/`](apps/indexer/README.md): event ingest, tree mirror, `/notes` + disclosure alarms (arbiter mode)
 - [`apps/payroll-web/`](apps/payroll-web/README.md): the employer pay console — MetaMask login, one worksheet, batch disburse
-- [`apps/treasury-web/`](apps/treasury-web/README.md): self-custody wallet, in-browser proving
+- [`apps/treasury-web/`](apps/treasury-web/README.md): the institution self-custody wallet, in-browser proving
 - [`apps/wallet-web/`](apps/wallet-web/README.md): the consumer self-scan wallet, no-auditor P2P ops (tokenless, in-browser proving)
 - [`deploy/`](deploy/README.md): forge scripts, live-chain drivers, anvil gates — recorded addresses at the top
 - [`docs/`](docs/): reference docs, one file per topic (index below)
@@ -213,7 +210,7 @@ How to build, test, and run each component lives in its own README:
 - **Contracts** (forge test, gas report): [`chains/evm/README.md`](chains/evm/README.md)
 - **Circuits** (prove_all, soundness gates): [`circuits/README.md`](circuits/README.md)
 - **Indexer** (local + live chain, Postgres, docker compose): [`apps/indexer/README.md`](apps/indexer/README.md)
-- **Wallet** (dev server, in-browser proving): [`apps/treasury-web/README.md`](apps/treasury-web/README.md)
+- **Institution wallet** (`apps/treasury-web`: dev server, in-browser proving): [`apps/treasury-web/README.md`](apps/treasury-web/README.md)
 - **Consumer wallet** (self-scan, tokenless): [`apps/wallet-web/README.md`](apps/wallet-web/README.md)
 - **Payroll console**: [`apps/payroll-web/README.md`](apps/payroll-web/README.md)
 - **GPU prover service**: [`prover/README.md`](prover/README.md)
@@ -226,46 +223,27 @@ Copy `.env.example` → `.env` (gitignored) for a funded deployer key. Toolchain
 
 System guarantees and inter-component contracts live in [`docs/`](docs/), one file per topic:
 
-- [Protocol](docs/protocol.md): notes, commitments, nullifiers, the single-frontier IMT, batch attach,
-  authority-envelope layouts and the disclosure chain.
-- [Circuits](docs/circuits.md): the four circuits, their exact public surfaces, the soundness belts, and how
-  `-l` resolves the vendored and upstream includes.
-- [Contracts](docs/contracts.md): `BongtuPool`'s duties: proof binding, nullifier spend, enforced disclosure,
-  events, arbiter epochs, the UUPS proxy and verifier wiring.
-- [Deployment](docs/deployment.md): the live deployment record, chain facts, the one-shot deploy and the
-  UUPS upgrade path, and the arbiter-key-at-deploy coupling.
-- [Indexer](docs/indexer.md): the mirror invariant, single-transaction persist and gap-only resume, the HTTP
-  API with its read-auth, and the arbiter-mode trust boundary.
-- [Wallet](docs/wallet.md): the two wallets on one engine: the shared core (key derivation, the lock,
-  in-browser proving and the stale-zkey hazard, spend chains), the enterprise wallet (view-token
-  session, arbiter-coupled reads, deposit/faucet, relayer withdraw, portal receive, pay-by-name),
-  and the consumer wallet (tokenless self-scan, the P2P 4 ops, registry-name sends).
-- [Relayer](docs/relayer.md): the gas-sponsoring withdraw submitter — why a proof-bound recipient makes
-  third-party submission safe, its API, and the no-silent-fallback client contract.
-- [Portal](docs/portal.md): stealth deposits — how a plain transfer from any wallet becomes a shielded
-  note: CREATE2 destinations, issuance-time announcements, the bot sweep, and the v1 trust concession.
-- [Consumer family](docs/consumer.md): the no-auditor op family — the op-module core (`applyOp` +
-  registry), the five consumer circuits with hybrid receiver ciphertexts and viewTags, self-scan
-  discovery, the public batch path, deploy profiles, and the op-level audit semantics.
-- [Error surfaces](docs/errors.md): the five consequence classes and their surfaces (toast = event,
-  banner = state), the money-state line, and the no-telemetry stance.
-- [Security model](docs/security-model.md): who sees what, the enforced-auditor-disclosure invariant, the
-  zero-commitment guard, and the residual gaps and testnet caveats.
-- [Performance](docs/performance.md): measured gas per operation, the live 256-disburse run, proof times,
-  and where the gas actually goes.
-- [Toolchain](docs/toolchain.md): the exact circom/snarkjs/ptau/forge invocations and paths that build and
-  prove everything.
-- [Zeto derivation](docs/zeto-derivation.md): which Zeto flavor bongtu uses, per-file circuit provenance, the
-  deliberate modifications, and the SMT→IMT soundness debt.
+- [Protocol](docs/protocol.md): notes, commitments, nullifiers, the single-frontier IMT, batch attach, envelope layouts, the disclosure chain.
+- [Circuits](docs/circuits.md): each circuit's exact public surface, the soundness belts, include (`-l`) resolution.
+- [Contracts](docs/contracts.md): `BongtuPool`'s duties — proof binding, nullifier spend, enforced disclosure, events, arbiter epochs, the UUPS proxy and verifier wiring.
+- [Deployment](docs/deployment.md): the live deployment record, chain facts, the one-shot deploy, the UUPS upgrade path, the arbiter-key-at-deploy coupling.
+- [Indexer](docs/indexer.md): the mirror invariant, single-transaction persist and gap-only resume, the HTTP API and its read-auth, the arbiter-mode trust boundary.
+- [Wallet](docs/wallet.md): the two wallets on one engine — the shared core (keys, lock, in-browser proving, spend chains), the enterprise wallet, the consumer wallet.
+- [Relayer](docs/relayer.md): the gas-sponsoring withdraw submitter and why a proof-bound recipient makes third-party submission safe.
+- [Portal](docs/portal.md): stealth deposits — a plain transfer from any wallet becomes a shielded note via CREATE2 destinations and the sweep bot.
+- [Consumer family](docs/consumer.md): the no-auditor op family — op-module core, the five consumer circuits, self-scan discovery, deploy profiles, op-level audit semantics.
+- [Error surfaces](docs/errors.md): the consequence-class taxonomy and its surfaces (toast = event, banner = state), the money-state line, the no-telemetry stance.
+- [Security model](docs/security-model.md): who sees what, the enforced-auditor-disclosure invariant, the zero-commitment guard, residual gaps and testnet caveats.
+- [Performance](docs/performance.md): measured gas per operation, proof times, and where the gas goes.
+- [Toolchain](docs/toolchain.md): the exact circom/snarkjs/ptau/forge invocations and paths.
+- [Zeto derivation](docs/zeto-derivation.md): the Zeto flavor bongtu derives from, per-file provenance, the deliberate modifications, the SMT→IMT soundness debt.
 
 How to run each piece is owned by its own README:
 
-- [Deploy](deploy/README.md): the reusable B=256 stack deploy: env config, local anvil gate, live-chain runbook.
-- [Prover service](prover/README.md): the resident-GPU proving service: wire contract, boot lifecycle, ops
-  invariants (one instance per GPU), env knobs.
-- [Third-party notices](THIRD_PARTY_NOTICES.md): dependency licenses, GPL isolation for build tools, and the
-  wallet's deliberate in-browser snarkjs (GPL) shipment.
-- Folder READMEs: each folder's own layout, run/test commands, and API surface:
+- [Deploy](deploy/README.md): the reusable B=256 stack deploy — env config, local anvil gate, live-chain runbook.
+- [Prover service](prover/README.md): the resident-GPU proving service — wire contract, boot lifecycle, ops invariants (one instance per GPU), env knobs.
+- [Third-party notices](THIRD_PARTY_NOTICES.md): dependency licenses, GPL isolation for build tools, the wallet's deliberate in-browser snarkjs (GPL) shipment.
+- Folder READMEs (layout, run/test commands, API surface):
   [`packages/core`](packages/core/README.md) · [`apps/indexer`](apps/indexer/README.md) ·
   [`circuits`](circuits/README.md) · [`contracts`](chains/evm/README.md) ·
   [`apps/payroll-web`](apps/payroll-web/README.md) · [`apps/treasury-web`](apps/treasury-web/README.md) ·
