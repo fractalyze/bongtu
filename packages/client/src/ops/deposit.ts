@@ -18,15 +18,18 @@
 // passes the contract's ZeroOutputCommitment check.
 //
 // RUN (SPEC §7): the approve+prove+submit orchestration for the public wallet's
-// deposit/shield action. Modeled on runSpendChain (ops/spend/run.ts): instead of DOM
-// status lines it reports a coarse stage ("approve" → "prove" → "submit") through a
-// callback the React Deposit screen renders as a staged progress bar. A deposit is
-// 0-in / 2-out (mint), so there is NO note selection and NO membership fetch — the
-// "approve" stage replaces the spend's "assemble": exact-V ERC-20 approve, SKIPPED
-// when the current allowance already covers V (one approve tx only when needed, then
-// the permissionless deposit tx). The orchestration is gated headlessly
-// (accountBinding.test.ts, opsFacade.test.ts), the wallet edges faked through the
-// RunDepositDeps seam.
+// deposit/shield action. The guard sequence, stage grammar ("approve" → "prove" →
+// "submit" through a callback the React Deposit screen renders as a staged
+// progress bar) and approve-landed reassurance rule live in the ONE deposit guard
+// driver (./driver.ts runGuardedDeposit) — the same sequence consumerRunDeposit
+// runs; this file supplies only the enterprise deltas: the pool's arbiter
+// KEM-epoch guard, the authority-envelope deposit builder, and the pool submit.
+// A deposit is 0-in / 2-out (mint), so there is NO note selection and NO
+// membership fetch — the "approve" stage replaces the spend's "assemble":
+// exact-V ERC-20 approve, SKIPPED when the current allowance already covers V
+// (one approve tx only when needed, then the permissionless deposit tx). The
+// orchestration is gated headlessly (accountBinding.test.ts, opsFacade.test.ts),
+// the wallet edges faked through the RunDepositDeps seam.
 
 // ------------------------- builder: PURE witness assembly -------------------------
 
@@ -103,18 +106,9 @@ export function freshDepositCrypto(rand: RandField, drawKem: KemDrawFn = freshKe
   };
 }
 
-/**
- * Cheap PURE precheck the deposit flow runs right after reading token state: a deposit
- * of `V` raw units cannot succeed if it exceeds the depositor's public kKRW `balance`
- * (the pool pulls exactly V via safeTransferFrom, which would revert). Throwing here —
- * BEFORE the approve tx and the multi-second proof — mirrors selectInputNotes (ops/spend/plan.ts)
- * rejecting an over-spend, and saves a wasted approve + proof on a doomed deposit.
- */
-export function assertDepositAffordable(V: bigint, balance: bigint): void {
-  if (V > balance) {
-    throw new Error(`insufficient kKRW balance: deposit ${V} exceeds balance ${balance}`);
-  }
-}
+// The affordability precheck is part of the ONE deposit guard sequence now
+// (./driver.ts runGuardedDeposit); re-exported so this subpath keeps serving it.
+export { assertDepositAffordable } from "./driver.js";
 
 /**
  * Assemble a deposit ProvingRequest: mint `amount` (V) into the pool as note(V) +
@@ -169,20 +163,16 @@ export function buildDepositRequest(
 // ----------------------- run: approve → prove → submit ---------------------------
 
 import type { Calldata } from "@bongtu/core/proving";
-import {
-  walletErrorMessage,
-  type Connection,
-  type SubmitResult,
-  type TokenState,
-} from "@bongtu/client/rail";
+import type { Connection, SubmitResult, TokenState } from "@bongtu/client/rail";
 import type { KeyCacheLike } from "@bongtu/client/keyCache";
 import { randField } from "./spend/crypto.js";
+import { runGuardedDeposit, type DepositFamily, type DepositStage } from "./driver.js";
 
-/** The coarse stages a deposit passes through. "unlock" is the signature that hands
- *  over the spending key and fires ONLY when the wallet is locked; "approve" is
- *  SKIPPED (no tx) when the pool allowance already covers V; "prove" is the
- *  multi-second in-browser proof. */
-export type DepositStage = "unlock" | "approve" | "prove" | "submit";
+// The stage grammar and the approve-landed money-state wording are the DRIVER's
+// (one guard sequence, one rule); re-exported here so this subpath stays the one
+// stable public surface the apps and suites import them from.
+export { DEPOSIT_FAILURE_REASSURANCE } from "./driver.js";
+export type { DepositStage };
 
 export interface DepositContext {
   connection: Connection;
@@ -238,10 +228,11 @@ export type DepositIo = RunDepositDeps;
 
 /**
  * Approve (if needed) → assemble the deposit witness → prove in-browser → submit the
- * permissionless deposit through the connected wallet. `onStage` fires as each coarse
- * stage begins. The
- * approve stage submits an exact-V approve ONLY when the current pool allowance is below
- * V; otherwise it is a no-op tx-wise (the stage still fires so the UI shows it advancing).
+ * permissionless deposit through the connected wallet — the ONE guard sequence
+ * (./driver.ts runGuardedDeposit), with this family's deltas below. `onStage`
+ * fires as each coarse stage begins. The approve stage submits an exact-V approve
+ * ONLY when the current pool allowance is below V; otherwise it is a no-op
+ * tx-wise (the stage still fires so the UI shows it advancing).
  *
  * Guards run cheapest-first, all of them before the approve tx: the pool's KEM epoch
  * (a view call), the depositor's public kKRW balance (assertDepositAffordable — a
@@ -260,66 +251,33 @@ export async function runDeposit(
   deps: DepositIo,
 ): Promise<DepositOutcome> {
   const io: RunDepositDeps = deps;
-  const amount = args.amount.trim();
-  const V = BigInt(amount);
-  if (V <= 0n) throw new Error(`deposit amount must be positive, got ${V}`);
-
-  // Announce the signature stage up front when the wallet is locked, so the progress
-  // list never has to step backwards into a popup it didn't predict.
-  const locked = !io.keyCache.isUnlocked();
-  onStage(locked ? "unlock" : "approve");
-  // A silently-restored session may still sit on another chain — align it before
-  // the token reads and every tx below (silent when the chain is already selected).
-  await io.ensureChain(ctx.connection);
-  // Verify the pool's arbiter KEM key hash FIRST: a pre-KEM or foreign-keyed pool
-  // can never accept this build's proof, so nothing below — not the approve tx, not
-  // the signature popup, not the multi-second proof — is worth spending on it.
-  await io.assertPoolKemEpoch(ctx.connection, ctx.pool);
-  const { balance, allowance } = await io.readTokenState(
-    ctx.connection,
-    ctx.token,
-    ctx.connection.address,
-    ctx.pool,
-  );
-  // Fail BEFORE the approve tx + proof if the public balance can't cover V (the pool's
-  // safeTransferFrom would revert on-chain anyway).
-  assertDepositAffordable(V, balance);
-  // The spending key comes from the in-memory lock: one signature the first time,
-  // reused after that (keyCache.ts). It resolves BEFORE the approve tx so that a
-  // mid-session account switch costs the user nothing — minting into a stranger's
-  // key must never be preceded by an approve the user paid gas for.
-  const identity = await io.keyCache.unlock(ctx.connection, ctx.sessionPubkey);
-  if (locked) onStage("approve");
-  const approved = allowance < V;
-  if (approved) {
-    await io.approveToken(ctx.connection, ctx.token, ctx.pool, V);
-  }
-
-  try {
-    onStage("prove");
-    const crypto = freshDepositCrypto(randField);
-    const built = buildDepositRequest(identity, amount, crypto);
-    const calldata = await io.prove(built.request);
-
-    onStage("submit");
-    // The tx carries the SAME encapsulation the proof's kemBinding committed to
-    // (crypto.kemCiphertext) — a different ct would decapsulate to mismatching
-    // limbs at the arbiter and burn the envelope into an alarm.
-    const res = await io.submitDeposit(ctx.connection, ctx.pool, calldata, crypto.kemCiphertext, ctx.explorer);
-    return { txHash: res.txHash, explorerUrl: res.explorerUrl, amount, approved };
-  } catch (e) {
-    // The CHAIN_FAILURE_REASSURANCE pattern generalized (error-surface standard):
-    // once the approve tx has landed, a later failure must say where the money
-    // stands — an approval went through but nothing moved, and it is reused on
-    // retry. A failure with no approve landed stays a plain single-transaction
-    // failure (the reassurance would only confuse — nothing partial can exist).
-    if (!approved) throw e;
-    throw new Error(`${walletErrorMessage(e)} ${DEPOSIT_FAILURE_REASSURANCE}`);
-  }
+  const family: DepositFamily<WalletIdentity> = {
+    connection: ctx.connection,
+    sessionPubkey: ctx.sessionPubkey,
+    keyCache: io.keyCache,
+    ensureChain: () => io.ensureChain(ctx.connection),
+    // Verify the pool's arbiter KEM key hash FIRST among the network guards: a
+    // pre-KEM or foreign-keyed pool can never accept this build's proof, so
+    // nothing below — not the approve tx, not the signature popup, not the
+    // multi-second proof — is worth spending on it.
+    guardPool: () => io.assertPoolKemEpoch(ctx.connection, ctx.pool),
+    refineIdentity: (identity) => identity,
+    readTokenState: () =>
+      io.readTokenState(ctx.connection, ctx.token, ctx.connection.address, ctx.pool),
+    approveToken: (V) => io.approveToken(ctx.connection, ctx.token, ctx.pool, V),
+    buildDeposit: (identity, amount) => {
+      const crypto = freshDepositCrypto(randField);
+      const built = buildDepositRequest(identity, amount, crypto);
+      return {
+        request: built.request,
+        // The tx carries the SAME encapsulation the proof's kemBinding committed
+        // to (crypto.kemCiphertext) — a different ct would decapsulate to
+        // mismatching limbs at the arbiter and burn the envelope into an alarm.
+        submit: (calldata) =>
+          io.submitDeposit(ctx.connection, ctx.pool, calldata, crypto.kemCiphertext, ctx.explorer),
+      };
+    },
+    prove: io.prove,
+  };
+  return runGuardedDeposit(args.amount, family, onStage);
 }
-
-/** What a deposit says when it fails AFTER its approve tx landed. Same money-state
- *  rule as the spend run's CHAIN_FAILURE_REASSURANCE (ops/spend/run.ts): name what stands (the approval)
- *  and what didn't move (every token). */
-export const DEPOSIT_FAILURE_REASSURANCE =
-  "No kKRW left your account. The approval stays in place and is reused when you retry.";

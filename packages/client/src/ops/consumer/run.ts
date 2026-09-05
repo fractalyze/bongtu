@@ -1,46 +1,38 @@
 // The consumer-family FLOW variants: consumerRunDeposit + consumerRunSpendChain,
 // the prove+submit orchestrations the consumer wallet app wires exactly like the
 // enterprise pair (ops/deposit.ts runDeposit / ops/spend/run.ts runSpendChain) —
-// same stage grammar, same ctx/deps seam shape, same failure-reassurance rule.
+// same stage grammar, same ctx/deps seam shape, same failure-reassurance rule,
+// because all four now RUN the same drivers (ops/driver.ts runLegChain /
+// runGuardedDeposit). What used to be a prose list of "the deltas, exactly" is
+// now literally this file's family configs; the deltas themselves are unchanged:
 //
-// ONE file for both flows, where the enterprise pair is two: the enterprise
-// flows share nothing (a deposit has no membership machinery), so each owns a
-// file; the consumer variants are each a SHORT list of deltas from their twin,
-// and the deltas are family-wide — keeping both beside the one list below is
-// what stops them drifting apart. The deltas, exactly:
-//
-//   - NO assertPoolKemEpoch — there is no arbiter KEM epoch to guard: consumer
+//   - NO guardPool — there is no arbiter KEM epoch to guard: consumer
 //     outputs seal to each RECIPIENT's registered triple (requests.ts),
 //     not to a chain-vouched authority key, so the guard has no subject.
 //   - membership is the AUTH-FREE path read (getPath / GET /path) — consumer
 //     batches serve /path openly (OPMOD §4.4 public batch fill), so no read
 //     needs the signed variant; the fake-IO suite pins that no signed fetch
 //     ever fires.
-//   - builders come from requests.ts (S2): per-output sealing, no
-//     authority envelope, kem cts surfaced in meta as `bytes[]` calldata.
-//   - submits go to the MODULE addresses via submit.ts; token approve
-//     still targets the POOL (the escrow holder — docs/consumer.md).
+//   - builders come from requests.ts: per-output sealing, no authority
+//     envelope, kem cts surfaced in meta as `bytes[]` calldata.
+//   - submits go to the MODULE addresses via the client-evm consumer submit
+//     edge (@bongtu/client-evm/consumer); token approve still targets the
+//     POOL (the escrow holder — docs/consumer.md).
 //   - refresh-between-legs is a SELF-SCAN pass: consumer notes have no /notes
 //     oracle, so ctx.reloadNotes is typed against the selfscan surface
 //     (ScanNote) and the app supplies a runSelfScan-backed closure — the
-//     indexer never appears here directly.
+//     indexer never appears here directly. (The driver reads only the
+//     commitment/spent/leafIndex fields ScanNote and OwnerNote share.)
 //   - merge legs are transfer10x2Priv-to-self: chain planning is the SAME pure
 //     planSpendChain (arity-driven, family-blind), each picked circuit mapped
 //     through consumerCircuitOf.
 
-import { commitment } from "@bongtu/core/note";
 import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
-import {
-  walletErrorMessage,
-  type Connection,
-  type SubmitResult,
-  type TokenState,
-} from "@bongtu/client/rail";
+import type { Connection, SubmitResult, TokenState } from "@bongtu/client/rail";
 import type { KeyCacheLike } from "@bongtu/client/keyCache";
 import { getHead, getPath } from "@bongtu/core/indexerApi";
-import { pollUntil, type PollForActionOptions } from "@bongtu/client/refresh";
+import type { PollForActionOptions } from "@bongtu/client/refresh";
 import {
-  pendingLegOf,
   planSpendChain,
   randField,
   type MembershipWitness,
@@ -64,17 +56,17 @@ import {
   type ConsumerSpendCircuit,
   type ConsumerSpendMeta,
 } from "./plan.js";
-import { assertDepositAffordable } from "@bongtu/client/deposit";
 import { isConsumerIdentity, type ScanNote } from "@bongtu/client/selfscan";
 import type { ConsumerWalletIdentity } from "@bongtu/client/derive";
-import { DEPOSIT_FAILURE_REASSURANCE, type DepositStage } from "@bongtu/client/deposit";
+import type { DepositStage } from "@bongtu/client/deposit";
+import type { OnSpendStage, SpendOutcome } from "@bongtu/client/spend";
 import {
-  CHAIN_FAILURE_REASSURANCE,
-  MERGE_NOT_INDEXED_MESSAGE,
-  type LegProgress,
-  type OnSpendStage,
-  type SpendOutcome,
-} from "@bongtu/client/spend";
+  runGuardedDeposit,
+  runLegChain,
+  type BuiltLeg,
+  type DepositFamily,
+  type LegChainFamily,
+} from "../driver.js";
 
 /** The unlock produces a full identity for every signature-derived key; only a
  *  synthetic enterprise-only identity (e.g. the sweeper's portal identity)
@@ -141,10 +133,12 @@ export type ConsumerDepositIo = RunConsumerDepositDeps;
 
 /**
  * Approve (if needed) → assemble the depositPriv witness → prove → submit to
- * the deposit module. Stage grammar and guard order are runDeposit's
- * (unlock → approve → prove → submit; affordability checked before the approve
- * tx; the unlock's session-account check before any token motion). The one
- * consumer-only knob: `args.recipient` mints note(V) to a THIRD PARTY's
+ * the deposit module — the ONE guard sequence (ops/driver.ts runGuardedDeposit)
+ * runDeposit also runs, with this family's deltas: no pool guard, the recipient
+ * triple probed BEFORE any token motion (a doomed deposit must not waste an
+ * approve tx — sealing would only catch a corrupt triple at the prove stage,
+ * after the approve landed), and the depositPriv builder + module submit. The
+ * one consumer-only knob: `args.recipient` mints note(V) to a THIRD PARTY's
  * registered triple (the consumer deposit's whole point — they discover it by
  * self-scan); omitted, the wallet mints to itself, the note(0) companion always
  * seals back to self.
@@ -156,61 +150,40 @@ export async function consumerRunDeposit(
   deps: ConsumerDepositIo,
 ): Promise<ConsumerDepositOutcome> {
   const io: RunConsumerDepositDeps = deps;
-  const amount = args.amount.trim();
-  const V = BigInt(amount);
-  if (V <= 0n) throw new Error(`deposit amount must be positive, got ${V}`);
-  // Probe the triple BEFORE any token motion: a doomed deposit must not waste
-  // an approve tx (ops/deposit.ts family rule) — sealing would only catch a
-  // corrupt triple at the prove stage, after the approve landed.
-  if (args.recipient) assertConsumerRecipient(args.recipient);
-
-  const locked = !io.keyCache.isUnlocked();
-  onStage(locked ? "unlock" : "approve");
-  await io.ensureChain(ctx.connection);
-  const { balance, allowance } = await io.readTokenState(
-    ctx.connection,
-    ctx.token,
-    ctx.connection.address,
-    ctx.pool,
-  );
-  assertDepositAffordable(V, balance);
-  const identity = asConsumerIdentity(await io.keyCache.unlock(ctx.connection, ctx.sessionPubkey));
-  if (locked) onStage("approve");
-  const approved = allowance < V;
-  if (approved) {
+  const family: DepositFamily<ConsumerWalletIdentity> = {
+    connection: ctx.connection,
+    sessionPubkey: ctx.sessionPubkey,
+    keyCache: io.keyCache,
+    ensureChain: () => io.ensureChain(ctx.connection),
+    precheck: () => {
+      if (args.recipient) assertConsumerRecipient(args.recipient);
+    },
+    refineIdentity: asConsumerIdentity,
     // The approve targets the POOL — the escrow that pulls V on a module's
     // accepted proof; approving the module would fund nothing (modules hold no
     // funds, docs/consumer.md).
-    await io.approveToken(ctx.connection, ctx.token, ctx.pool, V);
-  }
-
-  try {
-    onStage("prove");
-    const crypto = freshConsumerDepositCrypto(randField);
-    const self = selfConsumerRecipient(identity);
-    const built = buildConsumerDepositRequest(
-      [
-        { recipient: args.recipient ?? self, value: amount },
-        { recipient: self, value: "0" },
-      ],
-      crypto,
-    );
-    const calldata = await io.prove(built.request);
-
-    onStage("submit");
-    const res = await io.submitDepositPriv(
-      ctx.connection,
-      calldata,
-      built.meta.kemCiphertexts,
-      ctx.explorer,
-    );
-    return { txHash: res.txHash, explorerUrl: res.explorerUrl, amount, approved };
-  } catch (e) {
-    // runDeposit's money-state rule verbatim (ops/deposit.ts): once the approve landed, a later
-    // failure must say where the money stands.
-    if (!approved) throw e;
-    throw new Error(`${walletErrorMessage(e)} ${DEPOSIT_FAILURE_REASSURANCE}`);
-  }
+    readTokenState: () =>
+      io.readTokenState(ctx.connection, ctx.token, ctx.connection.address, ctx.pool),
+    approveToken: (V) => io.approveToken(ctx.connection, ctx.token, ctx.pool, V),
+    buildDeposit: (identity, amount) => {
+      const crypto = freshConsumerDepositCrypto(randField);
+      const self = selfConsumerRecipient(identity);
+      const built = buildConsumerDepositRequest(
+        [
+          { recipient: args.recipient ?? self, value: amount },
+          { recipient: self, value: "0" },
+        ],
+        crypto,
+      );
+      return {
+        request: built.request,
+        submit: (calldata) =>
+          io.submitDepositPriv(ctx.connection, calldata, built.meta.kemCiphertexts, ctx.explorer),
+      };
+    },
+    prove: io.prove,
+  };
+  return runGuardedDeposit(args.amount, family, onStage);
 }
 
 // =========================== consumerRunSpendChain ===========================
@@ -279,43 +252,9 @@ const SPEND_DEFAULT_DEPS: Pick<RunConsumerSpendDeps, "getHead" | "getPath" | "po
   poll: {},
 };
 
-// Fresh per leg, because each leg moves the root — ops/spend/run.ts fetchMemberships
-// with the signed read swapped for the open one (no owner key leaves the leg).
-async function fetchMemberships(
-  io: RunConsumerSpendDeps,
-  indexerUrl: string,
-  inputs: WalletInputNote[],
-): Promise<MembershipWitness[]> {
-  const head = await io.getHead(indexerUrl);
-  const memberships: MembershipWitness[] = [];
-  for (const n of inputs) {
-    const p = await io.getPath(indexerUrl, n.leafIndex);
-    memberships.push({ root: head.root, pathElements: p.siblings, leafIndex: n.leafIndex });
-  }
-  return memberships;
-}
-
-/** ops/spend/run.ts openSpendSession minus the KEM-epoch guard: align the chain,
- *  then take the spending key from the lock (session-account-checked per LEG,
- *  so a mid-chain account switch blocks the remaining transactions). */
-async function openConsumerSession(
-  io: RunConsumerSpendDeps,
-  ctx: ConsumerSpendContext,
-  onStage: OnSpendStage,
-  leg: LegProgress,
-): Promise<ConsumerWalletIdentity> {
-  const locked = !io.keyCache.isUnlocked();
-  onStage(locked ? "unlock" : "assemble", leg);
-  await io.ensureChain(ctx.connection);
-  const identity = asConsumerIdentity(await io.keyCache.unlock(ctx.connection, ctx.sessionPubkey));
-  if (locked) onStage("assemble", leg);
-  return identity;
-}
-
 /** One planned leg resolved into what its builder takes. A merge is a
  *  transfer10x2Priv paying the wallet's OWN triple the whole fold; a terminal
- *  leg carries the user's ask. Inputs the plan left pending are the notes
- *  earlier merges have since created (same pendingLegOf protocol as the spend run). */
+ *  leg carries the user's ask. */
 interface ConsumerAction {
   circuit: ConsumerSpendCircuit;
   inputs: WalletInputNote[];
@@ -327,17 +266,10 @@ interface ConsumerAction {
 
 function consumerLegAction(
   step: SpendLeg,
+  inputs: WalletInputNote[],
   identity: ConsumerWalletIdentity,
   args: { to?: ConsumerRecipient; amount: string },
-  merged: (WalletInputNote | undefined)[],
 ): ConsumerAction {
-  const inputs = step.inputs.map((n) => {
-    const from = pendingLegOf(n.leafIndex);
-    if (from === null) return n;
-    const real = merged[from];
-    if (!real) throw new Error(`merge leg ${from + 1} has not produced its note yet`);
-    return real;
-  });
   const self = selfConsumerRecipient(identity);
   if (step.leg === "merge") {
     return { circuit: "transfer10x2Priv", inputs, to: self, amount: step.mergedValue };
@@ -367,73 +299,63 @@ function buildConsumerLeg(
   return buildConsumerTransferRequest(identity, inputs, memberships, to, amount, crypto);
 }
 
-/** One transaction: auth-free membership → witness → proof → module submit. The
- *  payee salt comes back with it — a merge leg's output note is identified by
- *  the salt this run drew (spendFlow's rule unchanged). */
-async function runConsumerLeg(
+/** The consumer deltas, as the driver's family config: no pool guard, the
+ *  view/KEM-refined identity, the OPEN membership read, the requests.ts builders
+ *  per picked circuit, the module submits carrying the per-output kem cts, and
+ *  the self-scan reload. */
+function consumerFamily(
   io: RunConsumerSpendDeps,
   ctx: ConsumerSpendContext,
-  identity: ConsumerWalletIdentity,
-  action: ConsumerAction,
-  onStage: OnSpendStage,
-  leg: LegProgress,
-  withdrawRecipient: string,
-): Promise<{ outcome: SpendOutcome; payeeSalt: string }> {
-  const memberships = await fetchMemberships(io, ctx.indexerUrl, action.inputs);
-  const crypto = freshConsumerSpendCrypto(randField);
-  const built = buildConsumerLeg(action, identity, memberships, crypto, withdrawRecipient);
-  if (!built.meta.membershipOk) {
-    throw new Error("Your balance just changed. Go back and try again.");
-  }
-
-  onStage("prove", leg);
-  const calldata = await io.prove(built.request);
-
-  onStage("submit", leg);
-  // The tx carries the per-output kem cts the builder sealed — one 1088-byte
-  // entry per output, in output order; a substituted ct simply never
-  // decapsulates for its recipient (self-sabotage class, never theft: the
-  // commitment binds the SPEND key in-proof).
-  const res =
-    action.circuit === "withdrawPriv"
-      ? await io.submitWithdrawPriv(ctx.connection, calldata, built.meta.kemCiphertexts, ctx.explorer)
-      : action.circuit === "transfer10x2Priv"
-        ? await io.submitTransfer10x2Priv(ctx.connection, calldata, built.meta.kemCiphertexts, ctx.explorer)
-        : await io.submitTransferPriv(ctx.connection, calldata, built.meta.kemCiphertexts, ctx.explorer);
+  args: { to?: ConsumerRecipient; amount: string; withdrawTo?: string },
+): LegChainFamily<ConsumerWalletIdentity, ScanNote> {
+  // A withdraw pays the connected account unless withdrawTo substitutes another
+  // L1 address — either way proof-bound.
+  const withdrawRecipient = args.withdrawTo ?? ctx.connection.address;
   return {
-    outcome: { txHash: res.txHash, explorerUrl: res.explorerUrl },
-    payeeSalt: crypto.payeeSalt ?? "",
+    connection: ctx.connection,
+    sessionPubkey: ctx.sessionPubkey,
+    keyCache: io.keyCache,
+    ensureChain: () => io.ensureChain(ctx.connection),
+    // no guardPool: there is no arbiter KEM epoch in this family (delta list).
+    refineIdentity: asConsumerIdentity,
+    getHead: () => io.getHead(ctx.indexerUrl),
+    readPath: (_identity, leafIndex) => io.getPath(ctx.indexerUrl, leafIndex),
+    buildLeg: (step, inputs, identity, memberships): BuiltLeg => {
+      const action = consumerLegAction(step, inputs, identity, args);
+      const crypto = freshConsumerSpendCrypto(randField);
+      const built = buildConsumerLeg(action, identity, memberships, crypto, withdrawRecipient);
+      // The tx carries the per-output kem cts the builder sealed — one
+      // 1088-byte entry per output, in output order; a substituted ct simply
+      // never decapsulates for its recipient (self-sabotage class, never theft:
+      // the commitment binds the SPEND key in-proof).
+      const submitFor =
+        action.circuit === "withdrawPriv"
+          ? io.submitWithdrawPriv
+          : action.circuit === "transfer10x2Priv"
+            ? io.submitTransfer10x2Priv
+            : io.submitTransferPriv;
+      return {
+        request: built.request,
+        membershipOk: built.meta.membershipOk,
+        payeeSalt: crypto.payeeSalt ?? "",
+        submit: (calldata) =>
+          submitFor(ctx.connection, calldata, built.meta.kemCiphertexts, ctx.explorer),
+      };
+    },
+    prove: io.prove,
+    reloadNotes: ctx.reloadNotes,
+    poll: io.poll,
   };
 }
 
-/** Wait for a self-scan pass to discover the note a merge leg created — its
- *  leafIndex is what the next leg proves membership against. The identity
- *  (mergedValue, payeeSalt, own spend key) → commitment rule is spendFlow's
- *  awaitMergedNote unchanged; only the note SOURCE differs (a scan of the
- *  public feed instead of the arbiter's /notes). */
-async function awaitMergedNote(
-  io: RunConsumerSpendDeps,
-  ctx: ConsumerSpendContext,
-  identity: ConsumerWalletIdentity,
-  mergedValue: string,
-  payeeSalt: string,
-): Promise<WalletInputNote> {
-  const wanted = commitment(BigInt(mergedValue), BigInt(payeeSalt), identity.keypair.publicKey).toString();
-  const seen = (notes: ScanNote[]): ScanNote | undefined =>
-    notes.find((n) => n.commitment === wanted && !n.spent);
-  const { last } = await pollUntil(ctx.reloadNotes, (ns) => seen(ns) !== undefined, io.poll);
-  const note = last ? seen(last) : undefined;
-  if (!note) throw new Error(MERGE_NOT_INDEXED_MESSAGE);
-  return { value: mergedValue, salt: payeeSalt, leafIndex: note.leafIndex };
-}
-
 /**
- * Plan the consumer spend as a chain and run it: per leg, auth-free membership →
- * requests.ts witness build → proof → module submit; after a merge leg, the
- * "waiting" pause until a self-scan pass has found the note it created. Stage
- * grammar (unlock → assemble → prove → submit → waiting), leg numbering, and
- * the partial-failure reassurance are runSpendChain's, so the app renders both
- * families through one progress rail.
+ * Plan the consumer spend as a chain and run it through the one driver
+ * (ops/driver.ts runLegChain): per leg, auth-free membership → requests.ts
+ * witness build → proof → module submit; after a merge leg, the "waiting" pause
+ * until a self-scan pass has found the note it created. Stage grammar
+ * (unlock → assemble → prove → submit → waiting), leg numbering, and the
+ * partial-failure reassurance are the driver's — the same run runSpendChain
+ * gets — so the app renders both families through one progress rail.
  *
  * `args.to` is the payee's registered consumer triple (consumerRecipientOf) —
  * required for a transfer, ignored by a withdraw, never consumed by a merge
@@ -455,29 +377,6 @@ export async function consumerRunSpendChain(
   // SAME planner as the enterprise chain (selection is arity-driven and
   // family-blind); only the circuit each leg lands on maps to the consumer twin.
   const plan = planSpendChain(kind, ctx.notes, args.amount);
-  const count = plan.length;
-  const merged: (WalletInputNote | undefined)[] = [];
-  const outcomes: SpendOutcome[] = [];
-  const withdrawRecipient = args.withdrawTo ?? ctx.connection.address;
-
-  for (const index of Array(count).keys()) {
-    const leg: LegProgress = { index, count };
-    const step = plan[index];
-    try {
-      const identity = await openConsumerSession(io, ctx, onStage, leg);
-      const action = consumerLegAction(step, identity, args, merged);
-      const run = await runConsumerLeg(io, ctx, identity, action, onStage, leg, withdrawRecipient);
-      outcomes.push(run.outcome);
-      if (step.leg === "merge") {
-        onStage("waiting", leg);
-        merged[index] = await awaitMergedNote(io, ctx, identity, step.mergedValue, run.payeeSalt);
-      }
-    } catch (e) {
-      // spendFlow's rule: a one-transaction spend fails exactly as it always
-      // did; only a chain that already landed legs earns the reassurance.
-      if (count === 1) throw e;
-      throw new Error(`${walletErrorMessage(e)} ${CHAIN_FAILURE_REASSURANCE}`);
-    }
-  }
+  const { outcomes } = await runLegChain(plan, plan.length, consumerFamily(io, ctx, args), onStage);
   return outcomes[outcomes.length - 1] as SpendOutcome;
 }
