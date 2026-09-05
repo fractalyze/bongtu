@@ -9,6 +9,10 @@ not re-derive what those files own.
 
 ## Rules an agent cannot see from code + README
 
+- **Intent chain**: feature-scale work (anything that would get its own PR + issue) runs
+  through the intent workflow — stages, PR gates, and the `/intent` … `/maintain` commands
+  are defined in `.dev/intents/README.md`; the sub-agents live in `.claude/agents/`, the
+  stage skills in `.claude/skills/`. Bugfixes and chores keep the normal loop.
 - **PATH**: `forge`/`anvil`/`node` are not on the default PATH. Prefix gate runs with
   `export PATH=$HOME/.foundry/bin:$HOME/.nvm/versions/node/v22.17.1/bin:$PATH`.
 - **External node_modules**: `snarkjs`/`circomlibjs` load via `createRequire` from
