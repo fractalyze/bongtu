@@ -33,21 +33,16 @@ import { NameRegistry } from "../names.js";
 import { isStealthAnnouncement } from "@bongtu/core/stealth";
 import type { ChainConfig } from "../chain.js";
 import type { FeedEntry, Slice } from "../store.js";
+import { ARBITER_EPOCH_GENESIS, EVENT_DISCRIMINATOR, TREE_HEIGHT } from "@bongtu/core/solana";
 import {
   decodeEvent,
   decodeOp,
   programInstructionsOf,
-  ARBITER_EPOCH_GENESIS,
-  EVENT_DISCRIMINATOR,
   type SolanaEventAnchor,
   type SolanaLedgerTx,
   type SolanaOpIx,
   type StealthTail,
 } from "./wire.js";
-
-// IMT height, shared protocol-wide (SOLR §4.1) — the Solana TreeState is the
-// same 32-level frontier as the EVM pool.
-const TREE_HEIGHT = 32;
 
 /**
  * The rail-specific fetch layer under the pure apply — a live JSON-RPC

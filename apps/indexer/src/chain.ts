@@ -10,6 +10,7 @@ import { parseAbi, type Abi, type AbiEvent } from "viem";
 
 import { KEM_SECRET_KEY_BYTES } from "@bongtu/core/kem";
 import { CHAIN_ID } from "@bongtu/core/network";
+import { PROGRAM_ID_BASE58 } from "@bongtu/core/solana";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = join(HERE, "..", "..", ".."); // apps/indexer/src -> repo root
@@ -218,7 +219,7 @@ export function resolveConfig(): ChainConfig {
   const solana = process.env.SOLANA_RPC
     ? {
         rpc: process.env.SOLANA_RPC,
-        programId: process.env.SOLANA_PROGRAM || "HGVVfVfRnHauJoQwUttgUoy6ucG47LAXj8e6YBbZkoCj",
+        programId: process.env.SOLANA_PROGRAM || PROGRAM_ID_BASE58,
         treeAccount: process.env.SOLANA_TREE || (() => { throw new Error("SOLANA_RPC is set but SOLANA_TREE (the TreeState account) is not"); })(),
       }
     : null;

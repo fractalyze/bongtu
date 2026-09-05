@@ -1,16 +1,35 @@
 // Solana ledger wire decode (SOLR §3.2) — the pure translation layer under the
 // Solana ingest backend. On this rail the discovery material rides in op
 // INSTRUCTION DATA (the calldata analogue) and the per-op anchors ride
-// SELF-CPI EVENTS (the log analogue, landing in a tx's inner instructions), so
-// the decoders here are byte-for-byte mirrors of chains/solana/program/src
-// (each op module's wire doc comment + event.rs). Layout constants are spelled
-// per op instead of parsed from an IDL: the program is framework-free by
-// design and the fixed offsets ARE its wire contract, gate-4-pinned.
+// SELF-CPI EVENTS (the log analogue, landing in a tx's inner instructions).
+// The event decoders are byte-for-byte mirrors of event.rs; the OP layouts
+// (discriminators, carried-publics composition, named field positions) come
+// from the ONE layout table — @bongtu/core/solanaOps, the same table the
+// vector generators consume, itself pinned against the Rust op modules and
+// the committed conformance fixtures by packages/core/test/solana.test.ts —
+// so no per-op index literal lives here.
 //
 // Everything is a pure function of bytes — the ingest backend (ingest.ts
 // sibling) stays an I/O shell over these, which is what lets the conformance
 // suite drive the whole backend from recorded ledger fixtures with no
 // validator in the loop (SOLR §5.3).
+
+import {
+  ARBITER_EPOCH_GENESIS,
+  EVENT_DISCRIMINATOR,
+  KEM_CT_LEN,
+  PROOF_LEN,
+} from "@bongtu/core/solana";
+import {
+  SOLANA_OPS,
+  familyTagOf,
+  wireLenOf,
+  type SolanaOpLayout,
+} from "@bongtu/core/solanaOps";
+
+// Rail fact re-exported for existing importers (the conformance leg): the
+// one home is @bongtu/core/solana.
+export { EVENT_DISCRIMINATOR };
 
 /** One instruction as the ledger records it (top-level or inner). Pubkeys and
  *  data are 0x-hex — the recorded fixtures emit hex directly and the live RPC
@@ -39,14 +58,6 @@ export interface SolanaLedgerTx {
   inner: SolanaInstructionRecord[][];
 }
 
-export const EVENT_DISCRIMINATOR = 0xf0;
-
-/** The program's default id (chains/solana/program declare_id!), as 0x-hex. */
-export const DEFAULT_PROGRAM_ID_BASE58 = "HGVVfVfRnHauJoQwUttgUoy6ucG47LAXj8e6YBbZkoCj";
-
-const PROOF_LEN = 256;
-const KEM_CT_LEN = 1088;
-
 export function bytesOfHex(hex: string): Uint8Array {
   const h = hex.startsWith("0x") ? hex.slice(2) : hex;
   const out = new Uint8Array(h.length / 2);
@@ -68,16 +79,9 @@ const le64 = (bytes: Uint8Array, off: number): number => {
 
 // --- self-CPI event decode (event.rs payload builders, byte-for-byte) -------
 
-/** Family tags (event.rs: instruction discriminator - 1). */
-export const FAMILY_DISBURSE256 = 7;
-
-/** Arbiter epoch on this rail, pinned at genesis (the Rust program's
- *  `state.rs ARBITER_EPOCH_GENESIS`; dated deviation in SOLR §3.3.1):
- *  `rotateArbiter` is not yet a Solana instruction, and the per-op event
- *  payload carries no epoch field, so ledger data cannot describe any other
- *  epoch. The ingest pins enterprise transfer feed entries to this value and
- *  trips loudly on the first disburse event that disproves the pin. */
-export const ARBITER_EPOCH_GENESIS = 0;
+/** Family tag of the disburse anchor shape (event.rs: discriminator - 1,
+ *  derived from the layout table, never retyped). */
+export const FAMILY_DISBURSE256 = familyTagOf(SOLANA_OPS.disburse256);
 
 /** The per-op anchor event (op_event_payload). */
 export interface OpEventAnchor {
@@ -149,29 +153,44 @@ interface OpBase {
 }
 
 export type SolanaOpIx =
-  | (OpBase & { kind: "depositPriv"; family: 1; cts: bigint[]; viewTags: bigint[]; outputCommitments: [bigint, bigint]; kemCiphertexts: string[] })
-  | (OpBase & { kind: "transferPriv"; family: 2; cts: bigint[]; viewTags: bigint[]; nullifiers: bigint[]; outputCommitments: [bigint, bigint]; kemCiphertexts: string[] })
-  | (OpBase & { kind: "transfer10x2Priv"; family: 3; cts: bigint[]; viewTags: bigint[]; nullifiers: bigint[]; outputCommitments: [bigint, bigint]; kemCiphertexts: string[] })
-  | (OpBase & { kind: "withdrawPriv"; family: 4; cts: bigint[]; viewTags: bigint[]; nullifiers: bigint[]; changeCommitment: bigint; kemCiphertexts: string[]; stealth: StealthTail; recipientTokenAccount: string | null })
-  | (OpBase & { kind: "deposit"; family: 5; outputCommitments: [bigint, bigint] })
-  | (OpBase & { kind: "withdraw"; family: 6; nullifiers: bigint[]; changeCommitment: bigint; stealth: StealthTail; recipientTokenAccount: string | null })
-  | (OpBase & { kind: "disburse"; family: 7; disclosureHash: bigint; subtreeRoot: bigint; kemBinding: bigint; nullifier: bigint })
-  | (OpBase & { kind: "transfer"; family: 8; receiverCts: bigint[]; authorityCt: bigint[]; nullifiers: bigint[]; outputCommitments: [bigint, bigint] })
-  | (OpBase & { kind: "transfer10x2"; family: 9; receiverCts: bigint[]; authorityCt: bigint[]; nullifiers: bigint[]; outputCommitments: [bigint, bigint] });
+  | (OpBase & { kind: "depositPriv"; family: number; cts: bigint[]; viewTags: bigint[]; outputCommitments: [bigint, bigint]; kemCiphertexts: string[] })
+  | (OpBase & { kind: "transferPriv"; family: number; cts: bigint[]; viewTags: bigint[]; nullifiers: bigint[]; outputCommitments: [bigint, bigint]; kemCiphertexts: string[] })
+  | (OpBase & { kind: "transfer10x2Priv"; family: number; cts: bigint[]; viewTags: bigint[]; nullifiers: bigint[]; outputCommitments: [bigint, bigint]; kemCiphertexts: string[] })
+  | (OpBase & { kind: "withdrawPriv"; family: number; cts: bigint[]; viewTags: bigint[]; nullifiers: bigint[]; changeCommitment: bigint; kemCiphertexts: string[]; stealth: StealthTail; recipientTokenAccount: string | null })
+  | (OpBase & { kind: "deposit"; family: number; outputCommitments: [bigint, bigint] })
+  | (OpBase & { kind: "withdraw"; family: number; nullifiers: bigint[]; changeCommitment: bigint; stealth: StealthTail; recipientTokenAccount: string | null })
+  | (OpBase & { kind: "disburse"; family: number; disclosureHash: bigint; subtreeRoot: bigint; kemBinding: bigint; nullifier: bigint })
+  | (OpBase & { kind: "transfer"; family: number; receiverCts: bigint[]; authorityCt: bigint[]; nullifiers: bigint[]; outputCommitments: [bigint, bigint] })
+  | (OpBase & { kind: "transfer10x2"; family: number; receiverCts: bigint[]; authorityCt: bigint[]; nullifiers: bigint[]; outputCommitments: [bigint, bigint] });
 
-const carriedOf = (d: Uint8Array, n: number): bigint[] => {
-  return Array.from({ length: n }, (_, i) => be32(d, 1 + PROOF_LEN + 32 * i));
+/** FULL-publics-index reader over the carried run of `d` for layout `l`:
+ *  wire position maps through the table's carried composition, so every
+ *  field access below names FULL indices (the table's field map), never a
+ *  local wire-position literal. Asking for an injected (non-carried) index
+ *  is a decoder bug and throws. */
+const fullReader = (d: Uint8Array, l: SolanaOpLayout): ((fullIndex: number) => bigint) => {
+  const byFull = new Map<number, bigint>();
+  for (const [w, fi] of l.carried.entries()) byFull.set(fi, be32(d, 1 + PROOF_LEN + 32 * w));
+  return (i: number): bigint => {
+    const v = byFull.get(i);
+    if (v === undefined) throw new Error(`decodeOp: public ${i} is injected, not carried`);
+    return v;
+  };
 };
 
-const kemsOf = (d: Uint8Array, carried: number, count: number): string[] => {
-  const base = 1 + PROOF_LEN + 32 * carried;
-  return Array.from({ length: count }, (_, i) => hexOfBytes(d.subarray(base + i * KEM_CT_LEN, base + (i + 1) * KEM_CT_LEN)));
+const kemsOf = (d: Uint8Array, l: SolanaOpLayout): string[] => {
+  const base = 1 + PROOF_LEN + 32 * l.carried.length;
+  return Array.from({ length: l.kemCtCount }, (_, i) => hexOfBytes(d.subarray(base + i * KEM_CT_LEN, base + (i + 1) * KEM_CT_LEN)));
 };
 
-const stealthOf = (d: Uint8Array): StealthTail => {
-  const off = d.length - 33;
+const stealthOf = (d: Uint8Array, l: SolanaOpLayout): StealthTail => {
+  // The tail length is a table-owned fact (pinned to Rust STEALTH_TAIL_LEN):
+  // 32-byte ephemeral pub + 1-byte view tag.
+  const off = d.length - l.stealthTailLen;
   return { ephemeralPub: hexOfBytes(d.subarray(off, off + 32)), viewTag: d[off + 32] };
 };
+
+const pair = (f: (i: number) => bigint, idx: readonly number[]): [bigint, bigint] => [f(idx[0]), f(idx[1])];
 
 const expectLen = (d: Uint8Array, want: number, kind: string): void => {
   if (d.length !== want) throw new Error(`decodeOp: ${kind} instruction is ${d.length} bytes, wire says ${want}`);
@@ -181,103 +200,112 @@ const expectLen = (d: Uint8Array, want: number, kind: string): void => {
  * Decode one pool op instruction. `accounts` is the instruction's meta list
  * (top-level or inner — a wrapper-invoked op carries the same layout) — only
  * the withdraw wires read it (the proof-bound recipient token account,
- * meta 11 in both withdraw layouts, feeds the announcement projection).
- * Field positions per op module doc comment; `enabled` never rides the wire
+ * meta 11 in both withdraw layouts, feeds the announcement projection; an
+ * accounts-table fact, not a publics-layout fact, so it stays here).
+ * Field positions per @bongtu/core/solanaOps; `enabled` never rides the wire
  * (program-derived), so nothing here reconstructs it — the feed needs the
  * discovery material, not the verifier vector.
  */
 export function decodeOp(dataHex: string, accounts?: string[]): SolanaOpIx | null {
   const d = bytesOfHex(dataHex);
-  const disc = d[0];
-  const wireLen = (carried: number, kems: number, tail = 0): number => 1 + PROOF_LEN + 32 * carried + kems * KEM_CT_LEN + tail;
-  switch (disc) {
-    case 2: {
-      expectLen(d, wireLen(16, 2), "depositPriv");
-      const c = carriedOf(d, 16);
+  switch (d[0]) {
+    case SOLANA_OPS.depositPriv.discriminator: {
+      const l = SOLANA_OPS.depositPriv;
+      expectLen(d, wireLenOf(l), "depositPriv");
+      const f = fullReader(d, l);
       return {
-        kind: "depositPriv", family: 1,
-        ecdhPublicKey: [c[1], c[2]], encryptionNonce: c[15],
-        cts: c.slice(3, 11), viewTags: [c[11], c[12]],
-        outputCommitments: [c[13], c[14]], kemCiphertexts: kemsOf(d, 16, 2),
+        kind: "depositPriv", family: familyTagOf(l),
+        ecdhPublicKey: pair(f, l.fields.ecdhPublicKey), encryptionNonce: f(l.fields.encryptionNonce[0]),
+        cts: l.fields.cts.map(f), viewTags: l.fields.viewTags.map(f),
+        outputCommitments: pair(f, l.fields.outputCommitments), kemCiphertexts: kemsOf(d, l),
       };
     }
-    case 3: {
-      expectLen(d, wireLen(18, 2), "transferPriv");
-      const c = carriedOf(d, 18);
+    case SOLANA_OPS.transferPriv.discriminator: {
+      const l = SOLANA_OPS.transferPriv;
+      expectLen(d, wireLenOf(l), "transferPriv");
+      const f = fullReader(d, l);
       return {
-        kind: "transferPriv", family: 2,
-        ecdhPublicKey: [c[0], c[1]], encryptionNonce: c[17],
-        cts: c.slice(2, 10), viewTags: [c[10], c[11]], nullifiers: [c[12], c[13]],
-        outputCommitments: [c[15], c[16]], kemCiphertexts: kemsOf(d, 18, 2),
+        kind: "transferPriv", family: familyTagOf(l),
+        ecdhPublicKey: pair(f, l.fields.ecdhPublicKey), encryptionNonce: f(l.fields.encryptionNonce[0]),
+        cts: l.fields.cts.map(f), viewTags: l.fields.viewTags.map(f), nullifiers: l.fields.nullifiers.map(f),
+        outputCommitments: pair(f, l.fields.outputCommitments), kemCiphertexts: kemsOf(d, l),
       };
     }
-    case 4: {
-      expectLen(d, wireLen(26, 2), "transfer10x2Priv");
-      const c = carriedOf(d, 26);
+    case SOLANA_OPS.transfer10x2Priv.discriminator: {
+      const l = SOLANA_OPS.transfer10x2Priv;
+      expectLen(d, wireLenOf(l), "transfer10x2Priv");
+      const f = fullReader(d, l);
       return {
-        kind: "transfer10x2Priv", family: 3,
-        ecdhPublicKey: [c[0], c[1]], encryptionNonce: c[25],
-        cts: c.slice(2, 10), viewTags: [c[10], c[11]], nullifiers: c.slice(12, 22),
-        outputCommitments: [c[23], c[24]], kemCiphertexts: kemsOf(d, 26, 2),
+        kind: "transfer10x2Priv", family: familyTagOf(l),
+        ecdhPublicKey: pair(f, l.fields.ecdhPublicKey), encryptionNonce: f(l.fields.encryptionNonce[0]),
+        cts: l.fields.cts.map(f), viewTags: l.fields.viewTags.map(f), nullifiers: l.fields.nullifiers.map(f),
+        outputCommitments: pair(f, l.fields.outputCommitments), kemCiphertexts: kemsOf(d, l),
       };
     }
-    case 5: {
-      expectLen(d, wireLen(13, 1, 33), "withdrawPriv");
-      const c = carriedOf(d, 13);
+    case SOLANA_OPS.withdrawPriv.discriminator: {
+      const l = SOLANA_OPS.withdrawPriv;
+      expectLen(d, wireLenOf(l), "withdrawPriv");
+      const f = fullReader(d, l);
       return {
-        kind: "withdrawPriv", family: 4,
-        ecdhPublicKey: [c[1], c[2]], encryptionNonce: c[12],
-        cts: c.slice(3, 7), viewTags: [c[7]], nullifiers: [c[8], c[9]],
-        changeCommitment: c[11], kemCiphertexts: kemsOf(d, 13, 1), stealth: stealthOf(d),
+        kind: "withdrawPriv", family: familyTagOf(l),
+        ecdhPublicKey: pair(f, l.fields.ecdhPublicKey), encryptionNonce: f(l.fields.encryptionNonce[0]),
+        cts: l.fields.cts.map(f), viewTags: l.fields.viewTags.map(f), nullifiers: l.fields.nullifiers.map(f),
+        changeCommitment: f(l.fields.changeCommitment[0]), kemCiphertexts: kemsOf(d, l), stealth: stealthOf(d, l),
         recipientTokenAccount: accounts?.[11] ?? null,
       };
     }
-    case 6: {
-      expectLen(d, wireLen(17, 1), "deposit");
-      const c = carriedOf(d, 17);
+    case SOLANA_OPS.deposit.discriminator: {
+      const l = SOLANA_OPS.deposit;
+      expectLen(d, wireLenOf(l), "deposit");
+      const f = fullReader(d, l);
       return {
-        kind: "deposit", family: 5,
-        ecdhPublicKey: [c[1], c[2]], encryptionNonce: c[16],
-        outputCommitments: [c[14], c[15]],
+        kind: "deposit", family: familyTagOf(l),
+        ecdhPublicKey: pair(f, l.fields.ecdhPublicKey), encryptionNonce: f(l.fields.encryptionNonce[0]),
+        outputCommitments: pair(f, l.fields.outputCommitments),
       };
     }
-    case 7: {
-      expectLen(d, wireLen(22, 1, 33), "withdraw");
-      const c = carriedOf(d, 22);
+    case SOLANA_OPS.withdraw.discriminator: {
+      const l = SOLANA_OPS.withdraw;
+      expectLen(d, wireLenOf(l), "withdraw");
+      const f = fullReader(d, l);
       return {
-        kind: "withdraw", family: 6,
-        ecdhPublicKey: [c[1], c[2]], encryptionNonce: c[21],
-        nullifiers: [c[17], c[18]], changeCommitment: c[20], stealth: stealthOf(d),
-        recipientTokenAccount: accounts?.[11] ?? null,
+        kind: "withdraw", family: familyTagOf(l),
+        ecdhPublicKey: pair(f, l.fields.ecdhPublicKey), encryptionNonce: f(l.fields.encryptionNonce[0]),
+        nullifiers: l.fields.nullifiers.map(f), changeCommitment: f(l.fields.changeCommitment[0]),
+        stealth: stealthOf(d, l), recipientTokenAccount: accounts?.[11] ?? null,
       };
     }
-    case 8: {
-      expectLen(d, wireLen(8, 1), "disburse256");
-      const c = carriedOf(d, 8);
+    case SOLANA_OPS.disburse256.discriminator: {
+      const l = SOLANA_OPS.disburse256;
+      expectLen(d, wireLenOf(l), "disburse256");
+      const f = fullReader(d, l);
       return {
-        kind: "disburse", family: 7,
-        ecdhPublicKey: [c[0], c[1]], encryptionNonce: c[7],
-        disclosureHash: c[2], subtreeRoot: c[3], kemBinding: c[4], nullifier: c[5],
+        kind: "disburse", family: familyTagOf(l),
+        ecdhPublicKey: pair(f, l.fields.ecdhPublicKey), encryptionNonce: f(l.fields.encryptionNonce[0]),
+        disclosureHash: f(l.fields.disclosureHash[0]), subtreeRoot: f(l.fields.subtreeRoot[0]),
+        kemBinding: f(l.fields.kemBinding[0]), nullifier: f(l.fields.nullifiers[0]),
       };
     }
-    case 9: {
-      expectLen(d, wireLen(33, 1), "transfer");
-      const c = carriedOf(d, 33);
+    case SOLANA_OPS.transfer.discriminator: {
+      const l = SOLANA_OPS.transfer;
+      expectLen(d, wireLenOf(l), "transfer");
+      const f = fullReader(d, l);
       return {
-        kind: "transfer", family: 8,
-        ecdhPublicKey: [c[0], c[1]], encryptionNonce: c[32],
-        receiverCts: c.slice(2, 10), authorityCt: c.slice(10, 26),
-        nullifiers: [c[27], c[28]], outputCommitments: [c[30], c[31]],
+        kind: "transfer", family: familyTagOf(l),
+        ecdhPublicKey: pair(f, l.fields.ecdhPublicKey), encryptionNonce: f(l.fields.encryptionNonce[0]),
+        receiverCts: l.fields.receiverCts.map(f), authorityCt: l.fields.authorityCt.map(f),
+        nullifiers: l.fields.nullifiers.map(f), outputCommitments: pair(f, l.fields.outputCommitments),
       };
     }
-    case 10: {
-      expectLen(d, wireLen(56, 1), "transfer10x2");
-      const c = carriedOf(d, 56);
+    case SOLANA_OPS.transfer10x2.discriminator: {
+      const l = SOLANA_OPS.transfer10x2;
+      expectLen(d, wireLenOf(l), "transfer10x2");
+      const f = fullReader(d, l);
       return {
-        kind: "transfer10x2", family: 9,
-        ecdhPublicKey: [c[0], c[1]], encryptionNonce: c[55],
-        receiverCts: c.slice(2, 10), authorityCt: c.slice(10, 41),
-        nullifiers: c.slice(42, 52), outputCommitments: [c[53], c[54]],
+        kind: "transfer10x2", family: familyTagOf(l),
+        ecdhPublicKey: pair(f, l.fields.ecdhPublicKey), encryptionNonce: f(l.fields.encryptionNonce[0]),
+        receiverCts: l.fields.receiverCts.map(f), authorityCt: l.fields.authorityCt.map(f),
+        nullifiers: l.fields.nullifiers.map(f), outputCommitments: pair(f, l.fields.outputCommitments),
       };
     }
     default:

@@ -15,7 +15,9 @@
 // Run from the repo root:
 //   node_modules/.bin/tsx chains/solana/scripts/gen_attach_vectors.ts
 //
-// Reads   packages/core (poseidon + ImtTree — the JS oracle; nothing else)
+// Reads   packages/core (poseidon + ImtTree — the JS oracle; the enterprise
+//         profile H/B/LOG_B from @bongtu/core/solana) and the shared fixture
+//         assertion vocabulary (circuits/fixtures/fixture_lib.ts)
 // Writes  chains/solana/conformance/attach_vectors.json (gate 7 input)
 //
 // postState carries the PROGRAM's expected frontier: Frontier::attach_subtree
@@ -27,41 +29,31 @@
 // cross-checked against ImtTree.naiveRoot (the dense from-scratch recompute)
 // before anything is written — a drifted oracle fails here, not in mollusk.
 
-import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ImtTree } from "@bongtu/core/imt";
 import { poseidon2 } from "@bongtu/core/poseidon";
+import { BATCH_B_ENTERPRISE, LOG_B_ENTERPRISE, TREE_HEIGHT } from "@bongtu/core/solana";
+
+import {
+  hex32,
+  makeAssertEq,
+  snapshot,
+  writeJson,
+  type TreeSnapshot,
+} from "../../../circuits/fixtures/fixture_lib.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CONFORMANCE = join(HERE, "..", "conformance");
 
 // Enterprise profile tree shape (gen_enterprise_vectors.ts): height 32
 // protocol-wide, B=256 (the production disburse arity), LOG_B = 8.
-const H = 32;
-const B = 256;
-const LOG_B = 8;
+const H = TREE_HEIGHT;
+const B = BATCH_B_ENTERPRISE;
+const LOG_B = LOG_B_ENTERPRISE;
 
-const hex32 = (v: bigint): string => "0x" + v.toString(16).padStart(64, "0");
-
-function assertEq<T>(got: T, want: T, what: string): void {
-  if (got !== want) throw new Error(`gen_attach_vectors: ${what}: got ${got}, want ${want}`);
-}
-
-interface TreeSnapshot {
-  nextLeafIndex: number;
-  currentRoot: string;
-  filledSubtrees: string[];
-}
-
-function snapshot(t: ImtTree): TreeSnapshot {
-  return {
-    nextLeafIndex: t.getNextLeafIndex(),
-    currentRoot: hex32(t.getRoot()),
-    filledSubtrees: t.filledSubtrees.map(hex32),
-  };
-}
+const assertEq = makeAssertEq("gen_attach_vectors");
 
 // Deterministic nonzero leaves: leaf = poseidon2(tag, k), derived through the
 // same packages/core poseidon the tree folds with — byte-stable across runs,
@@ -163,7 +155,7 @@ function main(): void {
     logB: LOG_B,
     cases,
   };
-  writeFileSync(join(CONFORMANCE, "attach_vectors.json"), JSON.stringify(out, null, 1) + "\n");
+  writeJson(CONFORMANCE, "attach_vectors.json", out);
   console.log(`wrote attach_vectors.json (${cases.length} cases, anchors verified)`);
 }
 

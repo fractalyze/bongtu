@@ -45,8 +45,9 @@
 
 import { resolveConfig, databaseUrlError } from "./chain.js";
 import { Indexer } from "./ingest.js";
+import { base58ToHex } from "@bongtu/core/solana";
 import { SolanaIndexer } from "./solana/ingest.js";
-import { SolanaRpcIo, base58ToHex } from "./solana/rpc.js";
+import { SolanaRpcIo } from "./solana/rpc.js";
 import { startApi } from "./api/router.js";
 
 async function main(): Promise<void> {
