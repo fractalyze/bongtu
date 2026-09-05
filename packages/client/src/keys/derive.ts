@@ -24,12 +24,34 @@
 // EOA + deterministic ECDSA only (MetaMask pinned); 4337 accounts need a different
 // derivation (v1.1).
 
-import { hexToBytes, keccak256 } from "viem";
+import { keccak_256 } from "@noble/hashes/sha3.js";
+import { bytesToHex, hexToBytes as nobleHexToBytes } from "@noble/hashes/utils.js";
 import { deriveKeypair } from "@bongtu/core/note";
 import type { Keypair } from "@bongtu/core/note";
 import { packPubkey } from "@bongtu/core/pubkey";
 import { SUBGROUP_ORDER } from "@bongtu/core/babyjub";
 import { ml_kem768 } from "@bongtu/core/kem";
+
+// The exact byte-level helpers this module used from viem before the rail
+// split (issue #40, keeping this KDF core rail-agnostic): viem's
+// keccak256/hexToBytes are @noble/hashes underneath, so hashing the decoded
+// bytes here is byte-identical — INCLUDING the rejections. viem's hexToBytes
+// throws on a missing 0x/0X prefix, and noble's throws on odd length or
+// non-hex content; the shim keeps that whole boundary so the KDF input domain
+// does not widen past what the pre-split code accepted. The determinism
+// fixture suite (packages/client/test/deriveDeterminism.test.ts) pins both the
+// derived keys against the pre-split values and the throw on bare hex.
+function hexToBytes(hex: string): Uint8Array {
+  if (!hex.startsWith("0x") && !hex.startsWith("0X")) {
+    throw new Error("hexToBytes: expected a 0x-prefixed hex string");
+  }
+  return nobleHexToBytes(hex.slice(2));
+}
+
+function keccak256(data: string | Uint8Array): `0x${string}` {
+  const bytes = typeof data === "string" ? hexToBytes(data) : data;
+  return `0x${bytesToHex(keccak_256(bytes))}`;
+}
 
 /** The wallet's deterministic ML-KEM-768 keypair — the PQ leg of the consumer
  *  view identity (OPMOD §3.1). `ek` is registered/published (1184 B); `dk`
@@ -70,55 +92,10 @@ export interface ConsumerWalletIdentity extends WalletIdentity {
   kemKeypair: KemKeypair;
 }
 
-/** An EIP-712 typed-data payload ready for `signer._signTypedData(domain, types, message)`
- *  / `eth_signTypedData_v4`. */
-export interface KeyDerivationTypedData {
-  domain: {
-    name: string;
-    version: string;
-    chainId: number;
-    verifyingContract: string;
-  };
-  types: Record<string, { name: string; type: string }[]>;
-  primaryType: string;
-  message: Record<string, string>;
-}
-
-/**
- * The domain-separated struct the wallet asks MetaMask to sign (SPEC §6). The
- * spending key is a pure function of this payload + the signing account, so the
- * exact bytes here are consensus-critical: changing `name`/`version`/the message
- * text rotates every user's key. `verifyingContract` = the pool, `chainId` +
- * `version` complete the separation.
- */
-export function keyDerivationTypedData(
-  chainId: number,
-  poolAddress: string,
-  version: string,
-): KeyDerivationTypedData {
-  return {
-    domain: {
-      name: "bongtu",
-      version,
-      chainId,
-      verifyingContract: poolAddress,
-    },
-    types: {
-      // EIP712Domain is filled in by the wallet / ethers automatically.
-      BongtuSpendingKey: [
-        { name: "statement", type: "string" },
-        { name: "warning", type: "string" },
-      ],
-    },
-    primaryType: "BongtuSpendingKey",
-    message: {
-      statement: "Derive my bongtu BabyJubJub spending key for this pool.",
-      warning:
-        "Signing this message reveals your bongtu spending key to whoever requested it. " +
-        "Only sign inside the official bongtu wallet.",
-    },
-  };
-}
+// The EIP-712 typed-data struct the wallet signs to produce the seed lives in
+// the EVM rail client (@bongtu/client-evm/derive keyDerivationTypedData): the
+// struct and the signing edge are rail-specific, while everything below —
+// signature bytes in, identity out — is the rail-agnostic derivation core.
 
 /**
  * The KDF: keccak256 of the raw signature, reduced mod the BabyJubJub prime-order

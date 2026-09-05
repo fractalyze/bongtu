@@ -2,10 +2,11 @@
 // (the live chain only, every installed extension via EIP-6963 discovery — wagmi's
 // multiInjectedProviderDiscovery, on by default — and WalletConnect for phones/QR;
 // the RainbowKit connect modal lists all of them), plus the functions that turn
-// whatever wagmi connected into the `Connection` shape the protocol engine
-// (@bongtu/client/connection) consumes. Everything security-relevant (key
-// derivation, balance, witness assembly, submits) lives in @bongtu/client and is
-// unit-tested; this file is the thin I/O edge (no wallet in the headless env).
+// whatever wagmi connected into the `Connection` shape the EVM rail client
+// (@bongtu/client-evm/connection) consumes. Everything security-relevant is
+// unit-tested headlessly: key derivation, balance, and witness assembly in the
+// rail-agnostic engine (@bongtu/client); submits and the EIP-712 signing edge in
+// @bongtu/client-evm. This file is the thin I/O edge (no wallet in the headless env).
 //
 // BUILD FLAG. WalletConnect is dark unless `VITE_WC_PROJECT_ID` is set at build
 // time: without it `buildConnectors` contributes NO WalletConnect connector, the
@@ -21,8 +22,8 @@ import { disconnect, getAccount, reconnect, watchAccount } from "wagmi/actions";
 import { connectorsForWallets } from "@rainbow-me/rainbowkit";
 import { walletConnectWallet } from "@rainbow-me/rainbowkit/wallets";
 import { createPublicClient, createWalletClient, custom, type PublicClient } from "viem";
-import { liveChain } from "@bongtu/client/chain";
-import { accountWatchHandler, type Connection, type WalletEdge, type WalletWatchHandlers } from "@bongtu/client/connection";
+import { liveChain } from "@bongtu/client-evm/chain";
+import { accountWatchHandler, type Connection, type WalletEdge, type WalletWatchHandlers } from "@bongtu/client-evm/connection";
 
 /**
  * The Reown Cloud project id, or null when this build has none. `import.meta.env`

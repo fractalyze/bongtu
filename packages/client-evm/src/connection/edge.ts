@@ -1,18 +1,22 @@
-// io/connection/edge.ts — the Connection shape, wallet failure copy, account
-// watch, chain guard and the deterministic key-derivation signature (split from
-// connection.ts; the subpath @bongtu/client/connection re-exports everything).
+// connection/edge.ts — the Connection shape, account watch, chain guard and the
+// deterministic key-derivation signature (split from connection.ts; the subpath
+// @bongtu/client-evm/connection re-exports everything). The wallet failure copy
+// (WALLET_FAILURE_COPY / walletErrorMessage) is rail-agnostic and lives in the
+// engine's rail seam (@bongtu/client/rail) — re-exported here so the wallet's
+// words stay importable beside the edges that throw them.
 import type { Address, WalletClient, PublicClient } from "viem";
-import { classifyChainFailure, errorCode, fallbackText, failureCopy, type FailureCopyTable } from "@bongtu/core/errors";
-import type { KeyDerivationTypedData } from "@bongtu/client/derive";
+import { classifyChainFailure, errorCode } from "@bongtu/core/errors";
+import type { KeyDerivationTypedData } from "../derive.js";
 import type { WalletTransport } from "@bongtu/client/session";
 import {
   CHAIN_ID,
   CHAIN_NAME,
   EXPLORER_BASE,
-  GAS_TOKEN_PHRASE,
   NATIVE_CURRENCY,
   RPC_URL,
 } from "@bongtu/core/network";
+
+export { WALLET_FAILURE_COPY, walletErrorMessage } from "@bongtu/client/rail";
 interface Eip1193 {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;
 }
@@ -36,32 +40,6 @@ export interface Connection {
    *  chain guard don't (a remote wallet gets a different determinism rule and a
    *  different network-switch failure message). */
   transport: WalletTransport;
-}
-
-/**
- * The wallet's words per ChainFailure kind. The structural digging (cause chain,
- * conventional fields, viem's typed error names) lives in the shared classifier
- * (@bongtu/core/errors classifyChainFailure); this table is only the wallet's
- * WORDS for each verdict. A Record over the full union, so a kind added to the
- * classifier is a tsc error HERE rather than a silent fall-through to raw viem
- * text. Only the failures every tester hits (user rejection, no gas ETH, a
- * declined switch) get wallet wording; the rest keep viem's own best line via
- * the shared fallbackText — a precise revert beats any paraphrase.
- */
-export const WALLET_FAILURE_COPY: FailureCopyTable = {
-  user_rejected: () => "Transaction rejected in your wallet.",
-  insufficient_gas: () =>
-    `Not enough ${GAS_TOKEN_PHRASE} to pay gas. This account needs a little ${NATIVE_CURRENCY.symbol} on ${CHAIN_NAME} first.`,
-  // an un-rejected switch failure reads best in viem's own words
-  chain_switch: (failure, e) =>
-    failure.rejected ? "Transaction rejected in your wallet." : fallbackText(failure, e),
-  timeout: fallbackText,
-  transport: fallbackText,
-  other: fallbackText,
-};
-
-export function walletErrorMessage(e: unknown): string {
-  return failureCopy(WALLET_FAILURE_COPY, classifyChainFailure(e), e);
 }
 
 /** The connected account's native (gas) ETH balance on the live chain. */

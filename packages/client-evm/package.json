@@ -1,0 +1,34 @@
+{
+  "name": "@bongtu/client-evm",
+  "version": "0.0.0",
+  "description": "bongtu EVM rail client — the viem-typed layer split out of @bongtu/client (issue #40): the live chain object, the wallet Connection edge + proof/token submits, the EIP-712 key-derivation seed and login identity wiring, the stealth meta-key KDF and stealth-funds discovery, the consumer module submits, and the relayer client. Depends on the rail-agnostic engine (@bongtu/client) and satisfies its structural rail seam; a Solana client lands as a sibling package of the same shape.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "private": true,
+  "exports": {
+    "./chain": "./src/chain.ts",
+    "./connection": "./src/connection/index.ts",
+    "./consumer": "./src/consumer.ts",
+    "./derive": "./src/derive.ts",
+    "./identity": "./src/identity.ts",
+    "./keyCache": "./src/keyCache.ts",
+    "./ops": "./src/ops.ts",
+    "./relayer": "./src/relayer.ts",
+    "./stealthFunds": "./src/stealthFunds.ts",
+    "./stealthKeys": "./src/stealthKeys.ts"
+  },
+  "scripts": {
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@bongtu/client": "*",
+    "@bongtu/core": "*",
+    "viem": "^2.55.10"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -23,7 +23,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { DEFAULTS, isSelfScan } from "../config.js";
-import type { Connection } from "@bongtu/client/connection";
+import { ensureChain, type Connection } from "@bongtu/client-evm/connection";
 import { treasuryErrorMessage } from "../lib/errors.js";
 import {
   endWalletConnection,
@@ -34,7 +34,9 @@ import {
 } from "@bongtu/ui/wagmi";
 import { runLogin } from "@bongtu/client/login";
 import { SpendOps } from "@bongtu/client/spend";
-import { KEY_DERIVATION, deriveLoginIdentity } from "@bongtu/client/identity";
+import { KEY_DERIVATION } from "@bongtu/client/identity";
+import { deriveLoginIdentity } from "@bongtu/client-evm/identity";
+import { EVM_ENTERPRISE_IO } from "@bongtu/client-evm/ops";
 import { keyCache } from "@bongtu/ui/keyCache";
 import { proveInBrowser } from "../lib/prove.js";
 import type { WalletDescription } from "@bongtu/ui/walletBrand";
@@ -426,6 +428,7 @@ export function App(): ReactNode {
             // The wallet the RainbowKit modal just connected (wagmi.ts), deriving
             // under THIS deployment's KDF domain facts — the engine reads no config.
             openConnection: requireConnection,
+            ensureChain,
             deriveIdentity: (c, plan) => deriveLoginIdentity(c, plan, KEY_DERIVATION),
           },
         );
@@ -542,6 +545,7 @@ export function App(): ReactNode {
       connection && session
         ? new SpendOps(
             {
+              ...EVM_ENTERPRISE_IO,
               connection,
               indexerUrl: INDEXER_URL,
               pool: DEFAULTS.pool,

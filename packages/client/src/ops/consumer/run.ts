@@ -30,19 +30,12 @@
 
 import { commitment } from "@bongtu/core/note";
 import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
-import type { Connection } from "@bongtu/client/connection";
 import {
-  approveToken,
-  ensureChain,
-  readTokenState,
   walletErrorMessage,
-} from "@bongtu/client/connection";
-import {
-  submitDepositPriv,
-  submitTransferPriv,
-  submitTransfer10x2Priv,
-  submitWithdrawPriv,
-} from "./submit.js";
+  type Connection,
+  type SubmitResult,
+  type TokenState,
+} from "@bongtu/client/rail";
 import type { KeyCacheLike } from "@bongtu/client/keyCache";
 import { getHead, getPath } from "@bongtu/core/indexerApi";
 import { pollUntil, type PollForActionOptions } from "@bongtu/client/refresh";
@@ -122,30 +115,29 @@ export interface ConsumerDepositOutcome {
 /** The network/proving I/O consumerRunDeposit performs, injectable exactly as
  *  ops/deposit.ts RunDepositDeps — minus assertPoolKemEpoch, which does not
  *  EXIST in this family's seam (a member nothing may call would only invite a
- *  fake to prove the wrong thing). */
+ *  fake to prove the wrong thing). The rail members are METHOD-style over the
+ *  structural rail seam (@bongtu/client/rail) — apps spread
+ *  @bongtu/client-evm/ops EVM_CONSUMER_IO. */
 export interface RunConsumerDepositDeps {
-  ensureChain: typeof ensureChain;
+  /** put the wallet on the live chain (silent when already there). */
+  ensureChain(connection: Connection): Promise<void>;
   /** the wallet's lock — holds the spending key between actions (keyCache.ts). */
   keyCache: KeyCacheLike;
-  readTokenState: typeof readTokenState;
-  approveToken: typeof approveToken;
+  /** the rail's token-state read: balance + allowance to the pool (view, no gas). */
+  readTokenState(connection: Connection, tokenAddr: string, owner: string, spender: string): Promise<TokenState>;
+  /** the rail's exact-amount ERC-20 approve; resolves after the receipt. */
+  approveToken(connection: Connection, tokenAddr: string, spender: string, amount: bigint): Promise<string>;
   /** Turn a ProvingRequest into Groth16 calldata (the APP supplies this —
    *  treasury-web's in-browser snarkjs with its asset base applied). */
   prove: (request: ProvingRequest) => Promise<Calldata>;
-  submitDepositPriv: typeof submitDepositPriv;
+  /** the rail's proven-depositPriv submit (to the deposit MODULE address). */
+  submitDepositPriv(connection: Connection, calldata: Calldata, kemCiphertexts: string[], explorerBase: string, moduleAddress?: string): Promise<SubmitResult>;
 }
 
-/** What every consumer deposit must be handed: the app's lock and its prover.
- *  The engine-side edges default to the real ones. */
-export type ConsumerDepositIo = Pick<RunConsumerDepositDeps, "keyCache" | "prove"> &
-  Partial<RunConsumerDepositDeps>;
-
-const DEPOSIT_DEFAULT_DEPS: Omit<RunConsumerDepositDeps, "keyCache" | "prove"> = {
-  ensureChain,
-  readTokenState,
-  approveToken,
-  submitDepositPriv,
-};
+/** What every consumer deposit must be handed: the app's lock, its prover, and
+ *  the rail io (the engine has no rail defaults since the split — spread
+ *  @bongtu/client-evm/ops EVM_CONSUMER_IO at the wiring site). */
+export type ConsumerDepositIo = RunConsumerDepositDeps;
 
 /**
  * Approve (if needed) → assemble the depositPriv witness → prove → submit to
@@ -163,7 +155,7 @@ export async function consumerRunDeposit(
   onStage: (stage: DepositStage) => void,
   deps: ConsumerDepositIo,
 ): Promise<ConsumerDepositOutcome> {
-  const io: RunConsumerDepositDeps = { ...DEPOSIT_DEFAULT_DEPS, ...deps };
+  const io: RunConsumerDepositDeps = deps;
   const amount = args.amount.trim();
   const V = BigInt(amount);
   if (V <= 0n) throw new Error(`deposit amount must be positive, got ${V}`);
@@ -243,9 +235,12 @@ export interface ConsumerSpendContext {
 
 /** The network/proving I/O a consumer spend performs — RunSpendDeps minus the
  *  seams this family removes (assertPoolKemEpoch: nothing to guard;
- *  getSignedPath: membership is auth-free; relayed submit: v1 self-submits). */
+ *  getSignedPath: membership is auth-free; relayed submit: v1 self-submits).
+ *  The rail members are METHOD-style over the structural rail seam
+ *  (@bongtu/client/rail) — apps spread @bongtu/client-evm/ops EVM_CONSUMER_IO. */
 export interface RunConsumerSpendDeps {
-  ensureChain: typeof ensureChain;
+  /** put the wallet on the live chain (silent when already there). */
+  ensureChain(connection: Connection): Promise<void>;
   /** the wallet's lock — holds the spending key between actions (keyCache.ts). */
   keyCache: KeyCacheLike;
   getHead: typeof getHead;
@@ -253,26 +248,34 @@ export interface RunConsumerSpendDeps {
   getPath: typeof getPath;
   /** Turn a ProvingRequest into Groth16 calldata (the APP supplies this). */
   prove: (request: ProvingRequest) => Promise<Calldata>;
-  submitTransferPriv: typeof submitTransferPriv;
-  submitTransfer10x2Priv: typeof submitTransfer10x2Priv;
-  submitWithdrawPriv: typeof submitWithdrawPriv;
+  /** the rail's proven-transferPriv submit (to the op's MODULE address). */
+  submitTransferPriv(connection: Connection, calldata: Calldata, kemCiphertexts: string[], explorerBase: string, moduleAddress?: string): Promise<SubmitResult>;
+  /** the rail's proven-transfer10x2Priv submit (every consumer merge leg). */
+  submitTransfer10x2Priv(connection: Connection, calldata: Calldata, kemCiphertexts: string[], explorerBase: string, moduleAddress?: string): Promise<SubmitResult>;
+  /** the rail's proven-withdrawPriv submit (proof-bound payout). */
+  submitWithdrawPriv(connection: Connection, calldata: Calldata, kemCiphertexts: string[], explorerBase: string, moduleAddress?: string): Promise<SubmitResult>;
   /** interval/cap/sleep for the between-legs wait (refresh.ts), so tests can
    *  run a chain without real seconds. */
   poll: PollForActionOptions;
 }
 
-/** What every consumer spend must be handed: the app's lock instance and its
- *  prover. The engine-side edges default to the real ones. */
-export type ConsumerSpendIo = Pick<RunConsumerSpendDeps, "keyCache" | "prove"> &
+/** What every consumer spend must be handed: the app's lock instance, its
+ *  prover, and the rail io (spread @bongtu/client-evm/ops EVM_CONSUMER_IO at
+ *  the wiring site). The engine-side edges default to the real ones. */
+export type ConsumerSpendIo = Pick<
+  RunConsumerSpendDeps,
+  | "keyCache"
+  | "prove"
+  | "ensureChain"
+  | "submitTransferPriv"
+  | "submitTransfer10x2Priv"
+  | "submitWithdrawPriv"
+> &
   Partial<RunConsumerSpendDeps>;
 
-const SPEND_DEFAULT_DEPS: Omit<RunConsumerSpendDeps, "keyCache" | "prove"> = {
-  ensureChain,
+const SPEND_DEFAULT_DEPS: Pick<RunConsumerSpendDeps, "getHead" | "getPath" | "poll"> = {
   getHead,
   getPath,
-  submitTransferPriv,
-  submitTransfer10x2Priv,
-  submitWithdrawPriv,
   poll: {},
 };
 

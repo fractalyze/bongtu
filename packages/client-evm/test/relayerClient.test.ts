@@ -1,4 +1,4 @@
-// Headless gates for the relayed withdraw submit (src/wallet/relayerClient.ts), driven
+// Headless gates for the relayed withdraw submit (src/relayer.ts), driven
 // by a fake fetchFn — no relayer process, no network. What is gated:
 //
 //   (1) HAPPY PATH — POST {calldata, kemCiphertext} to <relayerUrl>/relay and
@@ -17,7 +17,7 @@ import assert from "node:assert/strict";
 import type { Calldata } from "@bongtu/core/proving";
 import type { StealthDerivation } from "@bongtu/core/stealth";
 
-import { submitWithdrawRelayed } from "@bongtu/client/relayer";
+import { submitWithdrawRelayed } from "@bongtu/client-evm/relayer";
 
 const CALLDATA: Calldata = {
   a: ["1", "2"],

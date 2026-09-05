@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@bongtu/client": "*",
+    "@bongtu/client-evm": "*",
     "@bongtu/core": "*",
     "@bongtu/ui": "*",
     "poseidon-lite": "^0.3.0",

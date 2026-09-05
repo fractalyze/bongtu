@@ -42,9 +42,8 @@
 
 import type { StealthKeys } from "@bongtu/core/stealth";
 import type { WalletIdentity } from "@bongtu/client/derive";
-import { ACCOUNT_MISMATCH_MESSAGE, assertSessionIdentity, KEY_DERIVATION, deriveTransientIdentity } from "@bongtu/client/identity";
-import { deriveStealthKeys } from "@bongtu/client/stealthKeys";
-import type { Connection, WalletEdge } from "@bongtu/client/connection";
+import { ACCOUNT_MISMATCH_MESSAGE, assertSessionIdentity } from "@bongtu/client/identity";
+import type { Connection } from "@bongtu/client/rail";
 
 /** How long an unused spending key is kept before the wallet re-locks itself. */
 export const IDLE_WIPE_MS = 10 * 60 * 1000;
@@ -67,12 +66,16 @@ export interface KeyCacheLike {
 }
 
 /** The I/O + clock the cache depends on, injectable so the whole state machine —
- *  including both idle-wipe layers — gates headlessly (test/keyCache.test.ts). */
+ *  including both idle-wipe layers — gates headlessly (test/keyCache.test.ts).
+ *  The two derivations are METHOD-style over the structural rail Connection so
+ *  a rail client's implementations (typed over its own wider Connection) are
+ *  assignable — the rail wiring itself lives in @bongtu/client-evm/keyCache
+ *  createKeyCache. */
 export interface KeyCacheDeps {
-  derive: (connection: Connection) => Promise<WalletIdentity>;
+  derive(connection: Connection): Promise<WalletIdentity>;
   /** The stealth meta-key derivation (its own EIP-712 popup — deriveStealthKeys
    *  partially applied by the app), unlocked lazily on the first stealth action. */
-  deriveStealth: (connection: Connection) => Promise<StealthKeys>;
+  deriveStealth(connection: Connection): Promise<StealthKeys>;
   currentAccount: () => Promise<string | null>;
   now: () => number;
   idleMs: number;
@@ -296,23 +299,6 @@ export class KeyCache {
   }
 }
 
-/**
- * The one sanctioned app construction: wire the lock to the wallet edge's
- * live-account read under the deployment's KDF config, with BOTH derivations
- * (spending + stealth) supplied here. The key-custody rule — no app may hold a
- * cache missing the stealth seam, and both apps must derive the same key for
- * the same account — is structural this way: an app would have to bypass this
- * helper deliberately (and re-wire the derivations by hand) to get anything
- * else. The parameter is the slice the lock actually consumes (apps pass their
- * full WalletEdge, which satisfies it). Each app owns its ONE instance; the
- * flows take it through their deps seam so tests run their own with a fake
- * clock.
- */
-export function createKeyCache(edge: Pick<WalletEdge, "currentAccount">): KeyCache {
-  return new KeyCache({
-    derive: (connection: Connection): Promise<WalletIdentity> =>
-      deriveTransientIdentity(connection, KEY_DERIVATION),
-    deriveStealth: (connection: Connection): Promise<StealthKeys> => deriveStealthKeys(connection),
-    currentAccount: () => edge.currentAccount(),
-  });
-}
+// The one sanctioned app construction (createKeyCache) moved to the EVM rail
+// client (@bongtu/client-evm/keyCache): it wires THIS state machine to the
+// rail's derivations, which the rail-agnostic engine may not import.

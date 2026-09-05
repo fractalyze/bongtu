@@ -11,10 +11,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { createWalletClient, custom } from "viem";
-import { liveChain } from "@bongtu/client/chain";
-import type { Connection } from "@bongtu/client/connection";
-import { ACCOUNT_MISMATCH_MESSAGE, KEY_DERIVATION, deriveTransientIdentity } from "@bongtu/client/identity";
-import { createKeyCache } from "@bongtu/client/keyCache";
+import { liveChain } from "@bongtu/client-evm/chain";
+import type { Connection } from "@bongtu/client-evm/connection";
+import { ACCOUNT_MISMATCH_MESSAGE, KEY_DERIVATION } from "@bongtu/client/identity";
+import { deriveTransientIdentity } from "@bongtu/client-evm/identity";
+import { createKeyCache } from "@bongtu/client-evm/keyCache";
 
 const ACCOUNT = "0x1111111111111111111111111111111111111111";
 const FIXED_SIG = ("0x" + "42".repeat(64) + "1b") as `0x${string}`;

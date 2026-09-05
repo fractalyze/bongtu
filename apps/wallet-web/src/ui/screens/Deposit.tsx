@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { DEFAULTS } from "../../config.js";
 import type { ConsumerDepositOutcome } from "@bongtu/client/consumer";
-import { readTokenState } from "@bongtu/client/connection";
+import { readTokenState } from "@bongtu/client-evm/connection";
 import { normalizeName } from "@bongtu/core/indexerApi";
 import type { ConsumerRecipient } from "@bongtu/client/consumer";
 import { resolveConsumerRecipient } from "../../lib/payName.js";

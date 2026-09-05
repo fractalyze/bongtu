@@ -12,7 +12,7 @@
 // flows wrap their failures with the money-state reassurance, and a paraphrase
 // here would eat it.
 
-import { walletErrorMessage } from "@bongtu/client/connection";
+import { walletErrorMessage } from "@bongtu/client-evm/connection";
 import { classifyChainFailure, failureCopy, type FailureCopyTable } from "@bongtu/core/errors";
 import { CHAIN_NAME } from "@bongtu/core/network";
 

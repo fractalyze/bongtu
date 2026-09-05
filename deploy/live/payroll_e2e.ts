@@ -9,7 +9,7 @@
 //   apps/payroll-web/src/lib/payRun.ts   runPayRun   — merges + terminal disburse
 //   apps/payroll-web/src/lib/proverClient.ts         — the prover-service adapter
 //   @bongtu/client/deposit           runDeposit  — approve + prove + submit
-//   @bongtu/client/connection            mintTestToken (the console's dev faucet)
+//   @bongtu/client-evm/connection            mintTestToken (the console's dev faucet)
 //   @bongtu/client/keyCache              KeyCache    — the real lock state machine
 //
 // What is necessarily FAKED (a node process is not a browser with MetaMask):
@@ -49,11 +49,12 @@ import { privateKeyToAccount } from "viem/accounts";
 import { B, CHAIN_ID, EXPLORER_BASE, RPC_URL, explorerTxUrl } from "@bongtu/core/network";
 import { deriveKeypair } from "@bongtu/core/note";
 import { packPubkey } from "@bongtu/core/pubkey";
-import { liveChain } from "@bongtu/client/chain";
-import type { Connection } from "@bongtu/client/connection";
-import { mintTestToken, readTokenState } from "@bongtu/client/connection";
+import { liveChain } from "@bongtu/client-evm/chain";
+import type { Connection } from "@bongtu/client-evm/connection";
+import { mintTestToken, readTokenState } from "@bongtu/client-evm/connection";
 import { deriveIdentityFromSignature } from "@bongtu/client/derive";
 import { runDeposit, type DepositStage } from "@bongtu/client/deposit";
+import { EVM_ENTERPRISE_IO } from "@bongtu/client-evm/ops";
 import { KeyCache } from "@bongtu/client/keyCache";
 import { sumUnspent } from "@bongtu/client/balance";
 import { buildNotesUrl, fetchNotes, type OwnerNote } from "@bongtu/core/indexerApi";
@@ -275,7 +276,7 @@ async function main(): Promise<void> {
     { connection, pool: ADDR.pool, token: ADDR.token, explorer: EXPLORER_BASE, sessionPubkey },
     { amount: DEPOSIT_AMOUNT.toString() },
     (stage: DepositStage) => console.log(`   [deposit] ${stage}`),
-    { keyCache, prove },
+    { ...EVM_ENTERPRISE_IO, keyCache, prove },
   );
   const depositRcpt = await publicClient.getTransactionReceipt({ hash: depositResult.txHash as `0x${string}` });
   ok(depositRcpt.status === "success", `deposit mined: ${depositResult.txHash}`);

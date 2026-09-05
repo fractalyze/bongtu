@@ -132,6 +132,13 @@ function spendDeps(trace: Trace, keyCache: KeyCache): SpendIo {
       trace.submit++;
       return { txHash: "0xwithdraw", explorerUrl: "https://x/tx/0xwithdraw" };
     },
+    // required rail-io members no flow here may reach (the amounts fit one tx)
+    submitTransfer10x2: async () => {
+      throw new Error("submitTransfer10x2 must not be reached here");
+    },
+    submitWithdrawRelayed: async () => {
+      throw new Error("submitWithdrawRelayed must not be reached here");
+    },
   };
 }
 

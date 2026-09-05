@@ -1,4 +1,4 @@
-// io/connection/writes.ts — the proof/token submits and reads that operate on a
+// connection/writes.ts — the proof/token submits and reads that operate on a
 // live Connection over viem: the ABI tables, the pool-KEM-epoch guard and the
 // gas/nonce discipline (split from connection.ts).
 import { parseAbi, type Abi, type Address } from "viem";
@@ -11,10 +11,15 @@ import {
   explorerTxUrl,
   isPreKemProbeError,
 } from "@bongtu/core/network";
-import { liveChain } from "@bongtu/client/chain";
+import { liveChain } from "../chain.js";
 import { ZERO_EPHEMERAL, type StealthDerivation } from "@bongtu/core/stealth";
 import { KEM_CIPHERTEXT_BYTES } from "@bongtu/core/kem";
+import type { SubmitResult, TokenState } from "@bongtu/client/rail";
 import type { Connection } from "./edge.js";
+
+// The result/token-state shapes are the engine's rail seam (@bongtu/client/rail)
+// — re-exported here so submit callers keep importing them beside the submits.
+export type { SubmitResult, TokenState } from "@bongtu/client/rail";
 // The shared per-function ABI fragments (@bongtu/core/network) — only the pool
 // functions the wallet touches, parsed once for viem. deposit is the 0-in/2-out
 // mint (a,b,c,pub,kemCiphertext) the shield flow submits.
@@ -45,11 +50,6 @@ const ERC20_ABI = parseAbi([
   ERC20_ABI_FRAGMENTS.balanceOf,
   ERC20_ABI_FRAGMENTS.mint,
 ]);
-
-export interface SubmitResult {
-  txHash: string;
-  explorerUrl: string;
-}
 
 // One successful verification per pool address is enough for the session: the
 // epoch hash only changes on an arbiter key rotation, which ships as a new
@@ -310,12 +310,6 @@ export async function mintTestToken(
     args: [to as Address, amount],
   });
   return { txHash: hash, explorerUrl: explorerTxUrl(hash) };
-}
-
-/** The depositor's raw kKRW balance and current allowance to the pool. */
-export interface TokenState {
-  balance: bigint;
-  allowance: bigint;
 }
 
 /**

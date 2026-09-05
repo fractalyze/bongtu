@@ -33,8 +33,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Banner } from "@bongtu/ui/Banner";
-import { KEY_DERIVATION, deriveLoginIdentity } from "@bongtu/client/identity";
-import { ensureChain, type Connection } from "@bongtu/client/connection";
+import { KEY_DERIVATION } from "@bongtu/client/identity";
+import { deriveLoginIdentity } from "@bongtu/client-evm/identity";
+import { EVM_ENTERPRISE_IO } from "@bongtu/client-evm/ops";
+import { ensureChain, type Connection } from "@bongtu/client-evm/connection";
 import { runDeposit } from "@bongtu/client/deposit";
 import type { LegProgress, SpendStage } from "@bongtu/client/spend";
 import { sumUnspent } from "@bongtu/client/balance";
@@ -394,7 +396,7 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
         },
         { amount: amountWei.toString() },
         (stage) => patchDeposit({ stage }),
-        { keyCache, prove },
+        { ...EVM_ENTERPRISE_IO, keyCache, prove },
       );
       // The note lands in the pool, not in this dialog: close it and let the 3s
       // refresh show the new private balance where the balance lives.

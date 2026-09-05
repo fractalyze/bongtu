@@ -36,12 +36,12 @@ import type { Point } from "@bongtu/core/babyjub";
 import {
   deriveIdentityFromSignature,
   scalarFromSignature,
-  keyDerivationTypedData,
   type WalletIdentity,
 } from "@bongtu/client/derive";
+import { keyDerivationTypedData } from "@bongtu/client-evm/derive";
 import { sumUnspent, trialDecryptEvents } from "@bongtu/client/balance";
 import { KEY_DERIVATION } from "@bongtu/client/identity";
-import { walletErrorMessage } from "@bongtu/client/connection";
+import { walletErrorMessage } from "@bongtu/client-evm/connection";
 import { resolveName, type FeedEvent, type NameRecord } from "@bongtu/core/indexerApi";
 import {
   buildTransferRequest,

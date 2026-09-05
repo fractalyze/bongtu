@@ -405,6 +405,10 @@ function flowDeps(f: ReturnType<typeof fixture>, trace: { circuit: string | null
       trace.submitted.push("withdraw");
       return { txHash: "0xw", explorerUrl: "https://x/tx/0xw" };
     },
+    // required rail-io member: no route here carries a relayerUrl
+    submitWithdrawRelayed: async () => {
+      throw new Error("submitWithdrawRelayed must not be reached here");
+    },
   };
 }
 

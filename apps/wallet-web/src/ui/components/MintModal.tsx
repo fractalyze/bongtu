@@ -17,7 +17,7 @@ import {
   readGasBalance,
   walletErrorMessage,
   type Connection,
-} from "@bongtu/client/connection";
+} from "@bongtu/client-evm/connection";
 import { parseKkrw } from "@bongtu/client/money";
 import { shortenPubkey } from "../format.js";
 import { ExplorerLink } from "./ExplorerLink.js";

@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { CHAIN_NAME } from "@bongtu/core/network";
 
 import { runLogin, runTokenlessLogin, type RunLoginDeps } from "@bongtu/client/login";
-import { chainSwitchMessage, type Connection } from "@bongtu/client/connection";
+import type { Connection } from "@bongtu/client/rail";
 import type { WalletIdentity } from "@bongtu/client/derive";
 import { KEY_CHANGED_MESSAGE } from "@bongtu/client/login";
 import { SessionStore, type StorageLike } from "@bongtu/client/session";
@@ -62,10 +62,11 @@ test("login prompts the wallet onto the live chain before any signature is reque
 test("a refused chain switch aborts the login with nothing written", async () => {
   const calls: string[] = [];
   const deps = fakes(calls, {
-    // The text ensureChain actually surfaces for a declined EIP-3326 request
-    // (connection.ts chainSwitchMessage) — not an invented string.
+    // The text the rail's chain guard actually surfaces for a declined EIP-3326
+    // request (@bongtu/client-evm/connection chainSwitchMessage) — reproduced
+    // here because this rail-agnostic suite may not import the rail client.
     ensureChain: async () => {
-      throw new Error(chainSwitchMessage(Object.assign(new Error("user rejected"), { code: 4001 })));
+      throw new Error(`You declined the network switch. bongtu only works on ${CHAIN_NAME}.`);
     },
   });
   await assert.rejects(() => runLogin({ indexerUrl: "http://x" }, deps), new RegExp(CHAIN_NAME));

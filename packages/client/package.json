@@ -1,15 +1,13 @@
 {
   "name": "@bongtu/client",
   "version": "0.0.0",
-  "description": "bongtu client engine — the React-free, wagmi-free protocol layer both apps drive: key derivation + the in-memory KeyCache lock, login/session/key-binding, witness assembly (spend/deposit), the prove+submit flow orchestrations, viem submits over a `Connection`, indexer reads and refresh policy, and the kKRW money edge. App config (pool, token, explorer, prover) is threaded in through each flow's ctx/deps seam — this package reads no env and imports no app config.",
+  "description": "bongtu client engine — the React-free, rail-agnostic protocol layer both apps drive: key derivation core + the in-memory KeyCache lock, login/session/key-binding, witness assembly (spend/deposit/consumer), the prove+submit flow orchestrations over the structural rail seam (src/rail.ts), indexer reads and refresh policy, and the kKRW money edge. Rail io (viem submits, the wallet Connection edge, the EIP-712 seed) lives in @bongtu/client-evm; this package's dependency closure carries NO rail SDK (gated by test/railFree.test.ts). App config (pool, token, explorer, prover) is threaded in through each flow's ctx/deps seam — this package reads no env and imports no app config.",
   "type": "module",
   "license": "Apache-2.0",
   "private": true,
   "exports": {
     "./activity": "./src/scan/activity.ts",
     "./balance": "./src/scan/balance.ts",
-    "./chain": "./src/io/chain.ts",
-    "./connection": "./src/io/connection/index.ts",
     "./consumer": "./src/ops/consumer/index.ts",
     "./deposit": "./src/ops/deposit.ts",
     "./derive": "./src/keys/derive.ts",
@@ -18,13 +16,11 @@
     "./keyCache": "./src/keys/keyCache.ts",
     "./login": "./src/session/login.ts",
     "./money": "./src/money.ts",
+    "./rail": "./src/rail.ts",
     "./refresh": "./src/scan/refresh.ts",
-    "./relayer": "./src/io/relayer.ts",
     "./selfscan": "./src/scan/selfscan/index.ts",
     "./session": "./src/session/session.ts",
-    "./spend": "./src/ops/spend/index.ts",
-    "./stealthFunds": "./src/ops/stealthFunds.ts",
-    "./stealthKeys": "./src/keys/stealthKeys.ts"
+    "./spend": "./src/ops/spend/index.ts"
   },
   "scripts": {
     "test": "node --import tsx --test test/*.test.ts",
@@ -32,7 +28,7 @@
   },
   "dependencies": {
     "@bongtu/core": "*",
-    "viem": "^2.55.10"
+    "@noble/hashes": "^1.8.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

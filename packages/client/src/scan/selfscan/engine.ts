@@ -1,7 +1,7 @@
 // scan/selfscan/engine.ts — the pure, PRNG-free event-scan pass: viewTag prefilter,
 // decaps + open, leaf-match, spent flags (split from selfscan.ts; the subpath
 // @bongtu/client/selfscan re-exports everything).
-import { hexToBytes } from "viem";
+import { kemHexToBytes } from "@bongtu/core/kem";
 import {
   commitment,
   nullifier,
@@ -198,7 +198,7 @@ export function scanEventsPass(events: FeedEvent[], identity: ConsumerWalletIden
           ecdhPublicKey: eph,
           viewPriv,
           kemDk,
-          kemCiphertext: hexToBytes(kemHex as `0x${string}`),
+          kemCiphertext: kemHexToBytes(kemHex),
           encryptionNonce: nonce,
           index: outIndex, // the §3.5 nonce + i rule, uniform across all five
         });

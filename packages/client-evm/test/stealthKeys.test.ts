@@ -7,14 +7,14 @@ import assert from "node:assert/strict";
 import { SUBGROUP_ORDER } from "@bongtu/core/babyjub";
 import { SECP256K1_ORDER, deriveStealthAddress, scanStealthAnnouncement } from "@bongtu/core/stealth";
 import { scalarFromSignature } from "@bongtu/client/derive";
-import type { KeyDerivationTypedData } from "@bongtu/client/derive";
-import type { Connection } from "@bongtu/client/connection";
+import type { KeyDerivationTypedData } from "@bongtu/client-evm/derive";
+import type { Connection } from "@bongtu/client-evm/connection";
 import {
   prepareStealthDestination,
   stealthKeysFromKdfSignature,
   stealthKeyTypedData,
-} from "@bongtu/client/stealthKeys";
-import { discoverStealthFunds, exportStealthFundKey } from "@bongtu/client/stealthFunds";
+} from "@bongtu/client-evm/stealthKeys";
+import { discoverStealthFunds, exportStealthFundKey } from "@bongtu/client-evm/stealthFunds";
 import { KEY_DERIVATION } from "@bongtu/client/identity";
 import type { WithdrawAnnouncementRecord } from "@bongtu/core/indexerApi";
 

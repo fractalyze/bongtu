@@ -4,7 +4,7 @@
 // goes through the shared createKeyCache, so the console derives exactly the
 // wallet's key for the same account and carries the stealth seam by construction.
 
-import { createKeyCache } from "@bongtu/client/keyCache";
+import { createKeyCache } from "@bongtu/client-evm/keyCache";
 import { walletEdge } from "./connect.js";
 
 export const keyCache = createKeyCache(walletEdge);
