@@ -28,8 +28,9 @@
     "test:history": "node --import tsx --test test/history.test.ts",
     "test:consumer": "node --import tsx test/consumer.test.ts",
     "test:solana": "node --import tsx test/solana.test.ts",
+    "test:alarms": "node --import tsx --test test/alarms.test.ts",
     "test:persist": "node --import tsx --test test/persist.test.ts",
-    "test:unit": "npm run test:tree && npm run test:disclosure && npm run test:ingest && npm run test:projection && npm run test:consumer && npm run test:config && npm run test:viewtoken && npm run test:names && npm run test:announcements && npm run test:portal && npm run test:derivehistory && npm run test:history && npm run test:persist",
+    "test:unit": "npm run test:tree && npm run test:disclosure && npm run test:alarms && npm run test:ingest && npm run test:projection && npm run test:consumer && npm run test:config && npm run test:viewtoken && npm run test:names && npm run test:announcements && npm run test:portal && npm run test:derivehistory && npm run test:history && npm run test:persist",
     "test:pg": "bash test/pg_integration.sh",
     "typecheck": "tsc --noEmit",
     "test:portal": "node --import tsx --test test/portal.test.ts"

@@ -49,6 +49,7 @@ import { base58ToHex } from "@bongtu/core/solana";
 import { SolanaIndexer } from "./solana/ingest.js";
 import { SolanaRpcIo } from "./solana/rpc.js";
 import { startApi } from "./api/router.js";
+import { currentAlarms } from "./alarms.js";
 
 async function main(): Promise<void> {
   // Postgres-only (U-I4): refuse to boot without DATABASE_URL — no silent
@@ -92,7 +93,7 @@ async function main(): Promise<void> {
   }
   await ix.ingest();
   const hd = await ix.head();
-  console.log(`ingested to head: root=${hd.root} nextLeafIndex=${hd.nextLeafIndex} events=${ix.store.allEvents().length} alarms=${ix.store.getAlarms().length}`);
+  console.log(`ingested to head: root=${hd.root} nextLeafIndex=${hd.nextLeafIndex} events=${ix.store.allEvents().length} alarms=${currentAlarms(ix, Math.floor(Date.now() / 1000)).length}`);
 
   const api = await startApi(ix, port);
   const arbiterEndpoints = ix.arbiterMode ? " /notes?owner= /history?owner= /auth" : "";
