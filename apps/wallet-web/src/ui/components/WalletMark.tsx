@@ -4,7 +4,7 @@
 // the fox is drawn ONLY when the provider identified itself as MetaMask.
 
 import type { ReactNode } from "react";
-import type { WalletDescription } from "../../lib/walletBrand.js";
+import type { WalletDescription } from "@bongtu/ui/walletBrand";
 import { IconWallet, MetaMaskFox } from "./icons.js";
 
 export function WalletMark({

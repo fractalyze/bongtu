@@ -19,7 +19,7 @@ import { normalizeName, registerName, resolveName } from "@bongtu/core/indexerAp
 import { buildNameRegistrationV2 } from "@bongtu/core/indexerApi";
 import { isConsumerIdentity } from "@bongtu/client/selfscan";
 import { selfConsumerRecipient } from "@bongtu/client/consumer";
-import { keyCache } from "../../lib/keyCache.js";
+import { keyCache } from "@bongtu/ui/keyCache";
 import { consumerErrorMessage } from "../../lib/errors.js";
 import { opGate, OP_IN_FLIGHT_MESSAGE } from "../actionMachine.js";
 import {

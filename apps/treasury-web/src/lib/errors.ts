@@ -18,7 +18,7 @@ import { walletErrorMessage } from "@bongtu/client/connection";
 import { classifyChainFailure, failureCopy, type FailureCopyTable } from "@bongtu/core/errors";
 import { CHAIN_NAME } from "@bongtu/core/network";
 
-export const WALLET_FAILURE_COPY: FailureCopyTable = {
+export const TREASURY_FAILURE_COPY: FailureCopyTable = {
   user_rejected: (_failure, e) => walletErrorMessage(e),
   insufficient_gas: (_failure, e) => walletErrorMessage(e),
   chain_switch: (failure) =>
@@ -32,6 +32,6 @@ export const WALLET_FAILURE_COPY: FailureCopyTable = {
 
 /** The wallet's message for a failed wallet/RPC interaction, routed through
  *  the exhaustive table above. The op screens' one error edge. */
-export function walletWebErrorMessage(e: unknown): string {
-  return failureCopy(WALLET_FAILURE_COPY, classifyChainFailure(e), e);
+export function treasuryErrorMessage(e: unknown): string {
+  return failureCopy(TREASURY_FAILURE_COPY, classifyChainFailure(e), e);
 }

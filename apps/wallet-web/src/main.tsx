@@ -18,7 +18,7 @@ import { RainbowKitProvider } from "@rainbow-me/rainbowkit";
 import "@rainbow-me/rainbowkit/styles.css";
 import { Analytics } from "@vercel/analytics/react";
 import { isMobileDevice } from "@bongtu/client/device";
-import { wagmiConfig } from "./lib/wagmi.js";
+import { wagmiConfig } from "@bongtu/ui/wagmi";
 import { App } from "./ui/App.js";
 import "./styles.css";
 

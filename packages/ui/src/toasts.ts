@@ -8,7 +8,7 @@
 // (useCopyFeedback, the global handlers below) must reach the same queue the
 // <ToastHost> in App renders.
 
-import { ToastQueue } from "@bongtu/ui/toastQueue";
+import { ToastQueue } from "./toastQueue.js";
 import { describeThrown } from "@bongtu/core/errors";
 
 export const toasts = new ToastQueue();

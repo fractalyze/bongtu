@@ -27,13 +27,13 @@ import {
   restoreConnection,
   warmReconnect,
   watchWallet,
-} from "../lib/wagmi.js";
+} from "@bongtu/ui/wagmi";
 import { runTokenlessLogin } from "@bongtu/client/login";
 import { ConsumerOps } from "@bongtu/client/consumer";
 import { KEY_DERIVATION, deriveLoginIdentity } from "@bongtu/client/identity";
-import { keyCache } from "../lib/keyCache.js";
+import { keyCache } from "@bongtu/ui/keyCache";
 import { proveInBrowser } from "../lib/prove.js";
-import type { WalletDescription } from "../lib/walletBrand.js";
+import type { WalletDescription } from "@bongtu/ui/walletBrand";
 import { sumUnspent } from "@bongtu/client/balance";
 import {
   EMPTY_SCAN_STATE,
@@ -53,7 +53,7 @@ import {
   loadConsumerSession,
   saveConsumerSession,
 } from "../lib/sessionStore.js";
-import { markLockIntroSeen, shouldShowLockIntro } from "../lib/lockIntro.js";
+import { markLockIntroSeen, shouldShowLockIntro } from "@bongtu/ui/lockIntro";
 import {
   skipBaseline,
   pollForAction,
@@ -61,7 +61,7 @@ import {
   AUTO_REFRESH_MS,
   type OwnerSnapshot,
 } from "@bongtu/client/refresh";
-import { installGlobalErrorSurface, toastError, toasts } from "../lib/toasts.js";
+import { installGlobalErrorSurface, toastError, toasts } from "@bongtu/ui/toasts";
 import { ToastHost } from "@bongtu/ui/Toast";
 import { useHashRoute, navigate, useWalletDescription } from "./hooks.js";
 import { Onboarding } from "./screens/Onboarding.js";

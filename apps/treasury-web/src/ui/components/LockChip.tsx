@@ -14,7 +14,7 @@
 // signature already produced). Ten idle minutes, a reload, and signing out show Locked.
 
 import type { ReactNode } from "react";
-import { NEUTRAL_WALLET_NAME } from "../../lib/walletBrand.js";
+import { NEUTRAL_WALLET_NAME } from "@bongtu/ui/walletBrand";
 import { useWalletUnlocked } from "../hooks.js";
 import { IconLock, IconUnlock } from "./icons.js";
 

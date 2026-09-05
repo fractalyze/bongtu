@@ -17,7 +17,7 @@ import {
   hasSeenLockIntro,
   markLockIntroSeen,
   shouldShowLockIntro,
-} from "../src/lib/lockIntro.js";
+} from "@bongtu/ui/lockIntro";
 import type { StorageLike } from "@bongtu/client/session";
 import { LockIntro } from "../src/ui/screens/LockIntro.js";
 
