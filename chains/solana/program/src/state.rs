@@ -14,17 +14,24 @@ pub const TAG_TREE_STATE: u8 = 2;
 pub const TAG_DISBURSE_BATCH: u8 = 3;
 
 /// Family-enable flags in `PoolConfig` (SOLR §2.1: the module-registry
-/// analogue). Bit assignment is part of the deploy profile. Bits 4..6 are the
-/// S3 enterprise set (OPEN-1 decided on issue #8: deposit, withdraw,
-/// disburse256) — enterprise flags additionally require a nonzero arbiter key
-/// in the config (a consumer-only profile cannot enable them by flag alone).
-pub const FAMILY_DEPOSIT_PRIV: u8 = 1 << 0;
-pub const FAMILY_TRANSFER_PRIV: u8 = 1 << 1;
-pub const FAMILY_TRANSFER10X2_PRIV: u8 = 1 << 2;
-pub const FAMILY_WITHDRAW_PRIV: u8 = 1 << 3;
-pub const FAMILY_DEPOSIT: u8 = 1 << 4;
-pub const FAMILY_WITHDRAW: u8 = 1 << 5;
-pub const FAMILY_DISBURSE256: u8 = 1 << 6;
+/// analogue). Bit assignment is part of the deploy profile. Bits 4..8 are the
+/// S3 enterprise set (OPEN-1 decided on issue #8: the FULL enterprise family —
+/// deposit, withdraw, disburse256, transfer, transfer10x2) — enterprise flags
+/// additionally require a nonzero arbiter key in the config (a consumer-only
+/// profile cannot enable them by flag alone).
+///
+/// Flags widened u8 -> u16 in S3 pass 2 (2026-09-05): bit 7 would have been
+/// the last u8 bit, and the field absorbs the adjacent reserved byte, so
+/// existing config images (reserved byte always 0) read identically.
+pub const FAMILY_DEPOSIT_PRIV: u16 = 1 << 0;
+pub const FAMILY_TRANSFER_PRIV: u16 = 1 << 1;
+pub const FAMILY_TRANSFER10X2_PRIV: u16 = 1 << 2;
+pub const FAMILY_WITHDRAW_PRIV: u16 = 1 << 3;
+pub const FAMILY_DEPOSIT: u16 = 1 << 4;
+pub const FAMILY_WITHDRAW: u16 = 1 << 5;
+pub const FAMILY_DISBURSE256: u16 = 1 << 6;
+pub const FAMILY_TRANSFER: u16 = 1 << 7;
+pub const FAMILY_TRANSFER10X2: u16 = 1 << 8;
 
 /// Arbiter epoch on this rail. Key rotation (`rotateArbiter`) is not yet a
 /// Solana instruction, so every batch records the genesis epoch — dated
@@ -50,8 +57,7 @@ pub const SEED_VAULT_AUTHORITY: &[u8] = b"authority";
 /// PoolConfig layout:
 ///   0      tag (1)
 ///   1      version (1)
-///   2      family_flags (1)
-///   3      reserved (1)
+///   2..4   family_flags (u16 LE; was u8 + reserved byte pre S3 pass 2)
 ///   4..36  admin
 ///   36..68 mint
 ///   68..100 vault
@@ -106,9 +112,9 @@ pub fn check_pool_config(config: &AccountInfo, program_id: &Pubkey) -> Result<()
     Ok(())
 }
 
-pub fn config_family_flags(config: &AccountInfo) -> Result<u8, PoolError> {
+pub fn config_family_flags(config: &AccountInfo) -> Result<u16, PoolError> {
     let data = config.try_borrow_data().map_err(|_| PoolError::InvalidAccount)?;
-    Ok(data[CONFIG_OFF_FLAGS])
+    Ok(u16::from_le_bytes([data[CONFIG_OFF_FLAGS], data[CONFIG_OFF_FLAGS + 1]]))
 }
 
 fn config_field32(config: &AccountInfo, off: usize) -> Result<[u8; 32], PoolError> {

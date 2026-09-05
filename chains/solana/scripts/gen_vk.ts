@@ -37,6 +37,8 @@ const CIRCUITS: { name: string; snake: string; nPublic: number; vkeyPath?: strin
   { name: "withdrawPriv", snake: "withdraw_priv", nPublic: 16 },
   { name: "deposit", snake: "deposit", nPublic: 19 },
   { name: "withdraw", snake: "withdraw", nPublic: 27 },
+  { name: "transfer", snake: "transfer", nPublic: 37 },
+  { name: "transfer10x2", snake: "transfer10x2", nPublic: 68 },
   {
     name: "disburse256",
     snake: "disburse256",

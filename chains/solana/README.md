@@ -6,7 +6,8 @@ S2 milestone — the `bongtu_pool` program with the full consumer P2P op set:
 verify over alt_bn128 syscalls + sol_poseidon IMT + nullifier/root PDAs + SPL
 escrow motion + self-CPI events) plus the five mollusk gate families
 (SOLR §3.1.3) — and its S3 milestone: the enterprise op set decided under
-OPEN-1 (`deposit`, `withdraw`, `disburse256`) with the 1-tx disclosureHash
+OPEN-1 as the FULL family (`deposit`, `withdraw`, `transfer`,
+`transfer10x2`, `disburse256`) with the 1-tx disclosureHash
 disburse (SOLR §3.3): the chain persists the BINDING (`DisburseBatch` PDA);
 the 65,728 B disclosure blob is institution-served and refold-verifiable
 (gate 6). The ~19-tx consensus-forced-DA variant stays documented only
@@ -42,12 +43,16 @@ Event self-CPI = 0xF0; family tag in the event = discriminator - 1.
 | `deposit` (enterprise) | 6 | proof + 17 carried publics + 1×1088 = 1,888 B | pulls pub[0] payer→vault |
 | `withdraw` (enterprise) | 7 | proof + 22 carried publics + 1×1088 + 33 B stealth pair = 2,081 B | pushes pub[0] vault→proof-bound recipient |
 | `disburse256` (enterprise) | 8 | proof + 8 carried publics + 1×1088 = 1,600 B (the SOLR §3.3.1 ~1.7 KB claim, gate-4-pinned) | — |
+| `transfer` (enterprise) | 9 | proof + 33 carried publics + 1×1088 = 2,400 B | — |
+| `transfer10x2` (enterprise) | 10 | proof + 56 carried publics + 1×1088 = 3,136 B (widest public vector on the rail; still under transfer10x2_priv — one kem ct, not two) | — |
 
 Per-op account layouts are in each module's doc comment. The vault authority
 PDA is `["authority", config]`; the vault address is config-bound.
 
-Enterprise ops (family flag bits 4..6) additionally inject the arbiter bjj
-key from `PoolConfig` into the public vector before verify — a proof made for
+Enterprise ops (family flag bits 4..8; flags are u16 LE at config bytes 2..4
+since S3 pass 2 — bit 8 outgrew the u8, so the field absorbed the adjacent
+reserved byte; existing images read identically) additionally inject the
+arbiter bjj key from `PoolConfig` into the public vector before verify — a proof made for
 any other key fails (`InvalidProof`), and a zeroed key (consumer-only
 profile) refuses with `ArbiterKeyUnset` before verify. `disburse256` attaches
 its in-circuit 256-leaf subtree at LOG_B (from config `B`) and persists the
@@ -129,26 +134,31 @@ node_modules/.bin/tsx chains/solana/scripts/gen_enterprise_vectors.ts        # S
 | `deposit` | 233,774 | 246,000 | — |
 | `withdraw` | 264,215 | 278,000 | — |
 | `disburse256` | 202,752 | 213,000 | ~640k (S0 attach line was per-leaf; the O(LOG_B) close makes attach ~30k) |
+| `transfer` | 322,195 | 339,000 | — |
+| `transfer10x2` | 491,759 | 517,000 | — (merge fixture: 68-public verify + 11 PDA creates, ~35% of cap) |
 
 Measured on mollusk-svm 0.15.1 (Agave 4.x runtime cost model), committed
 realproof fixtures, full paths (verify + appends/attach + PDA creates +
-escrow CPI + self-CPI event). Worst op ≈ 24% of the 1.4M CU cap; the full
-256-out disburse is CHEAPER than a consumer transfer (~14% of cap).
+escrow CPI + self-CPI event). Worst op is the enterprise transfer10x2 at
+~35% of the 1.4M CU cap; the full 256-out disburse is CHEAPER than a
+consumer transfer (~14% of cap).
 
 ## Tx size (gate 4, worst-case shape per op, Transaction v1 = 4,096 B)
 
 | op | worst-case tx | headroom |
 |---|---|---|
-| `deposit_priv` | 3,423 B | 673 B |
-| `transfer_priv` | 3,487 B | 609 B |
-| `transfer10x2_priv` | 4,007 B (10 nullifier PDAs) | **89 B** — the §3.1.2 tightest op; next lever is an address lookup table |
-| `withdraw_priv` | 2,404 B | 1,692 B |
-| `deposit` | 2,367 B | 1,729 B |
-| `withdraw` | 2,692 B | 1,404 B |
-| `disburse256` | 2,079 B | 2,017 B |
+| `deposit_priv` | 3,435 B | 661 B |
+| `transfer_priv` | 3,499 B | 597 B |
+| `transfer10x2_priv` | 4,019 B (10 nullifier PDAs) | **77 B** — the §3.1.2 tightest op; next lever is an address lookup table |
+| `withdraw_priv` | 2,416 B | 1,680 B |
+| `deposit` | 2,379 B | 1,717 B |
+| `withdraw` | 2,704 B | 1,392 B |
+| `disburse256` | 2,091 B | 2,005 B |
+| `transfer` | 2,891 B | 1,205 B |
+| `transfer10x2` | 3,891 B (10 nullifier PDAs) | 205 B — widest publics but ONE kem ct, so the consumer 10x2 stays the tightest wire (ordering gate-4-pinned) |
 
-Computed from the consensus wire format (v0 message, 1 signature, ComputeBudget
-ix included) over the real instruction shapes; the gate also re-checks the
+Computed from the consensus wire format (v0 message, 1 signature, both
+ComputeBudget ixs — unit limit + unit price — included) over the real instruction shapes; the gate also re-checks the
 fixture-built instructions.
 
 ## Fixtures (SOLR §5.2)
@@ -163,8 +173,10 @@ re-proven Solana-recipient fixture
 same inputs, only pub[15] rebound); the EVM withdraw fixture still replays at
 verify level (accept + reject-tamper) against the generated VK.
 
-Enterprise (S3): `deposit`/`withdraw` replay `chains/evm/test/fixtures/
-realproofs.json` at op level with ZERO re-proving — including withdraw: its
+Enterprise (S3): `deposit`/`withdraw`/`transfer`/`transfer10x2` replay
+`chains/evm/test/fixtures/realproofs.json` at op level with ZERO re-proving
+(pass 2 note: the 10x2 fixture is the MERGE entry — all 10 inputs real — so
+the op-level replay drives the full 10-nullifier-PDA shape) — including withdraw: its
 proof-bound uint160 recipient IS a reachable token-account address under
 truncate-253, so the harness places the recipient token account at
 `BE32(pub[26])` (SOLR §5.2 S3 note). `disburse256` replays the committed GPU

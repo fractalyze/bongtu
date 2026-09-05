@@ -208,11 +208,12 @@ pub fn tree_account_data(config_key: &Pubkey, snap: &TreeSnapshot) -> Vec<u8> {
 /// fields zeroed, all four family flags on unless a test clears one). The
 /// mint/vault fields carry the harness MINT/VAULT bytes so the escrow ops'
 /// config-binding checks are exercised for real.
-pub fn config_account_data(flags: u8) -> Vec<u8> {
+pub fn config_account_data(flags: u16) -> Vec<u8> {
     let mut data = vec![0u8; state::POOL_CONFIG_LEN];
     data[0] = state::TAG_POOL_CONFIG;
     data[1] = 1;
-    data[state::CONFIG_OFF_FLAGS] = flags;
+    data[state::CONFIG_OFF_FLAGS..state::CONFIG_OFF_FLAGS + 2]
+        .copy_from_slice(&flags.to_le_bytes());
     data[4..36].copy_from_slice(&[0xAA; 32]); // admin: opaque to the ops
     data[state::CONFIG_OFF_MINT..state::CONFIG_OFF_MINT + 32].copy_from_slice(&MINT_BYTES);
     data[state::CONFIG_OFF_VAULT..state::CONFIG_OFF_VAULT + 32].copy_from_slice(&VAULT_BYTES);
@@ -639,8 +640,9 @@ fn shortvec_len(n: usize) -> usize {
     }
 }
 
-/// Exact serialized size of the v0 transaction wrapping `op_ix` plus one
-/// ComputeBudget SetComputeUnitLimit instruction, one fee-payer signature and
+/// Exact serialized size of the v0 transaction wrapping `op_ix` plus the two
+/// ComputeBudget instructions a realistic submission carries
+/// (SetComputeUnitLimit + SetComputeUnitPrice), one fee-payer signature and
 /// no address-lookup tables — computed from the consensus wire format
 /// (signatures shortvec + 64/sig; header 3 B; account keys shortvec + 32/key;
 /// blockhash 32 B; instructions shortvec + per-ix program index, accounts
@@ -652,14 +654,16 @@ fn shortvec_len(n: usize) -> usize {
 /// ComputeBudget program id.
 pub fn v0_tx_size(op_accounts: usize, op_data_len: usize) -> usize {
     let keys = op_accounts + 1;
-    let cb_ix = 1 + shortvec_len(0) + shortvec_len(5) + 5;
+    let cb_limit_ix = 1 + shortvec_len(0) + shortvec_len(5) + 5;
+    let cb_price_ix = 1 + shortvec_len(0) + shortvec_len(9) + 9;
     let op_ix = 1 + shortvec_len(op_accounts) + op_accounts + shortvec_len(op_data_len) + op_data_len;
     let legacy = (shortvec_len(1) + 64)
         + 3
         + (shortvec_len(keys) + 32 * keys)
         + 32
-        + shortvec_len(2)
-        + cb_ix
+        + shortvec_len(3)
+        + cb_limit_ix
+        + cb_price_ix
         + op_ix;
     legacy + 1 + shortvec_len(0) // version byte + empty ALT vec
 }

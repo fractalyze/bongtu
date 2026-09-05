@@ -27,6 +27,8 @@ pub const FAMILY_TAG_WITHDRAW_PRIV: u8 = 4;
 pub const FAMILY_TAG_DEPOSIT: u8 = 5;
 pub const FAMILY_TAG_WITHDRAW: u8 = 6;
 pub const FAMILY_TAG_DISBURSE256: u8 = 7;
+pub const FAMILY_TAG_TRANSFER: u8 = 8;
+pub const FAMILY_TAG_TRANSFER10X2: u8 = 9;
 
 /// Payload: [EVENT_DISCRIMINATOR, family, start_leaf_index u64 LE,
 /// leaf_count u8, resulting_root 32B BE, nf_count u8, nullifiers 32B BE each]

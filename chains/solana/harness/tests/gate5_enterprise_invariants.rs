@@ -1,6 +1,6 @@
 //! Gate 5, enterprise rows (SOLR §3.1.3 #5): the invariant-gate conformance
-//! matrix for the S3 op set — deposit, withdraw, disburse256 — complete per
-//! op (the S2 review rule): double-spend, unknown root, zero leaf/nullifier,
+//! matrix for the S3 op set — deposit, withdraw, disburse256, and the pass-2
+//! transfer + transfer10x2 — complete per op (the S2 review rule): double-spend, unknown root, zero leaf/nullifier,
 //! kem-ct shape, family flag, canonicality, escrow belts, PLUS the enterprise
 //! key-injection rows: a config holding a DIFFERENT arbiter key fails the
 //! proof (the SOLR §3.3.1 discipline — the prover never controls the key),
@@ -14,9 +14,11 @@ use {
     bongtu_solana_harness::{
         carried_offset,
         enterprise::{
-            build_disburse256_env, build_ent_deposit_env, build_ent_withdraw_env,
-            load_disburse256_fixture, load_ent_deposit_fixture, load_ent_withdraw_fixture,
-            set_enterprise_batch_b, set_enterprise_config, ENTERPRISE_FLAGS,
+            build_disburse256_env, build_ent_deposit_env, build_ent_transfer10x2_env,
+            build_ent_transfer_env, build_ent_withdraw_env, load_disburse256_fixture,
+            load_ent_deposit_fixture, load_ent_transfer10x2_fixture, load_ent_transfer_fixture,
+            load_ent_withdraw_fixture, set_enterprise_batch_b, set_enterprise_config,
+            ENTERPRISE_FLAGS,
         },
         hex_u64, program_id, token_account, token_amount, tree_account_data, Env, MINT_BYTES,
     },
@@ -417,5 +419,311 @@ fn disburse256_prefunded_batch_pda_does_not_block() {
         tree.data,
         tree_account_data(&env.config_key, &fx.post_state),
         "tree did not advance on the pre-funded-batch path"
+    );
+}
+
+// --- transfer (enterprise, S3 pass 2) rows -----------------------------------
+// Carried-public map: [27..28]=nullifiers [29]=root [30..31]=oc [32]=nonce.
+
+#[test]
+fn ent_transfer_double_spend_rejected() {
+    let fx = load_ent_transfer_fixture();
+    let mut env = build_ent_transfer_env(&fx);
+    let marker = env.existing_marker();
+    let nf0 = env.nf_pdas[0];
+    env.set_account(&nf0, marker);
+    expect_reject(&env, PoolError::NullifierAlreadyUsed);
+}
+
+#[test]
+fn ent_transfer_in_tx_duplicate_nullifier_rejected() {
+    let fx = load_ent_transfer_fixture();
+    let mut env = build_ent_transfer_env(&fx);
+    // carried[28] (nullifier 1) := carried[27] (nullifier 0).
+    let (src, dst) = (carried_offset(27), carried_offset(28));
+    let nf0: Vec<u8> = env.instruction.data[src..src + 32].to_vec();
+    env.instruction.data[dst..dst + 32].copy_from_slice(&nf0);
+    expect_reject(&env, PoolError::NullifierAlreadyUsed);
+}
+
+#[test]
+fn ent_transfer_unknown_root_rejected() {
+    let fx = load_ent_transfer_fixture();
+    let mut env = build_ent_transfer_env(&fx);
+    let spent = env.spent_root_pda;
+    env.set_account(&spent, Account::default());
+    expect_reject(&env, PoolError::UnknownRoot);
+}
+
+#[test]
+fn ent_transfer_mint_claiming_membership_rejected() {
+    let fx = load_ent_transfer_fixture();
+    let mut env = build_ent_transfer_env(&fx);
+    // Zero BOTH nullifiers (carried[27..28]) while the spent root stays
+    // nonzero: an op spending nothing must claim no membership.
+    for i in [27usize, 28] {
+        let off = carried_offset(i);
+        env.instruction.data[off..off + 32].fill(0);
+    }
+    expect_reject(&env, PoolError::UnknownRoot);
+}
+
+#[test]
+fn ent_transfer_missing_nullifier_account_rejected() {
+    let fx = load_ent_transfer_fixture();
+    let mut env = build_ent_transfer_env(&fx);
+    // 2 nonzero nullifiers but only 1 PDA account supplied.
+    env.instruction.accounts.pop();
+    expect_reject(&env, PoolError::MissingNullifierAccount);
+}
+
+#[test]
+fn ent_transfer_zero_output_commitment_rejected() {
+    let fx = load_ent_transfer_fixture();
+    let mut env = build_ent_transfer_env(&fx);
+    let off = carried_offset(30); // carried[30] == pub[32] (oc 0)
+    env.instruction.data[off..off + 32].fill(0);
+    expect_reject(&env, PoolError::ZeroOutputCommitment);
+}
+
+#[test]
+fn ent_transfer_wrong_kem_ciphertext_length_rejected() {
+    let fx = load_ent_transfer_fixture();
+    let mut env = build_ent_transfer_env(&fx);
+    env.instruction.data.pop();
+    expect_reject(&env, PoolError::WrongKemCiphertextLength);
+}
+
+#[test]
+fn ent_transfer_family_flag_off_rejected() {
+    let fx = load_ent_transfer_fixture();
+    let mut env = build_ent_transfer_env(&fx);
+    let (x, y) = arbiter_of(&env);
+    set_enterprise_config(&mut env, ENTERPRISE_FLAGS & !state::FAMILY_TRANSFER, &x, &y);
+    expect_reject(&env, PoolError::FamilyDisabled);
+}
+
+#[test]
+fn ent_transfer_non_canonical_public_rejected() {
+    let fx = load_ent_transfer_fixture();
+    let mut env = build_ent_transfer_env(&fx);
+    // carried[0] := r on the wire — byte-equality, not mod-p (OPMOD §4.4).
+    let off = carried_offset(0);
+    env.instruction.data[off..off + 32].copy_from_slice(&R_BE);
+    expect_reject(&env, PoolError::PublicInputNotCanonical);
+}
+
+#[test]
+fn ent_transfer_wrong_arbiter_key_fails_verify() {
+    let fx = load_ent_transfer_fixture();
+    let mut env = build_ent_transfer_env(&fx);
+    let (_, y) = arbiter_of(&env);
+    set_enterprise_config(&mut env, ENTERPRISE_FLAGS, &OTHER_KEY, &y);
+    expect_reject(&env, PoolError::InvalidProof);
+}
+
+#[test]
+fn ent_transfer_arbiter_key_unset_rejected() {
+    let fx = load_ent_transfer_fixture();
+    let mut env = build_ent_transfer_env(&fx);
+    set_enterprise_config(&mut env, ENTERPRISE_FLAGS, &[0u8; 32], &[0u8; 32]);
+    expect_reject(&env, PoolError::ArbiterKeyUnset);
+}
+
+#[test]
+fn ent_transfer_prefunded_marker_pda_does_not_block() {
+    // The griefing-DoS hardening (S2 review finding 1) on the enterprise
+    // path: nf PDA pre-funded below rent (top-up), new-root PDA above rent
+    // (skip-transfer) — the op must still land.
+    let fx = load_ent_transfer_fixture();
+    let mut env = build_ent_transfer_env(&fx);
+    let nf0 = env.nf_pdas[0];
+    env.set_account(
+        &nf0,
+        Account {
+            lamports: 500_000,
+            ..Account::default()
+        },
+    );
+    let new_root = env.new_root_pda;
+    env.set_account(
+        &new_root,
+        Account {
+            lamports: 1_000_000_000,
+            ..Account::default()
+        },
+    );
+    let result = env.mollusk.process_and_validate_instruction(
+        &env.instruction,
+        &env.accounts,
+        &[Check::success()],
+    );
+    for nf in &env.nf_pdas {
+        let acc = result.get_account(nf).expect("nullifier pda");
+        assert_eq!(acc.owner, program_id(), "nullifier PDA not claimed");
+        assert_eq!(acc.data.len(), 0);
+    }
+    let root_acc = result.get_account(&env.new_root_pda).expect("new root pda");
+    assert_eq!(root_acc.owner, program_id(), "new KnownRoot PDA not claimed");
+    let tree = result.get_account(&env.tree_key).expect("tree account");
+    assert_eq!(
+        tree.data,
+        tree_account_data(&env.config_key, &fx.post_state),
+        "tree did not advance on the pre-funded-PDA path"
+    );
+}
+
+// --- transfer10x2 (enterprise, S3 pass 2) rows -------------------------------
+// Carried-public map: [42..51]=nullifiers [52]=root [53..54]=oc [55]=nonce.
+// The merge fixture spends all 10 inputs, so the arity rows run at full width.
+
+#[test]
+fn ent_t10x2_double_spend_rejected() {
+    let fx = load_ent_transfer10x2_fixture();
+    let mut env = build_ent_transfer10x2_env(&fx);
+    // The LAST input (slot 9 of 10) already spent: the sequential loop
+    // reaches it only after accepting the first nine.
+    let marker = env.existing_marker();
+    let nf9 = env.nf_pdas[9];
+    env.set_account(&nf9, marker);
+    expect_reject(&env, PoolError::NullifierAlreadyUsed);
+}
+
+#[test]
+fn ent_t10x2_in_tx_duplicate_nullifier_rejected() {
+    let fx = load_ent_transfer10x2_fixture();
+    let mut env = build_ent_transfer10x2_env(&fx);
+    // carried[51] (nullifier slot 9) := carried[42] (slot 0) — NON-adjacent
+    // slots, so a regression to a neighbors-only duplicate check fails here.
+    let (src, dst) = (carried_offset(42), carried_offset(51));
+    let nf0: Vec<u8> = env.instruction.data[src..src + 32].to_vec();
+    env.instruction.data[dst..dst + 32].copy_from_slice(&nf0);
+    expect_reject(&env, PoolError::NullifierAlreadyUsed);
+}
+
+#[test]
+fn ent_t10x2_unknown_root_rejected() {
+    let fx = load_ent_transfer10x2_fixture();
+    let mut env = build_ent_transfer10x2_env(&fx);
+    let spent = env.spent_root_pda;
+    env.set_account(&spent, Account::default());
+    expect_reject(&env, PoolError::UnknownRoot);
+}
+
+#[test]
+fn ent_t10x2_mint_claiming_membership_rejected() {
+    let fx = load_ent_transfer10x2_fixture();
+    let mut env = build_ent_transfer10x2_env(&fx);
+    // Zero ALL TEN nullifiers while the spent root stays nonzero.
+    for i in 42..52usize {
+        let off = carried_offset(i);
+        env.instruction.data[off..off + 32].fill(0);
+    }
+    expect_reject(&env, PoolError::UnknownRoot);
+}
+
+#[test]
+fn ent_t10x2_missing_nullifier_account_rejected() {
+    let fx = load_ent_transfer10x2_fixture();
+    let mut env = build_ent_transfer10x2_env(&fx);
+    // 10 nonzero nullifiers but only 9 PDA accounts supplied.
+    env.instruction.accounts.pop();
+    expect_reject(&env, PoolError::MissingNullifierAccount);
+}
+
+#[test]
+fn ent_t10x2_zero_output_commitment_rejected() {
+    let fx = load_ent_transfer10x2_fixture();
+    let mut env = build_ent_transfer10x2_env(&fx);
+    let off = carried_offset(53); // carried[53] == pub[63] (oc 0)
+    env.instruction.data[off..off + 32].fill(0);
+    expect_reject(&env, PoolError::ZeroOutputCommitment);
+}
+
+#[test]
+fn ent_t10x2_wrong_kem_ciphertext_length_rejected() {
+    let fx = load_ent_transfer10x2_fixture();
+    let mut env = build_ent_transfer10x2_env(&fx);
+    env.instruction.data.pop();
+    expect_reject(&env, PoolError::WrongKemCiphertextLength);
+}
+
+#[test]
+fn ent_t10x2_family_flag_off_rejected() {
+    let fx = load_ent_transfer10x2_fixture();
+    let mut env = build_ent_transfer10x2_env(&fx);
+    let (x, y) = arbiter_of(&env);
+    set_enterprise_config(&mut env, ENTERPRISE_FLAGS & !state::FAMILY_TRANSFER10X2, &x, &y);
+    expect_reject(&env, PoolError::FamilyDisabled);
+}
+
+#[test]
+fn ent_t10x2_non_canonical_public_rejected() {
+    let fx = load_ent_transfer10x2_fixture();
+    let mut env = build_ent_transfer10x2_env(&fx);
+    let off = carried_offset(0);
+    env.instruction.data[off..off + 32].copy_from_slice(&R_BE);
+    expect_reject(&env, PoolError::PublicInputNotCanonical);
+}
+
+#[test]
+fn ent_t10x2_wrong_arbiter_key_fails_verify() {
+    let fx = load_ent_transfer10x2_fixture();
+    let mut env = build_ent_transfer10x2_env(&fx);
+    let (_, y) = arbiter_of(&env);
+    set_enterprise_config(&mut env, ENTERPRISE_FLAGS, &OTHER_KEY, &y);
+    expect_reject(&env, PoolError::InvalidProof);
+}
+
+#[test]
+fn ent_t10x2_arbiter_key_unset_rejected() {
+    let fx = load_ent_transfer10x2_fixture();
+    let mut env = build_ent_transfer10x2_env(&fx);
+    set_enterprise_config(&mut env, ENTERPRISE_FLAGS, &[0u8; 32], &[0u8; 32]);
+    expect_reject(&env, PoolError::ArbiterKeyUnset);
+}
+
+#[test]
+fn ent_t10x2_prefunded_marker_pda_does_not_block() {
+    // 10-PDA arity: pre-fund three SCATTERED nfs (slots 0, 4, 9) below rent
+    // and the new-root above rent; the op must still create the full marker
+    // run and advance the tree.
+    let fx = load_ent_transfer10x2_fixture();
+    let mut env = build_ent_transfer10x2_env(&fx);
+    for slot in [0usize, 4, 9] {
+        let nf = env.nf_pdas[slot];
+        env.set_account(
+            &nf,
+            Account {
+                lamports: 500_000,
+                ..Account::default()
+            },
+        );
+    }
+    let new_root = env.new_root_pda;
+    env.set_account(
+        &new_root,
+        Account {
+            lamports: 1_000_000_000,
+            ..Account::default()
+        },
+    );
+    let result = env.mollusk.process_and_validate_instruction(
+        &env.instruction,
+        &env.accounts,
+        &[Check::success()],
+    );
+    for nf in &env.nf_pdas {
+        let acc = result.get_account(nf).expect("nullifier pda");
+        assert_eq!(acc.owner, program_id(), "nullifier PDA not claimed");
+        assert_eq!(acc.data.len(), 0);
+    }
+    let root_acc = result.get_account(&env.new_root_pda).expect("new root pda");
+    assert_eq!(root_acc.owner, program_id(), "new KnownRoot PDA not claimed");
+    let tree = result.get_account(&env.tree_key).expect("tree account");
+    assert_eq!(
+        tree.data,
+        tree_account_data(&env.config_key, &fx.post_state),
+        "tree did not advance on the pre-funded-PDA path"
     );
 }
