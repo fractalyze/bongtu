@@ -23,7 +23,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { DEFAULTS, isSelfScan } from "../config.js";
-import { walletErrorMessage, type Connection } from "@bongtu/client/connection";
+import type { Connection } from "@bongtu/client/connection";
+import { walletWebErrorMessage } from "../lib/errors.js";
 import {
   endWalletConnection,
   requireConnection,
@@ -460,7 +461,7 @@ export function App(): ReactNode {
         setLockIntro(shouldShowLockIntro("connect"));
         navigate("home");
       } catch (e) {
-        setConnectError(walletErrorMessage(e));
+        setConnectError(walletWebErrorMessage(e));
       } finally {
         setConnecting(false);
       }
