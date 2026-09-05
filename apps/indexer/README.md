@@ -19,6 +19,11 @@ response bodies against them.
   `GET /notes?owner=` plus within-batch `/path`. Institution-internal by nature — the
   key is held in memory only, never logged, never returned. See the repo
   [`CLAUDE.md`](../../CLAUDE.md) "Indexer modes" rule.
+  **EVM backend only for now**: with `SOLANA_RPC` set, an `AUTHORITY_KEY` boot is
+  REFUSED with a pinned error ("arbiter surfaces are not yet supported on the Solana
+  backend") — the Solana backend builds no arbiter ledger, so serving would mean
+  `/notes`/`/history` 503ing forever and envelope alarms silently vanishing, exactly
+  the silent degrade the KEM boot guard exists to refuse.
 
 ## Endpoints
 
@@ -29,6 +34,7 @@ response bodies against them.
 | `GET /path/{leafIndex}` | `{ leafIndex, siblings[], pathIndices[], root }`; 404 out-of-range; **422** for an ENTERPRISE disburse-batch interior leaf in public mode (served in arbiter mode — to the leaf's proven owner only: `/notes` read-auth + ownership, else 400/401/403). A CONSUMER (`disbursePriv`) batch interior serves **auth-free in both modes**: its commitments were published as calldata and fold-checked against the proof's `subtreeRoot` before the fill (OPMOD §4.4), the same privacy class as single-append leaves |
 | `GET /alarms` | one discriminated feed: every non-passing disclosure (`{type:"disclosure"}`, status `mismatch` / `unverifiable` / `withheld` — the consumer §4.4 checks, incl. the canonical-form and fold-to-subtreeRoot failures, classify into the same statuses) plus, arbiter mode only, envelope cross-check failures (`{type:"envelope"}`). kem-`pending`/`withheld` is NOT an alarm (nothing on-chain-provable was violated) — it rides `/events` |
 | `GET /nullifiers` | `string[]` — the spent-nullifier set from events (public, key-free) |
+| `GET /disclosure/{startLeafIndex}` | PUBLIC (both modes): the institution-held disburse disclosure blob for one Solana batch (`{ startLeafIndex, elements[], disclosureHash, verdict }`, elements 32-byte hex in fold order, `disclosureHash` the chain-committed anchor, `verdict` the registry's current refold status) — any party refolds the elements against `disclosureHash` (SOLR §3.3.2; `.dev/solana-rail-design.md`). **409** (same body) when the held blob's verdict is non-passing, so known-tampered bytes never serve as a clean 200; 404 when no blob is held (with the anchor echoed when the batch is known); always 404 on an EVM backend (its disburse bytes are consensus-published on `/events`) |
 | `GET /health` | `{ ok, lastBlock, nextLeafIndex, batchSize, alarms, lastSuccessAt, lastError, lastErrorAt, consecutiveFailures }` — `ok` is false when the tail poll is persistently failing |
 | `GET /announcements?cursor=&limit=` | PUBLIC (both modes): the stealth-withdraw discovery feed `[{ seq, txHash, blockNumber, recipient, ephemeralPub, viewTag }]` — scan-all with your view key (`@bongtu/core/stealth`). With `?owner=&ts=&sig=` or `token=` (ARBITER MODE, `/notes` read-auth): only the caller's own announcements, no scanning |
 | `POST /pay/{name}` | PUBLIC (both modes; **404 unless `PORTAL_FACTORY` is set**): resolve-time portal issuance — derives a fresh stealth address for the name's meta-address, eth_calls `factory.addressOf(portalSalt(addr))` for the CREATE2 sweeper destination, records the announcement, returns `{ destination, ephemeralPub, viewTag, stealthAddr, factory }`. Unauthenticated by design (recorded PoC spam surface — see `src/api/routes/portal.ts`) |
@@ -148,6 +154,8 @@ Env knobs (`src/index.ts`):
 | `PORTAL_FACTORY` | unset | PortalFactory address → portal deposits live (`POST /pay/{name}` + `/portal/*`, Swept-log ingest). Unset → those routes 404 and boot logs one line saying so |
 | `LOG_CHUNK` | `50000` | getLogs chunk size in blocks — the one read-side tuning knob (auto-bisects on RPC range caps; `10000` suits rate-capped public RPC tail scanning) |
 | `KEM_GRACE_SECONDS` | `3600` | seconds an incomplete consumer-disburse chunk set reads kem-`pending` on `/events` before kem-`withheld` (OPMOD §5). Parsed once at boot — a non-numeric value refuses to boot |
+| `SOLANA_RPC` | unset | **backend switch**: set => the service ingests the SOLANA rail (`src/solana/`) instead of the EVM pool — signature-cursor ingest, inner-instruction dispatch, self-CPI event decode, per-op mirror assertion (SOLR §3.2). The API surface is identical; `RPC`/`POOL` are ignored. Requires `SOLANA_TREE` (the TreeState account, base58); `SOLANA_PROGRAM` defaults to the program's `declare_id!`. Refuses to boot combined with `AUTHORITY_KEY` (arbiter surfaces are not yet supported on the Solana backend — see "Two modes") |
+| `DISCLOSURE_DIR` | unset | directory of institution-held disburse disclosure blobs (`{startLeafIndex}.json`, a JSON array of 32-byte hex elements) — what `GET /disclosure` serves and the per-batch boot invariant re-checks against `DisburseBatch.disclosureHash` (SOLR §3.3.2). A mismatching blob alarms `mismatch`; a batch unserved past `DISCLOSURE_GRACE_SECONDS` (default `3600`) alarms `withheld` |
 
 Workspace install and shared tooling: root [`README.md`](../../README.md). Loading the
 pool ABI and ethers goes through the external-`node_modules` seam (`BONGTU_NODE_MODULES`,

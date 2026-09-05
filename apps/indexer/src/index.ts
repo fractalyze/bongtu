@@ -45,6 +45,8 @@
 
 import { resolveConfig, databaseUrlError } from "./chain.js";
 import { Indexer } from "./ingest.js";
+import { SolanaIndexer } from "./solana/ingest.js";
+import { SolanaRpcIo, base58ToHex } from "./solana/rpc.js";
 import { startApi } from "./api/router.js";
 
 async function main(): Promise<void> {
@@ -62,7 +64,11 @@ async function main(): Promise<void> {
   // Mode is logged; the arbiter key and the DATABASE_URL (may carry a password)
   // are NEVER printed.
   const mode = cfg.authorityKey != null ? "ARBITER" : "public";
-  console.log(`bongtu indexer: rpc=${cfg.rpc} pool=${cfg.pool} startBlock=${cfg.startBlock} mode=${mode} backend=postgres`);
+  console.log(
+    cfg.solana
+      ? `bongtu indexer: solana rpc=${cfg.solana.rpc} program=${cfg.solana.programId} mode=${mode} backend=postgres`
+      : `bongtu indexer: rpc=${cfg.rpc} pool=${cfg.pool} startBlock=${cfg.startBlock} mode=${mode} backend=postgres`,
+  );
   // One line either way: a missing PORTAL_FACTORY is a configuration CHOICE the
   // operator should be able to read off the boot log, not discover via a 404.
   console.log(
@@ -70,7 +76,11 @@ async function main(): Promise<void> {
       ? `portal deposits: factory=${cfg.portalFactory} (POST /pay/{name}, /portal/*)`
       : "portal deposits not configured (PORTAL_FACTORY unset) — POST /pay/{name} and /portal/* will 404",
   );
-  const ix = new Indexer(cfg);
+  // Backend selection is CONFIG, not code paths in routes: both classes serve
+  // the identical read model, so everything below this line is backend-blind.
+  const ix = cfg.solana
+    ? new SolanaIndexer(cfg, new SolanaRpcIo(cfg.solana), base58ToHex(cfg.solana.programId))
+    : new Indexer(cfg);
   // KEM boot guard (pq-envelope-design.md §7): a KEM-epoch pool served by a
   // V1-ABI build or a KEM-keyless arbiter fails SILENTLY (envelopes skipped /
   // undecryptable while the tree mirror stays green) — refuse to serve instead.

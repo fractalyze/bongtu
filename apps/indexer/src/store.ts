@@ -80,6 +80,12 @@ export interface FeedEntry {
   /** consumer disburse only (§4.1): the published commitment run (decimal, leaf
    *  order) — what boot re-fills the public batch from. */
   outputCommitments?: string[];
+  /** Solana enterprise disburse only (SOLR §3.3.1): the DisburseBatch anchor
+   *  tuple the self-CPI event carried. Persisted with the entry so a restart
+   *  rebuilds the served-blob registry (which blobs must verify against which
+   *  hash, and when the withheld grace clock started) without ledger access.
+   *  Never served on /events — the disclosure verdict is the wire projection. */
+  disburseAnchor?: { disclosureHash: string; kemBinding: string; epoch: number; recordedAt: number };
 }
 
 /**

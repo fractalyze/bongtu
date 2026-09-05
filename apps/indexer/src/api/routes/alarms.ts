@@ -23,8 +23,14 @@ export const alarms: Route = {
   method: "GET",
   pattern: "/alarms",
   handle({ ix }) {
+    // The served-blob registry (SOLR §3.3.2) joins the SAME "disclosure"
+    // class: a late-loaded blob's mismatch, or a batch unserved past grace
+    // ("withheld"). Empty on the EVM backend, so the feed is byte-identical
+    // there.
+    const now = Math.floor(Date.now() / 1000);
     const body: Alarm[] = [
       ...ix.store.getAlarms().map((a) => ({ type: "disclosure" as const, ...a })),
+      ...ix.disclosures.alarms(now).map((a) => ({ type: "disclosure" as const, ...a })),
       ...(ix.ledger?.getEnvelopeAlarms() ?? []).map((a) => ({ type: "envelope" as const, ...a })),
     ];
     return { status: 200, body };

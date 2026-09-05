@@ -33,7 +33,29 @@ pub const FAMILY_TAG_TRANSFER10X2: u8 = 9;
 /// Payload: [EVENT_DISCRIMINATOR, family, start_leaf_index u64 LE,
 /// leaf_count u8, resulting_root 32B BE, nf_count u8, nullifiers 32B BE each]
 /// — the per-op anchor tuple of SOLR §3.2.1; `resulting_root` restores the
-/// indexer's per-op mirror assertion.
+/// indexer's per-op mirror assertion. Split out of `emit_op_event` so the
+/// S4 ledger recorder serializes the exact wire the program emits — one
+/// byte-builder, no reconstruction drift.
+pub fn op_event_payload(
+    family: u8,
+    start_leaf_index: u64,
+    leaf_count: u8,
+    resulting_root: &[u8; 32],
+    nullifiers: &[[u8; 32]],
+) -> Vec<u8> {
+    let mut data = Vec::with_capacity(1 + 1 + 8 + 1 + 32 + 1 + 32 * nullifiers.len());
+    data.push(EVENT_DISCRIMINATOR);
+    data.push(family);
+    data.extend_from_slice(&start_leaf_index.to_le_bytes());
+    data.push(leaf_count);
+    data.extend_from_slice(resulting_root);
+    data.push(nullifiers.len() as u8);
+    for nf in nullifiers {
+        data.extend_from_slice(nf);
+    }
+    data
+}
+
 pub fn emit_op_event<'a>(
     program_id: &Pubkey,
     event_authority: &AccountInfo<'a>,
@@ -49,18 +71,7 @@ pub fn emit_op_event<'a>(
     if event_authority.key != &expected_authority {
         return Err(PoolError::InvalidEventAuthority);
     }
-
-    let mut data = Vec::with_capacity(1 + 1 + 8 + 1 + 32 + 1 + 32 * nullifiers.len());
-    data.push(EVENT_DISCRIMINATOR);
-    data.push(family);
-    data.extend_from_slice(&start_leaf_index.to_le_bytes());
-    data.push(leaf_count);
-    data.extend_from_slice(resulting_root);
-    data.push(nullifiers.len() as u8);
-    for nf in nullifiers {
-        data.extend_from_slice(nf);
-    }
-
+    let data = op_event_payload(family, start_leaf_index, leaf_count, resulting_root, nullifiers);
     emit(program_id, event_authority, program_account, bump, data)
 }
 
@@ -71,6 +82,32 @@ pub fn emit_op_event<'a>(
 /// kem_binding 32B BE, epoch u64 LE]. A separate shape from `emit_op_event`
 /// because a 256-leaf attach does not fit the per-op event's u8 leaf_count
 /// and the batch tuple is the disburse anchor, not per-leaf appends.
+/// The payload builder is public for the same recorder-reuse reason as
+/// `op_event_payload`.
+#[allow(clippy::too_many_arguments)]
+pub fn disburse_event_payload(
+    family: u8,
+    start_leaf_index: u64,
+    subtree_root: &[u8; 32],
+    resulting_root: &[u8; 32],
+    nullifier: &[u8; 32],
+    disclosure_hash: &[u8; 32],
+    kem_binding: &[u8; 32],
+    epoch: u64,
+) -> Vec<u8> {
+    let mut data = Vec::with_capacity(2 + 8 + 5 * 32 + 8);
+    data.push(EVENT_DISCRIMINATOR);
+    data.push(family);
+    data.extend_from_slice(&start_leaf_index.to_le_bytes());
+    data.extend_from_slice(subtree_root);
+    data.extend_from_slice(resulting_root);
+    data.extend_from_slice(nullifier);
+    data.extend_from_slice(disclosure_hash);
+    data.extend_from_slice(kem_binding);
+    data.extend_from_slice(&epoch.to_le_bytes());
+    data
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn emit_disburse_event<'a>(
     program_id: &Pubkey,
@@ -90,17 +127,16 @@ pub fn emit_disburse_event<'a>(
     if event_authority.key != &expected_authority {
         return Err(PoolError::InvalidEventAuthority);
     }
-
-    let mut data = Vec::with_capacity(2 + 8 + 5 * 32 + 8);
-    data.push(EVENT_DISCRIMINATOR);
-    data.push(family);
-    data.extend_from_slice(&start_leaf_index.to_le_bytes());
-    data.extend_from_slice(subtree_root);
-    data.extend_from_slice(resulting_root);
-    data.extend_from_slice(nullifier);
-    data.extend_from_slice(disclosure_hash);
-    data.extend_from_slice(kem_binding);
-    data.extend_from_slice(&epoch.to_le_bytes());
+    let data = disburse_event_payload(
+        family,
+        start_leaf_index,
+        subtree_root,
+        resulting_root,
+        nullifier,
+        disclosure_hash,
+        kem_binding,
+        epoch,
+    );
     emit(program_id, event_authority, program_account, bump, data)
 }
 

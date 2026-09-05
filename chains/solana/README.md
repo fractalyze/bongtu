@@ -24,7 +24,7 @@ the 65,728 B disclosure blob is institution-served and refold-verifiable
 | `program/src/generated/` | GENERATED constants — VKs from the committed vkeys, BN254 moduli, IMT zeros; never hand-edit |
 | `harness/` | mollusk test crate: gates 1 (poseidon), 2 (verify parity), 3 (CU budgets), 4 (tx size), 5 (invariants), 6 (disburse refold) |
 | `harness/src/enterprise.rs` | the S3 enterprise envs (enterprise `PoolConfig` with arbiter key + B=256, DisburseBatch PDA) |
-| `conformance/` | GENERATED vectors + fixture-derived state (committed; regenerate via `scripts/`) |
+| `conformance/` | GENERATED vectors + fixture-derived state (committed; regenerate via `scripts/`). `ledger_{consumer,enterprise}.json` are the recorded-ledger fixtures driving the indexer's Solana conformance leg (`apps/indexer/test/solana.test.ts`, SOLR §5.3): the per-op fixtures chained through mollusk from the empty tree, each tx carrying its op instruction(s), inner instructions (the self-CPI event bytes from the program's own `event::*_payload` builders + the foreign SPL CPI), and the post-op TreeState; the consumer ledger additionally records one multi-op tx (transferPriv + transfer10x2Priv) and the withdrawPriv as a wrapper-invoked INNER instruction with its account metas (the recorder doc comment explains the constructed shape). Regenerate: `cargo run -p bongtu-solana-harness --bin record_ledger` (after `cargo-build-sbf`) |
 | `scripts/` | generators (run from the repo root with `node_modules/.bin/tsx`) |
 | `gates/mollusk.sh` | the S2/S3 gate: `cargo-build-sbf` + `cargo test --workspace` |
 | `cu_budget.json` | per-op CU regression budgets, moved only by explicit commit |

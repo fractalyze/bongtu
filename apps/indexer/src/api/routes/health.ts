@@ -22,9 +22,13 @@ export const health: Route = {
         lastBlock: ix.store.lastBlock,
         nextLeafIndex: ix.tree ? ix.tree.nextLeafIndex() : 0,
         batchSize: ix.batchSize,
-        // Same population as GET /alarms: disclosure alarms plus, in arbiter
-        // mode, the ledger's envelope cross-check alarms.
-        alarms: ix.store.getAlarms().length + (ix.ledger?.getEnvelopeAlarms().length ?? 0),
+        // Same population as GET /alarms: disclosure alarms (store + the
+        // served-blob registry) plus, in arbiter mode, the ledger's envelope
+        // cross-check alarms.
+        alarms:
+          ix.store.getAlarms().length +
+          ix.disclosures.alarms(Math.floor(Date.now() / 1000)).length +
+          (ix.ledger?.getEnvelopeAlarms().length ?? 0),
         lastSuccessAt: ix.lastSuccessAt,
         lastError: ix.lastError,
         lastErrorAt: ix.lastErrorAt,

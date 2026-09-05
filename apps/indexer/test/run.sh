@@ -109,6 +109,17 @@ echo "== running indexer conformance test =="
 RPC="$E2E_RPC" "$NODE" --max-old-space-size=16000 --import tsx "$INDEXER/test/indexer.test.ts"
 RC=$?
 
+# --- run the Solana backend leg (SOLR §5.3) ----------------------------------
+# Recorded-ledger driven: no validator, no anvil — only the throwaway postgres
+# provisioned above (TEST_DATABASE_URL) and the committed chains/solana
+# conformance fixtures.
 echo ""
-if [ "$RC" -eq 0 ]; then echo "INDEXER GATE: PASS"; else echo "INDEXER GATE: FAIL (rc=$RC)"; fi
-exit "$RC"
+echo "== running SOLANA backend conformance leg (recorded ledger fixtures) =="
+"$NODE" --import tsx "$INDEXER/test/solana.test.ts"
+SRC=$?
+
+echo ""
+if [ "$RC" -eq 0 ]; then echo "INDEXER GATE (EVM): PASS"; else echo "INDEXER GATE (EVM): FAIL (rc=$RC)"; fi
+if [ "$SRC" -eq 0 ]; then echo "INDEXER GATE (SOLANA): PASS"; else echo "INDEXER GATE (SOLANA): FAIL (rc=$SRC)"; fi
+[ "$RC" -eq 0 ] && [ "$SRC" -eq 0 ] && exit 0
+exit 1

@@ -158,6 +158,34 @@ export class MirrorTree {
     this.batchRoots[block] = subtreeRoot;
   }
 
+  /**
+   * Drive one Solana op's appends from its self-CPI event anchor (SOLR §3.2.1):
+   * the event carries only the op's FINAL resulting root (per-op granularity,
+   * not per-leaf like the EVM `Appended` stream), so the leaves append together
+   * and the index + root asserts run once at the op boundary. Replay-safe like
+   * applyAppend: leaves already below the frontier were applied by an earlier
+   * (partially failed) call — they are re-recorded (recordLeaf is first-sight
+   * idempotent) and not re-appended.
+   */
+  applyOpAppend(startLeafIndex: number, leaves: bigint[], resultingRoot: bigint): void {
+    const next = this.tree.getNextLeafIndex();
+    if (startLeafIndex + leaves.length > next) {
+      if (startLeafIndex > next) {
+        throw new Error(`MirrorTree.applyOpAppend: start ${startLeafIndex} leaves a gap before mirror index ${next}`);
+      }
+      for (const k of Array(leaves.length).keys()) {
+        if (startLeafIndex + k >= next) this.tree.appendLeaf(leaves[k]);
+      }
+      if (this.tree.getNextLeafIndex() !== startLeafIndex + leaves.length) {
+        throw new Error(`MirrorTree.applyOpAppend: mirror index ${this.tree.getNextLeafIndex()} != op end ${startLeafIndex + leaves.length}`);
+      }
+      if (this.tree.getRoot() !== resultingRoot) {
+        throw new Error(`MirrorTree.applyOpAppend: mirror root diverged from the op event root @start ${startLeafIndex}`);
+      }
+    }
+    for (const k of Array(leaves.length).keys()) this.recordLeaf(startLeafIndex + k, leaves[k]);
+  }
+
   /** Record a real single-append leaf value (pass 2), the source a path folds from. */
   recordLeaf(leafIndex: number, leaf: bigint): void {
     // First sight of this leaf → buffer it for the next delta flush. A replay

@@ -76,6 +76,38 @@ export function verifyDisclosure(
   };
 }
 
+// The served-blob verifier (SOLR §3.3.2): on the Solana rail the enterprise
+// disburse bytes are INSTITUTION-served, not on-chain, and any party checks
+// them by refolding against the chain-committed DisburseBatch.disclosureHash.
+// Inherits the gate-6 (chains/solana/harness gate6_disburse_refold.rs)
+// verifier behavior: a non-canonical alias (element + r) is rejected BEFORE
+// folding — byte equality, not mod-p equivalence (OPMOD §4.4): poseidon folds
+// reduce mod p silently, so an aliased element WOULD reproduce the committed
+// hash for bytes the wire must refuse. `recomputed: "0"` marks the pre-fold
+// reject (no fold ran); everything else delegates to the enterprise
+// classifier, so the alarm classes map unchanged (mismatch / unverifiable /
+// withheld).
+export function verifyServedDisclosure(
+  elements: bigint[],
+  onchainDH: bigint,
+  batchSize: number,
+  txHash: string,
+  startLeafIndex: number,
+): DisclosureResult {
+  if (elements.length > 0 && elements.some((x) => x < 0n || x >= FIELD_PRIME)) {
+    return {
+      status: "mismatch",
+      txHash,
+      startLeafIndex,
+      emittedCount: elements.length,
+      receiverCount: batchSize * 4,
+      recomputed: "0",
+      expected: onchainDH.toString(),
+    };
+  }
+  return verifyDisclosure(elements, onchainDH, batchSize, txHash, startLeafIndex);
+}
+
 /** verifyConsumerDisclosure's answer: the alarm-classified result, plus the
  *  batch's commitment run when every check passed (the public-fill material —
  *  a null keeps a bad publish an alarm instead of a wrong fill). */
