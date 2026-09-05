@@ -17,7 +17,7 @@
 //   - PostgresLedger's own (txHash, logIndex) replay dedup;
 //   - pollOnce failure/success state + the /health projection of it.
 //
-// Preconditions shared with src/chain.ts: contracts/out built (the Indexer
+// Preconditions shared with src/chain.ts: chains/evm/out built (the Indexer
 // constructor reads the pool ABI off the Foundry artifact). The dummy RPC below
 // is never contacted.
 //

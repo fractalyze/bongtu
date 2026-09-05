@@ -602,7 +602,7 @@ export async function runConsumerLeg(rig: Rig): Promise<void> {
  *  the proof + the full chunk lifecycle needs only anvil. */
 async function runDisbursePriv256Replay(rig: Rig, poseidonAddr: string, tokenAddr: string): Promise<void> {
   const fx = JSON.parse(
-    readFileSync(join(ROOT, "contracts", "test", "fixtures", "consumer_realproofs.json"), "utf8"),
+    readFileSync(join(ROOT, "chains", "evm", "test", "fixtures", "consumer_realproofs.json"), "utf8"),
   ).disbursePriv256 as {
     a: string[]; b: string[][]; c: string[]; pub: string[];
     seedLeaves: string[]; rootAfter: string; disclosure: string[];

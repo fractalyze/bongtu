@@ -29,7 +29,7 @@ fail() { echo "FATAL: $*" >&2; exit 1; }
 
 # --- preflight: contracts build --------------------------------------------
 echo "== preflight: forge build =="
-( cd contracts && "$FORGE" build >/dev/null ) || fail "forge build failed"
+( cd chains/evm && "$FORGE" build >/dev/null ) || fail "forge build failed"
 
 # --- start anvil (background) + trap-kill ----------------------------------
 ANVIL_LOG="$(mktemp)"
@@ -59,7 +59,7 @@ export DEPLOYER_KEY="${DEPLOYER_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478c
 # --- 1) deploy the full B=256 stack (broadcast) ----------------------------
 echo ""
 echo "== forge script Deploy --broadcast =="
-( cd contracts && "$FORGE" script ../deploy/forge/Deploy.s.sol:Deploy \
+( cd chains/evm && "$FORGE" script ../../deploy/forge/Deploy.s.sol:Deploy \
     --rpc-url "$RPC" --broadcast --skip-simulation ) || fail "deploy script failed"
 
 ADDR="deploy/addresses.${CHAINID}.json"
@@ -85,7 +85,7 @@ echo "nextLeafIndex()   = $("$CAST" call "$POOL" "nextLeafIndex()(uint256)" --rp
 # --- 3) SMOKE: real deposit against the deployed pool (broadcast) -----------
 echo ""
 echo "== forge script Smoke --broadcast (real deposit vs DEPLOYED pool) =="
-( cd contracts && "$FORGE" script ../deploy/forge/Smoke.s.sol:Smoke \
+( cd chains/evm && "$FORGE" script ../../deploy/forge/Smoke.s.sol:Smoke \
     --rpc-url "$RPC" --broadcast --skip-simulation ) || fail "smoke script failed"
 
 NLI=$("$CAST" call "$POOL" "nextLeafIndex()(uint256)" --rpc-url "$RPC")

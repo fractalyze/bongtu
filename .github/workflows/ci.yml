@@ -19,14 +19,14 @@
 #                        parallel `docker build` (~1-2 min), off the critical path.
 #   forge                contracts: forge test + deploy/gates/deploy_local.sh (full
 #                        B=256 stack deploy + smoke deposit on a self-contained
-#                        anvil). forge-std is vendored under contracts/lib/ and
+#                        anvil). forge-std is vendored under chains/evm/lib/ and
 #                        all fixtures (poseidon2.hex, committed real Groth16
 #                        proofs incl. disburse256) are in-tree — no network.
-#   solana-mollusk       solana/ program island (SOLR §3.1.3): cargo-build-sbf
+#   solana-mollusk       chains/solana/ program island (SOLR §3.1.3): cargo-build-sbf
 #                        + the mollusk gate suite (poseidon conformance, verify
 #                        parity vs committed realproof fixtures, tx-size, the
 #                        invariant-gate rows, CU budgets). Fast lane, runs when
-#                        solana/ or the committed fixtures change. Self-contained:
+#                        chains/solana/ or the committed fixtures change. Self-contained:
 #                        every fixture/vector is in-tree; the only network use
 #                        is the pinned Agave toolchain install (AGAVE_VERSION
 #                        in ci-pins.env).
@@ -51,7 +51,7 @@
 #                        so those gates cannot be skipped by a stale artifact.
 #                        The full pot22
 #                        ptau is required (not a smaller one): the committed
-#                        contracts/src/verifiers/*.sol derive from a pot22
+#                        chains/evm/src/verifiers/*.sol derive from a pot22
 #                        groth16 setup, and `snarkjs groth16 setup` is
 #                        deterministic given (r1cs, ptau), so fresh zkeys
 #                        produce proofs that verify against the committed
@@ -92,7 +92,7 @@
 #     + run.sh): rabbitsnark GPU proving needs a local CUDA GPU and the local
 #     GPU venv bridge; hosted runners have no GPU. The on-chain half of
 #     disburse256 IS still gated here: forge test verifies the committed
-#     real-proof fixtures (contracts/test/fixtures/disburse256.proof.json,
+#     real-proof fixtures (chains/evm/test/fixtures/disburse256.proof.json,
 #     realproofs.json) against the committed Disburse256Verifier.
 #   - disburse256 circuit build: 2.79M constraints -> ~1.24 GB zkey with a
 #     multi-minute setup, and its only consumer is the GPU proving path
@@ -153,11 +153,11 @@ jobs:
           has() { echo "$FILES" | grep -qE "$1" && echo true || echo false; }
           {
             echo "code=$(echo "$FILES" | grep -vE '^docs/|^\.dev/|\.md$|^LICENSE|^NOTICE' | grep -q . && echo true || echo false)"
-            echo "contracts=$(has '^contracts/|^deploy/|^\.github/')"
+            echo "contracts=$(has '^chains/evm/|^deploy/|^\.github/')"
             echo "prover=$(has '^prover/|^\.github/')"
-            echo "indexer=$(has '^apps/indexer/|^contracts/|^packages/core/|^package(-lock)?\.json|^\.github/')"
+            echo "indexer=$(has '^apps/indexer/|^chains/evm/|^packages/core/|^package(-lock)?\.json|^\.github/')"
             echo "image=$(has '^apps/indexer/|^packages/|^package(-lock)?\.json|^\.github/')"
-            echo "solana=$(has '^solana/|^contracts/test/fixtures/|^\.github/')"
+            echo "solana=$(has '^chains/solana/|^chains/evm/test/fixtures/|^\.github/')"
           } >> "$GITHUB_OUTPUT"
 
   node-fast:
@@ -318,7 +318,7 @@ jobs:
           version: v1.7.1
       - name: forge build (pool ABI artifact)
         run: forge build
-        working-directory: contracts
+        working-directory: chains/evm
       - name: committed indexer ABI matches the rebuilt pool (drift gate)
         # apps/indexer/abi/BongtuPool.abi.json is the container's committed copy of
         # the pool ABI (the Docker image ships it, since forge is not in the image
@@ -327,7 +327,7 @@ jobs:
         # A non-empty diff means the pool's events/view fns changed without the
         # committed ABI being refreshed (recipe: apps/indexer/abi/README.md).
         run: |
-          node -e 'const fs=require("fs");const a=JSON.parse(fs.readFileSync("contracts/out/BongtuPool.sol/BongtuPool.json","utf8"));fs.writeFileSync("apps/indexer/abi/BongtuPool.abi.json",JSON.stringify({abi:a.abi},null,2)+"\n")'
+          node -e 'const fs=require("fs");const a=JSON.parse(fs.readFileSync("chains/evm/out/BongtuPool.sol/BongtuPool.json","utf8"));fs.writeFileSync("apps/indexer/abi/BongtuPool.abi.json",JSON.stringify({abi:a.abi},null,2)+"\n")'
           git diff --exit-code apps/indexer/abi/BongtuPool.abi.json
       - name: indexer unit tests (tree + disclosure + ingest, anvil-free)
         run: npm run test:unit -w @bongtu/indexer
@@ -366,18 +366,18 @@ jobs:
           version: v1.7.1
       - name: forge test
         run: forge test -vv
-        working-directory: contracts
+        working-directory: chains/evm
       - name: local deploy + smoke gate (deploy_local.sh, self-contained anvil :8550)
         # The only gate exercising Deploy.s.sol/Smoke.s.sol wiring (proxy init,
         # verifier wiring, addresses round-trip); deployer = anvil account 0.
         run: bash deploy/gates/deploy_local.sh
 
   solana-mollusk:
-    # solana/ program island (SOLR §3.1.3): cargo-build-sbf + the mollusk
+    # chains/solana/ program island (SOLR §3.1.3): cargo-build-sbf + the mollusk
     # gates (poseidon conformance, verify parity vs committed EVM realproof
     # fixtures, invariant-gate conformance, CU budget). Self-contained: the
     # pinned Agave release ships cargo-build-sbf + platform-tools, the host
-    # toolchain comes from solana/rust-toolchain.toml via rustup, and every
+    # toolchain comes from chains/solana/rust-toolchain.toml via rustup, and every
     # fixture/vector is committed — no network beyond toolchain install.
     needs: changes
     if: ${{ success() && needs.changes.outputs.solana == 'true' }}
@@ -398,10 +398,10 @@ jobs:
         with:
           path: |
             ~/.cargo/registry
-            solana/target
-          key: solana-cargo-${{ runner.os }}-${{ env.AGAVE_VERSION }}-${{ hashFiles('solana/Cargo.lock', 'solana/rust-toolchain.toml') }}
+            chains/solana/target
+          key: solana-cargo-${{ runner.os }}-${{ env.AGAVE_VERSION }}-${{ hashFiles('chains/solana/Cargo.lock', 'chains/solana/rust-toolchain.toml') }}
       - name: mollusk gates
-        run: bash solana/gates/mollusk.sh
+        run: bash chains/solana/gates/mollusk.sh
 
   prover-pytest:
     needs: changes

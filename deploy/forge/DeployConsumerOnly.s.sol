@@ -114,9 +114,9 @@ contract DeployConsumerOnly is Script {
         vm.serializeAddress(o, "token", d.token);
         vm.serializeAddress(o, "poolImpl", d.impl);
         string memory js = vm.serializeAddress(o, "pool", address(d.pool));
-        vm.writeJson(js, string.concat("../deploy/addresses.consumer.", vm.toString(block.chainid), ".json"));
+        vm.writeJson(js, string.concat("../../deploy/addresses.consumer.", vm.toString(block.chainid), ".json"));
         ConsumerModuleKit.write(
-            string.concat("../deploy/modules.consumer.", vm.toString(block.chainid), ".json"), d.mods
+            string.concat("../../deploy/modules.consumer.", vm.toString(block.chainid), ".json"), d.mods
         );
     }
 

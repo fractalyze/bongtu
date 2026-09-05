@@ -9,7 +9,7 @@ defaults but a live chain requires (see [Config](#config-env-with-defaults)).
 
 `forge/Deploy.s.sol` broadcasts, from a single deployer:
 
-1. **Poseidon-v1** — from the circomlibjs creation bytecode (`contracts/test/fixtures/poseidon2.hex`),
+1. **Poseidon-v1** — from the circomlibjs creation bytecode (`chains/evm/test/fixtures/poseidon2.hex`),
    the byte-identical hash the circuits / SDK / tests use (inline `create`).
 2. the **6 real Groth16 verifiers** — `DepositVerifier`, `WithdrawVerifier`,
    **`Disburse256Verifier`** (production 256-arity), `TransferVerifier`,
@@ -27,7 +27,7 @@ defaults but a live chain requires (see [Config](#config-env-with-defaults)).
    and `poolImpl`. Owner = the deployer.
 
 Addresses are written to `deploy/addresses.<chainid>.json` (forge also writes
-`contracts/broadcast/Deploy.s.sol/<chainid>/run-latest.json`).
+`chains/evm/broadcast/Deploy.s.sol/<chainid>/run-latest.json`).
 
 ### Config (env, with defaults)
 
@@ -63,7 +63,7 @@ fixture fallback would make every auditor envelope world-readable with nothing i
 so ([`Deploy.s.sol` `_resolveKemPkHash`](forge/Deploy.s.sol)).
 
 The default arbiter key is read straight from the committed
-`contracts/test/fixtures/disburse256.public.json` public signals `[8..9]`, i.e.
+`chains/evm/test/fixtures/disburse256.public.json` public signals `[8..9]`, i.e.
 the `authorityPublicKey` the real GPU 256-disburse proof was made against — so a
 real 256 disburse verifies against the deployed pool's stored key out of the box.
 Override the two env vars for a production key.
@@ -101,7 +101,7 @@ L1 (Cosmos-SDK x/feemarket EIP-1559 fees, gas token tOKRW) with the BN254
 precompiles present — the smoke deposit's Groth16 proof verified natively on-chain.
 
 ```sh
-cd bongtu/contracts
+cd bongtu/chains/evm
 export DEPLOYER_KEY=0x<funded-key>   # from the chain's faucet; lives in .env (gitignored, template .env.example)
 export LIVE_RPC=<the chain's RPC>    # docs/deployment.md#chain-facts; .env.example carries the current one
 
@@ -165,7 +165,7 @@ Canonical data stays at the top; everything else is grouped by what runs it.
 - `arbiter-kem-pk.450815.hex` — the live arbiter's ML-KEM-768 public key (byte-identical to the
   historical `arbiter-kem-pk.84532.hex`: the arbiter did not rotate on the chain move).
 
-`forge/` — the Solidity scripts, run through `forge script` from `contracts/`:
+`forge/` — the Solidity scripts, run through `forge script` from `chains/evm/`:
 
 - `Deploy.s.sol` — the whole stack in one broadcast (Poseidon + the six verifiers + impl + ERC-1967
   proxy running `initialize`) + the `addresses.<chainid>.json` writer; `MODULE_PROFILE=consumer`

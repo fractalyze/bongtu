@@ -64,10 +64,10 @@ library AddressBook {
     VmSafe private constant vm = VmSafe(address(uint160(uint256(keccak256("hevm cheat code")))));
 
     /// @dev The record for the chain the script is running against. Scripts run
-    ///      from `contracts/`, hence the `../deploy` prefix (matching the
-    ///      `fs_permissions` grant in contracts/foundry.toml).
+    ///      from `chains/evm/`, hence the `../../deploy` prefix (matching the
+    ///      `fs_permissions` grant in chains/evm/foundry.toml).
     function path() internal view returns (string memory) {
-        return string.concat("../deploy/addresses.", vm.toString(block.chainid), ".json");
+        return string.concat("../../deploy/addresses.", vm.toString(block.chainid), ".json");
     }
 
     /// @notice Load the existing record. Every field except `arbiterKemPk` is

@@ -15,7 +15,7 @@
 //       resolves into notes once the transport completes;
 //   (7) enterprise coexistence: spend-key envelope notes in the same feed are
 //       discovered beside consumer notes;
-//   (8) the REAL consumer fixture (contracts/test/fixtures/
+//   (8) the REAL consumer fixture (chains/evm/test/fixtures/
 //       consumer_realproofs.json): the engine opens circuit-derived artifacts
 //       with the shared fixture identities (circuits/fixtures/consumer_lib);
 //   (9) activity/snapshot derivation and the persistence codec.
@@ -51,7 +51,7 @@ import {
 import { consumerReceiver } from "../../../circuits/fixtures/consumer_lib.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const FIXTURE = join(HERE, "..", "..", "..", "contracts", "test", "fixtures", "consumer_realproofs.json");
+const FIXTURE = join(HERE, "..", "..", "..", "chains", "evm", "test", "fixtures", "consumer_realproofs.json");
 
 // ---- deterministic material -------------------------------------------------
 

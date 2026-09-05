@@ -18,9 +18,9 @@ jf() { python3 -c "import json;print(json.load(open('$ADDR')).get('$1',''))"; }
 trap 'kill "$ANVIL_PID" 2>/dev/null' EXIT
 for _ in $(seq 1 50); do "$CAST" chain-id --rpc-url "$RPC" >/dev/null 2>&1 && break; sleep 0.2; done
 
-(cd contracts && "$FORGE" script ../deploy/forge/Deploy.s.sol:Deploy --rpc-url "$RPC" --broadcast --skip-simulation) >/dev/null 2>&1 || fail "Deploy failed"
+(cd chains/evm && "$FORGE" script ../../deploy/forge/Deploy.s.sol:Deploy --rpc-url "$RPC" --broadcast --skip-simulation) >/dev/null 2>&1 || fail "Deploy failed"
 [ -z "$(jf portalFactory)" ] || fail "fresh record must not carry a factory"
-(cd contracts && "$FORGE" script ../deploy/forge/DeployPortal.s.sol:DeployPortal --rpc-url "$RPC" --broadcast --skip-simulation) || fail "DeployPortal failed"
+(cd chains/evm && "$FORGE" script ../../deploy/forge/DeployPortal.s.sol:DeployPortal --rpc-url "$RPC" --broadcast --skip-simulation) || fail "DeployPortal failed"
 F=$(jf portalFactory); [ -n "$F" ] || fail "portalFactory not recorded"
 OWNER=$("$CAST" call "$F" "owner()(address)" --rpc-url "$RPC")
 DEPLOYER=$("$CAST" wallet address --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80)
@@ -28,5 +28,5 @@ DEPLOYER=$("$CAST" wallet address --private-key 0xac0974bec39a17e36ba4a6b4d238ff
 "$CAST" call "$F" "addressOf(bytes32)(address)" 0x00000000000000000000000011"11111111111111111111111111111111111111" --rpc-url "$RPC" >/dev/null 2>&1 || \
   "$CAST" call "$F" "addressOf(bytes32)(address)" $(printf '0x%064x' 0x1111111111111111111111111111111111111111) --rpc-url "$RPC" >/dev/null || fail "addressOf unreachable"
 echo "== rerun refusal =="
-(cd contracts && "$FORGE" script ../deploy/forge/DeployPortal.s.sol:DeployPortal --rpc-url "$RPC" --broadcast --skip-simulation) >/dev/null 2>&1 && fail "rerun must refuse" || echo "   PASS: rerun refused"
+(cd chains/evm && "$FORGE" script ../../deploy/forge/DeployPortal.s.sol:DeployPortal --rpc-url "$RPC" --broadcast --skip-simulation) >/dev/null 2>&1 && fail "rerun must refuse" || echo "   PASS: rerun refused"
 echo "PORTAL DEPLOY DRILL: PASS"

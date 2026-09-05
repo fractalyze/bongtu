@@ -44,7 +44,7 @@ The pool implementation, the proxy and `DepositVerifier` are source-verified on 
 explorer (`forge verify-contract --verifier blockscout`, 2026-09-04); the other verifiers and the
 mock token are bytecode-only — verify them the same way if needed. Poseidon has no Solidity source
 at all — it is deployed from circomlibjs *creation bytecode*
-(`contracts/test/fixtures/poseidon2.hex`). Audit everything against this repo at the commit that
+(`chains/evm/test/fixtures/poseidon2.hex`). Audit everything against this repo at the commit that
 deployed it.
 
 Externally, call the proxy address simply "the pool contract"; "proxy" is plumbing vocabulary.
@@ -95,7 +95,7 @@ affected op reverts.
 
 Whatever storage the change needs is moved by a fresh `reinitializer(2)` payload written against
 that change — the pool ships with the version slot at 1 and nothing reserved in advance. Two rules
-the payload must respect, both pinned by `contracts/test/Upgrade.t.sol`:
+the payload must respect, both pinned by `chains/evm/test/Upgrade.t.sol`:
 
 | rule | why |
 |---|---|
@@ -149,7 +149,7 @@ profiles exist; the env knob and script per profile live in
   hash, no enterprise verifier wired), rather than a burned placeholder. Every enterprise
   entrypoint reverts on such a pool; the consumer modules are its whole op surface. The
   KEM deploy knobs above do not apply to this profile — there is no authority envelope to
-  key. Pinned by `contracts/test/ConsumerOnly.t.sol`.
+  key. Pinned by `chains/evm/test/ConsumerOnly.t.sol`.
 
 The consumer end-to-end leg of `deploy/gates/e2e_m0.sh` (`deploy/gates/consumer_leg.ts`)
 proves the consumer flows with no arbiter-mode indexer in the loop: profile deploy + V3
@@ -202,7 +202,7 @@ move is that module plus the deploy record rather than another repo sweep.
 | explorer | `https://explorer-testnet.maroo.io` (Blockscout) | `EXPLORER_BASE` |
 | faucet | `https://faucet.maroo.io` | `GAS_FAUCET_URL` |
 | gas token | tOKRW, 18-dec (sovereign EVM L1; EIP-1559 via Cosmos x/feemarket) | `NATIVE_CURRENCY` |
-| per-tx gas cap | none published; every op fits the previous chain's 16,777,216 EIP-7825 cap (asserted in `contracts/test/Disburse256.t.sol`) | — |
+| per-tx gas cap | none published; every op fits the previous chain's 16,777,216 EIP-7825 cap (asserted in `chains/evm/test/Disburse256.t.sol`) | — |
 | BN254 precompiles | present — the smoke deposit's Groth16 proof verified natively on-chain | — |
 | gas price the runners pin | `18000` gwei (quote 9000 gwei = 8000 base + 1000 tip, 2026-09-04) | `GAS_PRICE_PIN_GWEI` |
 
@@ -233,8 +233,8 @@ to lose and expensive to rediscover:
 
 - **`--skip-simulation` is required.** `Deploy.s.sol` deploys Poseidon via inline-assembly `create`,
   which forge's on-chain simulation cannot model.
-- The deployer key lives in `.env` (gitignored, template `.env.example`); `contracts/broadcast/`
-  and `contracts/cache/` are gitignored.
+- The deployer key lives in `.env` (gitignored, template `.env.example`); `chains/evm/broadcast/`
+  and `chains/evm/cache/` are gitignored.
 
 ## The arbiter key is fixed at deploy, and the fixtures are bound to it
 
@@ -243,9 +243,9 @@ into the proof's `authorityPublicKey` public signals before verifying. A proof e
 other key fails.
 
 ```
- contracts/test/fixtures/disburse256.public.json  pub[8..9]
+ chains/evm/test/fixtures/disburse256.public.json  pub[8..9]
                     ||  (same value)
- contracts/test/fixtures/realproofs.json  .arbiterKey
+ chains/evm/test/fixtures/realproofs.json  .arbiterKey
                     ||  (Deploy.s.sol default for ARBITER_KEY_X / ARBITER_KEY_Y)
                     vv
         pool.arbiterEpochs[0]  ──injected──>  every verifyProof call

@@ -16,11 +16,11 @@ depends on the following third-party software.
   newly written but follow Zeto's design (UTXO commitments, nullifiers,
   ECDH + Poseidon-sponge encryption, non-repudiation envelope).
 - **forge-std** — https://github.com/foundry-rs/forge-std — MIT OR Apache-2.0.
-  Vendored under `contracts/lib/forge-std/` with its `LICENSE-MIT` / `LICENSE-APACHE`.
+  Vendored under `chains/evm/lib/forge-std/` with its `LICENSE-MIT` / `LICENSE-APACHE`.
 - **OpenZeppelin Contracts** (v5.0, MIT) — https://github.com/OpenZeppelin/openzeppelin-contracts.
-  The UUPS proxy machinery under `contracts/src/utils/proxy/` (Initializable, ERC1967Utils,
+  The UUPS proxy machinery under `chains/evm/src/utils/proxy/` (Initializable, ERC1967Utils,
   UUPSUpgradeable, ERC1967Proxy, Proxy, StorageSlot, Address, IERC1822Proxiable) is vendored
-  byte-faithfully from OZ v5.0 (repo avoids git submodules; see `contracts/src/utils/proxy/README.md`),
+  byte-faithfully from OZ v5.0 (repo avoids git submodules; see `chains/evm/src/utils/proxy/README.md`),
   each file retaining the MIT SPDX header. `Ownable2StepUpgradeable` is an initializer twin of the repo's
   own `Ownable2Step`, modeled on OZ's.
 
@@ -42,7 +42,7 @@ live in `node_modules/` or an external checkout, gitignored):
 - **circom** (GPL-3.0) — the compiler.
 
 **Copyleft isolation:** no GPL source is committed to this repo. Groth16 verifier
-`.sol` files under `circuits/verifiers/` and `contracts/src/verifiers/` are
+`.sol` files under `circuits/verifiers/` and `chains/evm/src/verifiers/` are
 **tool output** produced by snarkjs (like a compiler's output), not derivative of
 the snarkjs source. The build/compile tools (circom, circomlib) and every
 tooling/server-side use of snarkjs stay external and un-bundled (out-of-process

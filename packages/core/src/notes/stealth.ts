@@ -276,7 +276,7 @@ export function validateStealthMetaAddress(meta: StealthMetaAddress): void {
 // payer at a CREATE2-precomputed PortalSweeper address whose salt IS the
 // DKSAP-derived stealth address, so the resolver, the sweeping bot, and the
 // recipient all recompute the same destination from the announcement alone.
-// The Solidity mirror is contracts/src/PortalFactory.sol `addressOf`; parity is
+// The Solidity mirror is chains/evm/src/PortalFactory.sol `addressOf`; parity is
 // pinned by a committed vector in test/stealth.test.ts.
 
 /**

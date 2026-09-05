@@ -42,7 +42,7 @@ are the stable public names.
 - `apps/payroll-web` / `apps/wallet-web` — commitments/ciphertext, `envelope` for the
   disburse assembly + auditor ledger (admin), `proving` request assembly, the
   `indexerApi` client, `pubkey` + `eddsa` for the signed `/notes` read.
-- `circuits/` generators and `contracts/test/fixtures/` generators — witness inputs and
+- `circuits/` generators and `chains/evm/test/fixtures/` generators — witness inputs and
   the differential/real-proof oracles.
 - `deploy/` — the M0 e2e orchestrator and the live 256-disburse runner.
 - `prover/` — mirrors `proving.ts` as `prover_service/schema.py` (kept in sync by hand;
@@ -83,7 +83,7 @@ npm run typecheck     # tsc --noEmit
 ```
 
 The cross-system checks that make this package an oracle run elsewhere: the Foundry
-differential test in [`contracts/`](../../contracts/README.md) (contract root ==
+differential test in [`chains/evm/`](../../chains/evm/README.md) (contract root ==
 `ImtTree` root at every insert) and the CPU prove pipeline in
 [`circuits/`](../../circuits/README.md) (witnesses built from these primitives satisfy
 the real circuits).

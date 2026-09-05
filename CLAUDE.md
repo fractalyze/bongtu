@@ -55,7 +55,7 @@ not re-derive what those files own.
   override `ARBITER_KEY_X/Y` alongside freshly re-proven fixtures, or the smoke deposit
   reverts `InvalidProof`.
 - **Local-pass ≠ CI-pass**: hosted runners lack the dev-box defaults (the `BONGTU_NODE_MODULES`
-  fallback path, prebuilt `circuits/out` / `contracts/out`, fast spawns). Check any new CI-run
+  fallback path, prebuilt `circuits/out` / `chains/evm/out`, fast spawns). Check any new CI-run
   test against a clean env before pushing — see `.dev/ci.md`. In particular, refresh
   `apps/indexer/abi/BongtuPool.abi.json` whenever the pool ABI changes (CI drift-gates it).
 - **Isolated agent worktrees need local `node_modules/@bongtu` symlinks**: a worktree

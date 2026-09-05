@@ -41,7 +41,7 @@ import type { WalletIdentity } from "@bongtu/client/derive";
 // pool rides as an address arg where Solidity declares IPortalPool). The
 // indexer's portalFactoryAbi carries only Swept + addressOf (its whole
 // surface), so the sweep fragment has no shared owner yet; the contract
-// (contracts/src/PortalFactory.sol) is the source of truth restated here.
+// (chains/evm/src/PortalFactory.sol) is the source of truth restated here.
 export const SWEEP_ABI: Abi = parseAbi([
   "function sweep(bytes32 salt, address pool, uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[19] pub, bytes kemCiphertext)",
 ]);

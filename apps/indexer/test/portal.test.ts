@@ -140,7 +140,7 @@ test("unconfigured factory: /pay and both /portal feeds 404 with a clear body", 
 
 // ============================ (2) SWEPT MARKING ==============================
 
-// A real Indexer (the ingest.test.ts recipe: the ABI loads from contracts/out,
+// A real Indexer (the ingest.test.ts recipe: the ABI loads from chains/evm/out,
 // the dummy RPC is never contacted), its registry seeded through issue().
 const DUMMY_RPC = "http://127.0.0.1:1";
 const DUMMY_POOL = "0x" + "12".repeat(20);

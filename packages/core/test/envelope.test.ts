@@ -18,7 +18,7 @@
 //                                               plus the disburse#3 authority-tampered
 //                                               leg's DISTINCT input shape, B=16)
 //   p2    disclosureChain over the ciphertext derived from the committed
-//         contracts/test/fixtures/disburse256.input.json equals the committed
+//         chains/evm/test/fixtures/disburse256.input.json equals the committed
 //         proof's disclosureHash public signal (disburse pub[2] — the on-chain
 //         value ingest.ts hands verifyDisclosure as `expected`)
 //   p3    parseEnvelope snapshots: the committed disburse256 authority tail
@@ -67,7 +67,7 @@ import { FIXTURE_ARBITER_SCALAR } from "../../../circuits/fixtures/fixture_lib.j
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..", "..");
-const FIXTURES = join(ROOT, "contracts", "test", "fixtures");
+const FIXTURES = join(ROOT, "chains", "evm", "test", "fixtures");
 
 // ---- pin plumbing -----------------------------------------------------------
 

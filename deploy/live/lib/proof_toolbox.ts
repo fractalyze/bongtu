@@ -28,7 +28,7 @@ import { loadSnarkjs } from "@bongtu/core/extern";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..", ".."); // deploy/live/lib -> repo root
 const CIRC_OUT = join(ROOT, "circuits", "out");
-const CONTRACTS_OUT = join(ROOT, "contracts", "out");
+const CONTRACTS_OUT = join(ROOT, "chains", "evm", "out");
 
 // snarkjs comes back `any` from the shared external loader — we type OUR code
 // (notes, keys, tree), not theirs.
@@ -38,7 +38,7 @@ const snarkjs: any = loadSnarkjs();
 /** BigInt -> decimal string, the form snarkjs and ethers both take. */
 export const dec = (x: FieldInput): string => BigInt(x).toString();
 
-/** A compiled contract from `contracts/out` (forge's artifact layout). */
+/** A compiled contract from `chains/evm/out` (forge's artifact layout). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function artifact(sol: string, contract: string): { abi: any; bytecode: any } {
   const j = JSON.parse(readFileSync(join(CONTRACTS_OUT, `${sol}.sol`, `${contract}.json`), "utf8"));

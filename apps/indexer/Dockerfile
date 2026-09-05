@@ -71,11 +71,11 @@ COPY packages/core/src packages/core/src
 COPY apps/indexer/package.json apps/indexer/tsconfig.json apps/indexer/
 COPY apps/indexer/src apps/indexer/src
 
-# chain.ts reads the pool ABI from contracts/out/BongtuPool.sol/BongtuPool.json at
+# chain.ts reads the pool ABI from chains/evm/out/BongtuPool.sol/BongtuPool.json at
 # runtime (a gitignored forge artifact on a dev box). Ship the committed minimal
 # ABI at exactly that path: self-contained (no foundry in the build) + reproducible
 # (identical bytes every build). Regenerate: apps/indexer/abi/README.md.
-COPY apps/indexer/abi/BongtuPool.abi.json contracts/out/BongtuPool.sol/BongtuPool.json
+COPY apps/indexer/abi/BongtuPool.abi.json chains/evm/out/BongtuPool.sol/BongtuPool.json
 
 # POOL defaults to deploy/addresses.<CHAIN_ID>.json when the POOL env is unset, so
 # the file the container needs is picked at RUNTIME by CHAIN_ID. A glob bakes in

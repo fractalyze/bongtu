@@ -38,7 +38,7 @@ INIT_SLOT=0xf0c57e16840df040f15088dc2f81fe391c3923bec73e23a9662efc9c229c6a00
 fail() { echo "FATAL: $*" >&2; exit 1; }
 
 echo "== preflight: forge build =="
-( cd contracts && "$FORGE" build >/dev/null ) || fail "forge build failed"
+( cd chains/evm && "$FORGE" build >/dev/null ) || fail "forge build failed"
 
 ANVIL_LOG="$(mktemp)"
 "$ANVIL" --port "$PORT" --chain-id "$CHAINID" --silent >"$ANVIL_LOG" 2>&1 &
@@ -68,7 +68,7 @@ export DEPLOYER_KEY="${DEPLOYER_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478c
 step() { # step <label> <script-file:contract>
   echo ""
   echo "== forge script $2 --broadcast =="
-  ( cd contracts && "$FORGE" script "../deploy/forge/$2" \
+  ( cd chains/evm && "$FORGE" script "../../deploy/forge/$2" \
       --rpc-url "$RPC" --broadcast --skip-simulation ) || fail "$1 failed"
 }
 

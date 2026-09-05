@@ -38,7 +38,7 @@ contract Smoke is Script {
         address deployer = vm.addr(deployerKey);
 
         string memory aj = vm.readFile(
-            string.concat("../deploy/addresses.", vm.toString(block.chainid), ".json")
+            string.concat("../../deploy/addresses.", vm.toString(block.chainid), ".json")
         );
         BongtuPool pool = BongtuPool(vm.parseJsonAddress(aj, ".pool"));
         address tokenAddr = vm.parseJsonAddress(aj, ".token");

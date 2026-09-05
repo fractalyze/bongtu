@@ -219,7 +219,7 @@ test("deregistered consumerDisburse gets NO constant (enterprise-path only)", ()
 });
 
 test("CONSUMER_MODULE_ABI_FRAGMENTS match the registered module signatures", () => {
-  // Byte-pins of the deployed module entrypoints (contracts/src/modules/*,
+  // Byte-pins of the deployed module entrypoints (chains/evm/src/modules/*,
   // exercised end to end by deploy/gates/consumer_leg.ts): per-output bytes[]
   // kemCiphertexts everywhere — this family has no single authority
   // kemCiphertext — and pub arities include the enabled slots the module

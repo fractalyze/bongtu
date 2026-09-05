@@ -14,9 +14,9 @@ import { CHAIN_ID } from "@bongtu/core/network";
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = join(HERE, "..", "..", ".."); // apps/indexer/src -> repo root
 
-/** Load a Foundry artifact ABI from contracts/out/<sol>.sol/<contract>.json. */
+/** Load a Foundry artifact ABI from chains/evm/out/<sol>.sol/<contract>.json. */
 export function loadAbi(sol: string, contract: string): Abi {
-  const p = join(REPO_ROOT, "contracts", "out", `${sol}.sol`, `${contract}.json`);
+  const p = join(REPO_ROOT, "chains", "evm", "out", `${sol}.sol`, `${contract}.json`);
   return JSON.parse(readFileSync(p, "utf8")).abi as Abi;
 }
 
@@ -99,7 +99,7 @@ export function staleOpAbiError(abi: Abi): string | null {
   const names = new Set(abi.filter((x): x is AbiEvent => x.type === "event").map((ev) => ev.name));
   for (const wanted of ["Transferred10", "Transferred10x2", "WithdrawAnnouncement", "OpApplied", "ModuleRegistered", "ModuleRemoved"]) {
     if (!names.has(wanted)) {
-      return `FATAL: this build's ABI lacks the ${wanted} event — a stale contracts/out (or apps/indexer/abi/BongtuPool.abi.json) silently skips every ${wanted} op while /health stays green. Rebuild the pool ABI (recipe: apps/indexer/abi/README.md).`;
+      return `FATAL: this build's ABI lacks the ${wanted} event — a stale chains/evm/out (or apps/indexer/abi/BongtuPool.abi.json) silently skips every ${wanted} op while /health stays green. Rebuild the pool ABI (recipe: apps/indexer/abi/README.md).`;
     }
   }
   return null;
@@ -238,7 +238,7 @@ export function kemBootGuardError(opts: {
 }): string | null {
   if (opts.kemPkHash.toLowerCase() === ZERO32) return null; // pre-KEM epoch (or V1 pool)
   if (!opts.abiKnowsKem) {
-    return "FATAL: the pool's arbiterKemPkHash(currentEpoch()) is nonzero but this build's ABI has no KEM event fields — a V1-ABI ingest silently under-records every op envelope while /health stays green. Rebuild contracts/out from the hybrid BongtuPool.";
+    return "FATAL: the pool's arbiterKemPkHash(currentEpoch()) is nonzero but this build's ABI has no KEM event fields — a V1-ABI ingest silently under-records every op envelope while /health stays green. Rebuild chains/evm/out from the hybrid BongtuPool.";
   }
   if (opts.arbiterMode && !opts.hasKemKey) {
     return "FATAL: the pool's arbiterKemPkHash(currentEpoch()) is nonzero but AUTHORITY_KEM_KEY is unset — arbiter mode cannot decapsulate hybrid envelopes. Set AUTHORITY_KEM_KEY (the ML-KEM-768 decapsulation key) or run public mode.";

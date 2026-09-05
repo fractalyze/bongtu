@@ -8,7 +8,7 @@
 # where p256(n) = "0x" + hex(n) left-padded to 64 nibbles. The G2 inner swap on
 # `b` is the part a verifier call would silently get wrong — pinned two ways:
 # hand-restated on synthetic proofs below, AND differentially against
-# contracts/test/fixtures/disburse256.calldata.json, which snarkjs ITSELF
+# chains/evm/test/fixtures/disburse256.calldata.json, which snarkjs ITSELF
 # produced from the committed real proof (so a shared misunderstanding of the
 # rule cannot pass — the reference implementation is in the loop via a
 # committed byte-level artifact).
@@ -21,7 +21,7 @@ import pytest
 from prover_service import config
 from prover_service.calldata import to_solidity_calldata
 
-FIXTURES = Path(__file__).resolve().parents[2] / "contracts" / "test" / "fixtures"
+FIXTURES = Path(__file__).resolve().parents[2] / "chains" / "evm" / "test" / "fixtures"
 
 
 def snarkjs_proof(a0=11, a1=12, b00=21, b01=22, b10=23, b11=24, c0=31, c1=32) -> dict:

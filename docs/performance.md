@@ -68,9 +68,9 @@ the wallet.
 (hybrid epoch, employer-console pay run, 2026-07-30) and has **not** been re-run on Base Sepolia.
 
 It is carried forward rather than restated because the chain move changed **zero executable lines in
-any operation path**: every changed line in `contracts/src/BongtuPool.sol` is inside `initialize` /
+any operation path**: every changed line in `chains/evm/src/BongtuPool.sol` is inside `initialize` /
 `_initVerifiers` or in the deleted `initializeV2..V5` payloads (verify with
-`git diff 64ec0f5..HEAD -- contracts/src/BongtuPool.sol`). L2 `gasUsed` is a function of the
+`git diff 64ec0f5..HEAD -- chains/evm/src/BongtuPool.sol`). L2 `gasUsed` is a function of the
 bytecode executed and the calldata received, and an untouched path costs what it cost. Re-running it
 on Base (`deploy/live/payroll_e2e.ts`) is what would turn this into a measurement rather than an
 inference.
@@ -97,7 +97,7 @@ with an IMT batch-attach and its per-note ciphertext with one aggregated disclos
 ## On-chain gas per operation (harness, pre-KEM)
 
 Clean `gasleft()` delta around the single pool call, real verifiers, B=16 pool
-(`contracts/test/GasReport.t.sol`; `forge --gas-report` inflates via metering and mixes arities, so
+(`chains/evm/test/GasReport.t.sol`; `forge --gas-report` inflates via metering and mixes arities, so
 it is not used). **Measured 2026-07-26**, before the hybrid upgrade. These are figures about this
 tree, not about a chain — they measure the call, not the transaction, so they carry neither the
 intrinsic cost nor the calldata cost and are always lower than the live rows above.
@@ -109,7 +109,7 @@ intrinsic cost nor the calldata cost and are always lower than the live rows abo
 | `withdraw` (2-in / 1-out, + authority envelope) | 1,411,960 | 2 nullifiers, 1 change leaf |
 | `disburseWithCiphertexts` (1-in / 16-out, partial block, full ciphertext) | 2,194,716 | B=16 dev arity |
 
-The production 256 arity (`contracts/test/Disburse256.t.sol`, real GPU proof against the real
+The production 256 arity (`chains/evm/test/Disburse256.t.sol`, real GPU proof against the real
 verifier, **measured 2026-07-26**, pre-KEM). Both cases seed a single input note at leaf 0, so both
 disburse into a **1-leaf partial block** and both close it in-call before attaching the 256-leaf
 subtree:
@@ -216,8 +216,8 @@ contract.
 ## Reproducing
 
 ```sh
-cd contracts && forge test --match-path "test/GasReport.t.sol" -vv
-cd contracts && forge test --match-path "test/Disburse256.t.sol" -vv
+cd chains/evm && forge test --match-path "test/GasReport.t.sol" -vv
+cd chains/evm && forge test --match-path "test/Disburse256.t.sol" -vv
 cd circuits  && $SNARKJS r1cs info out/<name>.r1cs        # $SNARKJS: toolchain.md
 cast receipt <txhash> --rpc-url "$LIVE_RPC"               # $LIVE_RPC: .env.example
 npx tsx deploy/live/gas_survey.ts                         # re-measures the live table (spends gas)

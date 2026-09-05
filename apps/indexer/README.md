@@ -183,7 +183,7 @@ a builder trims the npm workspace to `packages/core` + `apps/indexer` (a lockfil
 `BONGTU_NODE_MODULES` seam; the slim non-root runtime copies the installed tree, the raw
 `.ts` source (run via `node --import tsx`), the addresses file, and the **committed pool
 ABI** ([`abi/BongtuPool.abi.json`](abi/README.md)) placed at
-`contracts/out/BongtuPool.sol/BongtuPool.json` so the image is self-contained (no foundry
+`chains/evm/out/BongtuPool.sol/BongtuPool.json` so the image is self-contained (no foundry
 in the build) and reproducible. CI builds this image **build-only** (`indexer-image`
 job); `docker compose up` and the pg integration test below stay LOCAL gates.
 

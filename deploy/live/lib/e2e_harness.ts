@@ -60,7 +60,7 @@ export { artifact, dec, prove, ok, step, failureCount } from "./proof_toolbox.js
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..", ".."); // deploy/live/lib -> repo root
-const POSEIDON_HEX = join(ROOT, "contracts", "test", "fixtures", "poseidon2.hex");
+const POSEIDON_HEX = join(ROOT, "chains", "evm", "test", "fixtures", "poseidon2.hex");
 
 export const RPC = process.env.E2E_RPC || "http://127.0.0.1:8545";
 // anvil default account #0 (deterministic dev key — testnet fake money only).

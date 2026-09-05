@@ -17,9 +17,9 @@ node_modules
 .env.*.local
 
 # heavy artifacts / build caches (none are needed: the pool ABI ships committed
-# under apps/indexer/abi, not from contracts/out)
+# under apps/indexer/abi, not from chains/evm/out)
 circuits
-contracts
+chains
 deploy/broadcast
 deploy/cache
 **/dist
