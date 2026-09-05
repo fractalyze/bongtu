@@ -19,9 +19,11 @@ done
 ## One iteration
 
 1. **Find work**: `git fetch -q origin main`; candidates are slugs under `.dev/intents/`
-   on origin/main whose intent.md says `Status: accepted` and which have no
-   `refs/heads/feat/<slug>` on origin (`git ls-remote`). None → this tick is a no-op;
-   let the loop reschedule (idle pace, 20–30 min).
+   on origin/main whose intent.md says `Status: accepted`, which have no
+   `refs/heads/feat/<slug>` on origin (`git ls-remote`), AND no PR ever opened from that
+   head (`gh pr list --head feat/<slug> --state all` is empty) — a merged or closed PR
+   means the intent is done or was abandoned deliberately, even though the branch is
+   deleted. None → this tick is a no-op; let the loop reschedule (idle pace, 20–30 min).
 2. **Claim atomically** (oldest candidate first): create local `feat/<slug>` at
    origin/main, add an empty commit `chore(<slug>): claim intent for auto run`, and push.
    The push either creates the ref or is rejected because another worker's claim commit
