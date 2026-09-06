@@ -100,7 +100,9 @@ src/
     actionMachine.ts   React adapter over @bongtu/ui/actionMachine
     homeView.ts / activityView.ts   pure screen presenters
     screens/           Onboarding, LockIntro, Home, Activity, Settings, Deposit,
-                       SpendScreen (Send + Withdraw), Receive (identity + v2 registration)
+                       SpendScreen (Send + Withdraw), Receive (identity + v2 registration),
+                       Payments (received-payments list — the view-key scan over the
+                       attribution-free announce feed, docs/wallet.md)
     components/        balance card, activity list, sync dot, staged progress, download
                        progress, modals, controls
 test/

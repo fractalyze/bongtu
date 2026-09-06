@@ -578,7 +578,9 @@ and submitted to the registered op modules (token approvals still target the poo
 escrow holder). The shell is treasury-web's, forked and trimmed to the profile that IS
 this product. What deliberately does not exist here (v1 scope, issue #13): the enterprise
 view-token session, owner-authed indexer reads, activity paging, the pool KEM-epoch guard,
-the relayer exit leg, the portal receive, and any disburse UI.
+the relayer exit leg, the enterprise portal Receive panel, and any disburse UI. (The
+CONSUMER receive product — pay-page issuance and the received-payments list — landed
+later; see below.)
 
 ### Tokenless session
 
@@ -633,6 +635,21 @@ words (paying it would mint notes the recipient could never discover by self-sca
 get paid is their NAME, never the raw triple and no longer a bare address, and
 registration is v2-only, binding the stealth meta pair and the consumer pair under one
 owner signature ([indexer.md](indexer.md#name-directory)).
+
+### The received-payments list
+
+Behind the receive identity sits the payments view (`#/payments`): one row per pay-page
+issuance that was actually funded ([portal.md](portal.md#receiving-the-consumer-pay-page)),
+with the status ladder `received → shielding → shielded`. Every source is a public
+endpoint, so the tokenless contract holds: the wallet scans the ATTRIBUTION-FREE announce
+feed with its own stealth view key to decide which rows are its own
+(`scanStealthAnnouncement` — the feed serves no name and no owner), reads the
+destination's live token balance for unswept rows (an unfunded issuance is dropped, never
+rendered as phantom money), takes the `swept` flip from the record, and calls a payment
+`shielded` when the sweep's mint surfaces in its own self-scan note set (the sweep tx hash
+matches a discovered note's). The fold is pure and headlessly gated
+(`src/lib/payments.ts`); the stealth unlock rides `keyCache` under the one-op slot like
+every other signature train.
 
 ### What the consumer bundle carries
 

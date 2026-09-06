@@ -232,7 +232,7 @@ System guarantees and inter-component contracts live in [`docs/`](docs/), one fi
 - [Indexer](docs/indexer.md): the mirror invariant, single-transaction persist and gap-only resume, the HTTP API and its read-auth, the arbiter-mode trust boundary.
 - [Wallet](docs/wallet.md): the two wallets on one engine — the shared core (keys, lock, in-browser proving, spend chains), the enterprise wallet, the consumer wallet.
 - [Relayer](docs/relayer.md): the gas-sponsoring withdraw submitter and why a proof-bound recipient makes third-party submission safe.
-- [Portal](docs/portal.md): stealth deposits — a plain transfer from any wallet becomes a shielded note via CREATE2 destinations and the sweep bot.
+- [Portal](docs/portal.md): stealth deposits and stealth receiving — a plain transfer from any wallet becomes a shielded note via CREATE2 destinations and the sweep bot; the receive product adds browser-side issuance and consumer-family (no-auditor) sweeps.
 - [Solana rail](docs/solana-rail.md): the same op families on Solana — one program, PDA state, Transaction v1, the 1-tx disburse binding with institution-served disclosure.
 - [Consumer family](docs/consumer.md): the no-auditor op family — op-module core, the five consumer circuits, self-scan discovery, deploy profiles, op-level audit semantics.
 - [Error surfaces](docs/errors.md): the consequence-class taxonomy and its surfaces (toast = event, banner = state), the money-state line, the no-telemetry stance.

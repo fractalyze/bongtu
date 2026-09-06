@@ -174,6 +174,34 @@ Notes for the live run:
   args for the proxy). The pool implementation, proxy and DepositVerifier are
   verified; Poseidon cannot be (no Solidity source).
 
+### Deploy the receive factory (add-on, live chain — the human step)
+
+The receive product's contracts (`ReceiveFactory`/`ReceiveSweeper`,
+[docs/portal.md](../docs/portal.md#receiving-the-consumer-pay-page)) ship as an
+add-on deploy beside the pool — no pool transaction of any kind. Preconditions
+the script itself enforces: the chain's record holds a pool AND
+`deploy/modules.<chainid>.json` holds a `depositPrivModule` (the consumer module
+set must already be registered). Rerun-guarded on the record's `receiveFactory`
+field (a second factory would strand every announcement issued against the
+first).
+
+```sh
+cd bongtu/chains/evm
+export DEPLOYER_KEY=0x<funded-key>
+# optional: a dedicated sweep-bot EOA (defaults to the broadcaster)
+# export BOT=0x<bot-address>
+forge script ../deploy/forge/DeployReceive.s.sol:DeployReceive \
+  --rpc-url "$LIVE_RPC" --broadcast --skip-simulation
+```
+
+The factory address lands in `deploy/addresses.<chainid>.json` as
+`receiveFactory` — copy it BY FIELD NAME into the live wiring: the public
+indexer's `RECEIVE_FACTORY` (+ `PORTAL_OPERATOR_TOKEN`, shared with the bot),
+the receive-mode sweeper (`MODE=receive`, `apps/sweeper/README.md`), and the
+pay-web Vercel project's `VITE_RECEIVE_FACTORY` /
+`VITE_SWEEPER_INITCODE_HASH` (`apps/pay-web/README.md`). The anvil drill for
+this script is `gates/test_deploy_receive.sh`.
+
 ### Deploy the dedicated ct-free enterprise pool (second pool, same chain)
 
 One command stands a dedicated enterprise pool BESIDE the chain's shared pool —
@@ -256,9 +284,13 @@ Canonical data stays at the top; everything else is grouped by what runs it.
 - `test_upgrade_v3.sh` — the op-module upgrade drill (v1 proxy → UpgradeV3 → modules registered,
   enterprise Smoke still accepted, rerun refused).
 - `e2e_m0.sh` / `e2e_orchestrator.ts` — the M0 full spend-cycle e2e on a fresh anvil, including the
-  portal leg (`portal_leg.ts`) and the arbiter-free consumer leg (`consumer_leg.ts`: profile deploy +
+  portal leg (`portal_leg.ts`), the arbiter-free consumer leg (`consumer_leg.ts`: profile deploy +
   V3 upgrade, CPU-proved consumer ops + disburse chunk txs, PUBLIC indexer, self-scan discovery +
-  batch-interior spend via the auth-free `/path`, and the committed disbursePriv256 calldata replay).
+  batch-interior spend via the auth-free `/path`, and the committed disbursePriv256 calldata replay),
+  and the receive leg (`receive_leg.ts`: pay-page issuance, distinct-EOA payments, receive-mode
+  depositPriv sweeps, the R7 unlinkability grep, self-scan discovery).
+- `test_deploy_receive.sh` — the receive-factory add-on deploy drill (module-set precondition,
+  happy path, rerun refusal).
 - `test_one_shot_deploy.sh` — scratch-anvil drill of the deploy: B=256, all six verifier getters
   wired and matching the record, Initializable version 1, `currentEpoch() == 0`.
 - `upload_circuits.sh` — publishes the wallet's proving assets to the Vercel Blob store.
