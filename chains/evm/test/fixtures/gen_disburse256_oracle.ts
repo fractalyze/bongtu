@@ -35,12 +35,18 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const H = 32;
 const B = 256;
 
+// Fixture-set prefix: "disburse256" (default) or "disburseCtf256" (the ct-free
+// sibling — same input note and therefore the same roots, its own proof set).
+// The ctf run keeps the default INPUT_PATH: the ctf proof is generated from the
+// PARENT's committed input on purpose (identical input signal set).
+const PREFIX = process.env.BONGTU_DISBURSE256_PREFIX ?? "disburse256";
+
 // Real proof publics (11) — the rabbitsnark-GPU disburse256 proof
 // ([0..1]=ecdhPub [2]=disclosureHash [3]=subtreeRoot [4]=kemBinding [5]=nf
 //  [6]=root [7]=enabled [8]=nonce [9..10]=authorityPubKey).
-const pub = JSON.parse(readFileSync(join(HERE, "disburse256.public.json"), "utf8"));
+const pub = JSON.parse(readFileSync(join(HERE, `${PREFIX}.public.json`), "utf8"));
 // Solidity-ready Groth16 calldata (snarkjs applied the G2 inner swap on b).
-const cd = JSON.parse(readFileSync(join(HERE, "disburse256.calldata.json"), "utf8"));
+const cd = JSON.parse(readFileSync(join(HERE, `${PREFIX}.calldata.json`), "utf8"));
 // The input note that was spent (its commitment is the sole leaf of the
 // membership tree the proof proves against).
 const INPUT_PATH = process.env.BONGTU_DISBURSE256_INPUT ?? join(HERE, "disburse256.input.json");
@@ -58,7 +64,7 @@ const s = (x: bigint | number | string): string => "0x" + BigInt(x).toString(16)
 // The calldata fixture must be the same proof run: its publics are the hex form
 // of public.json, or the a/b/c we emit belong to a different proof.
 if (JSON.stringify(cd.pub) !== JSON.stringify(pub.map(s))) {
-  throw new Error("disburse256.calldata.json pub != disburse256.public.json — stale fixture?");
+  throw new Error(`${PREFIX}.calldata.json pub != ${PREFIX}.public.json — stale fixture?`);
 }
 
 const tree = new ImtTree(H, B);
@@ -100,8 +106,8 @@ const out = {
 };
 
 mkdirSync(HERE, { recursive: true });
-writeFileSync(join(HERE, "disburse256.oracle.json"), JSON.stringify(out, null, 2));
-console.log("wrote disburse256.oracle.json");
+writeFileSync(join(HERE, `${PREFIX}.oracle.json`), JSON.stringify(out, null, 2));
+console.log(`wrote ${PREFIX}.oracle.json`);
 console.log(`  seedRoot   = ${out.seedRoot}  (== public.json[6], verified)`);
 console.log(`  oracleRoot = ${out.oracleRoot}`);
 console.log(`  finalNextLeafIndex = ${finalNextLeafIndex} (expect 512)`);

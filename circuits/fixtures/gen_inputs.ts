@@ -325,4 +325,13 @@ write("transfer10_consolidate", genTransfer10Consolidate());
 write("transfer10x2", genTransfer10x2());
 write("transfer10x2_merge", genTransfer10x2Merge());
 write("withdraw", genWithdraw());
+// The ct-free enterprise variants take the IDENTICAL input signal set as their
+// parents (they differ only in dropping the receiver encryption from the
+// constraint system), so the parent generators are reused under the ctf
+// fixture names — same material, separate files, because the pipeline keys
+// fixture name == input name.
+write("transferCtf", genTransfer());
+write("transfer10Ctf", genTransfer10());
+write("transfer10x2Ctf", genTransfer10x2());
+write("disburseCtf", genDisburse());
 console.log("input generation OK");

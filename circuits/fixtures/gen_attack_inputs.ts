@@ -208,4 +208,8 @@ write("withdraw_attack", genAttack());
 write("withdraw_padded", genPadded());
 write("transfer10_attack", genSpend10Attack("transfer10_attack", 10));
 write("transfer10x2_attack", genSpend10Attack("transfer10x2_attack", 2));
+// Ct-free variants take the identical input signal set (gen_inputs.ts reuse
+// rule); the attacks must be equally unsatisfiable on the variant belts.
+write("transfer10Ctf_attack", genSpend10Attack("transfer10Ctf_attack", 10));
+write("transfer10x2Ctf_attack", genSpend10Attack("transfer10x2Ctf_attack", 2));
 console.log("mint/attack/padded input generation OK");

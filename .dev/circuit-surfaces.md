@@ -107,6 +107,15 @@ former travels as a separate calldata argument bound by `disclosureHash`, the la
 argument bound by `kemBinding` ([protocol.md](../docs/protocol.md),
 [contracts.md](../docs/contracts.md)).
 
+## Ct-free enterprise (dedicated pools)
+
+`transferCtf` / `transfer10Ctf` / `transfer10x2Ctf` / `disburseCtf` / `disburseCtf256` are
+**index-identical** to their parents above (`uint[37]` / `uint[141]` / `uint[68]` / `uint[11]` /
+`uint[11]`) — the layout-preservation rule (docs/circuits.md#ct-free-enterprise-variants). The
+only value-level difference: every `cipherTexts` slot is constrained to zero (transfer family),
+and the disburse `disclosureHash` folds a zeroed 4·B receiver run. No separate tables: any index
+listed for a parent applies verbatim to its ctf sibling.
+
 ## Consumer (module-verified)
 
 ### depositPriv — `uint[16]` (enterprise deposit: `uint[19]`)

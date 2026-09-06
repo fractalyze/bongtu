@@ -92,4 +92,26 @@ contract VerifierDriftTest is Test {
     function testDisbursePriv256VerifierIsTheGeneratedOneRenamed() public view {
         _assertRenameOnly("disbursePriv256_verifier.sol", "DisbursePriv256Verifier");
     }
+
+    // --- ct-free enterprise family — same rename-only rule ------------------
+
+    function testTransferCtfVerifierIsTheGeneratedOneRenamed() public view {
+        _assertRenameOnly("transferCtf_verifier.sol", "TransferCtfVerifier");
+    }
+
+    function testTransfer10CtfVerifierIsTheGeneratedOneRenamed() public view {
+        _assertRenameOnly("transfer10Ctf_verifier.sol", "Transfer10CtfVerifier");
+    }
+
+    function testTransfer10x2CtfVerifierIsTheGeneratedOneRenamed() public view {
+        _assertRenameOnly("transfer10x2Ctf_verifier.sol", "Transfer10x2CtfVerifier");
+    }
+
+    function testDisburseCtfVerifierIsTheGeneratedOneRenamed() public view {
+        _assertRenameOnly("disburseCtf_verifier.sol", "DisburseCtfVerifier");
+    }
+
+    function testDisburseCtf256VerifierIsTheGeneratedOneRenamed() public view {
+        _assertRenameOnly("disburseCtf256_verifier.sol", "DisburseCtf256Verifier");
+    }
 }

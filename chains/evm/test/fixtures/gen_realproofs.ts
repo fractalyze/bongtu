@@ -189,6 +189,55 @@ async function main(): Promise<void> {
     out.withdraw_padded = { ...cd, seedLeaves: inC.map(s), rootAfter: s(t.getRoot()), ...kemFor("withdraw_padded", cd.pub[16]) };
   }
 
+  // --- ct-free enterprise variants (transferCtf / transfer10Ctf /
+  //     transfer10x2Ctf / disburseCtf) --------------------------------------
+  // Same public layouts and the SAME input fixtures as their parents (the ctf
+  // inputs are the parent generators re-written under ctf names in
+  // gen_inputs.ts, so each KEM draw is the PARENT's label). The receiver-ct
+  // publics must be ALL ZERO — that is the property these fixtures exist to
+  // prove, so it is belted here rather than trusted.
+  {
+    const ctfKem: Record<string, string> = {
+      transferCtf: "transfer",
+      transfer10Ctf: "transfer10",
+      transfer10x2Ctf: "transfer10x2",
+      disburseCtf: "disburse",
+    };
+    // Per-family public indices (identical to the parents'): [ctStart, ctLen,
+    // rootIdx, ocStart, ocCount, kemBindingIdx, appendAllOutputs].
+    const shapes: Record<string, [number, number, number, number, number, number, boolean]> = {
+      transferCtf: [2, 8, 29, 32, 2, 26, true],
+      transfer10Ctf: [2, 40, 117, 128, 10, 106, true],
+      transfer10x2Ctf: [2, 8, 52, 63, 2, 41, true],
+    };
+    for (const [name, [ctStart, ctLen, rootIdx, ocStart, ocCount, kbIdx]] of Object.entries(shapes)) {
+      const cd = await calldata(name);
+      for (const i of Array(ctLen).keys()) {
+        assertEq(cd.pub[ctStart + i], 0n, `${name} receiver-ct public[${ctStart + i}] != 0`);
+      }
+      const inp = rd(join(INPUTS, `${name}.json`));
+      const seed = (inp.inputCommitments as string[]).filter((_, i) => BigInt(inp.enabled[i]) === 1n).map(BigInt);
+      assertEq(rootAfterAppends(seed), cd.pub[rootIdx], `${name} membership root != pub[${rootIdx}]`);
+      const t = new ImtTree(H, B);
+      for (const c of seed) t.appendLeaf(c);
+      for (const i of Array(ocCount).keys()) t.appendLeaf(BigInt(cd.pub[ocStart + i]));
+      out[name] = { ...cd, seedLeaves: seed.map(s), rootAfter: s(t.getRoot()), ...kemFor(ctfKem[name], cd.pub[kbIdx]) };
+    }
+    // disburseCtf mirrors disburse (receiver cts live inside disclosureHash,
+    // not as publics — the zeroed run is proven by the disclosure-blob replay
+    // in the gate, not assertable here).
+    {
+      const cd = await calldata("disburseCtf");
+      const inCommit = rd(join(INPUTS, "disburseCtf.json")).inputCommitments[0];
+      assertEq(rootAfterAppends([inCommit]), cd.pub[6], "disburseCtf membership root != pub[6]");
+      const seed = [BigInt(inCommit), FILLER];
+      const t = new ImtTree(H, B);
+      for (const c of seed) t.appendLeaf(c);
+      t.attachSubtree(BigInt(cd.pub[3])); // subtreeRoot
+      out.disburseCtf = { ...cd, seedLeaves: seed.map(s), rootAfter: s(t.getRoot()), ...kemFor(ctfKem.disburseCtf, cd.pub[4]) };
+    }
+  }
+
   // --- arbiter key (authority pubkey the real proofs encrypt to) ------------
   // Every circuit's authority envelope must encrypt to the SAME key, since the
   // contract injects one stored arbiter key for ALL verifier calls (a proof made

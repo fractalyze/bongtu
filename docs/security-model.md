@@ -200,12 +200,14 @@ Scope, stated honestly:
   produce proofs for, while any hash that is *present* but not this build's, a zero among them, is
   refused as a key mismatch. A zero on-chain never means "pre-KEM"; the pool refuses to store one,
   so it can only mean an epoch that was never minted.
-- **Enterprise receiver ciphertexts are still ECDH-only.** Per-recipient KEM is deferred there: it
-  costs ~38k gas per recipient (≈ +9.7M on a 256-batch) and only helps an adversary who already
-  holds candidate recipient pubkeys — which appear nowhere on-chain in the clear. The interim
-  defence is operational: bongtu addresses are shared off-channel, never published. Consumer
-  receiver ciphertexts are hybrid per output
-  ([the consumer-family section](#the-consumer-family-no-auditor-ops)).
+- **Enterprise receiver ciphertexts are still ECDH-only — on the shared pool.** Per-recipient KEM
+  is deferred there: it costs ~38k gas per recipient (≈ +9.7M on a 256-batch) and only helps an
+  adversary who already holds candidate recipient pubkeys — which appear nowhere on-chain in the
+  clear. The interim defence is operational: bongtu addresses are shared off-channel, never
+  published. Consumer receiver ciphertexts are hybrid per output
+  ([the consumer-family section](#the-consumer-family-no-auditor-ops)). On a **dedicated ct-free
+  pool** ([below](#the-dedicated-ct-free-pool-posture)) the surface does not exist: no receiver
+  ciphertext content is ever emitted.
 - **The KEM alarm is arbiter-attested, not publicly recomputable.** The disclosure alarm can be
   re-derived by anyone from public data; confirming a `kemBinding` mismatch requires decapsulating
   under the arbiter's secret key, so a third party can neither verify a raised alarm nor detect a
@@ -230,6 +232,28 @@ every spending base. Regression gates: `circuits/gates/test_zero_leaf_unsat.sh` 
 unsatisfiable) and the contract enforcement tests. See
 [circuits.md](circuits.md#soundness-invariants).
 
+## The dedicated ct-free pool posture
+
+A dedicated enterprise pool (`Deploy.s.sol VERIFIER_PROFILE=ctf` — one institution, own arbiter
+key) runs the [ct-free circuit variants](circuits.md#ct-free-enterprise-variants): **no
+receiver-decryptable ciphertext content exists on-chain at all.** The delta against the shared
+pool:
+
+- **Harvest-now-decrypt-later on receiver material is closed**, not mitigated: there is nothing
+  to harvest. The hybrid authority envelope (already post-quantum) is unchanged, and the
+  ct-free disburse's `disclosureHash` still binds the full blob — the receiver run is zeros, so
+  the indexer's disclosure alarm and non-repudiation of the authority envelope survive verbatim.
+- **Who sees what changes for the recipient**: the receiver-ct trial-decrypt row disappears, so
+  a recipient's ONLY discovery path is the institution's own indexer — by design, since a
+  dedicated pool has no non-client participants, but it hardens the "discovery liveness depends
+  on the indexer" gap into a hard dependency for this pool class. Funds safety still does not
+  depend on the indexer for a recipient who holds their note material; the off-chain receipt
+  convention (value, salt, leafIndex — a separate work item) is the recipient's
+  institution-independent verification and cold-spend path.
+- **The shared pool is untouched.** The live 450815 consumer pool keeps receiver-ct emission —
+  on a shared dual-mode pool the receiver-ct is load-bearing for cross-family receivability —
+  so the receiver-ct residuals below remain scoped to shared pools.
+
 ## Residual gaps
 
 Present-tense, deliberate, and not fixed by anything in the tree today.
@@ -244,16 +268,19 @@ Present-tense, deliberate, and not fixed by anything in the tree today.
   no grace window, so any proof built against the previous key fails. It rotates the bjj key and
   the KEM pk hash together, so a client with a cached old KEM key is caught by the
   pre-encapsulation guard rather than producing a false-tamper op.
-- **Enterprise receiver ciphertexts are not post-quantum.** Per-recipient KEM is deferred on cost
-  grounds; see the post-quantum scope above for why the residual exposure needs an adversary who
-  already holds recipient pubkeys.
+- **Enterprise receiver ciphertexts are not post-quantum (shared pools only).** Per-recipient KEM
+  is deferred on cost grounds; see the post-quantum scope above for why the residual exposure
+  needs an adversary who already holds recipient pubkeys. Dedicated ct-free pools close this
+  outright ([above](#the-dedicated-ct-free-pool-posture)).
 - **Two-time pad on duplicate output owners (enterprise disburse only).** All outputs of a disburse
   batch share one ephemeral key and one nonce, so two outputs to the same owner would leak
   `m1 − m2`. Mitigated by assembly-time rejection (`assertDistinctOwnerPubkeys`), not by the
   constraint system. The transfer circuit closed this structurally: receiver ciphertext `i` is
   encrypted under `encryptionNonce + i` in-circuit, so duplicate output owners — including
   transfer-to-self — are safe there; the consumer family encrypts every output at `nonce + i` in
-  all five of its circuits, so the ban applies to the enterprise disburse alone.
+  all five of its circuits, so the ban applies to the enterprise disburse alone — and only on
+  shared pools: the ct-free disburse emits no receiver ciphertext, so the pad has nothing to leak
+  there (the assembly-time ban is kept anyway, uniformity being cheaper than an exception).
 - **Discovery liveness depends on the indexer.** All ciphertext is on-chain and OP Stack posts it
   to L1, so the data is available; but reading it means `eth_getLogs` against an archive node or
   the bongtu indexer. Funds safety never depends on the indexer — a user who keeps their notes can

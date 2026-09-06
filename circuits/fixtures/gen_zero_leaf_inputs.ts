@@ -165,4 +165,9 @@ write("transfer_zero_leaf", genTransferZeroLeaf());
 write("transfer10_zero_leaf", genSpend10ZeroLeaf("transfer10_zero_leaf", 10));
 write("transfer10x2_zero_leaf", genSpend10ZeroLeaf("transfer10x2_zero_leaf", 2));
 write("withdraw_zero_leaf", genWithdrawZeroLeaf());
+// Ct-free variants take the identical input signal set (gen_inputs.ts reuse
+// rule); the zero-leaf exploit must be equally unsatisfiable on their belts.
+write("transferCtf_zero_leaf", genTransferZeroLeaf());
+write("transfer10Ctf_zero_leaf", genSpend10ZeroLeaf("transfer10Ctf_zero_leaf", 10));
+write("transfer10x2Ctf_zero_leaf", genSpend10ZeroLeaf("transfer10x2Ctf_zero_leaf", 2));
 console.log("zero-leaf exploit input generation OK");

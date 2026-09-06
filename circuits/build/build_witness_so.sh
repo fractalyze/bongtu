@@ -57,7 +57,7 @@ for tool in "$CIRCOM_MLIR" "$PRIME_IR_OPT" "$MLIR_TRANSLATE" "$LLC"; do
   [ -x "$tool" ] || { echo "FATAL: toolchain binary missing/not executable: $tool"; exit 1; }
 done
 
-ALL_CIRCUITS=(disburse256 transfer10x2 deposit disbursePriv256)
+ALL_CIRCUITS=(disburse256 transfer10x2 deposit disbursePriv256 disburseCtf256)
 if [ "$#" -gt 0 ]; then CIRCUITS=("$@"); else CIRCUITS=("${ALL_CIRCUITS[@]}"); fi
 
 mkdir -p out

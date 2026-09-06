@@ -1,12 +1,14 @@
 # Circuits
 
-Two circuit families share one pool. The **enterprise** family — arbiter envelope mandatory,
-verified by `BongtuPool` itself — is seven top-level circuits over four bases; the **consumer**
-(no-auditor) family adds six more tops over four sibling bases
-([below](#consumer-circuits-and-public-surfaces)). Both share one membership gadget and one
-envelope construction. Sources: `circuits/*.circom` (top-levels) and `circuits/lib/*.circom`
-(vendored bases). Provenance against upstream Zeto is in
-[zeto-derivation.md](zeto-derivation.md); build commands are in [toolchain.md](toolchain.md).
+Three circuit families. The **enterprise** family — arbiter envelope mandatory, verified by
+`BongtuPool` itself — is seven top-level circuits over four bases; the **consumer** (no-auditor)
+family adds six more tops over four sibling bases
+([below](#consumer-circuits-and-public-surfaces)); the **ct-free enterprise** family
+([below](#ct-free-enterprise-variants)) adds five tops over two sibling bases for dedicated
+pools. All share one membership gadget and one envelope construction. Sources:
+`circuits/*.circom` (top-levels) and `circuits/lib/*.circom` (vendored bases). Provenance
+against upstream Zeto is in [zeto-derivation.md](zeto-derivation.md); build commands are in
+[toolchain.md](toolchain.md).
 
 | circuit | template | arity | constraints | publics | domain |
 |---|---|---|---|---|---|
@@ -55,7 +57,35 @@ ML-KEM-768 shared secret; the derivation, tags and limb encoding are owned by
   went hybrid.
 
 There is no ECDH-only encryption path left in any base. Receiver-side `EncryptOutputs` is
-untouched.
+untouched on the shared-pool family (and absent from the ct-free family below).
+
+## Ct-free enterprise variants
+
+For **dedicated** enterprise pools (one institution, discovery served by its own indexer),
+five siblings remove the receiver-decryptable ciphertext from the constraint system — the
+classical-ECDH-only receiver material that is the shared pool's
+harvest-now-decrypt-later exposure ([security-model.md](security-model.md)):
+
+| circuit | template | constraints | publics |
+|---|---|---|---|
+| `transferCtf.circom` | `ZetoTransferSmallCtf(2,2,32)` | 55,814 | 37 |
+| `transfer10Ctf.circom` | `ZetoTransferSmallCtf(10,10,32)` | 218,774 | 141 |
+| `transfer10x2Ctf.circom` | `ZetoTransferSmallCtf(10,2,32)` | 203,805 | 68 |
+| `disburseCtf.circom` | `ZetoCtf(1,16,32)` | 140,015 | 11 |
+| `disburseCtf256.circom` | `ZetoCtf(1,256,32)` | 1,697,455 | 11 |
+
+The **layout-preservation rule**: each variant keeps its parent's exact public surface —
+`BongtuPool` hard-codes the public-vector lengths and literal indices, so index identity is
+what lets the unchanged pool, ABI, indexer and wire types serve both families. The receiver-ct
+slots stay in the layout, **constrained to zero**: ct-freeness is proof-enforced (a proof
+carrying any nonzero receiver-ct element fails verification —
+`chains/evm/test/CtfVerifiers.t.sol`), and the ct-free disburse's `disclosureHash` folds the
+zeroed 4·B run ++ the authority ciphertext, so the length check and the indexer's disclosure
+alarm work unchanged. The hybrid authority envelope is verbatim; every constraint count drops
+(the receiver encryption sponges go away), so no parent's domain size is exceeded — transfer10Ctf
+sits at 2^18 with far more margin than its parent. deposit and withdraw need no variant: they
+publish no receiver ciphertext today and are reused byte-identically, verifiers and fixtures
+included.
 
 ## Public surfaces
 

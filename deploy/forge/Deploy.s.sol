@@ -21,6 +21,10 @@ import {Disburse256Verifier} from "bongtu-src/verifiers/Disburse256Verifier.sol"
 import {TransferVerifier} from "bongtu-src/verifiers/TransferVerifier.sol";
 import {Transfer10Verifier} from "bongtu-src/verifiers/Transfer10Verifier.sol";
 import {Transfer10x2Verifier} from "bongtu-src/verifiers/Transfer10x2Verifier.sol";
+import {DisburseCtf256Verifier} from "bongtu-src/verifiers/DisburseCtf256Verifier.sol";
+import {TransferCtfVerifier} from "bongtu-src/verifiers/TransferCtfVerifier.sol";
+import {Transfer10CtfVerifier} from "bongtu-src/verifiers/Transfer10CtfVerifier.sol";
+import {Transfer10x2CtfVerifier} from "bongtu-src/verifiers/Transfer10x2CtfVerifier.sol";
 import {MockERC20} from "bongtu-test/mocks/MockERC20.sol";
 
 import {AddressBook, AddressRecord} from "./AddressBook.sol";
@@ -49,6 +53,18 @@ import {ConsumerModuleKit, ConsumerModuleRecord} from "./ConsumerModuleKit.sol";
 /// Config is env-driven so the SAME script targets anvil or the live testnet:
 ///   DEPLOYER_KEY  (uint256 privkey)  default = anvil account 0
 ///   BATCH_SIZE    (uint256)          default = 256 (production)
+///   VERIFIER_PROFILE (string)        standard (default) deploys today's six
+///                                    verifiers and writes the chain's unnamed
+///                                    record, byte-identical to the pre-profile
+///                                    deploy; ctf swaps the four spending slots
+///                                    for the ct-free enterprise verifiers
+///                                    (TransferCtf / Transfer10Ctf /
+///                                    Transfer10x2Ctf / DisburseCtf256 — no
+///                                    receiver ciphertext content exists on such
+///                                    a pool), forces the audited-only module
+///                                    posture, and writes the NAMED record
+///                                    `addresses.ctf.<chainid>.json` so the
+///                                    canonical pool's record is never touched.
 ///   ARBITER_KEY_X / ARBITER_KEY_Y    default = the disburse256 fixture's
 ///                                    authorityPublicKey (pub[9..10]) so the
 ///                                    committed REAL 256 disburse proof verifies
@@ -77,6 +93,7 @@ contract Deploy is Script {
     /// the one place the addresses-file field list is declared.
     function run() external returns (AddressRecord memory d) {
         uint256 deployerKey = vm.envOr("DEPLOYER_KEY", DEFAULT_ANVIL_KEY);
+        bool ctf = _verifierProfileIsCtf();
         d.chainId = block.chainid;
         d.batchSize = vm.envOr("BATCH_SIZE", uint256(256));
         (uint256 defAx, uint256 defAy) = _fixtureArbiterKey();
@@ -91,11 +108,24 @@ contract Deploy is Script {
         console2.log("deployer :", d.owner);
         console2.log("batchSize:", d.batchSize);
 
-        _deployStack(deployerKey, d);
+        _deployStack(deployerKey, d, ctf);
         _selfCheck(d);
-        _writeAddresses(d);
+        _writeAddresses(d, ctf);
         _log(d);
-        _deployModuleProfile(deployerKey, d);
+        _deployModuleProfile(deployerKey, d, ctf);
+    }
+
+    /// @dev VERIFIER_PROFILE knob (orthogonal to MODULE_PROFILE): `standard`
+    ///      keeps the deploy byte-identical to the pre-profile script; `ctf`
+    ///      stands up the DEDICATED enterprise pool shape (ct-free spending
+    ///      verifiers, audited-only, named record). Everything else — Poseidon,
+    ///      token handling, initialize, arbiter knobs, _selfCheck, the KEM
+    ///      fail-closed rules — is shared, not forked.
+    function _verifierProfileIsCtf() internal view returns (bool) {
+        bytes32 h = keccak256(bytes(vm.envOr("VERIFIER_PROFILE", string("standard"))));
+        if (h == keccak256("standard")) return false;
+        require(h == keccak256("ctf"), "VERIFIER_PROFILE must be 'standard' or 'ctf'");
+        return true;
     }
 
     /// @dev MODULE_PROFILE (OPMOD §7/§9 deploy profiles):
@@ -106,9 +136,16 @@ contract Deploy is Script {
     ///                        event-logged onlyOwner registerModule.
     ///      (The no-arbiter consumer-only profile is its own script,
     ///      DeployConsumerOnly.s.sol — it needs a different initializer.)
-    function _deployModuleProfile(uint256 deployerKey, AddressRecord memory d) internal {
+    function _deployModuleProfile(uint256 deployerKey, AddressRecord memory d, bool ctf) internal {
         string memory profile = vm.envOr("MODULE_PROFILE", string("none"));
         bytes32 h = keccak256(bytes(profile));
+        // The dedicated ct-free pool is audited-only BY DESIGN: a registered
+        // consumer module would reopen a receiver-ct path on a pool whose whole
+        // point is that none exists.
+        if (ctf) {
+            require(h == keccak256("none"), "ctf profile is audited-only: MODULE_PROFILE must be 'none'");
+            return;
+        }
         if (h == keccak256("none")) return;
         require(h == keccak256("consumer"), "MODULE_PROFILE must be 'consumer' or 'none'");
 
@@ -131,16 +168,18 @@ contract Deploy is Script {
     /// @dev The full production stack, all inside one broadcast window so each
     ///      `new`/`create` is recorded as an on-chain deployment tx. Writes into
     ///      the struct directly to stay under the stack-depth limit.
-    function _deployStack(uint256 deployerKey, AddressRecord memory d) internal {
+    function _deployStack(uint256 deployerKey, AddressRecord memory d, bool ctf) internal {
         vm.startBroadcast(deployerKey);
 
         d.poseidon = address(_deployPoseidon());
+        // deposit and withdraw publish no receiver ciphertext, so the ctf
+        // profile reuses them; only the four spending slots swap.
         d.depositVerifier = address(new DepositVerifier());
         d.withdrawVerifier = address(new WithdrawVerifier());
-        d.disburseVerifier = address(new Disburse256Verifier());
-        d.transferVerifier = address(new TransferVerifier());
-        d.transfer10Verifier = address(new Transfer10Verifier());
-        d.transfer10x2Verifier = address(new Transfer10x2Verifier());
+        d.disburseVerifier = ctf ? address(new DisburseCtf256Verifier()) : address(new Disburse256Verifier());
+        d.transferVerifier = ctf ? address(new TransferCtfVerifier()) : address(new TransferVerifier());
+        d.transfer10Verifier = ctf ? address(new Transfer10CtfVerifier()) : address(new Transfer10Verifier());
+        d.transfer10x2Verifier = ctf ? address(new Transfer10x2CtfVerifier()) : address(new Transfer10x2Verifier());
         // Production: point at an existing ERC-20 via TOKEN_ADDRESS (must be
         // non-fee-on-transfer / non-rebasing, SPEC §5.3). Default deploys a mock
         // kKRW so the local gate + a testnet smoke are self-contained.
@@ -282,8 +321,8 @@ contract Deploy is Script {
         return kemPkHash == _fixtureKemPkHash() ? _fixtureKemPk() : bytes("");
     }
 
-    function _writeAddresses(AddressRecord memory d) internal {
-        string memory path = AddressBook.path();
+    function _writeAddresses(AddressRecord memory d, bool ctf) internal {
+        string memory path = ctf ? AddressBook.namedPath("ctf") : AddressBook.path();
         AddressBook.write(path, d);
         console2.log("addresses ->", path);
     }

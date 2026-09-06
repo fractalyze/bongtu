@@ -45,9 +45,10 @@ $NODE --import tsx fixtures/gen_inputs.ts || { echo "FATAL: input generation fai
 $NODE --import tsx fixtures/gen_consumer_inputs.ts || { echo "FATAL: consumer input generation failed"; exit 1; }
 
 # The five consumer (no-auditor) CPU circuits (OPMOD §2, .dev/op-module-design.md)
-# ride the same pipeline; disbursePriv256 stays out for the same reason
+# and the four CPU ct-free enterprise variants ride the same pipeline;
+# disbursePriv256 and disburseCtf256 stay out for the same reason
 # disburse256 does (GB-scale zkey, GPU proving — CLAUDE.md GPU regen recipe).
-ALL_CIRCUITS=(deposit disburse transfer transfer10 transfer10x2 withdraw depositPriv transferPriv transfer10x2Priv withdrawPriv disbursePriv)
+ALL_CIRCUITS=(deposit disburse transfer transfer10 transfer10x2 withdraw depositPriv transferPriv transfer10x2Priv withdrawPriv disbursePriv transferCtf transfer10Ctf transfer10x2Ctf disburseCtf)
 if [ "$#" -gt 0 ]; then CIRCUITS=("$@"); else CIRCUITS=("${ALL_CIRCUITS[@]}"); fi
 
 # Fixtures proved against a circuit's zkey ON TOP of its same-named one.
