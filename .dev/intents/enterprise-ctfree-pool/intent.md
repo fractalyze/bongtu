@@ -1,6 +1,6 @@
 # Ct-free enterprise circuits and the dedicated-pool deploy profile
 
-Author: JunBeom Lee. Status: draft.
+Author: JunBeom Lee. Status: accepted.
 Origin: conversation
 
 ## Problem
