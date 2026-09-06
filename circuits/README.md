@@ -36,6 +36,20 @@ ML-KEM-768) receiver ciphertexts and canonical `viewTags` instead; derived bases
 | `disbursePriv.circom` | 1-in / 16-out | dev-loop consumer batch: extended `disclosureHash` fold (cts ++ viewTags ++ commitments) + `subtreeRoot` |
 | `disbursePriv256.circom` | 1-in / 256-out | production consumer batch (3,049,889 constraints, 2^22); compile-only here — GPU regen recipe applies when it ships |
 
+The CT-FREE enterprise family (dedicated pools —
+[docs/circuits.md](../docs/circuits.md#ct-free-enterprise-variants)) sits beside both: siblings
+of the enterprise spending tops with the receiver encryption removed from the constraint system
+and every receiver-ct slot constrained to zero, public layouts index-identical to the parents;
+derived bases in `lib/ctf_*.circom`:
+
+| file | arity | role |
+|---|---|---|
+| `transferCtf.circom` | 2-in / 2-out | ct-free transfer (55,814 constraints) |
+| `transfer10Ctf.circom` | 10-in / 10-out | fills the pool's mandatory transfer10 slot with a ct-free verifier (deprecated for clients, like its parent) |
+| `transfer10x2Ctf.circom` | 10-in / 2-out | ct-free consolidation + payment (203,805 constraints) |
+| `disburseCtf.circom` | 1-in / 16-out | dev-loop ct-free batch: `disclosureHash` folds a zeroed receiver run ++ the authority ct |
+| `disburseCtf256.circom` | 1-in / 256-out | production ct-free batch (1,697,455 constraints, 749MB zkey); GPU regen recipe applies |
+
 `lib/` holds the vendored bases (`anon_enc_nullifier_non_repudiation_imt_base`,
 `check-imt-proof`, and friends) with provenance headers — a fresh checkout builds
 with no dependency on any untracked Zeto file. Upstream Zeto sub-checks and circomlib
@@ -116,8 +130,8 @@ scripts fail loudly if a belt regresses (the exploits they close are documented 
 `.dev/spec-decisions.md` §5.2 and `docs/zeto-derivation.md`):
 
 ```sh
-bash circuits/gates/test_zero_leaf_unsat.sh      # zero-commitment belt UNSAT for all 9 spending circuits (5 enterprise + 4 consumer)
-npx tsx circuits/gates/assert_attacks_throw.ts   # value belt: mint/attack THROW, padded SUCCEEDS (enterprise + consumer re-target); kemBinding tamper (enterprise only)
+bash circuits/gates/test_zero_leaf_unsat.sh      # zero-commitment belt UNSAT for all 13 spending circuits (5 enterprise + 4 consumer + 4 ct-free)
+npx tsx circuits/gates/assert_attacks_throw.ts   # value belt: mint/attack THROW, padded SUCCEEDS (enterprise + consumer + ct-free); kemBinding tamper (enterprise + ct-free)
 npx tsx circuits/gates/auditor_decrypt_check.ts  # deposit/withdraw envelopes decrypt with the arbiter key alone
 ```
 

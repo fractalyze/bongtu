@@ -133,6 +133,15 @@ exist; the env knob, script and drill per profile are tabulated in
   enterprise verifier wired), rather than a burned placeholder. Every enterprise entrypoint
   reverts on such a pool; the consumer modules are its whole op surface; the KEM deploy knobs do
   not apply — there is no authority envelope to key. Pinned by `chains/evm/test/ConsumerOnly.t.sol`.
+- **dedicated ct-free enterprise** — `Deploy.s.sol VERIFIER_PROFILE=ctf` (orthogonal to
+  `MODULE_PROFILE`, which it pins to `none`): the four spending-verifier slots hold the
+  [ct-free variants](circuits.md#ct-free-enterprise-variants), so no receiver ciphertext content
+  ever reaches the chain; discovery is the institution's own indexer
+  ([security-model.md](security-model.md#the-dedicated-ct-free-pool-posture)). The record is the
+  NAMED `deploy/addresses.ctf.<chainid>.json` — one chain can carry the shared pool and N
+  dedicated pools side by side, and the unnamed record stays reserved for the canonical pool.
+  Proven end to end by `deploy/gates/ctf_pool_local.sh`; the 450815 runbook is in
+  [`deploy/README.md`](../deploy/README.md#deploy-the-dedicated-ct-free-enterprise-pool-second-pool-same-chain).
 
 The consumer end-to-end leg of `deploy/gates/e2e_m0.sh` (`consumer_leg.ts`) proves the consumer
 flows with no arbiter-mode indexer in the loop — profile deploy + V3 upgrade, real CPU-proved

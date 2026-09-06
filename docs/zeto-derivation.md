@@ -56,6 +56,20 @@ is silently dropped** — every delta above is written down in the vendored file
 or inline at the constraint's own call site (the value belt and the zero-commitment guard are
 documented in the body, next to the constraints they add).
 
+### The ct-free enterprise family
+
+Two further siblings derive from the vendored enterprise bases (not from upstream directly) for
+the dedicated-pool deployment shape ([circuits.md](circuits.md#ct-free-enterprise-variants)):
+
+| bongtu file | parent | deliberate deltas |
+|---|---|---|
+| `lib/ctf_transfer_imt_small_base.circom` (`ZetoTransferSmallCtf`; tops `transferCtf` / `transfer10Ctf` / `transfer10x2Ctf`) | `lib/anon_enc_nullifier_non_repudiation_imt_small_base.circom` | `EncryptOutputsPerOutputNonce` removed; `ecdhPublicKey` derived directly via `BabyPbk`; every `cipherTexts` output constrained to zero (layout preserved) |
+| `lib/ctf_disburse_imt_base.circom` (`ZetoCtf`; tops `disburseCtf` / `disburseCtf256`) | `lib/anon_enc_nullifier_non_repudiation_imt_base.circom` | `EncryptOutputs` removed the same way; the zeroed receiver run still enters the `disclosureHash` fold, so the fold shape is the parent's |
+
+Everything else — belts, membership, subtree gadget, hybrid envelope, `kemBinding`-last
+ordering — is verbatim from the parents; each file's provenance header names the one semantic
+delta, so the audit surface is the delta, not a fresh base.
+
 ### The consumer (no-auditor) family
 
 The consumer circuits are a **second-generation derivation**: every parent is a vendored bongtu file

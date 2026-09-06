@@ -18,6 +18,15 @@ choosing which entries boot. Three circuits are registered:
 | `transfer10x2` | `transfer10x2` | 95MB | 68 | 10-in/2-out merge/pay leg — CPU-provable, but the employer console proves its **merge chains** here so a payroll run stays on the warm box |
 | `deposit` | `deposit` | 6.8MB | 19 | 0-in/2-out funding mint — tiny, rides along because the payroll console does NO in-browser proving: its deposits prove on the same warm box |
 
+The ct-free enterprise family (`disburseCtf256` — docs/circuits.md) has buildable
+artifacts (zkey via `circuits/build/prove_all.sh` conventions + GPU recipe, witness
+`.so`/`w2s` via `circuits/build/build_witness_so.sh`, which lists it) but is **not
+registered here**: a dedicated-pool prover instance would add a `CIRCUITS` entry
+pointing at those artifacts — a config decision that belongs to the
+dedicated-pool operational work, not this registry's default. Note the resident
+footprint math before co-locating it with the live family on one GPU (a second
+~749MB zkey engine).
+
 This is a **top-level directory, not an npm package**: it is Python, runs only
 on the employer's GPU box, and is institution-internal (binds `127.0.0.1` by
 default). Browser wallets never talk to it — transfer/withdraw prove **in the
