@@ -28,7 +28,7 @@ route through `/intent` first — capturing intent is never automated.
    `reviewer` (with the slug) concurrently. Fix what they report, then re-spawn BOTH — the
    final state must be a fresh verifier PASS and a fresh reviewer APPROVE over the final
    diff. Three fix rounds without convergence → stop and report to the user.
-6. **PR**: `workflow:create-pr`, `Closes #N`, body notes this was an auto-mode run and
+6. **PR**: `workflow:create-pr`, linking `.dev/intents/<slug>/`, body notes this was an auto-mode run and
    surfaces the spec's deferred concerns as the review points.
 
 Stop-and-ask conditions (never push through): a blocker-class spec concern, a gate failure

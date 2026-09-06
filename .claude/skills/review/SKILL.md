@@ -13,7 +13,7 @@ description: Stage 5 of bongtu's intent chain - review the branch diff through t
 3. Fix what stands, then re-spawn the reviewer until it returns APPROVE (blockers and majors
    resolved; minors may ship as noted follow-ups at the user's call).
 4. Only then open the PR (`workflow:create-pr`). The PR body follows repo convention: short
-   summary, the review points a human should scrutinize, `Closes #N`.
+   summary, the review points a human should scrutinize, a link to `.dev/intents/<slug>/`.
 
 The session that wrote the code never self-approves: APPROVE must come from a fresh reviewer
 run over the final diff, not from an earlier run plus untracked fixes.

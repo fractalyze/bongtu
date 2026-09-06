@@ -33,11 +33,11 @@ Per the playbook, an artifact's lifecycle is recorded by git events, not status 
 - `plan.md` is committed on the feature branch; its gate is the in-session plan approval, and
   the final PR review checks the diff against it. A deviation discovered while building is
   reflected by updating plan.md in the same branch, so the deviation is visible in the PR diff.
-- Done = the feature PR merges and the linked issue closes. Folders are never moved or archived.
+- Done = the feature PR merges. Folders are never moved or archived.
 
-A public GitHub issue is opened when an intent is accepted (bongtu tracks work as plain public
-issues, no board); the issue links the folder and is the discussion surface, the files are the
-record.
+No tracking issue accompanies an intent: the chain is files + PRs only (decided 2026-09-06).
+The intent PR and the feature PR are the discussion surfaces; the pending backlog is the set
+of accepted intents without a feature PR, exactly what a worker's candidate scan lists.
 
 ## Auto mode
 
@@ -61,7 +61,7 @@ loop is: merge an intent PR, get a finished feature PR back.
 
 ## When the chain applies
 
-Feature-scale work: anything that would get its own PR and issue anyway. Bugfixes and chores
+Feature-scale work: anything that would get its own PR anyway. Bugfixes and chores
 skip stages 1–3 and use the normal loop — `/verify` and `/review` still apply to any PR.
 Findings that outgrow the current work item are written back as a new intent (stage 6 closes
 the loop), not expanded in place.
