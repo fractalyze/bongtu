@@ -70,6 +70,14 @@ library AddressBook {
         return string.concat("../../deploy/addresses.", vm.toString(block.chainid), ".json");
     }
 
+    /// @dev Named-record variant for ADDITIONAL pools on one chain
+    ///      (`addresses.<name>.<chainid>.json`, the consumer.31337 precedent):
+    ///      the unnamed record stays reserved for the chain's canonical pool,
+    ///      so a profile deploy can never clobber it.
+    function namedPath(string memory name) internal view returns (string memory) {
+        return string.concat("../../deploy/addresses.", name, ".", vm.toString(block.chainid), ".json");
+    }
+
     /// @notice Load the existing record. Every field except `arbiterKemPk` is
     ///         required — a record missing one is corrupt, and defaulting it to
     ///         zero would write that zero back on the next merge.
