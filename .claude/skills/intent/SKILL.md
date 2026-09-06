@@ -9,7 +9,7 @@ The chain and its gates are defined in `.dev/intents/README.md`. This stage prod
 intent artifact and runs its acceptance gate.
 
 **Scope check first.** The chain is for feature-scale work — anything that would get its own
-PR and issue anyway. For a bugfix or chore, say so and use the normal loop instead.
+PR anyway. For a bugfix or chore, say so and use the normal loop instead.
 
 ## New intent
 
@@ -21,13 +21,10 @@ PR and issue anyway. For a bugfix or chore, say so and use the normal loop inste
 3. **Gate**: branch `intent/<slug>` from current main, commit via the `workflow:commit`
    skill, open a PR via `workflow:create-pr` (short body: the Problem and Proposed outcome).
    - **Accept** = user says merge: flip the line to `Status: accepted` in a final commit,
-     squash-merge, then open the tracking issue (below).
+     squash-merge.
    - **Reject** = close the PR unmerged and delete the branch. The closed PR is the record.
-4. **Tracking issue** (on acceptance): `gh issue create` — a plain public issue (no board,
-   no project). Title = the intent title; body = Problem + Proposed outcome summary and a
-   link to `.dev/intents/<slug>/`. Note the issue number back in intent.md is NOT needed —
-   the issue links the folder, git links the rest.
-5. Point the user at `/spec` as the next stage.
+4. Point the user at `/spec` as the next stage. No tracking issue is opened: the chain is
+   files + PRs only, and the two PRs (intent, feature) are the discussion surfaces.
 
 ## Triage a maintainer draft
 

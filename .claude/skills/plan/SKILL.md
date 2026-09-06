@@ -35,5 +35,5 @@ Preconditions: `.dev/intents/<slug>/spec.md` on main with `Status: accepted`.
 4. **Build** proceeds in this session against plan.md, committing per work unit. If reality
    deviates from the plan, update plan.md in the same branch so the deviation is visible in
    the PR diff — the stage-5 review checks diff-vs-plan.
-5. After the last unit: `/verify`, then `/review`, then `workflow:create-pr` referencing the
-   tracking issue (`Closes #N`).
+5. After the last unit: `/verify`, then `/review`, then `workflow:create-pr`; the PR body
+   links `.dev/intents/<slug>/` as its context.
