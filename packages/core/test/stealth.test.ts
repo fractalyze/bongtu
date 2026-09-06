@@ -150,6 +150,26 @@ test("create2Address matches the Solidity addressOf parity vector (checksummed)"
   assert.equal(got, VECTOR_ADDRESS);
 });
 
+// The receive pair's OWN vector — chains/evm/test/Receive.t.sol
+// `testReceiveCreate2ParityVectorPinned` (ReceiveSweeper's initcode differs
+// from PortalSweeper's, so the hash and every derived address differ; regen:
+// `forge test --match-test testReceiveCreate2ParityVectorPinned -vv` after any
+// ReceiveSweeper/compiler change, then update BOTH files).
+const RECEIVE_VECTOR_FACTORY = "0x00000000000000000000000000000000c0ffee02";
+const RECEIVE_VECTOR_INITCODE_HASH =
+  "0xe1cbdf009697cb9492969ca8f0534dbab59c3b06659ae5ef3838bb64c3e73cc2";
+const RECEIVE_VECTOR_STEALTH_EOA = "0x2222222222222222222222222222222222222222";
+const RECEIVE_VECTOR_ADDRESS = "0x717Ad979a80944A58f600F3E002F085502622De1";
+
+test("create2Address matches the ReceiveFactory addressOf parity vector", () => {
+  const got = create2Address(
+    RECEIVE_VECTOR_FACTORY,
+    portalSalt(RECEIVE_VECTOR_STEALTH_EOA),
+    RECEIVE_VECTOR_INITCODE_HASH,
+  );
+  assert.equal(got, RECEIVE_VECTOR_ADDRESS);
+});
+
 test("portalSalt is the address left-padded to bytes32 (the one padding rule)", () => {
   assert.equal(
     portalSalt("0xAbCd000000000000000000000000000000001234"),
