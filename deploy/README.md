@@ -62,6 +62,18 @@ modules deployed first (inert until registered), then ONE
 `upgradeToAndCall(reinitializeV3(modules))` — drilled by `gates/test_upgrade_v3.sh`
 (v1 proxy → v3, modules registered, enterprise Smoke still accepted, rerun refused).
 
+Orthogonal to the module profile, `VERIFIER_PROFILE` picks the verifier set
+(`Deploy.s.sol` only):
+
+| value | what deploys | record file |
+|---|---|---|
+| `standard` (default) | today's six verifiers, byte-identical to the pre-profile deploy | `addresses.<chainid>.json` |
+| `ctf` | the four spending slots swap to the **ct-free enterprise** verifiers (TransferCtf / Transfer10Ctf / Transfer10x2Ctf / DisburseCtf256 — no receiver ciphertext content exists on such a pool; deposit/withdraw are reused, they publish none today); `MODULE_PROFILE` must stay `none` (audited-only by design) | `addresses.ctf.<chainid>.json` — the chain's canonical record is never touched |
+
+The ctf profile is how a **dedicated enterprise pool** stands up beside a chain's
+shared pool ([`docs/deployment.md`](../docs/deployment.md#deploy-profiles-and-the-consumer-module-family));
+`gates/ctf_pool_local.sh` proves it end to end.
+
 The two KEM knobs are **required off anvil, and deliberately have no live default** — a silent
 fixture fallback would make every auditor envelope world-readable with nothing in the deploy saying
 so ([`Deploy.s.sol` `_resolveKemPkHash`](forge/Deploy.s.sol)).
@@ -87,6 +99,19 @@ and asserts the deployed instance advanced (`nextLeafIndex` 0 → 2) and custodi
 the tokens. Proves the full stack is live and correctly wired.
 
 Overridable: `DEPLOY_PORT` (default 8550), `RPC`, `CHAINID`, `FORGE`/`ANVIL`/`CAST`.
+
+The dedicated ct-free pool has its own gate:
+
+```sh
+cd bongtu && bash deploy/gates/ctf_pool_local.sh    # exits 0 iff every assertion holds
+```
+
+Scratch anvil → `VERIFIER_PROFILE=ctf` deploy (B=256, named record) → verifier
+wiring proven by BYTECODE compare (addresses cannot prove it: a fresh chain
+replays the same CREATE nonces as a standard deploy) → a real CPU deposit seeds
+the committed fixture's input note → the committed **real GPU ct-free 256
+disburse** settles, and the gate refolds the zeroed-receiver disclosure blob
+against the proof's `disclosureHash` (`gates/ctf_leg.ts`).
 
 ## Deploy to the live testnet
 
@@ -149,6 +174,35 @@ Notes for the live run:
   args for the proxy). The pool implementation, proxy and DepositVerifier are
   verified; Poseidon cannot be (no Solidity source).
 
+### Deploy the dedicated ct-free enterprise pool (second pool, same chain)
+
+One command stands a dedicated enterprise pool BESIDE the chain's shared pool —
+the record goes to `addresses.ctf.450815.json`, so `addresses.450815.json` (the
+canonical Maroo consumer pool) is never touched:
+
+```sh
+cd bongtu/chains/evm
+export DEPLOYER_KEY=0x<funded-key>
+export LIVE_RPC=<the chain's RPC>            # docs/deployment.md#chain-facts
+
+# REQUIRED: a FRESH institutional KEM keypair for this pool — never reuse the
+# shared pool's arbiter-kem-pk.450815.hex, and the fixture key is refused:
+export ARBITER_KEM_PK_HASH=0x<keccak256 of the institution's encapsulation key>
+export ARBITER_KEM_PK=0x<the full 1184-byte encapsulation key>
+
+# The bjj half DEFAULTS to the fixture key so the committed ct-free proof
+# fixtures verify against the pool (docs/deployment.md#the-arbiter-key-is-fixed-at-deploy-and-the-fixtures-are-bound-to-it);
+# override both halves together only with freshly re-proven fixtures.
+
+VERIFIER_PROFILE=ctf forge script ../deploy/forge/Deploy.s.sol:Deploy \
+  --rpc-url "$LIVE_RPC" --broadcast --skip-simulation
+```
+
+Prove wiring with the cast read-backs (`B()==256`, verifier getters == record
+fields) rather than a smoke deposit — a live pool that runs the fixture-KEM smoke
+carries one permanent envelope alarm (deployment.md). Then commit the new
+`addresses.ctf.450815.json`.
+
 ## Layout
 
 Canonical data stays at the top; everything else is grouped by what runs it.
@@ -166,6 +220,9 @@ Canonical data stays at the top; everything else is grouped by what runs it.
   profile's record pair (`DeployConsumerOnly.s.sol`; tracked scratch at 31337).
   The **by field name** rule above covers the module records too: never take an address from any
   of these files by pattern-matching a remembered value.
+- `addresses.ctf.<chainid>.json` — the dedicated ct-free enterprise pool's record
+  (`Deploy.s.sol VERIFIER_PROFILE=ctf`; same field list as the unnamed record, tracked scratch
+  at 31337). No modules file exists for it: the profile is audited-only by construction.
 - `arbiter-kem-pk.450815.hex` — the live arbiter's ML-KEM-768 public key (byte-identical to the
   historical `arbiter-kem-pk.84532.hex`: the arbiter did not rotate on the chain move).
 
