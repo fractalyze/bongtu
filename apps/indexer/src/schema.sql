@@ -157,3 +157,7 @@ CREATE TABLE IF NOT EXISTS portal_announcements (
 );
 CREATE INDEX IF NOT EXISTS portal_stealth_addr_idx ON portal_announcements (stealth_addr);
 CREATE INDEX IF NOT EXISTS portal_owner_idx ON portal_announcements (owner);
+-- Receive-product columns (rows from before them read back as the legacy
+-- portal flavor: factory '', rail 'evm' — src/portal.ts boot):
+ALTER TABLE portal_announcements ADD COLUMN IF NOT EXISTS factory TEXT;
+ALTER TABLE portal_announcements ADD COLUMN IF NOT EXISTS rail TEXT;

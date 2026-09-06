@@ -3,8 +3,14 @@
 // `<url> -> <status>: <body-slice>` error shape lives here.
 // --- thin typed client ----------------------------------------------------------
 
-export async function getJson<T>(url: string, fetchFn: typeof fetch = fetch, signal?: AbortSignal): Promise<T> {
-  const res = await fetchFn(url, signal === undefined ? undefined : { signal });
+export async function getJson<T>(
+  url: string,
+  fetchFn: typeof fetch = fetch,
+  signal?: AbortSignal,
+  headers?: Record<string, string>,
+): Promise<T> {
+  const init = signal === undefined && headers === undefined ? undefined : { signal, headers };
+  const res = await fetchFn(url, init);
   const text = await res.text();
   if (!res.ok) throw new Error(`${url} -> ${res.status}: ${text.slice(0, 300)}`);
   return JSON.parse(text) as T;

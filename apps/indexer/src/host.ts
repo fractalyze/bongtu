@@ -74,6 +74,13 @@ export interface IndexerHost {
    * the same 404 an unconfigured PORTAL_FACTORY produces.
    */
   portalAddressOf?(salt: string): Promise<string>;
+
+  /**
+   * eth_call `ReceiveFactory.addressOf(salt)` — the announce route's
+   * server-side destination recompute (the route never trusts a client
+   * destination). Same EVM-only/optional posture as portalAddressOf.
+   */
+  receiveAddressOf?(salt: string): Promise<string>;
 }
 
 /**

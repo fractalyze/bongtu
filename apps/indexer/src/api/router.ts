@@ -24,11 +24,18 @@
 //                               a fresh stealth destination for the name and
 //                               record the announcement — routes/portal.ts;
 //                               404 when PORTAL_FACTORY is unset)
-//   GET /portal/announcements -> [PortalRecord]  (PUBLIC cursor feed: every
-//                               issuance-time portal announcement — the
-//                               recipient's scan path)
-//   GET /portal/unswept      -> [PortalRecord]  (PUBLIC cursor feed: unswept
-//                               records only — the sweeper bot's work feed)
+//   POST /portal/announce    -> PortalPublicRecord  (PUBLIC pay-page issuance:
+//                               record a browser-side derivation; server
+//                               recomputes the destination, first write wins —
+//                               routes/portal.ts; 404 when RECEIVE_FACTORY is
+//                               unset, 409 on a recorded stealth address)
+//   GET /portal/announcements -> [PortalPublicRecord]  (PUBLIC cursor feed:
+//                               every recorded announcement, ATTRIBUTION-FREE
+//                               (no name/owner) — the recipient's scan path)
+//   GET /portal/unswept      -> [PortalRecord]  (OPERATOR cursor feed: unswept
+//                               attributed records — the sweeper bot's work
+//                               feed; 401 without x-operator-token once
+//                               PORTAL_OPERATOR_TOKEN is set)
 //   GET  /names/:name        -> NameRecord  (PUBLIC name directory: owner bjj
 //                               pubkey + stealth meta-address; names.ts)
 //   POST /names {name,owner,viewPub,spendPub,ts,sig} -> NameRecord  (PUBLIC;
@@ -75,7 +82,7 @@ import { nullifiers } from "./routes/nullifiers.js";
 import { disclosure } from "./routes/disclosure.js";
 import { nameRegister, nameResolve } from "./routes/names.js";
 import { announcements } from "./routes/announcements.js";
-import { payPortal, portalAnnouncements, portalUnswept } from "./routes/portal.js";
+import { payPortal, portalAnnounce, portalAnnouncements, portalUnswept } from "./routes/portal.js";
 import { notes } from "./routes/notes.js";
 import { history } from "./routes/history.js";
 import { authChallenge, authRedeem } from "./routes/auth.js";
@@ -93,6 +100,9 @@ export interface RouteContext {
   query: URLSearchParams;
   /** parsed JSON request body (POST routes only; undefined when absent/empty). */
   body?: unknown;
+  /** request headers (node lowercases the names) — the operator-token gate
+   *  reads x-operator-token; optional so handler-level tests omit it. */
+  headers?: Record<string, string | string[] | undefined>;
 }
 /** What a route handler returns: an HTTP status + a JSON-serialisable body. */
 export interface RouteResult {
@@ -112,7 +122,7 @@ export interface Route {
 // is public (always on); `/notes` + `/history` are ARBITER-ONLY and composed in
 // per-indexer by makeHandler, so public mode returns 404 for them (the endpoints
 // do not exist).
-export const routes: Route[] = [head, events, path, alarms, health, nullifiers, disclosure, nameResolve, nameRegister, announcements, payPortal, portalAnnouncements, portalUnswept];
+export const routes: Route[] = [head, events, path, alarms, health, nullifiers, disclosure, nameResolve, nameRegister, announcements, payPortal, portalAnnounce, portalAnnouncements, portalUnswept];
 
 function writeJson(res: ServerResponse, status: number, body: unknown, headers?: Record<string, string>): void {
   const s = JSON.stringify(body, null, 2);
@@ -172,7 +182,7 @@ export function makeHandler(ix: IndexerHost, tokens: ViewTokenService | null) {
           return writeJson(res, 400, { error: `bad request body: ${bodyRead.err.message}` });
         }
         const body = bodyRead.body;
-        const { status, body: resBody, headers } = await route.handle({ ix, tokens, params, query: url.searchParams, body });
+        const { status, body: resBody, headers } = await route.handle({ ix, tokens, params, query: url.searchParams, body, headers: req.headers });
         return writeJson(res, status, resBody, headers);
       }
       return writeJson(res, 404, { error: "not found", path: pathname });

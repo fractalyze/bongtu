@@ -213,20 +213,24 @@ export interface PortalIssuance {
   factory: string;
 }
 
-/** One issuance-time portal announcement, as served by /portal/announcements and
- *  /portal/unswept. All fields are PUBLIC data: the announcement half mirrors
- *  WithdrawAnnouncementRecord (ephemeralPub, viewTag, seq cursor), and the
- *  attribution half is the resolved name record (name, owner) — public because
- *  the name directory itself is. `swept` flips when the factory's Swept event
- *  lands, carrying the sweep tx + amount. */
-export interface PortalRecord {
+/** One portal/receive announcement as PUBLICLY served (/portal/announcements):
+ *  the announcement half mirrors WithdrawAnnouncementRecord (ephemeralPub,
+ *  viewTag, seq cursor) plus the payment coordinates. Deliberately carries NO
+ *  recipient attribution (no name, no owner) — the receive product's
+ *  unlinkability claim is served here, and the recipient does not need
+ *  attribution: its view key re-derives which records are its own
+ *  (scanStealthAnnouncement). `swept` flips when a factory Swept event lands. */
+export interface PortalPublicRecord {
   kind: "portal";
   /** issuance-order cursor key (the portal feed's own seq space, NOT the
    *  chain-event feed's — issuance has no tx to sequence by). */
   seq: number;
-  name: string;
-  /** compressed bjj pubkey of the name's owner (the recipient's in-pool identity). */
-  owner: string;
+  /** address-encoding flavor of `stealthAddr`/`destination` — "evm" today; a
+   *  non-EVM rail reuses these shapes with a different flavor. */
+  rail: string;
+  /** the factory address the destination was derived against (portal or
+   *  receive pair) — public, since the destination itself implies it. */
+  factory: string;
   ephemeralPub: string;
   viewTag: number;
   stealthAddr: string;
@@ -237,6 +241,46 @@ export interface PortalRecord {
   sweptTxHash: string | null;
   /** decimal; the swept deposit amount (the proof's public amount). */
   sweptAmount: string | null;
+}
+
+/** The OPERATOR-side record (/portal/unswept behind the operator token): the
+ *  public shape plus the attribution the sweep bot needs to build the deposit
+ *  for the right recipient. Never served on a public projection. A row
+ *  backfilled from a chain `Announced` event carries empty name/owner (chain
+ *  data has no attribution — such rows are already swept). */
+export interface PortalRecord extends PortalPublicRecord {
+  name: string;
+  /** compressed bjj pubkey of the name's owner (the recipient's in-pool identity). */
+  owner: string;
+}
+
+/** What the pay page POSTs to /portal/announce: the browser-side derivation's
+ *  public half, keyed by the recipient's directory label. The server NEVER
+ *  trusts a client destination — it recomputes addressOf(portalSalt(
+ *  stealthAddr)) itself and returns the public record carrying it, which the
+ *  page parity-checks before display. */
+export interface PortalAnnounceRequest {
+  label: string;
+  /** "0x" + 32-byte hex — the packed bjj ephemeral pubkey R. */
+  ephemeralPub: string;
+  viewTag: number;
+  /** "0x" + 20-byte hex — the DKSAP-derived one-time EOA. */
+  stealthAddr: string;
+  /** address-encoding flavor; omitted means "evm". */
+  rail?: string;
+}
+
+/** Record a browser-side issuance (the pay page calls this BEFORE displaying
+ *  the address). 404: unknown label or receive deposits unconfigured; 409: the
+ *  stealth address is already recorded (first write wins — a hijacker
+ *  re-announcing an observed destination under its own label always loses the
+ *  race to the honest record). */
+export function announcePortal(
+  indexerUrl: string,
+  req: PortalAnnounceRequest,
+  fetchFn: typeof fetch = fetch,
+): Promise<PortalPublicRecord> {
+  return postJson<PortalPublicRecord>(`${trim(indexerUrl)}/portal/announce`, req, fetchFn);
 }
 
 /** Resolve `name` into a fresh portal destination (the pay-by-name front door).
@@ -250,29 +294,37 @@ export function payPortal(
   return postJson<PortalIssuance>(`${trim(indexerUrl)}/pay/${encodeURIComponent(name)}`, {}, fetchFn);
 }
 
-/** The sweeper bot's work feed: unswept portal records (seq > cursor, capped). */
+/** The sweeper bot's work feed: unswept ATTRIBUTED records (seq > cursor,
+ *  capped). Operator-facing: when the indexer is started with
+ *  PORTAL_OPERATOR_TOKEN, the same value must ride the x-operator-token
+ *  header or the read is 401 (the attribution split — the public projection
+ *  never carries name/owner). */
 export function fetchUnswept(
   indexerUrl: string,
   cursor = -1,
   limit = 5000,
   fetchFn: typeof fetch = fetch,
+  operatorToken?: string,
 ): Promise<PortalRecord[]> {
   return getJson<PortalRecord[]>(
     `${trim(indexerUrl)}/portal/unswept?cursor=${cursor}&limit=${limit}`,
     fetchFn,
+    undefined,
+    operatorToken ? { "x-operator-token": operatorToken } : undefined,
   );
 }
 
-/** The full portal announcement feed (swept and not) — the recipient's scan-all
- *  path: pair each record with scanStealthAnnouncement, then map the matched
- *  address through portalSalt/create2Address to confirm `destination`. */
+/** The full public announcement feed (swept and not) — the recipient's
+ *  scan-all path: pair each record with scanStealthAnnouncement, then map the
+ *  matched address through portalSalt/create2Address to confirm `destination`.
+ *  Attribution-free by design (PortalPublicRecord). */
 export function getPortalAnnouncements(
   indexerUrl: string,
   cursor = -1,
   limit = 5000,
   fetchFn: typeof fetch = fetch,
-): Promise<PortalRecord[]> {
-  return getJson<PortalRecord[]>(
+): Promise<PortalPublicRecord[]> {
+  return getJson<PortalPublicRecord[]>(
     `${trim(indexerUrl)}/portal/announcements?cursor=${cursor}&limit=${limit}`,
     fetchFn,
   );

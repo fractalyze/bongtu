@@ -30,6 +30,7 @@ import {
   type ViewToken,
 } from "./indexerReads.js";
 import {
+  announcePortal,
   buildAnnouncementsUrl,
   fetchAnnouncements,
   fetchUnswept,
@@ -40,7 +41,9 @@ import {
   resolveName,
   type NameRecord,
   type NameRegistration,
+  type PortalAnnounceRequest,
   type PortalIssuance,
+  type PortalPublicRecord,
   type PortalRecord,
 } from "./indexerNames.js";
 // --- the bound client (issue #15 C1) ----------------------------------------------
@@ -139,11 +142,14 @@ export class IndexerClient {
 
   readonly payPortal = (name: string): Promise<PortalIssuance> => payPortal(this.base, name, this.fetchFn);
 
-  readonly unswept = (cursor?: number, limit?: number): Promise<PortalRecord[]> =>
-    fetchUnswept(this.base, cursor, limit, this.fetchFn);
+  readonly unswept = (cursor?: number, limit?: number, operatorToken?: string): Promise<PortalRecord[]> =>
+    fetchUnswept(this.base, cursor, limit, this.fetchFn, operatorToken);
 
-  readonly portalAnnouncements = (cursor?: number, limit?: number): Promise<PortalRecord[]> =>
+  readonly portalAnnouncements = (cursor?: number, limit?: number): Promise<PortalPublicRecord[]> =>
     getPortalAnnouncements(this.base, cursor, limit, this.fetchFn);
+
+  readonly announcePortal = (req: PortalAnnounceRequest): Promise<PortalPublicRecord> =>
+    announcePortal(this.base, req, this.fetchFn);
 
   readonly obtainViewToken = (ownerCompressed: string, ownerPrivateKey: FieldInput): Promise<ViewToken> =>
     obtainViewToken(this.base, ownerCompressed, ownerPrivateKey, this.fetchFn);

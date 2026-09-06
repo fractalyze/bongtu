@@ -20,6 +20,16 @@
 //                              ingest scans the factory's Swept logs. UNSET =>
 //                              the /pay + /portal routes 404 (one boot line
 //                              says so).
+//   RECEIVE_FACTORY            ReceiveFactory address => the receive product
+//                              lives: POST /portal/announce records pay-page
+//                              issuances against this factory's addressOf, and
+//                              ingest scans its Swept + Announced logs. UNSET
+//                              => /portal/announce 404s (one boot line).
+//   PORTAL_OPERATOR_TOKEN      shared secret gating the ATTRIBUTED sweep-bot
+//                              feed: set => GET /portal/unswept requires the
+//                              same value in x-operator-token (401 otherwise);
+//                              unset => the feed stays open (local/dev flows).
+//                              NEVER logged.
 //   AUTHORITY_KEY              arbiter PRIVATE key (bjj scalar) => ARBITER MODE:
 //                              decrypt every op's authority envelope, build the
 //                              note ledger, serve /notes + within-batch /path.
@@ -77,6 +87,11 @@ async function main(): Promise<void> {
     cfg.portalFactory
       ? `portal deposits: factory=${cfg.portalFactory} (POST /pay/{name}, /portal/*)`
       : "portal deposits not configured (PORTAL_FACTORY unset) — POST /pay/{name} and /portal/* will 404",
+  );
+  console.log(
+    cfg.receiveFactory
+      ? `receive deposits: factory=${cfg.receiveFactory} (POST /portal/announce; unswept feed ${cfg.portalOperatorToken ? "operator-token gated" : "OPEN (PORTAL_OPERATOR_TOKEN unset)"})`
+      : "receive deposits not configured (RECEIVE_FACTORY unset) — POST /portal/announce will 404",
   );
   // Backend selection is CONFIG, not code paths in routes: both classes serve
   // the identical read model, so everything below this line is backend-blind.

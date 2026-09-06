@@ -57,6 +57,8 @@ function record(over: Partial<PortalRecord> = {}): PortalRecord {
   return {
     kind: "portal",
     seq: 0,
+    rail: "evm",
+    factory: FACTORY,
     name: "alice",
     owner: OWNER_COMPRESSED,
     ephemeralPub: "0x" + "11".repeat(32),
