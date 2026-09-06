@@ -652,7 +652,10 @@ rendered as phantom money), takes the `swept` flip from the record, and calls a 
 `shielded` when the sweep's mint surfaces in its own self-scan note set (the sweep tx hash
 matches a discovered note's). The fold is pure and headlessly gated
 (`src/lib/payments.ts`); the stealth unlock rides `keyCache` under the one-op slot like
-every other signature train.
+every other signature train. One shape the list under-reports on purpose: a SECOND
+payment to an already-used destination (only an off-path payer — the pay page mints a
+fresh address per load) re-sweeps correctly into the balance, but the row keeps the
+first sweep's amount (`markSwept` is flip-once, the recorded portal semantics).
 
 ### What the consumer bundle carries
 
