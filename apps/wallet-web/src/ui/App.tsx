@@ -67,6 +67,7 @@ import { Settings } from "./screens/Settings.js";
 import { Deposit } from "./screens/Deposit.js";
 import { SpendScreen } from "./screens/SpendScreen.js";
 import { Receive } from "./screens/Receive.js";
+import { Payments } from "./screens/Payments.js";
 
 // The engine store is kept ONLY for the account→pubkey determinism bindings that
 // runLogin's default deps write (loginGuard.ts) — the session record itself lives
@@ -527,6 +528,8 @@ function Router({ route }: { route: string }): ReactNode {
       return <SpendScreen kind="withdraw" />;
     case "receive":
       return <Receive />;
+    case "payments":
+      return <Payments />;
     default:
       return <Home />;
   }

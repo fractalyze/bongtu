@@ -13,13 +13,14 @@ import type { BrowserCircuit } from "../config.js";
 export type Route =
   | "home"
   | "receive"
+  | "payments"
   | "send"
   | "withdraw"
   | "deposit"
   | "activity"
   | "settings";
 
-const ROUTES: readonly Route[] = ["home", "receive", "send", "withdraw", "deposit", "activity", "settings"];
+const ROUTES: readonly Route[] = ["home", "receive", "payments", "send", "withdraw", "deposit", "activity", "settings"];
 
 function parseHash(): Route {
   const h = window.location.hash.replace(/^#\/?/, "");

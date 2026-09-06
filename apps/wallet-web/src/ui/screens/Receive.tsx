@@ -30,9 +30,9 @@ import {
   type OwnNameStatus,
 } from "../../lib/payNameStore.js";
 import { useWallet } from "../App.js";
-import { useCopyFeedback } from "../hooks.js";
+import { navigate, useCopyFeedback } from "../hooks.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
-import { Button, ErrorBanner, Field, TextInput } from "../components/controls.js";
+import { Button, ErrorBanner, Field, LinkButton, TextInput } from "../components/controls.js";
 
 /** The name grammar, in the words a person can act on (the actual judge is the
  *  shared normalizeName — one grammar for form, registry and resolver). */
@@ -193,6 +193,7 @@ export function Receive(): ReactNode {
           <Button variant="primary" block onClick={copy}>
             {copied ? "Copied" : "Copy Name"}
           </Button>
+          <LinkButton onClick={() => navigate("payments")}>View received payments</LinkButton>
           {error && <ErrorBanner message={error} />}
         </div>
       ) : (
