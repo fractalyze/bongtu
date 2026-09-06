@@ -1,5 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  // Skip every non-production build: PRs get no preview deployments (owner decision
+  // 2026-09-06); only pushes to main (VERCEL_ENV=production) build and deploy.
+  "ignoreCommand": "[ \"$VERCEL_ENV\" != \"production\" ]",
   // Both destinations are copied from apps/treasury-web/vercel.json so the third
   // Vercel project deploys at all — but the `/indexer` rewrite MUST later point at a
   // PUBLIC-mode indexer instance: today's target is the institution-internal box,
