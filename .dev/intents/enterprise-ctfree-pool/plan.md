@@ -55,6 +55,14 @@ set mirrors the parent's committed disburse256 fixtures), witness `.so` + `w2s` 
 - CLAUDE.md GPU recipe: compile → groth16 setup (CPU ~2.5 min, 1.24 GB zkey) → export
   verifier/vkey → witness → rabbitsnark GPU prove (timeout ≥ 300000; confirm GPU memory
   back to ~idle after, kill stray prover PIDs).
+- DEVIATION (build time): the witness `.so` could not actually be built — the
+  circom-mlir toolchain checkout is ABSENT from this box at build_witness_so.sh's
+  documented default (`../circom-mlir/target/release/circom` does not exist beside the
+  repo), a pre-existing environment gap that equally blocks rebuilding the parent
+  disburse256.so from main today. disburseCtf256 is added to the script's registry so
+  the pair builds wherever the toolchain exists; the prover service is not reconfigured
+  in this slice (spec Non-goals), so the boot invariant is not triggered. Filed as a
+  repo issue at PR time.
 - Fixture inputs through the existing machinery so the arbiter binding holds:
   `public[9..10]` == the fixture bjj arbiter key (spec C5 resolution).
 
