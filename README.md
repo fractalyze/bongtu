@@ -193,6 +193,7 @@ imports it, it acts on a chain. Each has its own README.
 - [`apps/payroll-web/`](apps/payroll-web/README.md): the employer pay console — MetaMask login, one worksheet, batch disburse
 - [`apps/treasury-web/`](apps/treasury-web/README.md): the institution self-custody wallet, in-browser proving
 - [`apps/wallet-web/`](apps/wallet-web/README.md): the consumer self-scan wallet, no-auditor P2P ops (tokenless, in-browser proving)
+- [`apps/pay-web/`](apps/pay-web/README.md): the sender-facing pay page — browser-side stealth issuance at `/p/{label}`, no wallet code
 - [`deploy/`](deploy/README.md): forge scripts, live-chain drivers, anvil gates — recorded addresses at the top
 - [`docs/`](docs/): reference docs, one file per topic (index below)
 - [`.dev/`](.dev/README.md): working docs: milestone trackers and decision records
@@ -212,6 +213,7 @@ How to build, test, and run each component lives in its own README:
 - **Indexer** (local + live chain, Postgres, docker compose): [`apps/indexer/README.md`](apps/indexer/README.md)
 - **Institution wallet** (`apps/treasury-web`: dev server, in-browser proving): [`apps/treasury-web/README.md`](apps/treasury-web/README.md)
 - **Consumer wallet** (self-scan, tokenless): [`apps/wallet-web/README.md`](apps/wallet-web/README.md)
+- **Pay page** (`apps/pay-web`: stealth issuance for senders): [`apps/pay-web/README.md`](apps/pay-web/README.md)
 - **Payroll console**: [`apps/payroll-web/README.md`](apps/payroll-web/README.md)
 - **GPU prover service**: [`prover/README.md`](prover/README.md)
 - **Deploy + e2e** (local anvil, live-chain runbook): [`deploy/README.md`](deploy/README.md)
@@ -250,7 +252,7 @@ How to run each piece is owned by its own README:
   [`circuits`](circuits/README.md) · [`contracts`](chains/evm/README.md) ·
   [`chains/solana`](chains/solana/README.md) ·
   [`apps/payroll-web`](apps/payroll-web/README.md) · [`apps/treasury-web`](apps/treasury-web/README.md) ·
-  [`apps/wallet-web`](apps/wallet-web/README.md).
+  [`apps/wallet-web`](apps/wallet-web/README.md) · [`apps/pay-web`](apps/pay-web/README.md).
 
 Milestone trackers and decision records (applied/deferred/rejected lists, layout and CI rationale) live in
 [`.dev/`](.dev/README.md): agent-facing working docs, kept out of `docs/`.
