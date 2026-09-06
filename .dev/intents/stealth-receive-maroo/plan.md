@@ -50,8 +50,12 @@ default `Deploy.s.sol` untouched.
 Files: `apps/indexer/src/api/routes/portal.ts`, `src/portal.ts`, `src/api/router.ts`,
 `src/chain.ts` (+`RECEIVE_FACTORY` config + combined ABI rows for the new pair's
 `Swept`/`Announced`), `src/ingest.ts` (watch + gate on the new factory address),
-`packages/core/src/wire/indexerClient.ts` + the portal wire types,
-`apps/indexer/test/portal.test.ts`.
+`src/host.ts` (the `receiveAddressOf` capability), `src/index.ts` (env docs + boot
+lines), `src/schema.sql` (factory/rail columns + the unique stealth_addr index),
+`packages/core/src/wire/indexerClient.ts` + the portal wire types (+ the
+`indexerHttp.ts` header seam for the operator token), `apps/indexer/test/portal.test.ts`,
+`apps/sweeper/test/sweep.test.ts` + `packages/core/test/indexerApi.test.ts`
+(attributed-shape compat updates).
 
 - `POST /portal/announce` `{ label, ephemeralPub, viewTag, stealthAddr }`: server
   recomputes `destination = receiveAddressOf(portalSalt(stealthAddr))`, resolves the
@@ -103,7 +107,9 @@ ordering (fetch mock), record validation failure paths; `vite build` + typecheck
 ### U6 — wallet-web: payments list
 
 Files: `apps/wallet-web/src/ui/hooks.ts` (route union), `App.tsx` (Router case),
-`src/ui/screens/Payments.tsx` (new), `src/lib/` scan helper, `apps/wallet-web/test/`.
+`src/ui/screens/Payments.tsx` (new), `src/lib/` scan helper, `apps/wallet-web/test/`;
+plus the R1 share surface on the existing Receive screen: `src/config.ts`
+(`payBaseUrl` knob) + `src/ui/screens/Receive.tsx` (copy-payment-link).
 
 - Scan the public announce feed with the unlocked stealth view key
   (`scanStealthAnnouncement`), fold in `swept` flips and self-scan note arrival:
@@ -116,7 +122,9 @@ route wiring; typecheck green.
 ### U7 — the receive gate leg
 
 Files: `deploy/gates/receive_leg.ts` (new), `deploy/gates/e2e_orchestrator.ts` (call
-it after the consumer leg, same Postgres/env plumbing).
+it after the consumer leg, same Postgres/env plumbing), `deploy/gates/e2e_m0.sh`
+(the leg's own Postgres database), `apps/pay-web/package.json` (exports map so the
+leg calls the page's issuance decision headlessly).
 
 - Anvil: deploy pool stack + consumer modules + ReceiveFactory; real indexer with both
   factories configured; register a v2 name; TWO headless pay-page issuances (the U5

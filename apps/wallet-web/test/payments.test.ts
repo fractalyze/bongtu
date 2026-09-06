@@ -12,7 +12,8 @@ import assert from "node:assert/strict";
 import type { PortalPublicRecord } from "@bongtu/core/indexerApi";
 import { deriveStealthAddress, stealthKeysFromScalars } from "@bongtu/core/stealth";
 
-import { buildPaymentRows, isOwnAnnouncement, shortDestination, type ScanKeys } from "../src/lib/payments.js";
+import { buildPaymentRows, isOwnAnnouncement, paymentLink, shortDestination, type ScanKeys } from "../src/lib/payments.js";
+import { ROUTES } from "../src/ui/hooks.js";
 
 const OURS = stealthKeysFromScalars(1111n, 2222n);
 const THEIRS = stealthKeysFromScalars(5555n, 6666n);
@@ -102,4 +103,13 @@ test("the balance read is consulted ONLY for unswept rows", async () => {
 
 test("shortDestination keeps head and tail", () => {
   assert.equal(shortDestination("0x7f3Aabcdefabcdefabcdefabcdefabcdefab9c4E"), "0x7f3A…9c4E");
+});
+
+test("paymentLink joins the pay host and the /p route (trailing-slash tolerant)", () => {
+  assert.equal(paymentLink("https://pay.example", "jun"), "https://pay.example/p/jun");
+  assert.equal(paymentLink("https://pay.example/", "jun"), "https://pay.example/p/jun");
+});
+
+test("the payments screen is reachable: 'payments' is a registered hash route", () => {
+  assert.equal(ROUTES.includes("payments"), true);
 });

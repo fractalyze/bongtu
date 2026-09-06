@@ -197,10 +197,12 @@ forge script ../deploy/forge/DeployReceive.s.sol:DeployReceive \
 The factory address lands in `deploy/addresses.<chainid>.json` as
 `receiveFactory` — copy it BY FIELD NAME into the live wiring: the public
 indexer's `RECEIVE_FACTORY` (+ `PORTAL_OPERATOR_TOKEN`, shared with the bot),
-the receive-mode sweeper (`MODE=receive`, `apps/sweeper/README.md`), and the
+the receive-mode sweeper (`MODE=receive`, `apps/sweeper/README.md`), the
 pay-web Vercel project's `VITE_RECEIVE_FACTORY` /
-`VITE_SWEEPER_INITCODE_HASH` (`apps/pay-web/README.md`). The anvil drill for
-this script is `gates/test_deploy_receive.sh`.
+`VITE_SWEEPER_INITCODE_HASH` (`apps/pay-web/README.md`), and — if the pay-web
+project's domain differs from the wallet's default — the wallet-web project's
+`VITE_PAY_BASE_URL` (the Receive screen's copy-payment-link host). The anvil
+drill for this script is `gates/test_deploy_receive.sh`.
 
 ### Deploy the dedicated ct-free enterprise pool (second pool, same chain)
 

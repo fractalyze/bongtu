@@ -632,9 +632,12 @@ name, resolves it at Continue, and refuses a record without the consumer triple 
 words (paying it would mint notes the recipient could never discover by self-scan;
 `src/lib/payName.ts` owns the wording, the refusal itself is the engine's
 `consumerRecipientOf`). The Receive screen is the identity panel: what a person shares to
-get paid is their NAME, never the raw triple and no longer a bare address, and
-registration is v2-only, binding the stealth meta pair and the consumer pair under one
-owner signature ([indexer.md](indexer.md#name-directory)).
+get paid is their NAME (in-wallet sends) or their PAYMENT LINK
+(`${payBaseUrl}/p/{name}` — the pay page for any stock wallet or CEX sender,
+[portal.md](portal.md#receiving-the-consumer-pay-page); the host is the `payBaseUrl`
+config knob), never the raw triple and no longer a bare address. Registration is
+v2-only, binding the stealth meta pair and the consumer pair under one owner signature
+([indexer.md](indexer.md#name-directory)).
 
 ### The received-payments list
 

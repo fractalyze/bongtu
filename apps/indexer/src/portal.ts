@@ -265,12 +265,18 @@ export class PortalRegistry {
    *  Idempotent statements, so a poll-retry re-staging is harmless. */
   async flushInto(client: PoolClient): Promise<void> {
     for (const r of this.pendingInserts) {
+      // TARGETLESS on-conflict: a backfill row can collide on seq (replayed
+      // range) OR on the unique stealth_addr (an announce that committed
+      // between the miss and this flush). Naming only (seq) would let the
+      // address conflict abort the whole persist transaction — and since the
+      // buffer clears only after COMMIT, every retry would re-conflict and
+      // wedge ingest until restart.
       await client.query(
         `INSERT INTO portal_announcements
            (seq, name, owner, ephemeral_pub, view_tag, stealth_addr, destination,
             factory, rail, created_at, swept, swept_tx_hash, swept_amount)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-         ON CONFLICT (seq) DO NOTHING`,
+         ON CONFLICT DO NOTHING`,
         [r.seq, r.name, r.owner, r.ephemeralPub, r.viewTag, r.stealthAddr, r.destination,
          r.factory, r.rail, r.createdAt, r.swept, r.sweptTxHash, r.sweptAmount],
       );

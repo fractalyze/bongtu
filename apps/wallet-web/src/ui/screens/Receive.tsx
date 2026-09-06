@@ -31,6 +31,8 @@ import {
 } from "../../lib/payNameStore.js";
 import { useWallet } from "../App.js";
 import { navigate, useCopyFeedback } from "../hooks.js";
+import { DEFAULTS } from "../../config.js";
+import { paymentLink } from "../../lib/payments.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
 import { Button, ErrorBanner, Field, LinkButton, TextInput } from "../components/controls.js";
 
@@ -42,7 +44,7 @@ export const NAME_RULES_HINT = "3 to 32 characters: lowercase letters, numbers, 
 export const NAME_INVALID_MESSAGE = `That name can't be registered. ${NAME_RULES_HINT}`;
 
 /** The identity panel's one instruction. */
-export const RECEIVE_SHARE_LINE = "People pay you by this name. Share the name, nothing else.";
+export const RECEIVE_SHARE_LINE = "People pay you by this name, or through your payment link. Share those, nothing else.";
 
 /** An own record without the payment keys: exactly what senders refuse to pay. */
 export const NAME_NEEDS_UPDATE_NOTICE =
@@ -87,6 +89,10 @@ export function Receive(): ReactNode {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { copied, copy } = useCopyFeedback(ownName ?? "");
+  // The R1 deliverable: the URL a sender opens to pay this identity — every
+  // load of it derives a fresh one-time address (the pay page's contract).
+  const link = ownName ? paymentLink(DEFAULTS.payBaseUrl, ownName) : "";
+  const linkCopy = useCopyFeedback(link);
 
   const owner = session?.compressedPubkey ?? null;
 
@@ -192,6 +198,14 @@ export function Receive(): ReactNode {
           </div>
           <Button variant="primary" block onClick={copy}>
             {copied ? "Copied" : "Copy Name"}
+          </Button>
+          <div className="w-full bg-surface-2 border border-border rounded-xl px-3.5 py-3 flex items-center justify-between gap-2">
+            <span className="font-mono text-[0.78rem] text-muted overflow-hidden text-ellipsis whitespace-nowrap" title={link}>
+              {link}
+            </span>
+          </div>
+          <Button variant="ghost" block onClick={linkCopy.copy}>
+            {linkCopy.copied ? "Copied" : "Copy Payment Link"}
           </Button>
           <LinkButton onClick={() => navigate("payments")}>View received payments</LinkButton>
           {error && <ErrorBanner message={error} />}

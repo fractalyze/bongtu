@@ -20,7 +20,9 @@ export type Route =
   | "activity"
   | "settings";
 
-const ROUTES: readonly Route[] = ["home", "receive", "payments", "send", "withdraw", "deposit", "activity", "settings"];
+/** Exported so the test suite can pin route membership (a screen wired into
+ *  the Router but missing here would be unreachable by hash). */
+export const ROUTES: readonly Route[] = ["home", "receive", "payments", "send", "withdraw", "deposit", "activity", "settings"];
 
 function parseHash(): Route {
   const h = window.location.hash.replace(/^#\/?/, "");

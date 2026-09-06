@@ -106,3 +106,10 @@ export async function buildPaymentRows(
 export function shortDestination(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
+
+/** The shareable per-recipient payment link (spec R1): the pay page's /p route
+ *  over the registered name. One joiner so the wallet and any future surface
+ *  agree on the shape (trailing-slash tolerant). */
+export function paymentLink(payBaseUrl: string, name: string): string {
+  return `${payBaseUrl.replace(/\/$/, "")}/p/${name}`;
+}
