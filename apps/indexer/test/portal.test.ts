@@ -63,11 +63,25 @@ const fakeAddressOf = async (salt: string): Promise<string> => create2Address(FA
 const fakeReceiveAddressOf = async (salt: string): Promise<string> =>
   create2Address(RECEIVE_FACTORY, salt, RECEIVE_INITCODE_HASH);
 
+// The registered consumer pair (v2): what makes "alice" payable by the
+// receive product — announce refuses a record without it.
+const CONSUMER_PAIR = { noteViewPub: "0x" + "22".repeat(32), kemEk: "0x" + "33".repeat(1184) };
+
 async function seededIx(
-  opts: { factory?: string | null; receiveFactory?: string | null; operatorToken?: string | null } = {},
+  opts: {
+    factory?: string | null;
+    receiveFactory?: string | null;
+    operatorToken?: string | null;
+    receiveAddressOf?: (salt: string) => Promise<string>;
+    v1Only?: boolean;
+  } = {},
 ): Promise<{ ix: Indexer; portal: PortalRegistry }> {
   const registry = new NameRegistry(null);
-  await registry.register({ name: "alice", owner: ownerCompressed, viewPub: META.viewPub, spendPub: META.spendPub }, NOW);
+  await registry.register(
+    { name: "alice", owner: ownerCompressed, viewPub: META.viewPub, spendPub: META.spendPub },
+    NOW,
+    opts.v1Only ? undefined : CONSUMER_PAIR,
+  );
   const portal = new PortalRegistry(null);
   const ix = {
     cfg: {
@@ -78,7 +92,7 @@ async function seededIx(
     names: registry,
     portal,
     portalAddressOf: fakeAddressOf,
-    receiveAddressOf: fakeReceiveAddressOf,
+    receiveAddressOf: opts.receiveAddressOf ?? fakeReceiveAddressOf,
   } as unknown as Indexer;
   return { ix, portal };
 }
@@ -234,6 +248,37 @@ test("announce 404s when RECEIVE_FACTORY is unset (portal pair alone does not en
   const r = await portalAnnounce.handle(ctx(ix, [], "", browserDerivation()));
   assert.equal(r.status, 404);
   assert.match((r.body as { error: string }).error, /RECEIVE_FACTORY/);
+});
+
+test("announce refuses a v1-only label (no consumer pair -> the sweep could never build)", async () => {
+  const { ix, portal } = await seededIx({ v1Only: true });
+  const r = await handlePortalAnnounce(ctx(ix, [], "", browserDerivation()), NOW);
+  assert.equal(r.status, 400);
+  assert.match((r.body as { error: string }).error, /consumer identity/);
+  assert.equal(portal.list().length, 0, "nothing recorded for an unpayable label");
+});
+
+test("CONCURRENT double-announce: exactly one 200, one 409, one recorded row", async () => {
+  // The destination recompute awaits mid-handler — the exact window the
+  // reviewer's race lives in. A deferred fake holds BOTH handlers inside it,
+  // past the fast-path probe, before releasing them together.
+  const gate: { open: () => void } = { open: () => undefined };
+  const held = new Promise<void>((resolve) => { gate.open = resolve; });
+  const { ix, portal } = await seededIx({
+    receiveAddressOf: async (salt: string) => {
+      await held;
+      return fakeReceiveAddressOf(salt);
+    },
+  });
+  const req = browserDerivation();
+  const race = Promise.all([
+    handlePortalAnnounce(ctx(ix, [], "", req), NOW),
+    handlePortalAnnounce(ctx(ix, [], "", { ...req }), NOW),
+  ]);
+  gate.open();
+  const results = await race;
+  assert.deepEqual(results.map((r) => r.status).sort(), [200, 409], JSON.stringify(results));
+  assert.equal(portal.list().length, 1, "first write wins: exactly one row");
 });
 
 // ============================ (2) SWEPT MARKING ==============================

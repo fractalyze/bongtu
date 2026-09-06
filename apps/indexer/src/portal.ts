@@ -58,6 +58,14 @@ export function toPublic(r: PortalRecord): PortalPublicRecord {
   };
 }
 
+/** The first-write-wins refusal, typed so the announce route can answer 409
+ *  (any other issue() failure stays the catch-all 500). */
+export class DuplicateStealthAddressError extends Error {
+  constructor(readonly stealthAddr: string) {
+    super(`stealth address already recorded: ${stealthAddr}`);
+  }
+}
+
 export class PortalRegistry {
   // Issuance order == seq order, so the array IS the cursor-paged feed.
   private readonly records: PortalRecord[] = [];
@@ -109,7 +117,10 @@ export class PortalRegistry {
   /** First-write-wins probe: is this stealth address already recorded? The
    *  announce route 409s on it — a hijacker re-announcing an observed
    *  destination under its own label always loses the race, because the honest
-   *  record was written before the address was ever displayed. */
+   *  record was written before the address was ever displayed. A probe alone
+   *  cannot close a CONCURRENT double-announce (the route awaits the
+   *  destination recompute in between): `issue` owns that, via the unique
+   *  index (Postgres) and its own final pre-index recheck (memory mode). */
   hasStealth(stealthAddr: string): boolean {
     return this.bySalt.has(portalSalt(stealthAddr));
   }
@@ -119,11 +130,22 @@ export class PortalRegistry {
    * Write-through like a name registration: the row commits before the map
    * serves it. The stealth address is stored lowercase so the salt index has
    * one spelling.
+   *
+   * FIRST WRITE WINS is enforced HERE, atomically, not only by the route's
+   * probe: two concurrent announces for one address both pass the probe (the
+   * route awaits the destination recompute in between), so the database's
+   * unique stealth_addr index makes exactly one INSERT land — the loser's
+   * 23505 surfaces as DuplicateStealthAddressError (the route's 409). Memory
+   * mode (unit tests) has no database, but also no await between the recheck
+   * below and the index write, so the same recheck is race-free there.
    */
   async issue(fields: PortalIssuanceFields, nowSeconds: number): Promise<PortalRecord> {
     const record: PortalRecord = {
       kind: "portal",
-      seq: this.seq,
+      // Allocated EAGERLY (before any await) so two concurrent issues can
+      // never share a seq; a failed insert leaves a gap, which the seq>cursor
+      // feed paging is indifferent to.
+      seq: this.seq++,
       ...fields,
       stealthAddr: fields.stealthAddr.toLowerCase(),
       createdAt: nowSeconds,
@@ -131,6 +153,7 @@ export class PortalRegistry {
       sweptTxHash: null,
       sweptAmount: null,
     };
+    if (this.hasStealth(record.stealthAddr)) throw new DuplicateStealthAddressError(record.stealthAddr);
     if (this.pool) {
       await this.pool.query(
         `INSERT INTO portal_announcements
@@ -139,9 +162,19 @@ export class PortalRegistry {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE, NULL, NULL)`,
         [record.seq, record.name, record.owner, record.ephemeralPub, record.viewTag,
          record.stealthAddr, record.destination, record.factory, record.rail, record.createdAt],
-      );
+      ).catch((e: unknown) => {
+        // unique_violation on the stealth_addr index: the concurrent twin won
+        // the insert. Re-thrown typed so the route can 409 instead of 500 —
+        // and the in-memory map is NOT updated with the losing row. Matched by
+        // constraint name: 23505 alone would also swallow a seq PK violation
+        // (a different bug that must stay loud).
+        const pg = e as { code?: string; constraint?: string };
+        if (pg.code === "23505" && pg.constraint === "portal_stealth_addr_uniq") {
+          throw new DuplicateStealthAddressError(record.stealthAddr);
+        }
+        throw e;
+      });
     }
-    this.seq++;
     this.index(record);
     return record;
   }

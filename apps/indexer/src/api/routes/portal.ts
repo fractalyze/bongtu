@@ -43,8 +43,11 @@
 // (scanStealthAnnouncement), then maps a portal match through
 // portalSalt/create2Address (@bongtu/core/stealth) to confirm `destination`.
 
+import { timingSafeEqual, createHash } from "node:crypto";
+
 import type { Route, RouteContext, RouteResult } from "../router.js";
 import type { PortalIssuance, PortalPublicRecord, PortalRecord } from "@bongtu/core/indexerApi";
+import { KEM_EK_ZERO, NOTE_VIEW_PUB_ZERO } from "@bongtu/core/eddsa";
 import {
   deriveStealthAddress,
   isStealthAnnouncement,
@@ -52,7 +55,7 @@ import {
   randomEphemeralScalar,
 } from "@bongtu/core/stealth";
 import { normalizeName } from "../../names.js";
-import { toPublic } from "../../portal.js";
+import { DuplicateStealthAddressError, toPublic } from "../../portal.js";
 
 const DEFAULT_LIMIT = 5000;
 
@@ -152,8 +155,22 @@ export async function handlePortalAnnounce(
   }
   const record = ix.names.resolve(name);
   if (!record) return { status: 404, body: { error: "label not registered", name } };
+  // A v1-only record (no consumer pair, or the signed zero-sentinel clear)
+  // cannot receive consumer notes: the receive sweeper could never build the
+  // deposit, so the row would strand on the work feed forever and a payment
+  // to its destination with it. The pay page checks this client-side too;
+  // this is the server-side gate a direct API caller cannot skip.
+  if (
+    !record.noteViewPub || !record.kemEk ||
+    record.noteViewPub === NOTE_VIEW_PUB_ZERO || record.kemEk === KEM_EK_ZERO
+  ) {
+    return { status: 400, body: { error: "label has no consumer identity registered — it cannot receive", name } };
+  }
   // First write wins (spec C4): the page announces BEFORE displaying, so the
   // honest record always exists before anyone could observe the destination.
+  // This probe is the fast path; the ATOMIC enforcement is issue()'s (the
+  // unique stealth_addr index — two concurrent announces both pass this probe
+  // while the recompute below awaits).
   if (ix.portal.hasStealth(parsed.stealthAddr)) {
     return { status: 409, body: { error: "stealth address already recorded", stealthAddr: parsed.stealthAddr.toLowerCase() } };
   }
@@ -173,7 +190,13 @@ export async function handlePortalAnnounce(
       rail: "evm",
     },
     nowSeconds,
-  );
+  ).catch((e: unknown) => {
+    if (e instanceof DuplicateStealthAddressError) return null;
+    throw e;
+  });
+  if (issued === null) {
+    return { status: 409, body: { error: "stealth address already recorded", stealthAddr: parsed.stealthAddr.toLowerCase() } };
+  }
   return { status: 200, body: toPublic(issued) };
 }
 
@@ -204,16 +227,25 @@ export const portalAnnouncements: Route = {
   handle: (ctx) => serveFeed(ctx, (c, l) => ctx.ix.portal.listPublic(c, l)),
 };
 
+/** Constant-time shared-secret compare: both sides are hashed first so
+ *  timingSafeEqual gets equal-length buffers and the comparison leaks neither
+ *  content nor length. */
+function tokenMatches(want: string, got: unknown): boolean {
+  if (typeof got !== "string") return false;
+  const h = (s: string): Buffer => createHash("sha256").update(s).digest();
+  return timingSafeEqual(h(want), h(got));
+}
+
 /** The operator gate (spec C3): PORTAL_OPERATOR_TOKEN set => the attributed
  *  work feed requires the same value in x-operator-token; unset => open (the
  *  depositor-facing local flows keep working). A plain shared secret, compared
- *  here and never echoed. */
+ *  in constant time and never echoed. */
 export const portalUnswept: Route = {
   method: "GET",
   pattern: "/portal/unswept",
   handle: (ctx): RouteResult => {
     const want = ctx.ix.cfg.portalOperatorToken ?? null;
-    if (want !== null && ctx.headers?.["x-operator-token"] !== want) {
+    if (want !== null && !tokenMatches(want, ctx.headers?.["x-operator-token"])) {
       return { status: 401, body: { error: "operator token required (x-operator-token header)" } };
     }
     return serveFeed<PortalRecord>(ctx, (c, l) => ctx.ix.portal.unswept(c, l));

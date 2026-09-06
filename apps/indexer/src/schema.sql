@@ -161,3 +161,10 @@ CREATE INDEX IF NOT EXISTS portal_owner_idx ON portal_announcements (owner);
 -- portal flavor: factory '', rail 'evm' — src/portal.ts boot):
 ALTER TABLE portal_announcements ADD COLUMN IF NOT EXISTS factory TEXT;
 ALTER TABLE portal_announcements ADD COLUMN IF NOT EXISTS rail TEXT;
+-- The first-write-wins backstop for the UNAUTHENTICATED announce route: two
+-- concurrent announces for one stealth address can both pass the in-memory
+-- probe (the destination recompute awaits in between), so the database is
+-- what makes exactly one of them win — the loser's 23505 maps to the 409.
+-- Safe on live data: every recorded stealth address is a fresh 160-bit
+-- derivation, so pre-existing duplicates cannot exist.
+CREATE UNIQUE INDEX IF NOT EXISTS portal_stealth_addr_uniq ON portal_announcements (stealth_addr);
