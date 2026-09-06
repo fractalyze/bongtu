@@ -3,12 +3,14 @@
 #
 # Proves the zero-commitment belt `enabled[i] * IsZero(inputCommitments[i]) === 0`
 # closes the SMT->IMT zero-leaf mint-from-nothing at the CIRCUIT level, for all
-# NINE spending circuits — the five enterprise ones (all permissionless — the
+# THIRTEEN spending circuits — the five enterprise ones (all permissionless — the
 # disburse caller allowlist retired 2026-07-28) AND the four consumer spenders
 # (transferPriv, transfer10x2Priv, withdrawPriv, and the consumer disburse base
 # via its 1x16 dev twin disbursePriv; disbursePriv256 instantiates the SAME
-# BongtuConsumerDisburse template — OPMOD §2.1 gate obligation) — while leaving
-# honest spends provable.
+# BongtuConsumerDisburse template — OPMOD §2.1 gate obligation) AND the four
+# CPU ct-free enterprise variants (transferCtf, transfer10Ctf, transfer10x2Ctf,
+# and the ct-free disburse base via its 1x16 dev twin disburseCtf; disburseCtf256
+# instantiates the SAME ZetoCtf template) — while leaving honest spends provable.
 # The two 10-input circuits put their exploit in a middle slot (7 of 10), where a
 # per-slot belt is easiest to get wrong.
 #
@@ -84,10 +86,16 @@ declare -A TEMPLATE=(
   [transfer10x2Priv]="BongtuConsumerTransfer"
   [withdrawPriv]="BongtuConsumerWithdrawBase"
   [disbursePriv]="BongtuConsumerDisburse"
+  # ct-free enterprise variants: the three transfer arities share their base
+  # template; disburseCtf shares ZetoCtf with disburseCtf256.
+  [transferCtf]="ZetoTransferSmallCtf"
+  [transfer10Ctf]="ZetoTransferSmallCtf"
+  [transfer10x2Ctf]="ZetoTransferSmallCtf"
+  [disburseCtf]="ZetoCtf"
 )
 failures=0
 
-for name in transfer transfer10 transfer10x2 withdraw disburse transferPriv transfer10x2Priv withdrawPriv disbursePriv; do
+for name in transfer transfer10 transfer10x2 withdraw disburse transferPriv transfer10x2Priv withdrawPriv disbursePriv transferCtf transfer10Ctf transfer10x2Ctf disburseCtf; do
   compile_if_missing "$name"
   tmpl="${TEMPLATE[$name]}"
 
@@ -123,8 +131,9 @@ echo ""
 echo "======================================================================"
 if [ "$failures" -eq 0 ]; then
   echo "ZERO-LEAF BELT GATE: PASS — the zero-commitment mint-from-nothing is"
-  echo "unsatisfiable at witness-gen for transfer, transfer10, transfer10x2, withdraw, disburse"
-  echo "AND the consumer spenders transferPriv, transfer10x2Priv, withdrawPriv, disbursePriv; honest spends prove."
+  echo "unsatisfiable at witness-gen for transfer, transfer10, transfer10x2, withdraw, disburse,"
+  echo "the consumer spenders transferPriv, transfer10x2Priv, withdrawPriv, disbursePriv,"
+  echo "AND the ct-free spenders transferCtf, transfer10Ctf, transfer10x2Ctf, disburseCtf; honest spends prove."
   exit 0
 else
   echo "ZERO-LEAF BELT GATE: FAIL ($failures)"

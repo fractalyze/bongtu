@@ -35,7 +35,7 @@ const genwitOf = (c: string): string => join(OUT, `${c}_js`, "generate_witness.j
 const inp = (n: string): string => join(CIRCUITS, "fixtures", "inputs", `${n}.json`);
 const wtns = (n: string): string => join(OUT, `${n}.wtns`);
 
-for (const c of ["withdraw", "transfer10", "transfer10x2", "withdrawPriv", "transferPriv", "transfer10x2Priv"]) {
+for (const c of ["withdraw", "transfer10", "transfer10x2", "withdrawPriv", "transferPriv", "transfer10x2Priv", "transfer10Ctf", "transfer10x2Ctf"]) {
   if (!existsSync(wasmOf(c))) {
     console.error(`FATAL: ${wasmOf(c)} missing — compile ${c} first (bash build/prove_all.sh).`);
     process.exit(1);
@@ -91,6 +91,9 @@ const MUST_THROW: [circuit: string, fixture: string, belt: string][] = [
   ["withdrawPriv", "withdrawPriv_attack", "BongtuConsumerWithdrawBase"],
   ["transferPriv", "transferPriv_attack", "BongtuConsumerTransfer"],
   ["transfer10x2Priv", "transfer10x2Priv_attack", "BongtuConsumerTransfer"],
+  // ct-free enterprise variants: verbatim belts, must reject the same attacks.
+  ["transfer10Ctf", "transfer10Ctf_attack", "ZetoTransferSmallCtf"],
+  ["transfer10x2Ctf", "transfer10x2Ctf_attack", "ZetoTransferSmallCtf"],
 ];
 
 for (const [circuit, name, belt] of MUST_THROW) {
@@ -113,6 +116,8 @@ for (const [circuit, name] of [
   ["transfer10x2", "transfer10x2"],
   ["withdrawPriv", "withdrawPriv_padded"],
   ["transfer10x2Priv", "transfer10x2Priv"], // 6 zero-value disabled pads (committed honest fixture)
+  ["transfer10Ctf", "transfer10Ctf"], // ct-free variants keep pads provable
+  ["transfer10x2Ctf", "transfer10x2Ctf"],
 ]) {
   const r = witness(circuit, name);
   if (!r.ok) {
@@ -141,6 +146,12 @@ const KEM_BINDING_AT: [fixture: string, circuit: string, at: number][] = [
   ["transfer10x2_merge", "transfer10x2", 41],
   ["disburse", "disburse", 4],
   ["disburse256", "disburse256", 4],
+  // ct-free variants: index-identical layouts, same kemBinding positions.
+  ["transferCtf", "transferCtf", 26],
+  ["transfer10Ctf", "transfer10Ctf", 106],
+  ["transfer10x2Ctf", "transfer10x2Ctf", 41],
+  ["disburseCtf", "disburseCtf", 4],
+  ["disburseCtf256", "disburseCtf256", 4],
 ];
 
 async function kemBindingTamperGate(): Promise<void> {

@@ -56,3 +56,6 @@ const obj: DisburseInput = {
 };
 
 write("disburse_zero_leaf", obj);
+// The ct-free disburse base carries the same belt over the identical input
+// signal set (gen_inputs.ts reuse rule) — the exploit must throw there too.
+write("disburseCtf_zero_leaf", obj);
