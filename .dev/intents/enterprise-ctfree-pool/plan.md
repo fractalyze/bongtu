@@ -127,6 +127,19 @@ dedicated pools / open on shared, institution-served discovery dependency),
 Proof: docs build nothing, so the proof is the stage-5 review pass against the
 Docs-debt list in spec.md.
 
+### Supporting files (review-stage addendum)
+
+The units above under-enumerated the supporting files their proofs ride on; all are
+inside spec scope and additive, listed here so the plan matches the shipped diff:
+U2 also touches `chains/evm/test/fixtures/gen_realproofs.ts` + `realproofs.json`
+(R8's "existing fixture machinery") and the `circuits/verifiers/*_verifier.sol`
+raw-export mirrors plus the four committed ctf input JSONs; U3 also touches
+`gen_disburse256_oracle.ts` (fixture-set prefix parameter); U4 folds into
+`chains/evm/test/VerifierDrift.t.sol` and adds `DisburseCtf256.t.sol`, and extends
+`circuits/fixtures/gen_attack_inputs.ts` / `gen_zero_leaf_inputs.ts` /
+`gen_disburse_zero_leaf.ts`; U6's gate splits into `ctf_pool_local.sh` +
+`ctf_leg.ts` and commits `deploy/addresses.ctf.31337.json` as tracked scratch.
+
 ## Risks
 
 - **Regenerating existing artifacts by accident**: prove_all.sh re-runs are
