@@ -1,6 +1,6 @@
 # Global multi-rail consumer wallet
 
-Author: JunBeom Lee. Status: draft.
+Author: JunBeom Lee. Status: accepted.
 Origin: conversation
 
 ## Problem
