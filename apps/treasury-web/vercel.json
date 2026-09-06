@@ -1,8 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  // Skip every non-production build: PRs get no preview deployments (owner decision
-  // 2026-09-06); only pushes to main (VERCEL_ENV=production) build and deploy.
-  "ignoreCommand": "[ \"$VERCEL_ENV\" != \"production\" ]",
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- . ../../packages ../../package.json ../../package-lock.json ../../vite.shared.ts ../../tsconfig.base.json",
   "rewrites": [
     {
       "source": "/indexer/:path*",

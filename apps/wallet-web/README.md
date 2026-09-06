@@ -118,6 +118,24 @@ The lock (engine `createKeyCache`; the key never persists), wagmi config, wallet
 branding, lock intro, login pending, clipboard and toasts come from `@bongtu/ui`;
 protocol flows from `@bongtu/client`.
 
+## Vercel rewrites (vercel.json)
+
+Context that used to live as comments in `vercel.json` (which must stay pure JSON):
+
+- Both rewrite destinations were copied from `apps/treasury-web/vercel.json` so this third
+  Vercel project deploys at all, but the `/indexer` rewrite MUST later point at a
+  PUBLIC-mode indexer instance. Today's target is the institution-internal box, and this
+  consumer wallet's whole contract is that it only ever reads the public endpoints
+  (`/events`, `/nullifiers`, `/head`, `/path`, `/names`). Repointing it is an ops task
+  (recorded on issue #13, needs the user), not a code change.
+- The `/circuits` rewrite carries this app's OWN `CIRCUITS_VERSION` path segment (the
+  `src/config.ts` pin): a circuit regen must bump the pin, re-upload the assets
+  (`deploy/gates/upload_consumer_circuits.sh`) and repoint this path in the SAME change,
+  or deployments serve a mismatched proving set.
+- `ignoreCommand` path-filters builds: only a diff touching this app or the shared
+  workspace inputs (`packages/`, root package files, `vite.shared.ts`,
+  `tsconfig.base.json`) builds a deployment; other PRs and pushes are skipped.
+
 ## License
 
 Apache-2.0: see the root [`LICENSE`](../../LICENSE).
