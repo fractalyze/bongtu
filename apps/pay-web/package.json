@@ -5,6 +5,9 @@
   "type": "module",
   "private": true,
   "license": "Apache-2.0",
+  "exports": {
+    "./pay": "./src/lib/pay.ts"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
