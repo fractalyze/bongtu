@@ -31,9 +31,11 @@ import type { Calldata, DepositInput, ProvingRequest } from "@bongtu/core/provin
 import type { PortalRecord } from "@bongtu/core/indexerApi";
 
 import {
+  DEPOSIT_PRIV_PUB_LEN,
   DEPOSIT_PUB_LEN,
   handleHealth,
   initialState,
+  privSweepArgs,
   runOnce,
   sweepArgs,
   type SweeperChain,
@@ -57,6 +59,8 @@ function record(over: Partial<PortalRecord> = {}): PortalRecord {
   return {
     kind: "portal",
     seq: 0,
+    rail: "evm",
+    factory: FACTORY,
     name: "alice",
     owner: OWNER_COMPRESSED,
     ephemeralPub: "0x" + "11".repeat(32),
@@ -335,4 +339,159 @@ test("the wire: GET /health over real HTTP, 404 elsewhere", async () => {
 test("sweepArgs refuses a non-deposit-arity public vector", () => {
   const cd: Calldata = { a: ["0x1", "0x2"], b: [["0x3", "0x4"], ["0x5", "0x6"]], c: ["0x7", "0x8"], pub: ["0x1", "0x2"] };
   assert.throws(() => sweepArgs(record().stealthAddr, POOL, cd, KEM_CT), /19/);
+});
+
+// ============================= PRIV MODE =====================================
+//
+// The consumer-family path: depositPriv through the PortalPrivFactory. The
+// recipient triple comes from the fixture identities (real bjj + ML-KEM keys —
+// sealing performs a REAL encapsulation, so a synthetic key cannot stand in).
+
+import { consumerRecipientOf } from "@bongtu/client/consumer";
+import type { ConsumerDepositInput } from "@bongtu/core/proving";
+import { kemBytesToHex } from "@bongtu/core/kem";
+import { consumerReceiver } from "../../../circuits/fixtures/consumer_lib.js";
+
+const PRIV_FACTORY = "0x00000000000000000000000000000000000fac71";
+const MODULE = "0x000000000000000000000000000000000000d0d0";
+
+const RECIPIENT_ID = consumerReceiver(0);
+const RECIPIENT = {
+  owner: packPubkey(RECIPIENT_ID.spend.publicKey),
+  noteViewPub: packPubkey(RECIPIENT_ID.view.publicKey),
+  kemEk: kemBytesToHex(RECIPIENT_ID.kem.publicKey),
+};
+
+function privRecord(over: Partial<PortalRecord> = {}): PortalRecord {
+  return record({ factory: PRIV_FACTORY, owner: RECIPIENT.owner, ...over });
+}
+
+/** The priv twin of fakeProver: 16 publics, pub[0] echoing the built total. */
+function fakePrivProver(captured: ProvingRequest[]) {
+  return async (request: ProvingRequest): Promise<Calldata> => {
+    captured.push(request);
+    const input = request.input as unknown as ConsumerDepositInput;
+    const V = (input.outputValues as string[]).reduce((s, v) => s + BigInt(v), 0n);
+    const pub = Array.from({ length: DEPOSIT_PRIV_PUB_LEN }, (_, i) => "0x" + BigInt(i + 1).toString(16));
+    pub[0] = "0x" + V.toString(16);
+    return { a: ["0x1", "0x2"], b: [["0x3", "0x4"], ["0x5", "0x6"]], c: ["0x7", "0x8"], pub };
+  };
+}
+
+function makePrivDeps(
+  chain: SweeperChain,
+  records: PortalRecord[][],
+  captured: ProvingRequest[],
+  over: { minSweep?: bigint } = {},
+): SweeperDeps {
+  const feed = { round: 0 };
+  return {
+    chain,
+    fetchUnswept: async () => {
+      const page = records[Math.min(feed.round, records.length - 1)];
+      feed.round += 1;
+      return page;
+    },
+    prove: fakePrivProver(captured),
+    rand: countingRand(),
+    priv: {
+      module: MODULE,
+      minSweep: over.minSweep ?? 0n,
+      resolveRecipient: async (name: string) => {
+        assert.equal(name, "alice", "the triple is resolved by the ROW's name");
+        return RECIPIENT;
+      },
+    },
+  };
+}
+
+test("priv mode: a funded record sweeps with the EXACT priv tuple, sealed to the recipient triple", async () => {
+  const rec = privRecord();
+  const balance = 555n;
+  const { chain, calls } = fakeChain({ balances: { [rec.destination]: [balance] } });
+  // fakeChain defaults to the portal factory, which recordBelongsTo would
+  // filter every priv row against.
+  chain.factory = PRIV_FACTORY;
+  const captured: ProvingRequest[] = [];
+  const state = initialState();
+  await runOnce(makePrivDeps(chain, [[rec]], captured, {}), state);
+
+  // The depositPriv input: outputs [note(balance), note(0)], both bound to the
+  // recipient's SPEND key and view key — the wire form the consumer builder emits.
+  assert.equal(captured.length, 1, "exactly one proof");
+  assert.equal(captured[0].circuit, "depositPriv");
+  const input = captured[0].input as unknown as ConsumerDepositInput;
+  const spend = [RECIPIENT_ID.spend.publicKey[0].toString(), RECIPIENT_ID.spend.publicKey[1].toString()];
+  const view = [RECIPIENT_ID.view.publicKey[0].toString(), RECIPIENT_ID.view.publicKey[1].toString()];
+  assert.deepEqual(input.outputOwnerPublicKeys, [spend, spend], "both outputs owned by the recipient spend key");
+  assert.deepEqual(input.outputViewPublicKeys, [view, view], "both outputs sealed to the recipient view key");
+  assert.deepEqual(input.outputValues, [balance.toString(), "0"], "values [balance, 0] — sum == balance");
+
+  const write = calls.find((c) => c.name === "writeContract");
+  assert.ok(write, "writeContract was called");
+  const p = write.params as { address: string; functionName: string; args: unknown[]; account: string };
+  assert.equal(p.address, PRIV_FACTORY, "the sweep goes through the priv factory");
+  assert.equal(p.functionName, "sweep");
+  assert.equal(p.account, SWEEPER);
+  // THE priv tuple: [salt, module, a, b, c, pub16, kemCiphertexts,
+  // ephemeralPub, viewTag] — deep-equality on everything deterministic; the two
+  // kem cts are REAL per-output encapsulations (CSPRNG inside sealing), so
+  // shape-checked instead.
+  const expectedPub = Array.from({ length: DEPOSIT_PRIV_PUB_LEN }, (_, i) => BigInt(i + 1));
+  expectedPub[0] = balance;
+  assert.deepEqual(p.args.slice(0, 6), [
+    portalSalt(rec.stealthAddr),
+    MODULE,
+    [1n, 2n],
+    [[3n, 4n], [5n, 6n]],
+    [7n, 8n],
+    expectedPub,
+  ]);
+  const kemCts = p.args[6] as string[];
+  assert.equal(kemCts.length, 2, "one kem ct per output");
+  for (const ct of kemCts) assert.match(ct, /^0x[0-9a-f]{2176}$/, "1088-byte kem ct");
+  assert.equal(p.args[7], rec.ephemeralPub, "the announcement ephemeralPub rides the sweep");
+  assert.equal(p.args[8], rec.viewTag, "the announcement viewTag rides the sweep");
+  assert.ok(state.lastSweepAt !== null);
+});
+
+test("priv mode: a below-MIN_SWEEP balance is dust — no prove, no tx, stays unswept", async () => {
+  const rec = privRecord();
+  const { chain, calls } = fakeChain({ balances: { [rec.destination]: [9n] } });
+  chain.factory = PRIV_FACTORY;
+  const captured: ProvingRequest[] = [];
+  await runOnce(makePrivDeps(chain, [[rec]], captured, { minSweep: 10n }), initialState());
+  assert.equal(captured.length, 0, "no proof for dust");
+  assert.equal(calls.filter((c) => c.name === "writeContract").length, 0, "no tx for dust");
+  // …while an exactly-at-threshold balance sweeps (strictly-below semantics).
+  const at = fakeChain({ balances: { [rec.destination]: [10n] } });
+  at.chain.factory = PRIV_FACTORY;
+  await runOnce(makePrivDeps(at.chain, [[rec]], captured, { minSweep: 10n }), initialState());
+  assert.equal(captured.length, 1, "at-threshold balance sweeps");
+});
+
+test("mode row filtering: each bot keeps its own factory's rows; backfilled rows reach nobody", async () => {
+  const mine = privRecord({ seq: 0 });
+  const portalRow = record({ seq: 1, factory: FACTORY });
+  const legacyRow = record({ seq: 2, factory: "" });
+  const backfilled = privRecord({ seq: 3, name: "", owner: "" });
+  const feed = [mine, portalRow, legacyRow, backfilled];
+
+  // Priv bot (chain.factory = the priv factory): only its own row.
+  const rc = fakeChain({ balances: { [mine.destination]: [0n] } });
+  rc.chain.factory = PRIV_FACTORY;
+  const rState = initialState();
+  await runOnce(makePrivDeps(rc.chain, [feed], [], {}), rState);
+  assert.equal(rState.unswept, 1, "priv mode keeps exactly the priv-factory row");
+
+  // Enterprise bot: the portal row AND the legacy pre-column row.
+  const ec = fakeChain({ balances: { [portalRow.destination]: [0n] } });
+  const eState = initialState();
+  await runOnce(makeDeps(ec.chain, [[...feed]], [], []), eState);
+  assert.equal(eState.unswept, 2, "enterprise mode keeps its factory's row + the legacy row");
+});
+
+test("privSweepArgs refuses a non-depositPriv-arity public vector", () => {
+  const cd: Calldata = { a: ["0x1", "0x2"], b: [["0x3", "0x4"], ["0x5", "0x6"]], c: ["0x7", "0x8"], pub: Array(19).fill("0x1") };
+  assert.throws(() => privSweepArgs(privRecord(), MODULE, cd, []), /16/);
 });

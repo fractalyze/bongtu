@@ -353,6 +353,7 @@ test("getAnnouncements sends cursor/limit and parses the feed", async () => {
 // --- portal client half (fake-fetch round-trips, the names-client pattern) --------
 
 import {
+  announcePortal,
   payPortal,
   fetchUnswept,
   getPortalAnnouncements,
@@ -371,6 +372,8 @@ const PORTAL_ISSUANCE: PortalIssuance = {
 const PORTAL_RECORD: PortalRecord = {
   kind: "portal",
   seq: 3,
+  rail: "evm",
+  factory: "0x" + "aa".repeat(20),
   name: "alice",
   owner: "0x" + "11".repeat(32),
   ephemeralPub: "0x" + "88".repeat(32),
@@ -417,6 +420,41 @@ test("fetchUnswept and getPortalAnnouncements send cursor/limit and parse the fe
   const defaults = fakeFetch(200, "[]");
   assert.deepEqual(await fetchUnswept("http://localhost:8600", undefined, undefined, defaults.fn), []);
   assert.equal(defaults.calls[0]?.url, "http://localhost:8600/portal/unswept?cursor=-1&limit=5000");
+});
+
+test("fetchUnswept carries the operator token as the x-operator-token header", async () => {
+  const gated = fakeFetch(200, "[]");
+  await fetchUnswept("http://localhost:8600", -1, 10, gated.fn, "sekrit");
+  assert.deepEqual(gated.calls[0]?.init?.headers, { "x-operator-token": "sekrit" });
+
+  // No token — no headers object at all (the open depositor-facing flows).
+  const open = fakeFetch(200, "[]");
+  await fetchUnswept("http://localhost:8600", -1, 10, open.fn);
+  assert.equal(open.calls[0]?.init, undefined);
+});
+
+test("announcePortal POSTs the derivation and parses the public record", async () => {
+  const record = {
+    kind: "portal", seq: 0, rail: "evm", factory: PORTAL_RECORD.factory,
+    ephemeralPub: PORTAL_RECORD.ephemeralPub, viewTag: 42,
+    stealthAddr: PORTAL_RECORD.stealthAddr, destination: PORTAL_RECORD.destination,
+    createdAt: 1_700_000_000, swept: false, sweptTxHash: null, sweptAmount: null,
+  };
+  const { fn, calls } = fakeFetch(200, JSON.stringify(record));
+  const req = {
+    label: "alice",
+    ephemeralPub: PORTAL_RECORD.ephemeralPub,
+    viewTag: 42,
+    stealthAddr: PORTAL_RECORD.stealthAddr,
+  };
+  assert.deepEqual(await announcePortal("http://localhost:8600/", req, fn), record);
+  assert.equal(calls[0]?.url, "http://localhost:8600/portal/announce");
+  assert.equal(calls[0]?.init?.method, "POST");
+  assert.deepEqual(JSON.parse(String(calls[0]?.init?.body)), req);
+
+  // The first-write-wins refusal keeps the shared error shape (409 parseable).
+  const dup = fakeFetch(409, "stealth address already recorded");
+  await assert.rejects(() => announcePortal("http://localhost:8600", req, dup.fn), /-> 409: stealth address/);
 });
 
 // --- the bound IndexerClient (issue #15 C1) ---------------------------------------

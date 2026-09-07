@@ -40,7 +40,7 @@ import { isPreKemProbeError } from "@bongtu/core/network";
 import { isStealthAnnouncement } from "@bongtu/core/stealth";
 
 import { MirrorTree } from "./tree.js";
-import { poolAbi, abiKnowsKem, kemBootGuardError, staleOpAbiError, portalFactoryAbi, consumerModuleAbi, type ChainConfig } from "./chain.js";
+import { poolAbi, abiKnowsKem, kemBootGuardError, staleOpAbiError, portalFactoryAbi, portalPrivFactoryAbi, consumerModuleAbi, type ChainConfig } from "./chain.js";
 import { type FeedEntry, type Slice } from "./store.js";
 import { verifyDisclosure, verifyConsumerDisclosure } from "./disclosure.js";
 import { emitAlarm, emitDisclosureAlarm } from "./alarms.js";
@@ -83,9 +83,10 @@ const H = 32; // IMT height — a system-wide constant (SPEC §4)
 // versa). Which handler a log may reach is therefore decided by its EMITTER,
 // never by its name alone. Pool-family events apply only from the pool — the
 // registry mirror in particular is driven by POOL-emitted ModuleRegistered/
-// ModuleRemoved alone; Swept only from the PortalFactory; the consumer op
-// family only from the module watch-set. WithdrawAnnouncement is in BOTH sets:
-// the module emits the byte-identical pair for withdrawPriv.
+// ModuleRemoved alone; Swept only from the two factories (portal + receive)
+// and Announced only from the receive factory; the consumer op family only
+// from the module watch-set. WithdrawAnnouncement is in BOTH sets: the module
+// emits the byte-identical pair for withdrawPriv.
 const POOL_EVENT_NAMES = new Set([
   "Appended", "SubtreeAppended", "OpApplied",
   "Deposited", "Transferred", "Transferred10", "Transferred10x2",
@@ -191,7 +192,7 @@ export class Indexer extends IndexerHostBase {
     // consumer op logs (scanned from the registry-derived watch-set) decode
     // through the same path as pool events. Extra fragments are inert for pool
     // reads.
-    this.abi = [...poolAbi(), ...portalFactoryAbi, ...consumerModuleAbi];
+    this.abi = [...poolAbi(), ...portalFactoryAbi, ...portalPrivFactoryAbi, ...consumerModuleAbi];
     this.publicClient = createPublicClient({ transport: http(cfg.rpc) });
   }
 
@@ -226,6 +227,26 @@ export class Indexer extends IndexerHostBase {
     return String(
       await this.publicClient.readContract({
         address: this.cfg.portalFactory as Address,
+        abi: portalFactoryAbi,
+        functionName: "addressOf",
+        args: [salt as `0x${string}`],
+      }),
+    );
+  }
+
+  /**
+   * eth_call `PortalPrivFactory.addressOf(salt)` — the announce route's
+   * server-side destination recompute. Same chain-owns-the-initcode-hash
+   * posture as portalAddressOf (the addressOf fragment is byte-identical
+   * across the two factories, so the portal ABI serves the call).
+   */
+  async portalPrivAddressOf(salt: string): Promise<string> {
+    if (!this.cfg.portalPrivFactory) {
+      throw new Error("portalPrivAddressOf: PORTAL_PRIV_FACTORY is not configured");
+    }
+    return String(
+      await this.publicClient.readContract({
+        address: this.cfg.portalPrivFactory as Address,
         abi: portalFactoryAbi,
         functionName: "addressOf",
         args: [salt as `0x${string}`],
@@ -350,9 +371,11 @@ export class Indexer extends IndexerHostBase {
    * fixed per call and the watch-set is itself derived from the base scan.
    */
   private async getLogsChunked(from: number, to: number): Promise<ParsedLog[]> {
-    const baseAddrs = (this.cfg.portalFactory
-      ? [this.cfg.pool, this.cfg.portalFactory]
-      : [this.cfg.pool]) as Address[];
+    const baseAddrs = [
+      this.cfg.pool,
+      ...(this.cfg.portalFactory ? [this.cfg.portalFactory] : []),
+      ...(this.cfg.portalPrivFactory ? [this.cfg.portalPrivFactory] : []),
+    ] as Address[];
     const base = await this.scanRange(baseAddrs, from, to);
     const watch = new Set(this.modules.watchAddresses(this.kem.pendingModules()));
     for (const l of base) {
@@ -629,6 +652,7 @@ export class Indexer extends IndexerHostBase {
     // counts as pool-emitted.
     const poolAddr = this.cfg.pool.toLowerCase();
     const factoryAddr = this.cfg.portalFactory ? this.cfg.portalFactory.toLowerCase() : null;
+    const privAddr = this.cfg.portalPrivFactory ? this.cfg.portalPrivFactory.toLowerCase() : null;
     const logs = ((): ParsedLog[] => {
       const watched = new Set(this.modules.watchAddresses(this.kem.pendingModules()));
       const kept: ParsedLog[] = [];
@@ -639,6 +663,10 @@ export class Indexer extends IndexerHostBase {
           if (POOL_EVENT_NAMES.has(l.name)) kept.push(l);
         } else if (factoryAddr !== null && from === factoryAddr) {
           if (l.name === "Swept") kept.push(l);
+        } else if (privAddr !== null && from === privAddr) {
+          // The priv factory emits Swept AND (in the same tx) the
+          // announcement recovery event.
+          if (l.name === "Swept" || l.name === "Announced") kept.push(l);
         } else if (watched.has(from) && MODULE_EVENT_NAMES.has(l.name)) {
           kept.push(l);
         }
@@ -762,6 +790,9 @@ export class Indexer extends IndexerHostBase {
     // pairs). A replayed range re-adds nothing (addEvent dedups), so the queue
     // stays empty and the already-attached announcement is left alone.
     const withdrawEntriesByTx = new Map<string, FeedEntry[]>();
+    // Swept args queued per salt for the same-tx Announced backfill (the
+    // receive factory emits Swept then Announced from one sweep call).
+    const sweptArgsBySalt = new Map<string, { sweeper: string; amount: bigint; txHash: string }>();
     for (const l of logs) {
       if (l.name === "DisburseCiphertexts") {
         const start = Number(bn(l.args.startLeafIndex));
@@ -912,11 +943,42 @@ export class Indexer extends IndexerHostBase {
           };
         }
       } else if (l.name === "Swept") {
-        // PortalFactory sweep landed: flip the matching issuance record. The
-        // salt IS portalSalt(stealthAddr) (the one rule — PortalFactory header);
-        // the registry matches on it and no-ops an unknown or replayed salt,
-        // keeping this branch replay-idempotent like every sibling.
+        // A factory sweep landed (portal or receive pair — same event shape):
+        // flip the matching issuance record. The salt IS
+        // portalSalt(stealthAddr) (the one rule — PortalFactory header); the
+        // registry matches on it and no-ops an unknown or replayed salt,
+        // keeping this branch replay-idempotent like every sibling. The args
+        // are also queued for a same-tx Announced (emitted after Swept), whose
+        // backfill needs the destination (= sweeper) and amount.
         this.portal.markSwept(String(l.args.salt), l.txHash, bn(l.args.amount));
+        sweptArgsBySalt.set(String(l.args.salt).toLowerCase(), {
+          sweeper: String(l.args.sweeper),
+          amount: bn(l.args.amount),
+          txHash: l.txHash,
+        });
+      } else if (l.name === "Announced") {
+        // The priv factory's sweep-time announcement (the chain-only
+        // recovery path). A salt the registry knows is a no-op inside
+        // recordChainAnnouncement; an unknown one is backfilled from the event
+        // plus the same-tx Swept args. A lone Announced with no Swept in the
+        // delivered range cannot happen on-chain (one function emits both) —
+        // a synthetic/partial range degrades to a warning, not a throw.
+        const salt = String(l.args.salt).toLowerCase();
+        const swept = sweptArgsBySalt.get(salt);
+        if (swept) {
+          this.portal.recordChainAnnouncement({
+            salt,
+            ephemeralPub: String(l.args.ephemeralPub),
+            viewTag: Number(l.args.viewTag),
+            destination: swept.sweeper,
+            factory: this.cfg.portalPrivFactory ?? "",
+            txHash: swept.txHash,
+            amount: swept.amount,
+            blockTimestamp: l.blockTimestamp,
+          });
+        } else {
+          console.warn(`ingest: Announced for salt ${salt} has no same-range Swept — backfill skipped`);
+        }
       } else if (l.name === "Disbursed") {
         const st = subtreesByTx.get(l.txHash)?.shift();
         if (!st) throw new Error(`ingest: Disbursed in tx ${l.txHash} has no matching SubtreeAppended log`);

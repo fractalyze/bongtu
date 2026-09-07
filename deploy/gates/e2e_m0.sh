@@ -97,6 +97,9 @@ if [ -z "${E2E_DATABASE_URL:-}" ]; then
     # cursor), so it gets a dedicated database in the same container.
     "$DOCKER" exec "$PG_NAME" createdb -U postgres bongtu_consumer || fail "createdb bongtu_consumer failed"
     export E2E_CONSUMER_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:${PG_PORT}/bongtu_consumer"
+    # The PORTAL-PRIV leg's indexer likewise owns its schema + cursor.
+    "$DOCKER" exec "$PG_NAME" createdb -U postgres bongtu_portal_priv || fail "createdb bongtu_portal_priv failed"
+    export E2E_PORTAL_PRIV_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:${PG_PORT}/bongtu_portal_priv"
   else
     fail "the portal leg needs Postgres: export E2E_DATABASE_URL or make docker available (the leg is part of the DoD — no silent skip)"
   fi
@@ -105,6 +108,8 @@ fi
 # leg needs its OWN database and must never silently skip.
 [ -n "${E2E_CONSUMER_DATABASE_URL:-}" ] || \
   fail "the consumer leg needs its own Postgres database: export E2E_CONSUMER_DATABASE_URL (a different database on the same server is fine)"
+[ -n "${E2E_PORTAL_PRIV_DATABASE_URL:-}" ] || \
+  fail "the portalPriv leg needs its own Postgres database: export E2E_PORTAL_PRIV_DATABASE_URL (a different database on the same server is fine)"
 
 # --- drive the cycle --------------------------------------------------------
 echo "== running e2e orchestrator =="

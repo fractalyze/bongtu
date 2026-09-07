@@ -135,9 +135,9 @@ import {
 // update BOTH files). Nothing here is hand-computed.
 const VECTOR_FACTORY = "0x00000000000000000000000000000000c0ffee01";
 const VECTOR_INITCODE_HASH =
-  "0xe70cc154569870971ebc21f0d436f960dbd217315e69c3c102d47536293eeb3f";
+  "0xba3462dadd893a779c089632a4959372f7003b7eb40b31d83b98254d56729265";
 const VECTOR_STEALTH_EOA = "0x1111111111111111111111111111111111111111";
-const VECTOR_ADDRESS = "0xDdF8577C4Bd01a287dEA1bc3cFe4c9e7D5c2343A";
+const VECTOR_ADDRESS = "0x4d8BceD42cCCe66201128569967cD497A64c483d";
 
 test("create2Address matches the Solidity addressOf parity vector (checksummed)", () => {
   const got = create2Address(
@@ -148,6 +148,26 @@ test("create2Address matches the Solidity addressOf parity vector (checksummed)"
   // Exact-case equality: the vector is forge's checksummed log output, so this
   // also pins the EIP-55 checksumming.
   assert.equal(got, VECTOR_ADDRESS);
+});
+
+// The consumer pair's OWN vector — chains/evm/test/PortalPriv.t.sol
+// `testPortalPrivCreate2ParityVectorPinned` (PortalPrivSweeper's initcode
+// differs from PortalSweeper's, so the hash and every derived address differ;
+// regen: `forge test --match-test testPortalPrivCreate2ParityVectorPinned -vv`
+// after any PortalPrivSweeper/compiler change, then update BOTH files).
+const PORTAL_PRIV_VECTOR_FACTORY = "0x00000000000000000000000000000000c0ffee02";
+const PORTAL_PRIV_VECTOR_INITCODE_HASH =
+  "0x4a892b03a9bed6cf542e81c3167c1d8133dc50e3a2f7944230d99d870741e9c0";
+const PORTAL_PRIV_VECTOR_STEALTH_EOA = "0x2222222222222222222222222222222222222222";
+const PORTAL_PRIV_VECTOR_ADDRESS = "0x3763132b70279349718C6702F9f8ff3f3263Ca2B";
+
+test("create2Address matches the PortalPrivFactory addressOf parity vector", () => {
+  const got = create2Address(
+    PORTAL_PRIV_VECTOR_FACTORY,
+    portalSalt(PORTAL_PRIV_VECTOR_STEALTH_EOA),
+    PORTAL_PRIV_VECTOR_INITCODE_HASH,
+  );
+  assert.equal(got, PORTAL_PRIV_VECTOR_ADDRESS);
 });
 
 test("portalSalt is the address left-padded to bytes32 (the one padding rule)", () => {

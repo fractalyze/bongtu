@@ -41,6 +41,10 @@ struct AddressRecord {
     /// here means "not deployed on this chain", so the field is ABSENT rather
     /// than a zero-address claim.
     address portalFactory;
+    /// OPTIONAL for the same reason: the priv portal factory is the consumer
+    /// receive product's sweep add-on (PortalPrivFactory), deployed after the
+    /// pool AND the consumer module set.
+    address portalPrivFactory;
 }
 
 /// @title AddressBook — read/merge-write of `deploy/addresses.<chainid>.json`.
@@ -101,6 +105,7 @@ library AddressBook {
         r.poolImpl = vm.parseJsonAddress(j, ".poolImpl");
         r.pool = vm.parseJsonAddress(j, ".pool");
         if (vm.keyExists(j, ".portalFactory")) r.portalFactory = vm.parseJsonAddress(j, ".portalFactory");
+        if (vm.keyExists(j, ".portalPrivFactory")) r.portalPrivFactory = vm.parseJsonAddress(j, ".portalPrivFactory");
     }
 
     /// @notice Write the record back. An unset `arbiterKemPk` stays ABSENT: a
@@ -135,6 +140,7 @@ library AddressBook {
         vm.serializeAddress(o, "token", r.token);
         vm.serializeAddress(o, "poolImpl", r.poolImpl);
         if (r.portalFactory != address(0)) vm.serializeAddress(o, "portalFactory", r.portalFactory);
+        if (r.portalPrivFactory != address(0)) vm.serializeAddress(o, "portalPrivFactory", r.portalPrivFactory);
         string memory js = vm.serializeAddress(o, "pool", r.pool);
         vm.writeJson(js, p);
     }

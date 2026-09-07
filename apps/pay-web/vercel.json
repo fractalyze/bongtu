@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- . ../../packages ../../package.json ../../package-lock.json ../../vite.shared.ts ../../tsconfig.base.json",
+  "rewrites": [
+    {
+      "source": "/indexer/:path*",
+      "destination": "https://gpu-server.tailec11d1.ts.net:10000/:path*"
+    },
+    {
+      "source": "/p/:label",
+      "destination": "/"
+    }
+  ]
+}

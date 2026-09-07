@@ -1,0 +1,17 @@
+{
+  "// note": "Own TS package (NOT in the root tsconfig include), the wallet-web pattern: NodeNext resolution matches the unbuilt @bongtu/core workspace source it imports (exports map to raw src/*.ts). `DOM` lib for the page itself; no JSX — the page is framework-free.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "types": ["node", "vite/client"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "vite.config.ts"]
+}

@@ -36,14 +36,29 @@ import { buildDepositRequest, freshDepositCrypto } from "@bongtu/client/deposit"
 import type { RandField } from "@bongtu/client/deposit";
 import { freshKemMaterial, type KemDrawFn } from "@bongtu/client/spend";
 import type { WalletIdentity } from "@bongtu/client/derive";
+import {
+  buildConsumerDepositRequest,
+  freshConsumerDepositCrypto,
+  type ConsumerRecipient,
+} from "@bongtu/client/consumer";
 
-// The one function this service submits — PortalFactory.sweep (onlyOwner; the
-// pool rides as an address arg where Solidity declares IPortalPool). The
-// indexer's portalFactoryAbi carries only Swept + addressOf (its whole
-// surface), so the sweep fragment has no shared owner yet; the contract
-// (chains/evm/src/PortalFactory.sol) is the source of truth restated here.
+// The one function the ENTERPRISE mode submits — PortalFactory.sweep
+// (onlyOwner; the pool rides as an address arg where Solidity declares
+// IPortalPool). The indexer's portalFactoryAbi carries only Swept + addressOf
+// (its whole surface), so the sweep fragment has no shared owner yet; the
+// contract (chains/evm/src/PortalFactory.sol) is the source of truth restated
+// here.
 export const SWEEP_ABI: Abi = parseAbi([
   "function sweep(bytes32 salt, address pool, uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[19] pub, bytes kemCiphertext)",
+]);
+
+// The PRIV mode's submit — PortalPrivFactory.sweep: the depositPriv module
+// rides where the portal shape carries the pool, the proof is the consumer
+// 16-vector with per-output kem ciphertexts, and the announcement tuple rides
+// along so the factory can emit the chain-only recovery event
+// (chains/evm/src/PortalPrivFactory.sol is the source of truth).
+export const PRIV_SWEEP_ABI: Abi = parseAbi([
+  "function sweep(bytes32 salt, address module, uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[16] pub, bytes[] kemCiphertexts, bytes32 ephemeralPub, uint8 viewTag)",
 ]);
 
 const BALANCE_ABI: Abi = parseAbi([ERC20_ABI_FRAGMENTS.balanceOf]);
@@ -51,6 +66,10 @@ const BALANCE_ABI: Abi = parseAbi([ERC20_ABI_FRAGMENTS.balanceOf]);
 /** The deposit circuit's public-vector length (POOL_ABI_FRAGMENTS.deposit:
  *  uint[19], pub[0] == V). */
 export const DEPOSIT_PUB_LEN = 19;
+
+/** The depositPriv circuit's public-vector length (OPMOD §2: uint[16],
+ *  pub[0] == out). */
+export const DEPOSIT_PRIV_PUB_LEN = 16;
 
 /** How the sweeper reaches the chain — the viem clients behind a seam, so unit
  *  tests drive the whole loop body with fakes (no RPC, no key). index.ts builds
@@ -81,7 +100,8 @@ export interface SweeperChain {
  *  deposit's fresh crypto material. */
 export interface SweeperDeps {
   chain: SweeperChain;
-  /** one page of unswept records (index.ts binds the IndexerClient's unswept). */
+  /** one page of unswept records (index.ts binds the IndexerClient's unswept,
+   *  operator token included in priv mode). */
   fetchUnswept: () => Promise<PortalRecord[]>;
   /** ProvingRequest -> Groth16 calldata (prover.ts CPU snarkjs; a fake in tests). */
   prove: (request: ProvingRequest) => Promise<Calldata>;
@@ -89,6 +109,23 @@ export interface SweeperDeps {
   rand: RandField;
   /** fresh ML-KEM encapsulation against ARBITER_KEM_PK (deterministic in tests). */
   drawKem?: KemDrawFn;
+  /** PRIV MODE (set => runOnce takes the depositPriv path; unset => the
+   *  enterprise portal path, byte-identical to before the receive product). */
+  priv?: PrivDeps;
+}
+
+/** What the priv mode needs beyond the shared deps: the module the sweep
+ *  proves against, the dust threshold, and the recipient-triple lookup (the
+ *  work-feed row carries only name+owner — the v2 pair lives in the name
+ *  directory, so index.ts binds resolveName + consumerRecipientOf here). */
+export interface PrivDeps {
+  /** the DepositPrivModule address (the `module` calldata arg). */
+  module: string;
+  /** balances strictly below this stay unswept (MIN_SWEEP; spec C5 — a
+   *  below-dust payment shows `received` indefinitely, the recorded posture). */
+  minSweep: bigint;
+  /** name -> payable consumer triple; throws on a legacy/cleared record. */
+  resolveRecipient: (name: string) => Promise<ConsumerRecipient>;
 }
 
 /** What /health reports beyond the balance: mutated in place by runOnce (a
@@ -156,6 +193,60 @@ export function sweepArgs(
   ];
 }
 
+/**
+ * Build the consumer deposit that shields one funded priv destination:
+ * outputs [note(balance), note(0)], BOTH sealed to the recipient's registered
+ * consumer triple — the priv twin of buildPortalDeposit. REUSES the
+ * wallet's own consumer builder end to end, so a swept depositPriv is
+ * indistinguishable from a wallet one at the proof. Everything consumed here
+ * is PUBLIC registry material (owner bjj pubkey, noteViewPub, kemEk): the
+ * per-output sealing encrypts TO those keys, and the 0-in mint has no owner
+ * secret anywhere in its witness — the load-bearing property of the priv-sweep
+ * trust model (the operator can neither open nor redirect-by-forgery the
+ * minted notes; redirection rests on the bot key gate alone).
+ */
+export function buildPrivDeposit(
+  recipient: ConsumerRecipient,
+  balance: bigint,
+  rand: RandField,
+): { request: ProvingRequest; kemCiphertexts: string[] } {
+  const crypto = freshConsumerDepositCrypto(rand);
+  const built = buildConsumerDepositRequest(
+    [
+      { recipient, value: balance.toString() },
+      { recipient, value: "0" },
+    ],
+    crypto,
+  );
+  return { request: built.request, kemCiphertexts: built.meta.kemCiphertexts };
+}
+
+/** The EXACT priv-sweep argument tuple — [salt, module, a, b, c, pub,
+ *  kemCiphertexts, ephemeralPub, viewTag]: the sweepArgs discipline (a pinned
+ *  deep-equality target) with the consumer arity enforced and the record's
+ *  announcement tuple riding along for the factory's Announced emit. */
+export function privSweepArgs(
+  record: PortalRecord,
+  module: string,
+  calldata: Calldata,
+  kemCiphertexts: string[],
+): unknown[] {
+  if (calldata.pub.length !== DEPOSIT_PRIV_PUB_LEN) {
+    throw new Error(`depositPriv calldata must have ${DEPOSIT_PRIV_PUB_LEN} public signals, got ${calldata.pub.length}`);
+  }
+  return [
+    portalSalt(record.stealthAddr) as `0x${string}`,
+    module as Address,
+    calldata.a.map(BigInt) as [bigint, bigint],
+    calldata.b.map((r) => r.map(BigInt)) as [[bigint, bigint], [bigint, bigint]],
+    calldata.c.map(BigInt) as [bigint, bigint],
+    calldata.pub.map(BigInt),
+    kemCiphertexts as `0x${string}`[],
+    record.ephemeralPub as `0x${string}`,
+    record.viewTag,
+  ];
+}
+
 async function readBalance(chain: SweeperChain, destination: string): Promise<bigint> {
   return (await chain.publicClient.readContract({
     address: chain.token as Address,
@@ -203,18 +294,75 @@ export async function sweepRecord(deps: SweeperDeps, record: PortalRecord): Prom
 }
 
 /**
- * One poll round: fetch the unswept feed and process records SEQUENTIALLY —
- * one record in flight at a time by construction (each await completes before
- * the next record's balance read), so the bot never races itself into
- * double-sweeping one destination. A record's failure is logged and the round
- * moves on: the next rescan retries it (PoC — no queue, no backoff per record).
+ * One record, PRIV MODE: read balance -> skip zero/dust -> resolve the
+ * recipient triple -> build+prove depositPriv -> re-read -> factory sweep with
+ * the announcement tuple -> receipt. The balance-race and no-local-marking
+ * reasoning is sweepRecord's, unchanged.
+ */
+export async function sweepPrivRecord(deps: SweeperDeps, record: PortalRecord): Promise<`0x${string}` | null> {
+  const { chain } = deps;
+  const priv = deps.priv;
+  if (!priv) throw new Error("sweepPrivRecord called without priv deps");
+  const balance = await readBalance(chain, record.destination);
+  if (balance === 0n) return null;
+  // The dust threshold (spec C5): a below-MIN_SWEEP balance is left unswept —
+  // it stays `received` on the recipient's view, the recorded PoC posture —
+  // so the operator never spends sweep gas above the payment's value.
+  if (balance < priv.minSweep) return null;
+
+  const recipient = await priv.resolveRecipient(record.name);
+  const { request, kemCiphertexts } = buildPrivDeposit(recipient, balance, deps.rand);
+  const calldata = await deps.prove(request);
+  const amount = BigInt(calldata.pub[0]); // pub[0] == out, the proof-bound sweep amount
+
+  const now = await readBalance(chain, record.destination);
+  if (now < amount) return null;
+
+  const hash = await chain.walletClient.writeContract({
+    address: chain.factory as Address,
+    abi: PRIV_SWEEP_ABI,
+    functionName: "sweep",
+    args: privSweepArgs(record, priv.module, calldata, kemCiphertexts),
+    account: chain.sweeper as Address,
+    gasPrice: (await chain.publicClient.getGasPrice()) * 3n,
+  });
+  await chain.publicClient.waitForTransactionReceipt({ hash });
+  return hash;
+}
+
+/**
+ * Is this work-feed row this bot's to sweep? Rows carry the factory they were
+ * derived against (the announce path stamps the priv factory, /pay the
+ * portal one). Priv mode sweeps ONLY its own factory's rows — a portal row
+ * proven through depositPriv would land at the wrong CREATE2 address entirely. Enterprise mode keeps rows matching its factory
+ * plus legacy rows (factory "" predates the column) for compatibility. A
+ * backfilled chain-recovery row (empty name) is never sweepable — it is
+ * already swept by construction, but the guard keeps a malformed feed from
+ * reaching resolveRecipient("").
+ */
+export function recordBelongsTo(record: PortalRecord, deps: SweeperDeps): boolean {
+  if (record.name === "") return false;
+  const mine = deps.chain.factory.toLowerCase();
+  const rowFactory = record.factory.toLowerCase();
+  return deps.priv ? rowFactory === mine : rowFactory === mine || record.factory === "";
+}
+
+/**
+ * One poll round: fetch the unswept feed, keep this bot's rows, and process
+ * them SEQUENTIALLY — one record in flight at a time by construction (each
+ * await completes before the next record's balance read), so the bot never
+ * races itself into double-sweeping one destination. A record's failure is
+ * logged and the round moves on: the next rescan retries it (PoC — no queue,
+ * no backoff per record). The mode picks the per-record path: priv deps
+ * present => depositPriv through the priv factory, else the enterprise
+ * portal deposit.
  */
 export async function runOnce(deps: SweeperDeps, state: SweeperState): Promise<void> {
-  const records = await deps.fetchUnswept();
+  const records = (await deps.fetchUnswept()).filter((r) => recordBelongsTo(r, deps));
   state.unswept = records.length;
   for (const record of records) {
     try {
-      const hash = await sweepRecord(deps, record);
+      const hash = deps.priv ? await sweepPrivRecord(deps, record) : await sweepRecord(deps, record);
       if (hash !== null) state.lastSweepAt = Math.floor(Date.now() / 1000);
     } catch (e) {
       // Message only, never the raw object: the log surface must stay free of

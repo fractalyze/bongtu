@@ -1,0 +1,146 @@
+/* The published pay-page design (design canvas "Stealth Receive Screens",
+ * Main artboard): mobile card, navy accent, quiet grays. Plain CSS on
+ * purpose — the page is framework-free. */
+:root {
+  --pay-navy: #123a5c;
+  --pay-navy-deep: #0e2e4a;
+  --pay-bg: #f6f7f9;
+  --pay-ink: #111827;
+  --pay-muted: #667085;
+  --pay-line: #e4e7ec;
+  --pay-well: #eff1f4;
+  --pay-notice-bg: #f1f5f9;
+  --pay-notice-line: #c9d6e2;
+  --pay-notice-ink: #2a4a66;
+  --pay-error: #a63244;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "Pretendard", Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--pay-bg);
+  color: var(--pay-ink);
+}
+
+.page {
+  max-width: 430px;
+  margin: 0 auto;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px 10px;
+}
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; color: var(--pay-navy); }
+.topbar-note { font-size: 12px; color: var(--pay-muted); }
+
+.stack { display: flex; flex-direction: column; gap: 14px; padding: 8px 18px 0; }
+
+.card {
+  background: #fff;
+  border: 1px solid var(--pay-line);
+  border-radius: 16px;
+  padding: 22px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.who { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.avatar {
+  width: 44px; height: 44px; border-radius: 22px;
+  background: var(--pay-well);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 18px; color: var(--pay-navy);
+  text-transform: uppercase;
+}
+.who-title { font-weight: 700; font-size: 19px; margin-top: 6px; }
+.who-sub { font-size: 13px; color: var(--pay-muted); }
+
+.qr-frame {
+  width: 208px; height: 208px;
+  background: #fff;
+  border: 1px solid var(--pay-line);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex; align-items: center; justify-content: center;
+}
+.qr-frame svg, .qr-frame canvas { width: 100%; height: 100%; }
+
+.addr-row { width: 100%; display: flex; flex-direction: column; gap: 8px; }
+.addr-chip {
+  background: var(--pay-well);
+  border: 1px solid var(--pay-line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 13px; letter-spacing: -0.2px;
+  overflow-wrap: anywhere;
+}
+.copy-btn {
+  width: 100%;
+  background: var(--pay-navy);
+  color: #fff;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 15px 18px;
+  font-weight: 600; font-size: 16px; font-family: inherit;
+  cursor: pointer;
+}
+.copy-btn:hover { background: var(--pay-navy-deep); }
+
+.facts {
+  background: #fff;
+  border: 1px solid var(--pay-line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.fact { display: flex; align-items: center; justify-content: space-between; }
+.fact-k { font-size: 13px; color: var(--pay-muted); }
+.fact-v { font-size: 13px; font-weight: 600; }
+.fact-sep { height: 1px; background: var(--pay-well); }
+
+.notice {
+  background: var(--pay-notice-bg);
+  border: 1px solid var(--pay-notice-line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex; gap: 10px; align-items: flex-start;
+}
+.notice p { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--pay-notice-ink); }
+
+.error-card {
+  background: #fff;
+  border: 1px solid var(--pay-line);
+  border-radius: 16px;
+  padding: 28px 18px;
+  text-align: center;
+  color: var(--pay-error);
+  font-size: 14px;
+}
+
+.spinner-card {
+  background: #fff;
+  border: 1px solid var(--pay-line);
+  border-radius: 16px;
+  padding: 40px 18px;
+  text-align: center;
+  color: var(--pay-muted);
+  font-size: 14px;
+}
+
+.footer {
+  margin-top: auto;
+  padding: 14px 18px 22px;
+  display: flex; justify-content: center;
+  font-size: 11.5px; color: var(--pay-muted);
+}

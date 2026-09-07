@@ -148,6 +148,25 @@ consumer encapsulation self-sabotages only the sender's own delivery (the recipi
 rejects the garbage decrypt; the note's funds are intact), and there is no involuntary-disclosure
 duty for an alarm to protect.
 
+## Stealth receiving: the portal/receive edge
+
+The pool-edge machinery that turns a plain kKRW transfer into a shielded note
+([portal.md](portal.md)) adds three parties the tables above do not cover. The
+claims here are the SHIPPED wording — the gate leg
+(`deploy/gates/portal_priv_leg.ts`) asserts the unlinkability half mechanically.
+
+| party | holds | can read |
+|---|---|---|
+| **pay-page / indexer operator** | the announcement store and the name directory it serves | **the identity→payment mapping**: which label each issuance was announced under, every destination, every amount. It issues the URLs and records the announcements — operator-blindness (OMR/TEE class work) is out of scope and excluded from the claim. It can HIDE an unswept payment (a swept one is recoverable from the on-chain `Announced` event alone); it can never redirect one — the pay page recomputes the destination locally and fails closed on mismatch |
+| **sweep bot (operator key)** | the factory-owner EOA key + the token-gated attributed work feed | the same mapping, operator-side. Redirection-resistance rests on this key (the portal v1 concession): `sweep` is onlyOwner because the deposit proof binds no owner. On the **receive** pair it cannot OPEN what it mints — the depositPriv witness is built from the recipient's public triple, and the notes seal to keys only the recipient holds |
+| **chain observer** | nothing | the plain transfer (sender, destination, amount), the sweep tx (destination, deposit `pub[0]`, ciphertext) — and NO datum linking two payments to each other or to the recipient's registered identity: recipient keys appear in no calldata or log in the clear |
+
+**The precise privacy statement** (use this wording, not "the amount is
+shielded"): the **per-payment amount is public twice** — once in the plain
+transfer, once in the deposit's public `pub[0]`. What is shielded is note
+ownership, the recipient's aggregate balance, and all onward flow; what is
+unlinkable is payment-to-payment and payment-to-identity, on-chain.
+
 ## Post-quantum: the hybrid authority-envelope key
 
 Everything bongtu encrypts is published on-chain and stays there. A classical-only envelope key

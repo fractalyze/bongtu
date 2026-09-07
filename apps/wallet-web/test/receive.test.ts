@@ -71,7 +71,10 @@ test("payNameStore degrades without localStorage: no throw, null load (the regis
 test("the identity copy is pinned: share the NAME, and the update push names the gap", () => {
   assert.equal(NAME_RULES_HINT, "3 to 32 characters: lowercase letters, numbers, and hyphens.");
   assert.equal(NAME_INVALID_MESSAGE, `That name can't be registered. ${NAME_RULES_HINT}`);
-  assert.equal(RECEIVE_SHARE_LINE, "People pay you by this name. Share the name, nothing else.");
+  assert.equal(
+    RECEIVE_SHARE_LINE,
+    "People pay you by this name, or through your payment link. Share those, nothing else.",
+  );
   assert.equal(
     NAME_NEEDS_UPDATE_NOTICE,
     "This name doesn't carry your payment keys yet. Update it so people can pay you privately.",

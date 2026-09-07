@@ -1,10 +1,21 @@
-# Portal (stealth deposits)
+# Portal (stealth deposits and stealth receiving)
 
 How money enters the pool from someone who has nothing but an ordinary
 wallet: the payer makes a **plain kKRW transfer** to a one-time address, and
 the deposit lands shielded on the recipient's balance with **no action from
 either side afterwards**. Adapted from Curvy's front-door structure; the
 decision record is `.dev/milestone-stealth.md` slice ⑤.
+
+Two products share this machinery, on separate contract pairs:
+
+- **Portal** (depositor-facing, enterprise family): `PortalFactory` +
+  `PortalSweeper`, issuance server-side at `POST /pay/{name}`, sweeps through
+  the enterprise `deposit` — the original flow below.
+- **Receive** (recipient-facing, consumer family): `PortalPrivFactory` +
+  `PortalPrivSweeper`, issuance in the **sender's browser** on the pay page
+  (`apps/pay-web`), sweeps through the consumer `depositPriv` module — the
+  minted notes are no-auditor notes the operator cannot open. The deltas are
+  in [Receiving](#receiving-the-consumer-pay-page) below.
 
 ## The three tricks that make a plain transfer enough
 
@@ -50,8 +61,55 @@ A cheated recipient detects it: the address was funded, no note arrived —
 the `/notes` mismatch is the alarm surface. Recorded here and in both
 contract headers; not a hidden assumption.
 
+## Receiving (the consumer pay page)
+
+The receive product turns the portal around: the **recipient** registers a
+v2 payment name once (stealth meta + consumer pair, one owner signature) and
+shares a URL; every visit to `/p/{label}` on the pay page derives a **fresh**
+destination in the visitor's browser from the record's public keys and a
+locally drawn ephemeral scalar — no server secret participates, and the
+scalar dies with the page. The page records the announcement at
+`POST /portal/announce` **before** displaying the address (first write wins
+server-side, so an observer of a displayed address can never front-run the
+honest record), parity-checks the server's recomputed destination against
+its own CREATE2 mapping, and only then shows address + QR.
+
+Sweeps go through the consumer `depositPriv` module: the bot builds the
+proof from the recipient's **public** registered triple alone and the notes
+seal to keys only the recipient holds — "no one can open it, operator
+included" holds from the entry note onward. The sweep transaction also
+emits `Announced(salt, ephemeralPub, viewTag)` on-chain, so every **swept**
+payment is recoverable from chain data alone: a dead or hostile indexer can
+delay discovery of unswept payments but cannot erase swept ones. Balances
+below the bot's `MIN_SWEEP` dust threshold stay unswept (they read
+`received` in the wallet indefinitely — a stated policy, not a bug).
+
+Discovery is the recipient's own: the public announce feed serves **no
+attribution** (no name, no owner — the wire split is
+[indexer.md](indexer.md#http-api)), and the wallet's view key re-derives
+which records are its own. The attributed rows the sweep bot needs sit
+behind the shared `PORTAL_OPERATOR_TOKEN`.
+
+### The receive trust posture, stated plainly
+
+- **On-chain unlinkability is the claim**: distinct payments to one
+  recipient share no on-chain datum with each other or with the recipient's
+  registered identity — the gate leg (`deploy/gates/portal_priv_leg.ts`) greps
+  for exactly this. The **per-payment amount is public twice** (the plain
+  transfer, and the deposit's public `pub[0]`); what is shielded is note
+  ownership, the aggregate balance, and all onward flow.
+- **The pay-page/indexer operator sees the mapping it serves**: it issues
+  the URLs and stores the announcements. Operator-blindness (OMR/TEE class
+  work) is out of scope and stays honestly excluded from the claim.
+- **Redirection-resistance rests on the bot key** — the portal v1
+  concession, unchanged. What the consumer path removes is the arbiter's
+  read: a cheated recipient still detects theft (funded address, no note in
+  its own scan).
+
 ## PoC boundaries
 
-Issuance is unauthenticated (anyone may mint records — a spam surface the
-route header states); sweeps are full-balance, unbatched, one in flight; no
-fee model. Run mechanics: `apps/sweeper/README.md`.
+Issuance is unauthenticated on both write routes (anyone may mint records —
+a spam surface the route headers state; the bot treats rows as hints and
+sweeps only funded addresses); sweeps are full-balance, unbatched, one in
+flight; no fee model beyond the dust threshold. Run mechanics:
+`apps/sweeper/README.md`; page mechanics: `apps/pay-web/README.md`.

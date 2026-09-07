@@ -37,6 +37,7 @@ test("DEFAULTS carries exactly the consumer key set", () => {
       "explorer",
       "gasFaucet",
       "indexerUrl",
+      "payBaseUrl",
       "pool",
       "rpc",
       "testnet",

@@ -19,6 +19,7 @@ import {DisburseVerifier} from "../src/verifiers/DisburseVerifier.sol";
 import {TransferVerifier} from "../src/verifiers/TransferVerifier.sol";
 import {PortalFactory} from "../src/PortalFactory.sol";
 import {PortalSweeper, IPortalPool} from "../src/PortalSweeper.sol";
+import {PortalSweeperBase} from "../src/PortalSweeperBase.sol";
 import {Ownable2Step} from "../src/utils/Ownable2Step.sol";
 
 /// @notice Slice ⑤ U-P1: the portal deploy-and-sweep path against the REAL
@@ -170,7 +171,7 @@ contract PortalTest is Base {
         factory.sweep(SALT, IPortalPool(address(pool)), a, b, c, pub, kemCt);
 
         token.mint(predicted, pub[0]);
-        vm.expectRevert(abi.encodeWithSelector(PortalSweeper.NotFactory.selector, STRANGER));
+        vm.expectRevert(abi.encodeWithSelector(PortalSweeperBase.NotFactory.selector, STRANGER));
         vm.prank(STRANGER);
         PortalSweeper(predicted).sweep(IPortalPool(address(pool)), a, b, c, pub, kemCt);
     }
@@ -187,7 +188,7 @@ contract PortalTest is Base {
             _depositArgs();
         token.mint(factory.addressOf(SALT), pub[0] - 1);
 
-        vm.expectRevert(abi.encodeWithSelector(PortalSweeper.SweepExceedsBalance.selector, pub[0], pub[0] - 1));
+        vm.expectRevert(abi.encodeWithSelector(PortalSweeperBase.SweepExceedsBalance.selector, pub[0], pub[0] - 1));
         vm.prank(BOT);
         factory.sweep(SALT, IPortalPool(address(pool)), a, b, c, pub, kemCt);
     }
@@ -197,7 +198,7 @@ contract PortalTest is Base {
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c, uint[19] memory pub, bytes memory kemCt) =
             _depositArgs();
         // no funding at all — nothing to shield
-        vm.expectRevert(PortalSweeper.NothingToSweep.selector);
+        vm.expectRevert(PortalSweeperBase.NothingToSweep.selector);
         vm.prank(BOT);
         factory.sweep(SALT, IPortalPool(address(pool)), a, b, c, pub, kemCt);
     }
@@ -215,8 +216,8 @@ contract PortalTest is Base {
     // and copy the logged values into BOTH files.
     address constant VECTOR_FACTORY = address(uint160(0xC0FFEE01));
     bytes32 constant VECTOR_INITCODE_HASH =
-        0xe70cc154569870971ebc21f0d436f960dbd217315e69c3c102d47536293eeb3f;
-    address constant VECTOR_ADDRESS = 0xDdF8577C4Bd01a287dEA1bc3cFe4c9e7D5c2343A;
+        0xba3462dadd893a779c089632a4959372f7003b7eb40b31d83b98254d56729265;
+    address constant VECTOR_ADDRESS = 0x4d8BceD42cCCe66201128569967cD497A64c483d;
 
     function testCreate2ParityVectorPinned() public {
         deployCodeTo("PortalFactory.sol:PortalFactory", abi.encode(BOT), VECTOR_FACTORY);

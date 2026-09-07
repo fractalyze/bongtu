@@ -21,8 +21,19 @@
 //                 "funded" (default: the sdk TOKEN_ADDRESS — the live kKRW).
 //   POLL_MS       rescan period (default 15000). Retries ARE the rescan: a
 //                 record that stays unswept simply comes around again.
-//   CIRCUITS_OUT  where deposit.zkey / deposit_js/deposit.wasm live for the
-//                 CPU snarkjs prover (default <repo>/circuits/out).
+//   CIRCUITS_OUT  where the mode's zkey/wasm live for the CPU snarkjs prover
+//                 (default <repo>/circuits/out).
+//   MODE          "priv" flips to the consumer-family path: sweeps prove
+//                 depositPriv through the PortalPrivFactory (record field
+//                 `portalPrivFactory`), minting notes the operator cannot
+//                 open. Default "enterprise" keeps the portal path
+//                 byte-identical.
+//   MODULE        priv mode: the DepositPrivModule address (else
+//                 deploy/modules.<CHAIN_ID>.json `depositPrivModule`).
+//   MIN_SWEEP     priv mode: dust threshold in token base units — balances
+//                 strictly below it stay unswept (default 0).
+//   PORTAL_OPERATOR_TOKEN  shared secret for the indexer's attributed
+//                 /portal/unswept feed (required once the indexer gates it).
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -48,6 +59,19 @@ export interface SweeperConfig {
   // unit tests can build configs without material; index.ts refuses to boot
   // without it (bootError).
   sweeperKey?: string | null;
+  // MODE=priv flips the bot to the consumer-family path: sweeps go through
+  // the PortalPrivFactory (the record's `portalPrivFactory` field) proving
+  // depositPriv against `depositPrivModule`. Default: the enterprise portal.
+  mode: "enterprise" | "priv";
+  // Priv mode only — the DepositPrivModule the sweep proves against (env
+  // MODULE, else deploy/modules.<CHAIN_ID>.json `depositPrivModule` by name).
+  depositPrivModule: string | null;
+  // Priv mode only — balances strictly below this (token base units) are
+  // left unswept (env MIN_SWEEP, default 0 = sweep everything funded).
+  minSweep: bigint;
+  // Shared secret for the indexer's attributed /portal/unswept feed (env
+  // PORTAL_OPERATOR_TOKEN — same value the indexer holds). NEVER logged.
+  operatorToken: string | null;
 }
 
 /**
@@ -69,6 +93,13 @@ export function bootError(env: Record<string, string | undefined> = process.env)
 export function resolveConfig(env: Record<string, string | undefined> = process.env): SweeperConfig {
   const rpc = env.RPC || "http://127.0.0.1:8545";
   const chainId = env.CHAIN_ID ? Number(env.CHAIN_ID) : CHAIN_ID;
+  const mode = ((): "enterprise" | "priv" => {
+    const raw = env.MODE || "enterprise";
+    if (raw !== "enterprise" && raw !== "priv") {
+      throw new Error(`MODE must be "enterprise" or "priv", got "${raw}"`);
+    }
+    return raw;
+  })();
   // Same fallback the relayer/indexer use: the canonical deploy record BY FIELD
   // NAME (CLAUDE.md: never transcribe an address by pattern-matching).
   const record: Record<string, string> | null = (() => {
@@ -82,17 +113,52 @@ export function resolveConfig(env: Record<string, string | undefined> = process.
   })();
   const pool = env.POOL || record?.pool || "";
   if (!pool) throw new Error("no pool address (set POOL env or deploy/addresses.<CHAIN_ID>.json)");
-  const factory = env.FACTORY || record?.portalFactory || "";
+  // FACTORY means "the factory this mode sweeps through": the priv mode
+  // falls back to the record's portalPrivFactory field, the enterprise mode to
+  // portalFactory — one env var, mode-selected record field.
+  const factory = env.FACTORY || (mode === "priv" ? record?.portalPrivFactory : record?.portalFactory) || "";
   if (!factory) {
+    const field = mode === "priv" ? "portalPrivFactory" : "portalFactory";
     throw new Error(
-      "no PortalFactory address (set FACTORY env, or a `portalFactory` field in deploy/addresses.<CHAIN_ID>.json once the live factory is wired)",
+      `no ${mode} factory address (set FACTORY env, or a \`${field}\` field in deploy/addresses.<CHAIN_ID>.json once the live factory is wired)`,
     );
   }
+  // The priv sweep proves against the depositPriv module; its address lives
+  // in the modules record (see ConsumerModuleKit's header for why not the
+  // AddressBook). Resolved only in priv mode; missing => throw at boot, the
+  // DeployPortalPriv posture (never discovered at the first sweep).
+  const depositPrivModule = ((): string | null => {
+    if (mode !== "priv") return null;
+    if (env.MODULE) return env.MODULE;
+    const modsPath = join(REPO_ROOT, "deploy", `modules.${chainId}.json`);
+    const fromRecord = (() => {
+      try {
+        return (JSON.parse(readFileSync(modsPath, "utf8")) as Record<string, string>).depositPrivModule || "";
+      } catch {
+        return "";
+      }
+    })();
+    if (!fromRecord) {
+      throw new Error(
+        "no depositPrivModule address (set MODULE env, or deploy the consumer module set so deploy/modules.<CHAIN_ID>.json records it)",
+      );
+    }
+    return fromRecord;
+  })();
+  const minSweep = ((): bigint => {
+    if (!env.MIN_SWEEP) return 0n;
+    try {
+      return BigInt(env.MIN_SWEEP);
+    } catch {
+      throw new Error(`MIN_SWEEP must be an integer amount in token base units, got "${env.MIN_SWEEP}"`);
+    }
+  })();
   const token = env.TOKEN || TOKEN_ADDRESS;
   const port = env.PORT ? Number(env.PORT) : 8710;
   const pollMs = env.POLL_MS ? Number(env.POLL_MS) : 15000;
   const circuitsOut = env.CIRCUITS_OUT || join(REPO_ROOT, "circuits", "out");
   const indexerUrl = env.INDEXER_URL || "";
   const sweeperKey = env.SWEEPER_KEY || null;
-  return { rpc, pool, factory, token, chainId, port, pollMs, circuitsOut, indexerUrl, sweeperKey };
+  const operatorToken = env.PORTAL_OPERATOR_TOKEN || null;
+  return { rpc, pool, factory, token, chainId, port, pollMs, circuitsOut, indexerUrl, sweeperKey, mode, depositPrivModule, minSweep, operatorToken };
 }

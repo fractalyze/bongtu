@@ -1,5 +1,6 @@
-// CPU snarkjs deposit prover — witness + groth16 + solidity calldata for
-// circuits/out's deposit circuit.
+// CPU snarkjs prover — witness + groth16 + solidity calldata for one of
+// circuits/out's circuits (deposit for the enterprise portal mode, depositPriv
+// for the priv mode).
 //
 // RESTATED from deploy/live/lib/proof_toolbox.ts `prove()` (the pattern owner
 // alongside circuits/gates/auditor_decrypt_check.ts): that module is test/ops
@@ -17,22 +18,30 @@ import { loadSnarkjs } from "@bongtu/core/extern";
 import type { Calldata, ProvingRequest } from "@bongtu/core/proving";
 
 /**
- * A deposit prover bound to one circuits/out directory (env CIRCUITS_OUT).
- * The request's input is already wire-form (buildDepositRequest applies
- * toWire), so it feeds snarkjs' witness calculator as-is.
+ * A prover bound to one circuits/out directory (env CIRCUITS_OUT) and ONE
+ * circuit — the mode decides which at boot, and a request for any other
+ * circuit is refused loudly (a mode mismatch must never prove the wrong
+ * family). The request's input is already wire-form (the builders apply
+ * toWire), so it feeds snarkjs' witness calculator as-is. Artifact layout is
+ * the repo convention: <name>_js/<name>.wasm + <name>.zkey.
  */
-export function makeDepositProver(circuitsOut: string): (request: ProvingRequest) => Promise<Calldata> {
+export function makeCircuitProver(circuitsOut: string, circuit: string): (request: ProvingRequest) => Promise<Calldata> {
   return async (request: ProvingRequest): Promise<Calldata> => {
-    if (request.circuit !== "deposit") {
-      throw new Error(`sweeper prover only proves deposit, got ${request.circuit}`);
+    if (request.circuit !== circuit) {
+      throw new Error(`sweeper prover only proves ${circuit}, got ${request.circuit}`);
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const snarkjs: any = loadSnarkjs(); // lazy: see module header
-    const wasm = join(circuitsOut, "deposit_js", "deposit.wasm");
-    const zkey = join(circuitsOut, "deposit.zkey");
+    const wasm = join(circuitsOut, `${circuit}_js`, `${circuit}.wasm`);
+    const zkey = join(circuitsOut, `${circuit}.zkey`);
     const { proof, publicSignals } = await snarkjs.groth16.fullProve(request.input, wasm, zkey);
     const cd = await snarkjs.groth16.exportSolidityCallData(proof, publicSignals);
     const [a, b, c, pub] = JSON.parse("[" + cd + "]");
     return { a, b, c, pub };
   };
+}
+
+/** The enterprise portal mode's prover (the original sweeper surface). */
+export function makeDepositProver(circuitsOut: string): (request: ProvingRequest) => Promise<Calldata> {
+  return makeCircuitProver(circuitsOut, "deposit");
 }

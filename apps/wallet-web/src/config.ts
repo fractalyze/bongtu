@@ -59,6 +59,12 @@ export const DEFAULTS = {
   // vercel.json rewrite owns this path, and MUST target a PUBLIC-mode instance
   // (ops task on issue #13).
   indexerUrl: import.meta.env?.VITE_INDEXER_URL || "/indexer",
+  // The pay page origin (apps/pay-web) — what turns a registered name into the
+  // shareable per-recipient payment link `${payBaseUrl}/p/{name}`. Its own
+  // Vercel project, so the host is deployment config; the default is that
+  // project's canonical domain, and VITE_PAY_BASE_URL re-points a fork or a
+  // custom domain (ops step in deploy/README.md's receive runbook).
+  payBaseUrl: import.meta.env?.VITE_PAY_BASE_URL || "https://bongtu-pay.vercel.app",
   // Where the consumer circuit assets (wasm + zkey) are served for browser snarkjs
   // proving. One source in every environment: the bongtu-circuits blob store under
   // the CIRCUITS_VERSION path — reached through this same-origin path by the

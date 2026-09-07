@@ -193,6 +193,7 @@ imports it, it acts on a chain. Each has its own README.
 - [`apps/payroll-web/`](apps/payroll-web/README.md): the employer pay console — MetaMask login, one worksheet, batch disburse
 - [`apps/treasury-web/`](apps/treasury-web/README.md): the institution self-custody wallet, in-browser proving
 - [`apps/wallet-web/`](apps/wallet-web/README.md): the consumer self-scan wallet, no-auditor P2P ops (tokenless, in-browser proving)
+- [`apps/pay-web/`](apps/pay-web/README.md): the sender-facing pay page — browser-side stealth issuance at `/p/{label}`, no wallet code
 - [`deploy/`](deploy/README.md): forge scripts, live-chain drivers, anvil gates — recorded addresses at the top
 - [`docs/`](docs/): reference docs, one file per topic (index below)
 - [`.dev/`](.dev/README.md): working docs: milestone trackers and decision records
@@ -212,6 +213,7 @@ How to build, test, and run each component lives in its own README:
 - **Indexer** (local + live chain, Postgres, docker compose): [`apps/indexer/README.md`](apps/indexer/README.md)
 - **Institution wallet** (`apps/treasury-web`: dev server, in-browser proving): [`apps/treasury-web/README.md`](apps/treasury-web/README.md)
 - **Consumer wallet** (self-scan, tokenless): [`apps/wallet-web/README.md`](apps/wallet-web/README.md)
+- **Pay page** (`apps/pay-web`: stealth issuance for senders): [`apps/pay-web/README.md`](apps/pay-web/README.md)
 - **Payroll console**: [`apps/payroll-web/README.md`](apps/payroll-web/README.md)
 - **GPU prover service**: [`prover/README.md`](prover/README.md)
 - **Deploy + e2e** (local anvil, live-chain runbook): [`deploy/README.md`](deploy/README.md)
@@ -230,7 +232,7 @@ System guarantees and inter-component contracts live in [`docs/`](docs/), one fi
 - [Indexer](docs/indexer.md): the mirror invariant, single-transaction persist and gap-only resume, the HTTP API and its read-auth, the arbiter-mode trust boundary.
 - [Wallet](docs/wallet.md): the two wallets on one engine — the shared core (keys, lock, in-browser proving, spend chains), the enterprise wallet, the consumer wallet.
 - [Relayer](docs/relayer.md): the gas-sponsoring withdraw submitter and why a proof-bound recipient makes third-party submission safe.
-- [Portal](docs/portal.md): stealth deposits — a plain transfer from any wallet becomes a shielded note via CREATE2 destinations and the sweep bot.
+- [Portal](docs/portal.md): stealth deposits and stealth receiving — a plain transfer from any wallet becomes a shielded note via CREATE2 destinations and the sweep bot; the receive product adds browser-side issuance and consumer-family (no-auditor) sweeps.
 - [Solana rail](docs/solana-rail.md): the same op families on Solana — one program, PDA state, Transaction v1, the 1-tx disburse binding with institution-served disclosure.
 - [Consumer family](docs/consumer.md): the no-auditor op family — op-module core, the five consumer circuits, self-scan discovery, deploy profiles, op-level audit semantics.
 - [Error surfaces](docs/errors.md): the consequence-class taxonomy and its surfaces (toast = event, banner = state), the money-state line, the no-telemetry stance.
@@ -250,7 +252,7 @@ How to run each piece is owned by its own README:
   [`circuits`](circuits/README.md) · [`contracts`](chains/evm/README.md) ·
   [`chains/solana`](chains/solana/README.md) ·
   [`apps/payroll-web`](apps/payroll-web/README.md) · [`apps/treasury-web`](apps/treasury-web/README.md) ·
-  [`apps/wallet-web`](apps/wallet-web/README.md).
+  [`apps/wallet-web`](apps/wallet-web/README.md) · [`apps/pay-web`](apps/pay-web/README.md).
 
 Milestone trackers and decision records (applied/deferred/rejected lists, layout and CI rationale) live in
 [`.dev/`](.dev/README.md): agent-facing working docs, kept out of `docs/`.

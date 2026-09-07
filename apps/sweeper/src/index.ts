@@ -28,16 +28,26 @@
 //   CHAIN_ID      chain id for the addresses file (default: the sdk CHAIN_ID)
 //   PORT          HTTP port for GET /health (default 8710)
 //   POLL_MS       rescan period in ms (default 15000)
-//   CIRCUITS_OUT  deposit zkey/wasm directory (default <repo>/circuits/out)
+//   CIRCUITS_OUT  zkey/wasm directory for the mode's circuit (default
+//                 <repo>/circuits/out)
+//   MODE          "priv" => consumer-family sweeps: depositPriv proofs
+//                 through the PortalPrivFactory (record `portalPrivFactory`),
+//                 minting no-auditor notes. Default "enterprise" (the portal).
+//   MODULE        priv mode: DepositPrivModule address (else the modules
+//                 record's `depositPrivModule`)
+//   MIN_SWEEP     priv mode: dust threshold in token base units (default 0)
+//   PORTAL_OPERATOR_TOKEN  shared secret for the indexer's attributed unswept
+//                 feed (never logged)
 
 import { createPublicClient, createWalletClient, defineChain, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
 import { IndexerClient } from "@bongtu/core/indexerApi";
 import { randField } from "@bongtu/client/spend";
+import { consumerRecipientOf } from "@bongtu/client/consumer";
 
 import { bootError, resolveConfig } from "./config.js";
-import { makeDepositProver } from "./prover.js";
+import { makeCircuitProver } from "./prover.js";
 import { initialState, runOnce, type SweeperChain, type SweeperDeps } from "./sweep.js";
 import { startApi } from "./server.js";
 
@@ -78,25 +88,49 @@ async function main(): Promise<void> {
     publicClient: createPublicClient({ chain: chainDef, transport }),
     walletClient: createWalletClient({ account, chain: chainDef, transport }),
   };
-  // The bound client's tear-off IS the deps entry — arrow properties keep their
-  // instance, and the free-function defaults (cursor -1, 5000 cap) still apply.
+  // The bound client's tear-offs ARE the deps entries — arrow properties keep
+  // their instance, and the free-function defaults (cursor -1, 5000 cap) still
+  // apply. The unswept read carries the operator token (the indexer's
+  // attributed feed 401s without it once gated).
   const indexer = new IndexerClient(cfg.indexerUrl);
   const deps: SweeperDeps = {
     chain,
-    fetchUnswept: indexer.unswept,
-    prove: makeDepositProver(cfg.circuitsOut),
+    fetchUnswept: () => indexer.unswept(undefined, undefined, cfg.operatorToken ?? undefined),
+    prove: makeCircuitProver(cfg.circuitsOut, cfg.mode === "priv" ? "depositPriv" : "deposit"),
     rand: randField,
+    ...(cfg.mode === "priv"
+      ? {
+          priv: {
+            module: cfg.depositPrivModule as string, // resolveConfig throws when missing in this mode
+            minSweep: cfg.minSweep,
+            // The work-feed row carries name+owner; the v2 consumer pair lives
+            // in the directory record, so the triple is resolved per sweep
+            // (throws on a legacy/cleared record — that name cannot receive
+            // consumer notes, and the row is retried by rescan, not guessed at).
+            resolveRecipient: async (name: string) => {
+              const record = await indexer.resolveName(name);
+              if (!record) throw new Error(`name "${name}" not in the directory`);
+              return consumerRecipientOf(record);
+            },
+          },
+        }
+      : {}),
   };
   const state = initialState();
 
   // The sweeper ADDRESS is logged (it is public on every tx anyway); the KEY
   // never is.
   console.log(
-    `bongtu sweeper: rpc=${cfg.rpc} factory=${cfg.factory} pool=${cfg.pool} token=${cfg.token} ` +
-      `indexer=${cfg.indexerUrl} chainId=${cfg.chainId} pollMs=${cfg.pollMs} sweeper=${account.address}`,
+    `bongtu sweeper: mode=${cfg.mode} rpc=${cfg.rpc} factory=${cfg.factory} pool=${cfg.pool} token=${cfg.token} ` +
+      `indexer=${cfg.indexerUrl} chainId=${cfg.chainId} pollMs=${cfg.pollMs} sweeper=${account.address}` +
+      (cfg.mode === "priv" ? ` module=${cfg.depositPrivModule} minSweep=${cfg.minSweep}` : ""),
   );
   const api = await startApi(chain, state, cfg.port);
-  console.log(`API listening on :${api.port} (GET /health) — portal sweeps: full-balance, no fee, retries by rescan`);
+  console.log(
+    cfg.mode === "priv"
+      ? `API listening on :${api.port} (GET /health) — priv sweeps: depositPriv, full-balance above MIN_SWEEP, no fee, retries by rescan`
+      : `API listening on :${api.port} (GET /health) — portal sweeps: full-balance, no fee, retries by rescan`,
+  );
 
   // The poll loop: setTimeout AFTER each round completes (never setInterval),
   // so rounds — like records inside a round — are strictly one in flight.
