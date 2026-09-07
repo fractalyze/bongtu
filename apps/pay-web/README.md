@@ -32,7 +32,7 @@ set or the announce route 404s.
 - `VITE_PORTAL_PRIV_FACTORY` — the PortalPrivFactory address (copy BY FIELD NAME from
   `deploy/addresses.<chainid>.json` `portalPrivFactory`).
 - `VITE_SWEEPER_INITCODE_HASH` — the factory's `sweeperInitCodeHash` (the
-  committed parity vector's value; see `chains/evm/test/Receive.t.sol`).
+  committed parity vector's value; see `chains/evm/test/PortalPriv.t.sol`).
 
 The last two pin the CREATE2 mapping the page computes locally, so a hostile
 indexer can at worst hide a payment, never redirect one: the server's
