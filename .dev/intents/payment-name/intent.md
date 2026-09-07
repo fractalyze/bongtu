@@ -1,6 +1,6 @@
 # Payment name: rotating resolver over the stealth meta-address
 
-Author: JunBeom Lee. Status: draft.
+Author: JunBeom Lee. Status: accepted.
 Origin: conversation
 
 ## Problem
