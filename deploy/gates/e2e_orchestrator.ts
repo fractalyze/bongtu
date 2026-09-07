@@ -61,7 +61,7 @@ import {
 import { proofArgs } from "../live/lib/viem_client.js";
 import { runPortalLeg } from "./portal_leg.js";
 import { runConsumerLeg } from "./consumer_leg.js";
-import { runReceiveLeg } from "./receive_leg.js";
+import { runPortalPrivLeg } from "./portal_priv_leg.js";
 
 // ok() / step() and the failure count are the toolbox's (deploy/live/lib/proof_toolbox.ts),
 // shared with the live driver (deploy/live/payroll_e2e.ts).
@@ -491,9 +491,9 @@ async function main(): Promise<void> {
 
   // ========================== STEALTH RECEIVE =============================
   // The unlinkability gate (spec R7): pay-page issuance -> plain transfers
-  // from distinct EOAs -> receive-mode depositPriv sweeps -> negative grep +
-  // self-scan discovery. Throws when E2E_RECEIVE_DATABASE_URL is unset.
-  await runReceiveLeg(rig);
+  // from distinct EOAs -> priv-mode depositPriv sweeps -> negative grep +
+  // self-scan discovery. Throws when E2E_PORTAL_PRIV_DATABASE_URL is unset.
+  await runPortalPrivLeg(rig);
 
   const failures = failureCount();
   console.log(`\n${failures === 0 ? "E2E PASS — full cross-circuit spend cycle verified on live anvil" : `E2E FAIL — ${failures} assertion(s) failed`}`);

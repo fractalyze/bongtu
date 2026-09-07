@@ -40,7 +40,7 @@ import { isPreKemProbeError } from "@bongtu/core/network";
 import { isStealthAnnouncement } from "@bongtu/core/stealth";
 
 import { MirrorTree } from "./tree.js";
-import { poolAbi, abiKnowsKem, kemBootGuardError, staleOpAbiError, portalFactoryAbi, receiveFactoryAbi, consumerModuleAbi, type ChainConfig } from "./chain.js";
+import { poolAbi, abiKnowsKem, kemBootGuardError, staleOpAbiError, portalFactoryAbi, portalPrivFactoryAbi, consumerModuleAbi, type ChainConfig } from "./chain.js";
 import { type FeedEntry, type Slice } from "./store.js";
 import { verifyDisclosure, verifyConsumerDisclosure } from "./disclosure.js";
 import { emitAlarm, emitDisclosureAlarm } from "./alarms.js";
@@ -192,7 +192,7 @@ export class Indexer extends IndexerHostBase {
     // consumer op logs (scanned from the registry-derived watch-set) decode
     // through the same path as pool events. Extra fragments are inert for pool
     // reads.
-    this.abi = [...poolAbi(), ...portalFactoryAbi, ...receiveFactoryAbi, ...consumerModuleAbi];
+    this.abi = [...poolAbi(), ...portalFactoryAbi, ...portalPrivFactoryAbi, ...consumerModuleAbi];
     this.publicClient = createPublicClient({ transport: http(cfg.rpc) });
   }
 
@@ -235,18 +235,18 @@ export class Indexer extends IndexerHostBase {
   }
 
   /**
-   * eth_call `ReceiveFactory.addressOf(salt)` — the announce route's
+   * eth_call `PortalPrivFactory.addressOf(salt)` — the announce route's
    * server-side destination recompute. Same chain-owns-the-initcode-hash
    * posture as portalAddressOf (the addressOf fragment is byte-identical
    * across the two factories, so the portal ABI serves the call).
    */
-  async receiveAddressOf(salt: string): Promise<string> {
-    if (!this.cfg.receiveFactory) {
-      throw new Error("receiveAddressOf: RECEIVE_FACTORY is not configured");
+  async portalPrivAddressOf(salt: string): Promise<string> {
+    if (!this.cfg.portalPrivFactory) {
+      throw new Error("portalPrivAddressOf: PORTAL_PRIV_FACTORY is not configured");
     }
     return String(
       await this.publicClient.readContract({
-        address: this.cfg.receiveFactory as Address,
+        address: this.cfg.portalPrivFactory as Address,
         abi: portalFactoryAbi,
         functionName: "addressOf",
         args: [salt as `0x${string}`],
@@ -374,7 +374,7 @@ export class Indexer extends IndexerHostBase {
     const baseAddrs = [
       this.cfg.pool,
       ...(this.cfg.portalFactory ? [this.cfg.portalFactory] : []),
-      ...(this.cfg.receiveFactory ? [this.cfg.receiveFactory] : []),
+      ...(this.cfg.portalPrivFactory ? [this.cfg.portalPrivFactory] : []),
     ] as Address[];
     const base = await this.scanRange(baseAddrs, from, to);
     const watch = new Set(this.modules.watchAddresses(this.kem.pendingModules()));
@@ -652,7 +652,7 @@ export class Indexer extends IndexerHostBase {
     // counts as pool-emitted.
     const poolAddr = this.cfg.pool.toLowerCase();
     const factoryAddr = this.cfg.portalFactory ? this.cfg.portalFactory.toLowerCase() : null;
-    const receiveAddr = this.cfg.receiveFactory ? this.cfg.receiveFactory.toLowerCase() : null;
+    const privAddr = this.cfg.portalPrivFactory ? this.cfg.portalPrivFactory.toLowerCase() : null;
     const logs = ((): ParsedLog[] => {
       const watched = new Set(this.modules.watchAddresses(this.kem.pendingModules()));
       const kept: ParsedLog[] = [];
@@ -663,8 +663,8 @@ export class Indexer extends IndexerHostBase {
           if (POOL_EVENT_NAMES.has(l.name)) kept.push(l);
         } else if (factoryAddr !== null && from === factoryAddr) {
           if (l.name === "Swept") kept.push(l);
-        } else if (receiveAddr !== null && from === receiveAddr) {
-          // The receive factory emits Swept AND (in the same tx) the
+        } else if (privAddr !== null && from === privAddr) {
+          // The priv factory emits Swept AND (in the same tx) the
           // announcement recovery event.
           if (l.name === "Swept" || l.name === "Announced") kept.push(l);
         } else if (watched.has(from) && MODULE_EVENT_NAMES.has(l.name)) {
@@ -957,7 +957,7 @@ export class Indexer extends IndexerHostBase {
           txHash: l.txHash,
         });
       } else if (l.name === "Announced") {
-        // The receive factory's sweep-time announcement (the chain-only
+        // The priv factory's sweep-time announcement (the chain-only
         // recovery path). A salt the registry knows is a no-op inside
         // recordChainAnnouncement; an unknown one is backfilled from the event
         // plus the same-tx Swept args. A lone Announced with no Swept in the
@@ -971,7 +971,7 @@ export class Indexer extends IndexerHostBase {
             ephemeralPub: String(l.args.ephemeralPub),
             viewTag: Number(l.args.viewTag),
             destination: swept.sweeper,
-            factory: this.cfg.receiveFactory ?? "",
+            factory: this.cfg.portalPrivFactory ?? "",
             txHash: swept.txHash,
             amount: swept.amount,
             blockTimestamp: l.blockTimestamp,

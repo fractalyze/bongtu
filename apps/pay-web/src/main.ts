@@ -5,7 +5,7 @@
 
 import QRCode from "qrcode";
 
-import { INDEXER_URL, RECEIVE_FACTORY, SWEEPER_INITCODE_HASH, CHAIN_NAME, TOKEN_SYMBOL } from "./config.js";
+import { INDEXER_URL, PORTAL_PRIV_FACTORY, SWEEPER_INITCODE_HASH, CHAIN_NAME, TOKEN_SYMBOL } from "./config.js";
 import { issuePayment, labelFromPath, shortAddress, type IssuedPayment } from "./lib/pay.js";
 
 const app = document.getElementById("app") as HTMLElement;
@@ -83,7 +83,7 @@ async function boot(): Promise<void> {
   try {
     const issued = await issuePayment(label, {
       indexerUrl: INDEXER_URL,
-      receiveFactory: RECEIVE_FACTORY,
+      portalPrivFactory: PORTAL_PRIV_FACTORY,
       sweeperInitCodeHash: SWEEPER_INITCODE_HASH,
     });
     await renderIssued(issued);

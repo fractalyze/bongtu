@@ -66,12 +66,12 @@ export const portalFactoryAbi = parseAbi([
   "function addressOf(bytes32 salt) view returns (address)",
 ]);
 
-/** The ReceiveFactory delta over the portal fragments: its `Swept` and
+/** The PortalPrivFactory delta over the portal fragments: its `Swept` and
  *  `addressOf` are byte-identical to the portal ones (same topic0/selector, so
  *  the portalFactoryAbi fragments decode/call both factories); only the
  *  sweep-time `Announced` event — the chain-only recovery path the ingest
  *  backfills announcement rows from — is new. */
-export const receiveFactoryAbi = parseAbi([
+export const portalPrivFactoryAbi = parseAbi([
   "event Announced(bytes32 indexed salt, bytes32 ephemeralPub, uint8 viewTag)",
 ]);
 
@@ -139,11 +139,11 @@ export interface ChainConfig {
   // addressOf, and ingest also scans the factory's Swept logs. Unset => the
   // /pay + /portal routes 404 with a clear body (index.ts logs one boot line).
   portalFactory?: string | null;
-  // The ReceiveFactory address (env RECEIVE_FACTORY) — the consumer-family
-  // sweep pair. Set => POST /portal/announce is live (pay-page issuance
-  // recorded against this factory's addressOf) and ingest also scans this
-  // factory's Swept + Announced logs. Unset => /portal/announce 404s.
-  receiveFactory?: string | null;
+  // The PortalPrivFactory address (env PORTAL_PRIV_FACTORY) — the
+  // consumer-family sweep pair. Set => POST /portal/announce is live (pay-page
+  // issuance recorded against this factory's addressOf) and ingest also scans
+  // this factory's Swept + Announced logs. Unset => /portal/announce 404s.
+  portalPrivFactory?: string | null;
   // Shared-secret gate for the operator-facing attributed feed (env
   // PORTAL_OPERATOR_TOKEN): set => GET /portal/unswept requires the same value
   // in the x-operator-token header (401 otherwise); unset => the feed stays
@@ -223,9 +223,9 @@ export function resolveConfig(): ChainConfig {
   const databaseUrl = process.env.DATABASE_URL || null;
   // Portal deposits are opt-in per deployment: no factory address, no /pay.
   const portalFactory = process.env.PORTAL_FACTORY || null;
-  // The receive (consumer-family) pair is likewise opt-in: no factory, no
+  // The priv (consumer-family) pair is likewise opt-in: no factory, no
   // /portal/announce. The operator token gates the attributed unswept feed.
-  const receiveFactory = process.env.RECEIVE_FACTORY || null;
+  const portalPrivFactory = process.env.PORTAL_PRIV_FACTORY || null;
   const portalOperatorToken = process.env.PORTAL_OPERATOR_TOKEN || null;
   const kemGraceSeconds = parseKemGraceSeconds(process.env.KEM_GRACE_SECONDS);
   // Same fail-fast posture as the kem grace knob: garbage refuses to boot.
@@ -246,7 +246,7 @@ export function resolveConfig(): ChainConfig {
         treeAccount: process.env.SOLANA_TREE || (() => { throw new Error("SOLANA_RPC is set but SOLANA_TREE (the TreeState account) is not"); })(),
       }
     : null;
-  return { rpc, pool, startBlock, authorityKey, authorityKemKey, databaseUrl, portalFactory, receiveFactory, portalOperatorToken, kemGraceSeconds, disclosureDir, disclosureGraceSeconds, solana };
+  return { rpc, pool, startBlock, authorityKey, authorityKemKey, databaseUrl, portalFactory, portalPrivFactory, portalOperatorToken, kemGraceSeconds, disclosureDir, disclosureGraceSeconds, solana };
 }
 
 /** Parse AUTHORITY_KEM_KEY (the 2400-byte ML-KEM-768 decapsulation key) from

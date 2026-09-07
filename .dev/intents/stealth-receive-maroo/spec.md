@@ -87,7 +87,7 @@ depositor-facing and must keep working).
   payments end as shielded notes the recipient's client scan discovers (R6).
 - **R8 (MUST) Live-pool reuse; new standalone receive pair.** Pool `0x3B6238…1aD6` on
   450815 is reused as-is: no circuit change, no UUPS upgrade, no pool-touching
-  transaction. The receive product ships a NEW standalone `ReceiveFactory`/sweeper pair
+  transaction. The receive product ships a NEW standalone `PortalPrivFactory`/sweeper pair
   (naming in plan) targeting the live `depositPrivModule`, with the sweep-time
   announcement event; the EXISTING `portalFactory` and its depositor-facing flow are
   untouched (R11). The new pair's 450815 deployment is a one-command HUMAN step

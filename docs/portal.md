@@ -11,8 +11,8 @@ Two products share this machinery, on separate contract pairs:
 - **Portal** (depositor-facing, enterprise family): `PortalFactory` +
   `PortalSweeper`, issuance server-side at `POST /pay/{name}`, sweeps through
   the enterprise `deposit` — the original flow below.
-- **Receive** (recipient-facing, consumer family): `ReceiveFactory` +
-  `ReceiveSweeper`, issuance in the **sender's browser** on the pay page
+- **Receive** (recipient-facing, consumer family): `PortalPrivFactory` +
+  `PortalPrivSweeper`, issuance in the **sender's browser** on the pay page
   (`apps/pay-web`), sweeps through the consumer `depositPriv` module — the
   minted notes are no-auditor notes the operator cannot open. The deltas are
   in [Receiving](#receiving-the-consumer-pay-page) below.
@@ -94,7 +94,7 @@ behind the shared `PORTAL_OPERATOR_TOKEN`.
 
 - **On-chain unlinkability is the claim**: distinct payments to one
   recipient share no on-chain datum with each other or with the recipient's
-  registered identity — the gate leg (`deploy/gates/receive_leg.ts`) greps
+  registered identity — the gate leg (`deploy/gates/portal_priv_leg.ts`) greps
   for exactly this. The **per-payment amount is public twice** (the plain
   transfer, and the deposit's public `pub[0]`); what is shielded is note
   ownership, the aggregate balance, and all onward flow.

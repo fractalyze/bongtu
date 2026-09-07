@@ -23,14 +23,14 @@ npm run build --workspace @bongtu/pay-web
 ```
 
 The dev proxy forwards `/indexer/*` to a local indexer (vite.shared.ts, same
-convention as the other apps). The indexer must run with `RECEIVE_FACTORY`
+convention as the other apps). The indexer must run with `PORTAL_PRIV_FACTORY`
 set or the announce route 404s.
 
 ## Configuration (build-time env)
 
 - `VITE_INDEXER_URL` — indexer base (default `/indexer`, the rewrite/proxy path).
-- `VITE_RECEIVE_FACTORY` — the ReceiveFactory address (copy BY FIELD NAME from
-  `deploy/addresses.<chainid>.json` `receiveFactory`).
+- `VITE_PORTAL_PRIV_FACTORY` — the PortalPrivFactory address (copy BY FIELD NAME from
+  `deploy/addresses.<chainid>.json` `portalPrivFactory`).
 - `VITE_SWEEPER_INITCODE_HASH` — the factory's `sweeperInitCodeHash` (the
   committed parity vector's value; see `chains/evm/test/Receive.t.sol`).
 

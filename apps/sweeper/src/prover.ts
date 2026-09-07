@@ -1,6 +1,6 @@
 // CPU snarkjs prover — witness + groth16 + solidity calldata for one of
 // circuits/out's circuits (deposit for the enterprise portal mode, depositPriv
-// for the receive mode).
+// for the priv mode).
 //
 // RESTATED from deploy/live/lib/proof_toolbox.ts `prove()` (the pattern owner
 // alongside circuits/gates/auditor_decrypt_check.ts): that module is test/ops

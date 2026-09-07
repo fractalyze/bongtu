@@ -1,12 +1,12 @@
-// The receive leg of the M0 DoD gate (e2e_orchestrator.ts calls it after the
-// consumer leg) — the spec's unlinkability gate (R7) with the REAL services in
-// the loop:
+// The portalPriv (consumer receive) leg of the M0 DoD gate (e2e_orchestrator.ts
+// calls it after the consumer leg) — the spec's unlinkability gate (R7) with
+// the REAL services in the loop:
 //
 //   DEPLOY   a leg-owned enterprise stack + DepositPrivModule (registerModule
 //            — modules are live immediately) + BOTH factories: the portal pair
-//            (coexistence) and the ReceiveFactory under test
+//            (coexistence) and the PortalPrivFactory under test
 //   SPAWN    the real apps/indexer (PUBLIC mode — the consumer posture) with
-//            RECEIVE_FACTORY + PORTAL_OPERATOR_TOKEN set
+//            PORTAL_PRIV_FACTORY + PORTAL_OPERATOR_TOKEN set
 //   REGISTER a v2 payment name: stealth meta + the consumer pair under one
 //            owner signature
 //   ISSUE    TWO pay-page issuances — the pay-web derivation called headlessly
@@ -16,9 +16,9 @@
 //   PAY      two plain ERC-20 transfers from TWO DISTINCT funded EOAs (all a
 //            stock wallet can do)
 //   GATE     the attributed work feed 401s without the operator token
-//   SWEEP    apps/sweeper runOnce AS A LIBRARY in receive mode: depositPriv
+//   SWEEP    apps/sweeper runOnce AS A LIBRARY in priv mode: depositPriv
 //            proofs sealed to the registered consumer triple, submitted
-//            through the ReceiveFactory with the announcement tuple
+//            through the PortalPrivFactory with the announcement tuple
 //   ASSERT   R7: (a) the two destinations differ; (b) NEGATIVE GREP — neither
 //            payment tx (calldata or logs), neither sweep tx calldata, nor the
 //            public feed body carries the recipient's label or any registered
@@ -122,10 +122,10 @@ function stopIndexer(proc: ChildProcess): Promise<void> {
 const contains = (haystack: string, needle: string): boolean =>
   haystack.toLowerCase().includes(needle.replace(/^0x/, "").toLowerCase());
 
-export async function runReceiveLeg(rig: Rig): Promise<void> {
-  step("RECEIVE: leg-owned stack + DepositPrivModule + both factories + public indexer");
-  const databaseUrl = process.env.E2E_RECEIVE_DATABASE_URL || "";
-  ok(databaseUrl !== "", "E2E_RECEIVE_DATABASE_URL is set (receive leg is mandatory — no silent skip)");
+export async function runPortalPrivLeg(rig: Rig): Promise<void> {
+  step("PORTAL-PRIV: leg-owned stack + DepositPrivModule + both factories + public indexer");
+  const databaseUrl = process.env.E2E_PORTAL_PRIV_DATABASE_URL || "";
+  ok(databaseUrl !== "", "E2E_PORTAL_PRIV_DATABASE_URL is set (portalPriv leg is mandatory — no silent skip)");
 
   const { token, pool } = await deployStack(rig, {
     batchSize: GATE_B,
@@ -139,11 +139,11 @@ export async function runReceiveLeg(rig: Rig): Promise<void> {
   // The depositor-facing portal pair coexists (R11's shape): the indexer runs
   // with BOTH factories configured, each product on its own contracts.
   const portalFactory = await deploy(rig, "PortalFactory", "PortalFactory", [rig.address]);
-  const factory = await deploy(rig, "ReceiveFactory", "ReceiveFactory", [rig.address]);
+  const factory = await deploy(rig, "PortalPrivFactory", "PortalPrivFactory", [rig.address]);
   const initCodeHash = String(await factory.read("sweeperInitCodeHash"));
-  console.log(`   pool=${pool.address} receiveFactory=${factory.address}`);
+  console.log(`   pool=${pool.address} portalPrivFactory=${factory.address}`);
 
-  const port = Number(process.env.E2E_RECEIVE_INDEXER_PORT || 8633);
+  const port = Number(process.env.E2E_PORTAL_PRIV_INDEXER_PORT || 8633);
   const indexerUrl = `http://127.0.0.1:${port}`;
   const indexerEnv = {
     RPC,
@@ -151,7 +151,7 @@ export async function runReceiveLeg(rig: Rig): Promise<void> {
     START_BLOCK: "0",
     DATABASE_URL: databaseUrl,
     PORTAL_FACTORY: String(portalFactory.address),
-    RECEIVE_FACTORY: String(factory.address),
+    PORTAL_PRIV_FACTORY: String(factory.address),
     PORTAL_OPERATOR_TOKEN: OPERATOR_TOKEN,
     PORT: String(port),
     POLL_MS: "0", // tail OFF — chain state lands at boot ingest (see header)
@@ -159,10 +159,10 @@ export async function runReceiveLeg(rig: Rig): Promise<void> {
   const child = { proc: spawnIndexer(indexerEnv) };
   try {
     await waitHealthy(indexerUrl);
-    ok(true, `public indexer (RECEIVE_FACTORY + operator token) healthy on :${port}`);
+    ok(true, `public indexer (PORTAL_PRIV_FACTORY + operator token) healthy on :${port}`);
 
     // ================== REGISTER (v2: meta + consumer pair) =================
-    step("RECEIVE: register the v2 payment name (stealth meta + consumer pair)");
+    step("PORTAL-PRIV: register the v2 payment name (stealth meta + consumer pair)");
     const recipientCompressed = packPubkey(RECIPIENT.keypair.publicKey);
     const stealth = stealthKeysFromScalars(STEALTH_VIEW_SCALAR, STEALTH_SPEND_SCALAR);
     const pair = selfConsumerRecipient(RECIPIENT);
@@ -178,10 +178,10 @@ export async function runReceiveLeg(rig: Rig): Promise<void> {
     );
 
     // ============ ISSUE x2 (the pay page, called headlessly) ================
-    step("RECEIVE: two pay-page issuances (browser derivation, announce-before-display)");
+    step("PORTAL-PRIV: two pay-page issuances (browser derivation, announce-before-display)");
     const payDeps = {
       indexerUrl,
-      receiveFactory: String(factory.address),
+      portalPrivFactory: String(factory.address),
       sweeperInitCodeHash: initCodeHash,
     };
     const issuedA = await issuePayment(RECEIVE_NAME, payDeps);
@@ -191,14 +191,14 @@ export async function runReceiveLeg(rig: Rig): Promise<void> {
     for (const issued of [issuedA, issuedB]) {
       const onChain = String(await factory.read("addressOf", [portalSalt(issued.stealthAddr)]));
       ok(onChain.toLowerCase() === issued.destination.toLowerCase(),
-        "issued destination == receiveFactory.addressOf(portalSalt(stealthAddr)) on-chain");
+        "issued destination == portalPrivFactory.addressOf(portalSalt(stealthAddr)) on-chain");
       const rescan = scanStealthAnnouncement(STEALTH_VIEW_SCALAR, stealth.meta.spendPub, issued.ephemeralPub);
       ok(rescan.address.toLowerCase() === issued.stealthAddr.toLowerCase(),
         "recipient view key re-derives the announced stealth address from R alone");
     }
 
     // ============== PAY x2 (plain transfers, distinct EOAs) =================
-    step(`RECEIVE: plain transfers ${PAY_A} + ${PAY_B} from two distinct sender EOAs`);
+    step(`PORTAL-PRIV: plain transfers ${PAY_A} + ${PAY_B} from two distinct sender EOAs`);
     const payments = [
       { issued: issuedA, amount: PAY_A },
       { issued: issuedB, amount: PAY_B },
@@ -213,7 +213,7 @@ export async function runReceiveLeg(rig: Rig): Promise<void> {
     }
 
     // ==================== GATE (operator token, spec C3) ====================
-    step("RECEIVE: the attributed work feed is operator-token gated");
+    step("PORTAL-PRIV: the attributed work feed is operator-token gated");
     await fetchUnswept(indexerUrl).then(
       () => ok(false, "unswept without the operator token must 401"),
       (e) => ok(String(e).includes("401"), "unswept without the operator token -> 401"),
@@ -223,7 +223,7 @@ export async function runReceiveLeg(rig: Rig): Promise<void> {
       "both issuances on the token-authed work feed, attributed");
 
     // ================= SWEEP (receive-mode runOnce, library) ================
-    step("RECEIVE: sweeper runOnce in receive mode (depositPriv, real CPU prover)");
+    step("PORTAL-PRIV: sweeper runOnce in priv mode (depositPriv, real CPU prover)");
     const poolBefore = BigInt(await token.read("balanceOf", [pool.address]));
     const chain: SweeperChain = {
       sweeper: rig.address,
@@ -238,7 +238,7 @@ export async function runReceiveLeg(rig: Rig): Promise<void> {
       fetchUnswept: () => fetchUnswept(indexerUrl, -1, 5000, fetch, OPERATOR_TOKEN),
       prove: makeCircuitProver(join(ROOT, "circuits", "out"), "depositPriv"),
       rand: randField,
-      receive: {
+      priv: {
         module: String(depMod.address),
         minSweep: 1n,
         resolveRecipient: async (name: string) => {
@@ -254,7 +254,7 @@ export async function runReceiveLeg(rig: Rig): Promise<void> {
       `both sweeps grew the pool by exactly the payments (${PAY_A} + ${PAY_B})`);
     for (const p of payments) {
       ok(BigInt(await token.read("balanceOf", [p.issued.destination])) === 0n,
-        "receive destination emptied by the sweep");
+        "priv destination emptied by the sweep");
     }
 
     // ============ ANNOUNCED events carry the exact issuance tuples ==========
@@ -277,7 +277,7 @@ export async function runReceiveLeg(rig: Rig): Promise<void> {
     const sweepTxs = [...new Set(sweptLogs.map((l) => l.transactionHash))];
 
     // ================== R7(b): the NEGATIVE GREP ============================
-    step("RECEIVE: negative grep — no recipient identity in payment/sweep txs or the public feed");
+    step("PORTAL-PRIV: negative grep — no recipient identity in payment/sweep txs or the public feed");
     // Everything the recipient registered — none of it may appear in the clear.
     const needles: [string, string][] = [
       ["label", RECEIVE_NAME],
@@ -305,7 +305,7 @@ export async function runReceiveLeg(rig: Rig): Promise<void> {
       "R7(c): public projection has no attribution field at all");
 
     // ============ FLIP + DISCOVERY (restart -> boot ingest) =================
-    step("RECEIVE: restart indexer -> records flip swept; recipient self-scan finds both notes");
+    step("PORTAL-PRIV: restart indexer -> records flip swept; recipient self-scan finds both notes");
     await stopIndexer(child.proc);
     child.proc = spawnIndexer(indexerEnv);
     await waitHealthy(indexerUrl);

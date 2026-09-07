@@ -4,7 +4,7 @@
 //                                    non-canonical | 404 factory unconfigured
 //                                    (PUBLIC — server-side issuance, portal pair)
 //   POST /portal/announce         -> PortalPublicRecord | 404 unknown label or
-//                                    RECEIVE_FACTORY unconfigured | 400 bad
+//                                    PORTAL_PRIV_FACTORY unconfigured | 400 bad
 //                                    shape | 409 stealth address already
 //                                    recorded (PUBLIC — pay-page issuance)
 //   GET  /portal/announcements?cursor=&limit= -> PortalPublicRecord[] (PUBLIC:
@@ -21,7 +21,7 @@
 // POST /portal/announce is the receive-product twin with the derivation moved
 // into the VISITOR'S BROWSER: the page derives from the record's public keys,
 // announces BEFORE displaying the address, and the server (1) recomputes the
-// destination itself via the receive factory's addressOf — it never trusts a
+// destination itself via the priv factory's addressOf — it never trusts a
 // client destination — and (2) rejects a stealth address already recorded, so
 // first write wins: a hijacker re-announcing an observed destination under its
 // own label always loses the race to the honest record.
@@ -141,9 +141,9 @@ export async function handlePortalAnnounce(
   { ix, body }: RouteContext,
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): Promise<RouteResult> {
-  const factory = ix.cfg.receiveFactory ?? null;
-  if (!factory || !ix.receiveAddressOf) {
-    return { status: 404, body: { error: "receive deposits are not configured on this indexer (RECEIVE_FACTORY unset)" } };
+  const factory = ix.cfg.portalPrivFactory ?? null;
+  if (!factory || !ix.portalPrivAddressOf) {
+    return { status: 404, body: { error: "receive deposits are not configured on this indexer (PORTAL_PRIV_FACTORY unset)" } };
   }
   const parsed = parseAnnounceBody(body);
   if (!parsed) {
@@ -177,7 +177,7 @@ export async function handlePortalAnnounce(
   // The server recomputes the destination — a client-sent destination would
   // let an announcer redirect the display address away from the salt it
   // announces, so no such field is even accepted.
-  const destination = await ix.receiveAddressOf(portalSalt(parsed.stealthAddr));
+  const destination = await ix.portalPrivAddressOf(portalSalt(parsed.stealthAddr));
   const issued = await ix.portal.issue(
     {
       name,
@@ -212,7 +212,7 @@ function serveFeed<T extends PortalPublicRecord>(
   ctx: RouteContext,
   read: (cursor: number, limit: number) => T[],
 ): RouteResult {
-  if (!ctx.ix.cfg.portalFactory && !ctx.ix.cfg.receiveFactory) return unconfigured();
+  if (!ctx.ix.cfg.portalFactory && !ctx.ix.cfg.portalPrivFactory) return unconfigured();
   const cursor = Number(ctx.query.get("cursor") ?? -1);
   const limit = Number(ctx.query.get("limit") ?? DEFAULT_LIMIT);
   if (!Number.isInteger(cursor) || !Number.isInteger(limit) || limit <= 0) {

@@ -13,19 +13,19 @@ Ordered work units; one commit per unit via workflow:commit.
 
 ### U1 — receive contracts: consumer-family sweep + on-chain announcement
 
-Files: `chains/evm/src/ReceiveFactory.sol`, `chains/evm/src/ReceiveSweeper.sol` (new),
-`chains/evm/test/Receive.t.sol` (new), `packages/core/test/stealth.test.ts` (+ a second
+Files: `chains/evm/src/PortalPrivFactory.sol`, `chains/evm/src/PortalPrivSweeper.sol` (new),
+`chains/evm/test/PortalPriv.t.sol` (new), `packages/core/test/stealth.test.ts` (+ a second
 parity vector pinned by the new factory).
 
 - Sibling pair of PortalFactory/PortalSweeper with two deltas: (1) the sweeper's pool
-  interface is the CONSUMER path — `IReceiveModule.depositPriv(a, b, c, uint[16] pub,
+  interface is the CONSUMER path — `IPortalPrivModule.depositPriv(a, b, c, uint[16] pub,
   bytes[] kemCiphertexts)` hardcoded by the same breaking-by-policy rule, approving the
   POOL for `pub[0]` (DepositPrivModule pulls from its caller via `applyOpWithPull`);
   (2) the factory's `sweep(...)` gains `bytes ephemeralPub, uint8 viewTag` and emits
   `Announced(bytes32 indexed salt, bytes ephemeralPub, uint8 viewTag)` beside `Swept` —
   the chain-only recovery path for every swept payment (spec R5).
 - CREATE2/salt/addressOf semantics identical (salt = DKSAP stealth address, TS mirror
-  unchanged); the new pair has its own `sweeperInitCodeHash`, so `Receive.t.sol` pins a
+  unchanged); the new pair has its own `sweeperInitCodeHash`, so `PortalPriv.t.sol` pins a
   fresh parity vector consumed by the core stealth test beside the existing one.
 
 Proof: forge tests — a real committed depositPriv fixture sweeps and mints consumer
@@ -34,11 +34,11 @@ carries the exact ephemeralPub/viewTag; the parity vector pins initcode hash + a
 
 ### U2 — deploy script and record field
 
-Files: `deploy/forge/DeployReceive.s.sol` (new), `deploy/forge/AddressBook.sol`
-(`receiveFactory` optional field, the portalFactory pattern), `deploy/gates/test_deploy_receive.sh`
+Files: `deploy/forge/DeployPortalPriv.s.sol` (new), `deploy/forge/AddressBook.sol`
+(`portalPrivFactory` optional field, the portalFactory pattern), `deploy/gates/test_deploy_portal_priv.sh`
 (new, modeled on test_deploy_portal.sh).
 
-- Env knobs `DEPLOYER_KEY`/`BOT`; rerun guard on `receiveFactory`; requires a recorded
+- Env knobs `DEPLOYER_KEY`/`BOT`; rerun guard on `portalPrivFactory`; requires a recorded
   pool AND `depositPrivModule` (read from `modules.<chainid>.json`). The 450815 run is
   the human step (runbook in U8); the gate proves the script on anvil.
 
@@ -48,9 +48,9 @@ default `Deploy.s.sol` untouched.
 ### U3 — indexer: announce route, attribution split, operator gating
 
 Files: `apps/indexer/src/api/routes/portal.ts`, `src/portal.ts`, `src/api/router.ts`,
-`src/chain.ts` (+`RECEIVE_FACTORY` config + combined ABI rows for the new pair's
+`src/chain.ts` (+`PORTAL_PRIV_FACTORY` config + combined ABI rows for the new pair's
 `Swept`/`Announced`), `src/ingest.ts` (watch + gate on the new factory address),
-`src/host.ts` (the `receiveAddressOf` capability), `src/index.ts` (env docs + boot
+`src/host.ts` (the `portalPrivAddressOf` capability), `src/index.ts` (env docs + boot
 lines), `src/schema.sql` (factory/rail columns + the unique stealth_addr index),
 `packages/core/src/wire/indexerClient.ts` + the portal wire types (+ the
 `indexerHttp.ts` header seam for the operator token), `apps/indexer/test/portal.test.ts`,
@@ -58,7 +58,7 @@ lines), `src/schema.sql` (factory/rail columns + the unique stealth_addr index),
 (attributed-shape compat updates).
 
 - `POST /portal/announce` `{ label, ephemeralPub, viewTag, stealthAddr }`: server
-  recomputes `destination = receiveAddressOf(portalSalt(stealthAddr))`, resolves the
+  recomputes `destination = portalPrivAddressOf(portalSalt(stealthAddr))`, resolves the
   label to the owner at write time, rejects a recorded `stealthAddr` (first write wins),
   unauthenticated (recorded PoC posture).
 - Public projections of `/portal/announcements` + a new announce-backed feed drop
@@ -80,7 +80,7 @@ Files: `apps/sweeper/src/{sweep,prover,config,index}.ts`, `apps/sweeper/test/*`,
 (supporting) the consumer deposit request builder in `packages/client` if
 `buildDepositRequest` needs a depositPriv sibling.
 
-- A `RECEIVE_FACTORY` mode: fetches token-authed unswept, builds a depositPriv witness
+- A `PORTAL_PRIV_FACTORY` mode: fetches token-authed unswept, builds a depositPriv witness
   for the recipient's PUBLIC consumer triple (owner bjj pubkey, `noteViewPub` receiver
   cts, `kemEk` encapsulation — no private material, mirroring the zero-priv identity
   trick), proves `depositPriv` (16 publics), submits via the receive factory's sweep
@@ -121,12 +121,12 @@ route wiring; typecheck green.
 
 ### U7 — the receive gate leg
 
-Files: `deploy/gates/receive_leg.ts` (new), `deploy/gates/e2e_orchestrator.ts` (call
+Files: `deploy/gates/portal_priv_leg.ts` (new), `deploy/gates/e2e_orchestrator.ts` (call
 it after the consumer leg, same Postgres/env plumbing), `deploy/gates/e2e_m0.sh`
 (the leg's own Postgres database), `apps/pay-web/package.json` (exports map so the
 leg calls the page's issuance decision headlessly).
 
-- Anvil: deploy pool stack + consumer modules + ReceiveFactory; real indexer with both
+- Anvil: deploy pool stack + consumer modules + PortalPrivFactory; real indexer with both
   factories configured; register a v2 name; TWO headless pay-page issuances (the U5
   derivation called as a library); two plain transfers from two distinct funded EOAs;
   receive-mode `runOnce`; then the spec R7 assertions — distinct destinations, negative
@@ -142,7 +142,7 @@ Proof: the leg passes inside `e2e_m0.sh`; the pre-existing portal leg stays gree
 Files: `docs/portal.md`, `docs/security-model.md` (new portal/receive who-sees-what
 subsection incl. the pay-page operator row and the precise amount claim),
 `docs/indexer.md` (route table + token gating), `docs/wallet.md`, `deploy/README.md`
-(DeployReceive runbook for 450815 as the human step), root `README.md`,
+(DeployPortalPriv runbook for 450815 as the human step), root `README.md`,
 `apps/{pay-web,wallet-web,sweeper,indexer}/README.md`.
 
 Proof: stage-5 review against the spec's Docs debt list.
@@ -160,7 +160,7 @@ Proof: stage-5 review against the spec's Docs debt list.
 - **Empty circuits/out in this worktree**: regen `prove_all.sh` targets before heavy
   gates; committed artifacts must show adds-only afterward.
 - **Live records untouched**: no edit to `addresses.450815.json`/`modules.450815.json`;
-  the receiveFactory field lands there only via the human 450815 run.
+  the portalPrivFactory field lands there only via the human 450815 run.
 - **PATH/log discipline** per CLAUDE.md for every gate run.
 
 ## Proving gates
@@ -170,4 +170,4 @@ indexer unit, sweeper, wallet-web, pay-web) + `tsc`/workspace typechecks + `forg
 
 Final (/verify full): `deploy/gates/e2e_m0.sh` including the new receive leg and the
 untouched portal leg, indexer conformance (`apps/indexer && npm test`),
-`test_deploy_receive.sh`, and the lock-file adds-only check.
+`test_deploy_portal_priv.sh`, and the lock-file adds-only check.

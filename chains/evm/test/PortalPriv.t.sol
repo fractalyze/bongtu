@@ -22,21 +22,22 @@ import {
 } from "./mocks/StubVerifiers.sol";
 import {DepositPrivModule} from "../src/modules/DepositPrivModule.sol";
 import {DepositPrivVerifier} from "../src/verifiers/DepositPrivVerifier.sol";
-import {ReceiveFactory} from "../src/ReceiveFactory.sol";
-import {ReceiveSweeper, IReceiveModule} from "../src/ReceiveSweeper.sol";
+import {PortalPrivFactory} from "../src/PortalPrivFactory.sol";
+import {PortalPrivSweeper, IPortalPrivModule} from "../src/PortalPrivSweeper.sol";
+import {PortalSweeperBase} from "../src/PortalSweeperBase.sol";
 import {Ownable2Step} from "../src/utils/Ownable2Step.sol";
 
-/// @notice The receive deploy-and-sweep path against the REAL depositPriv
+/// @notice The portalPriv (consumer receive) deploy-and-sweep path against the REAL depositPriv
 ///         verifier + the committed consumer_realproofs.json depositPriv
 ///         fixture — a sweep is a real CONSUMER mint (no-auditor notes,
 ///         tokens pulled by the pool from the sweeper), gated by the factory
-///         owner (the portal v1 trust concession, see ReceiveFactory's
+///         owner (the portal v1 trust concession, see PortalPrivFactory's
 ///         header), with both balance guards firing BEFORE the module is ever
 ///         called, and the sweep-time `Announced` event carrying the exact
 ///         announcement tuple. The pool's enterprise verifier slots are
 ///         always-accept stubs (the ConsumerModules.t.sol pattern): consumer
 ///         proof validity is the thing under test here.
-contract ReceiveTest is Base {
+contract PortalPrivTest is Base {
     MockERC20 token;
     IPoseidon2 poseidon;
     string j;
@@ -51,7 +52,7 @@ contract ReceiveTest is Base {
 
     // Fresh pool with the REAL depositPriv verifier behind its module (the
     // sweep must mint via a real consumer proof) + a fresh factory owned by BOT.
-    function _fresh() internal returns (BongtuPool pool, DepositPrivModule mod, ReceiveFactory factory) {
+    function _fresh() internal returns (BongtuPool pool, DepositPrivModule mod, PortalPrivFactory factory) {
         token = new MockERC20();
         pool = deployPoolWithBatch(
             poseidon,
@@ -66,7 +67,7 @@ contract ReceiveTest is Base {
         );
         mod = new DepositPrivModule(pool, IDepositPrivVerifier(address(new DepositPrivVerifier())));
         pool.registerModule(address(mod));
-        factory = new ReceiveFactory(BOT);
+        factory = new PortalPrivFactory(BOT);
     }
 
     // --- committed depositPriv fixture (the ConsumerModules.t.sol loaders) ---
@@ -87,7 +88,7 @@ contract ReceiveTest is Base {
         kemCts = vm.parseJsonBytesArray(j, ".depositPriv.kemCiphertexts");
     }
 
-    // The salt convention (ReceiveFactory header): the DKSAP stealth address,
+    // The salt convention (PortalPrivFactory header): the DKSAP stealth address,
     // bytes32-left-padded. A fixed placeholder EOA stands in for a derived one —
     // the derivation itself is TS-side; the contract only ever sees the salt.
     address constant STEALTH = address(0x2222222222222222222222222222222222222222);
@@ -101,16 +102,16 @@ contract ReceiveTest is Base {
     event Swept(bytes32 indexed salt, address indexed sweeper, uint256 amount);
     event Announced(bytes32 indexed salt, bytes32 ephemeralPub, uint8 viewTag);
 
-    function _sweep(ReceiveFactory factory, DepositPrivModule mod) internal {
+    function _sweep(PortalPrivFactory factory, DepositPrivModule mod) internal {
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c, uint[16] memory pub, bytes[] memory kemCts) =
             _depositPrivArgs();
-        factory.sweep(SALT, IReceiveModule(address(mod)), a, b, c, pub, kemCts, EPHEMERAL_PUB, VIEW_TAG);
+        factory.sweep(SALT, IPortalPrivModule(address(mod)), a, b, c, pub, kemCts, EPHEMERAL_PUB, VIEW_TAG);
     }
 
     // ============================ happy path =================================
 
     function testSweepMintsConsumerNotes() public {
-        (BongtuPool pool, DepositPrivModule mod, ReceiveFactory factory) = _fresh();
+        (BongtuPool pool, DepositPrivModule mod, PortalPrivFactory factory) = _fresh();
         (,,, uint[16] memory pub,) = _depositPrivArgs();
         uint256 rootAfter = vm.parseJsonUint(j, ".depositPriv.rootAfter");
 
@@ -133,7 +134,7 @@ contract ReceiveTest is Base {
         // real consumer mint: two leaves appended, root == oracle, tokens
         // pulled INTO the pool (applyOpWithPull from the sweeper).
         assertGt(predicted.code.length, 0, "sweeper not deployed at addressOf(salt)");
-        assertEq(ReceiveSweeper(predicted).factory(), address(factory), "sweeper must be bound to this factory");
+        assertEq(PortalPrivSweeper(predicted).factory(), address(factory), "sweeper must be bound to this factory");
         assertEq(pool.nextLeafIndex(), 2, "sweep must append the 2 proof-bound notes");
         assertEq(pool.root(), rootAfter, "sweep root != depositPriv oracle");
         assertEq(token.balanceOf(address(pool)), pub[0], "pool did not receive the swept tokens");
@@ -148,7 +149,7 @@ contract ReceiveTest is Base {
     /// foot-gun is documented in docs/contracts.md, irrelevant to the
     /// deploy-skip + re-sweep mechanics under test).
     function testRepeatSweepOnDeployedSweeper() public {
-        (BongtuPool pool, DepositPrivModule mod, ReceiveFactory factory) = _fresh();
+        (BongtuPool pool, DepositPrivModule mod, PortalPrivFactory factory) = _fresh();
         (,,, uint[16] memory pub,) = _depositPrivArgs();
         address predicted = factory.addressOf(SALT);
 
@@ -170,7 +171,7 @@ contract ReceiveTest is Base {
     // ============================ access gates ===============================
 
     function testNonOwnerSweepReverts() public {
-        (, DepositPrivModule mod, ReceiveFactory factory) = _fresh();
+        (, DepositPrivModule mod, PortalPrivFactory factory) = _fresh();
         (,,, uint[16] memory pub,) = _depositPrivArgs();
         token.mint(factory.addressOf(SALT), pub[0]);
 
@@ -183,7 +184,7 @@ contract ReceiveTest is Base {
     /// onlyOwner would otherwise be bypassable by calling the deployed sweeper
     /// directly.
     function testDirectSweeperCallReverts() public {
-        (, DepositPrivModule mod, ReceiveFactory factory) = _fresh();
+        (, DepositPrivModule mod, PortalPrivFactory factory) = _fresh();
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c, uint[16] memory pub, bytes[] memory kemCts) =
             _depositPrivArgs();
         address predicted = factory.addressOf(SALT);
@@ -192,9 +193,9 @@ contract ReceiveTest is Base {
         _sweep(factory, mod);
 
         token.mint(predicted, pub[0]);
-        vm.expectRevert(abi.encodeWithSelector(ReceiveSweeper.NotFactory.selector, STRANGER));
+        vm.expectRevert(abi.encodeWithSelector(PortalSweeperBase.NotFactory.selector, STRANGER));
         vm.prank(STRANGER);
-        ReceiveSweeper(predicted).sweep(IReceiveModule(address(mod)), a, b, c, pub, kemCts);
+        PortalPrivSweeper(predicted).sweep(IPortalPrivModule(address(mod)), a, b, c, pub, kemCts);
     }
 
     // ============================ balance guards =============================
@@ -204,19 +205,19 @@ contract ReceiveTest is Base {
     /// SweepExceedsBalance proves the sweeper's own guard fired first — the
     /// pool's pull would have failed later with SafeERC20FailedOperation.
     function testBalanceShortSweepRevertsBeforeModule() public {
-        (, DepositPrivModule mod, ReceiveFactory factory) = _fresh();
+        (, DepositPrivModule mod, PortalPrivFactory factory) = _fresh();
         (,,, uint[16] memory pub,) = _depositPrivArgs();
         token.mint(factory.addressOf(SALT), pub[0] - 1);
 
-        vm.expectRevert(abi.encodeWithSelector(ReceiveSweeper.SweepExceedsBalance.selector, pub[0], pub[0] - 1));
+        vm.expectRevert(abi.encodeWithSelector(PortalSweeperBase.SweepExceedsBalance.selector, pub[0], pub[0] - 1));
         vm.prank(BOT);
         _sweep(factory, mod);
     }
 
     function testZeroBalanceSweepReverts() public {
-        (, DepositPrivModule mod, ReceiveFactory factory) = _fresh();
+        (, DepositPrivModule mod, PortalPrivFactory factory) = _fresh();
         // no funding at all — nothing to shield
-        vm.expectRevert(ReceiveSweeper.NothingToSweep.selector);
+        vm.expectRevert(PortalSweeperBase.NothingToSweep.selector);
         vm.prank(BOT);
         _sweep(factory, mod);
     }
@@ -224,23 +225,23 @@ contract ReceiveTest is Base {
     // ======================= TS<->sol CREATE2 parity =========================
 
     // THE PARITY VECTOR GENERATOR + PIN — this pair's OWN vector: the
-    // ReceiveSweeper initcode differs from PortalSweeper's, so the hash and
+    // PortalPrivSweeper initcode differs from PortalSweeper's, so the hash and
     // every derived address differ. The factory is etched at a FIXED address
     // (CREATE2 addresses depend on the deployer), then addressOf(SALT) and the
     // sweeper initcode hash are pinned to the committed constants below.
     // `packages/core/test/stealth.test.ts` pins `create2Address` to the SAME
     // three constants — no side hand-computes anything. After any
-    // ReceiveSweeper source or compiler-config change, regenerate with
-    //   forge test --match-test testReceiveCreate2ParityVectorPinned -vv
+    // PortalPrivSweeper source or compiler-config change, regenerate with
+    //   forge test --match-test testPortalPrivCreate2ParityVectorPinned -vv
     // and copy the logged values into BOTH files.
     address constant VECTOR_FACTORY = address(uint160(0xC0FFEE02));
     bytes32 constant VECTOR_INITCODE_HASH =
-        0xe1cbdf009697cb9492969ca8f0534dbab59c3b06659ae5ef3838bb64c3e73cc2;
-    address constant VECTOR_ADDRESS = 0x717Ad979a80944A58f600F3E002F085502622De1;
+        0x4a892b03a9bed6cf542e81c3167c1d8133dc50e3a2f7944230d99d870741e9c0;
+    address constant VECTOR_ADDRESS = 0x3763132b70279349718C6702F9f8ff3f3263Ca2B;
 
-    function testReceiveCreate2ParityVectorPinned() public {
-        deployCodeTo("ReceiveFactory.sol:ReceiveFactory", abi.encode(BOT), VECTOR_FACTORY);
-        ReceiveFactory f = ReceiveFactory(VECTOR_FACTORY);
+    function testPortalPrivCreate2ParityVectorPinned() public {
+        deployCodeTo("PortalPrivFactory.sol:PortalPrivFactory", abi.encode(BOT), VECTOR_FACTORY);
+        PortalPrivFactory f = PortalPrivFactory(VECTOR_FACTORY);
         console2.log("factory:", VECTOR_FACTORY);
         console2.log("sweeperInitCodeHash:");
         console2.logBytes32(f.sweeperInitCodeHash());

@@ -27,7 +27,7 @@
 //   POST /portal/announce    -> PortalPublicRecord  (PUBLIC pay-page issuance:
 //                               record a browser-side derivation; server
 //                               recomputes the destination, first write wins —
-//                               routes/portal.ts; 404 when RECEIVE_FACTORY is
+//                               routes/portal.ts; 404 when PORTAL_PRIV_FACTORY is
 //                               unset, 409 on a recorded stealth address)
 //   GET /portal/announcements -> [PortalPublicRecord]  (PUBLIC cursor feed:
 //                               every recorded announcement, ATTRIBUTION-FREE

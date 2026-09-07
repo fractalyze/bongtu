@@ -176,12 +176,12 @@ Notes for the live run:
 
 ### Deploy the receive factory (add-on, live chain — the human step)
 
-The receive product's contracts (`ReceiveFactory`/`ReceiveSweeper`,
+The receive product's contracts (`PortalPrivFactory`/`PortalPrivSweeper`,
 [docs/portal.md](../docs/portal.md#receiving-the-consumer-pay-page)) ship as an
 add-on deploy beside the pool — no pool transaction of any kind. Preconditions
 the script itself enforces: the chain's record holds a pool AND
 `deploy/modules.<chainid>.json` holds a `depositPrivModule` (the consumer module
-set must already be registered). Rerun-guarded on the record's `receiveFactory`
+set must already be registered). Rerun-guarded on the record's `portalPrivFactory`
 field (a second factory would strand every announcement issued against the
 first).
 
@@ -190,19 +190,19 @@ cd bongtu/chains/evm
 export DEPLOYER_KEY=0x<funded-key>
 # optional: a dedicated sweep-bot EOA (defaults to the broadcaster)
 # export BOT=0x<bot-address>
-forge script ../deploy/forge/DeployReceive.s.sol:DeployReceive \
+forge script ../deploy/forge/DeployPortalPriv.s.sol:DeployPortalPriv \
   --rpc-url "$LIVE_RPC" --broadcast --skip-simulation
 ```
 
 The factory address lands in `deploy/addresses.<chainid>.json` as
-`receiveFactory` — copy it BY FIELD NAME into the live wiring: the public
-indexer's `RECEIVE_FACTORY` (+ `PORTAL_OPERATOR_TOKEN`, shared with the bot),
-the receive-mode sweeper (`MODE=receive`, `apps/sweeper/README.md`), the
-pay-web Vercel project's `VITE_RECEIVE_FACTORY` /
+`portalPrivFactory` — copy it BY FIELD NAME into the live wiring: the public
+indexer's `PORTAL_PRIV_FACTORY` (+ `PORTAL_OPERATOR_TOKEN`, shared with the bot),
+the receive-mode sweeper (`MODE=priv`, `apps/sweeper/README.md`), the
+pay-web Vercel project's `VITE_PORTAL_PRIV_FACTORY` /
 `VITE_SWEEPER_INITCODE_HASH` (`apps/pay-web/README.md`), and — if the pay-web
 project's domain differs from the wallet's default — the wallet-web project's
 `VITE_PAY_BASE_URL` (the Receive screen's copy-payment-link host). The anvil
-drill for this script is `gates/test_deploy_receive.sh`.
+drill for this script is `gates/test_deploy_portal_priv.sh`.
 
 ### Deploy the dedicated ct-free enterprise pool (second pool, same chain)
 
@@ -289,9 +289,9 @@ Canonical data stays at the top; everything else is grouped by what runs it.
   portal leg (`portal_leg.ts`), the arbiter-free consumer leg (`consumer_leg.ts`: profile deploy +
   V3 upgrade, CPU-proved consumer ops + disburse chunk txs, PUBLIC indexer, self-scan discovery +
   batch-interior spend via the auth-free `/path`, and the committed disbursePriv256 calldata replay),
-  and the receive leg (`receive_leg.ts`: pay-page issuance, distinct-EOA payments, receive-mode
+  and the receive leg (`portal_priv_leg.ts`: pay-page issuance, distinct-EOA payments, receive-mode
   depositPriv sweeps, the R7 unlinkability grep, self-scan discovery).
-- `test_deploy_receive.sh` — the receive-factory add-on deploy drill (module-set precondition,
+- `test_deploy_portal_priv.sh` — the receive-factory add-on deploy drill (module-set precondition,
   happy path, rerun refusal).
 - `test_one_shot_deploy.sh` — scratch-anvil drill of the deploy: B=256, all six verifier getters
   wired and matching the record, Initializable version 1, `currentEpoch() == 0`.

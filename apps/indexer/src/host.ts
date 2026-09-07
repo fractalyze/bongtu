@@ -76,11 +76,11 @@ export interface IndexerHost {
   portalAddressOf?(salt: string): Promise<string>;
 
   /**
-   * eth_call `ReceiveFactory.addressOf(salt)` — the announce route's
+   * eth_call `PortalPrivFactory.addressOf(salt)` — the announce route's
    * server-side destination recompute (the route never trusts a client
    * destination). Same EVM-only/optional posture as portalAddressOf.
    */
-  receiveAddressOf?(salt: string): Promise<string>;
+  portalPrivAddressOf?(salt: string): Promise<string>;
 }
 
 /**

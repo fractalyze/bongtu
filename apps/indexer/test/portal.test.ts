@@ -6,11 +6,11 @@
 //      destination, the recorded announcement, and the 400/404 fences.
 //   2. ANNOUNCE ROUTE — POST /portal/announce via handlePortalAnnounce: the
 //      server-side destination recompute, the first-write-wins 409, the shape
-//      fences, and the unconfigured-receive 404.
+//      fences, and the unconfigured-priv-factory 404.
 //   3. SWEPT MARKING + ANNOUNCED BACKFILL — synthetic ParsedLogs through the
 //      REAL Indexer.applyLogs (the ingest.test.ts convention: constructor
 //      reads the Foundry ABI, the dummy RPC is never contacted): Swept flips
-//      the matching record (either factory); a receive-factory Announced
+//      the matching record (either factory); a priv-factory Announced
 //      backfills an unknown salt from chain data and no-ops a known one.
 //   4. FEEDS — the ATTRIBUTION SPLIT (public projection carries no name/owner
 //      field at all; unswept stays attributed behind the operator token),
@@ -49,9 +49,9 @@ const ownerCompressed = packPubkey(OWNER.publicKey);
 const META = stealthKeysFromScalars(1111n, 2222n).meta;
 
 const FACTORY = "0x" + "c0".repeat(20);
-const RECEIVE_FACTORY = "0x" + "c1".repeat(20);
+const PRIV_FACTORY = "0x" + "c1".repeat(20);
 const INITCODE_HASH = "0x" + "ab".repeat(32);
-const RECEIVE_INITCODE_HASH = "0x" + "cd".repeat(32);
+const PRIV_INITCODE_HASH = "0x" + "cd".repeat(32);
 const EPHEMERAL = 424242424242424242424242n;
 const NOW = 1_700_000_000;
 
@@ -60,8 +60,8 @@ const NOW = 1_700_000_000;
 // packages/core/test/stealth.test.ts), so the "chain" stays internally
 // consistent without an RPC. One per factory — their initcode hashes differ.
 const fakeAddressOf = async (salt: string): Promise<string> => create2Address(FACTORY, salt, INITCODE_HASH);
-const fakeReceiveAddressOf = async (salt: string): Promise<string> =>
-  create2Address(RECEIVE_FACTORY, salt, RECEIVE_INITCODE_HASH);
+const fakePrivAddressOf = async (salt: string): Promise<string> =>
+  create2Address(PRIV_FACTORY, salt, PRIV_INITCODE_HASH);
 
 // The registered consumer pair (v2): what makes "alice" payable by the
 // receive product — announce refuses a record without it.
@@ -70,9 +70,9 @@ const CONSUMER_PAIR = { noteViewPub: "0x" + "22".repeat(32), kemEk: "0x" + "33".
 async function seededIx(
   opts: {
     factory?: string | null;
-    receiveFactory?: string | null;
+    privFactory?: string | null;
     operatorToken?: string | null;
-    receiveAddressOf?: (salt: string) => Promise<string>;
+    privAddressOf?: (salt: string) => Promise<string>;
     v1Only?: boolean;
   } = {},
 ): Promise<{ ix: Indexer; portal: PortalRegistry }> {
@@ -86,13 +86,13 @@ async function seededIx(
   const ix = {
     cfg: {
       portalFactory: opts.factory === undefined ? FACTORY : opts.factory,
-      receiveFactory: opts.receiveFactory === undefined ? RECEIVE_FACTORY : opts.receiveFactory,
+      portalPrivFactory: opts.privFactory === undefined ? PRIV_FACTORY : opts.privFactory,
       portalOperatorToken: opts.operatorToken ?? null,
     },
     names: registry,
     portal,
     portalAddressOf: fakeAddressOf,
-    receiveAddressOf: opts.receiveAddressOf ?? fakeReceiveAddressOf,
+    portalPrivAddressOf: opts.privAddressOf ?? fakePrivAddressOf,
   } as unknown as Indexer;
   return { ix, portal };
 }
@@ -165,7 +165,7 @@ test("unknown name is 404, non-canonical name is 400 (the names route convention
 });
 
 test("unconfigured factories: /pay and both /portal feeds 404 with a clear body", async () => {
-  const { ix } = await seededIx({ factory: null, receiveFactory: null });
+  const { ix } = await seededIx({ factory: null, privFactory: null });
   for (const r of [
     await payPortal.handle(ctx(ix, ["alice"])),
     await portalUnswept.handle(ctx(ix)),
@@ -176,7 +176,7 @@ test("unconfigured factories: /pay and both /portal feeds 404 with a clear body"
   }
 });
 
-test("feeds stay live with only the receive factory configured (rows name their own factory)", async () => {
+test("feeds stay live with only the priv factory configured (rows name their own factory)", async () => {
   const { ix } = await seededIx({ factory: null });
   assert.equal((await portalAnnouncements.handle(ctx(ix))).status, 200);
   assert.equal((await portalUnswept.handle(ctx(ix))).status, 200);
@@ -193,17 +193,17 @@ function browserDerivation(scalar: bigint = EPHEMERAL) {
   return { label: "alice", ephemeralPub: d.ephemeralPub, viewTag: d.viewTag, stealthAddr: d.address };
 }
 
-test("announce happy path: server recomputes the destination against the RECEIVE factory", async () => {
+test("announce happy path: server recomputes the destination against the PRIV factory", async () => {
   const { ix, portal } = await seededIx();
   const req = browserDerivation();
   const r = await handlePortalAnnounce(ctx(ix, [], "", req), NOW);
   assert.equal(r.status, 200, JSON.stringify(r.body));
 
   const body = r.body as PortalPublicRecord;
-  // The destination is the SERVER's recompute (receive factory + its initcode
+  // The destination is the SERVER's recompute (priv factory + its initcode
   // hash) — nothing client-sent, and not the portal pair's address.
-  assert.equal(body.destination, create2Address(RECEIVE_FACTORY, portalSalt(req.stealthAddr), RECEIVE_INITCODE_HASH));
-  assert.equal(body.factory, RECEIVE_FACTORY);
+  assert.equal(body.destination, create2Address(PRIV_FACTORY, portalSalt(req.stealthAddr), PRIV_INITCODE_HASH));
+  assert.equal(body.factory, PRIV_FACTORY);
   assert.equal(body.rail, "evm");
   assert.equal(body.swept, false);
   // The response is the PUBLIC projection: no attribution fields at all.
@@ -243,11 +243,11 @@ test("announce fences: unknown label 404, malformed shapes 400", async () => {
   }
 });
 
-test("announce 404s when RECEIVE_FACTORY is unset (portal pair alone does not enable it)", async () => {
-  const { ix } = await seededIx({ receiveFactory: null });
+test("announce 404s when PORTAL_PRIV_FACTORY is unset (portal pair alone does not enable it)", async () => {
+  const { ix } = await seededIx({ privFactory: null });
   const r = await portalAnnounce.handle(ctx(ix, [], "", browserDerivation()));
   assert.equal(r.status, 404);
-  assert.match((r.body as { error: string }).error, /RECEIVE_FACTORY/);
+  assert.match((r.body as { error: string }).error, /PORTAL_PRIV_FACTORY/);
 });
 
 test("announce refuses a v1-only label (no consumer pair -> the sweep could never build)", async () => {
@@ -265,9 +265,9 @@ test("CONCURRENT double-announce: exactly one 200, one 409, one recorded row", a
   const gate: { open: () => void } = { open: () => undefined };
   const held = new Promise<void>((resolve) => { gate.open = resolve; });
   const { ix, portal } = await seededIx({
-    receiveAddressOf: async (salt: string) => {
+    privAddressOf: async (salt: string) => {
       await held;
-      return fakeReceiveAddressOf(salt);
+      return fakePrivAddressOf(salt);
     },
   });
   const req = browserDerivation();
@@ -305,7 +305,7 @@ function sweptLog(salt: string, txHash: string, amount: bigint, logIndex = 0): P
 async function sweepFixture(): Promise<{ ix: Indexer; record: PortalRecord }> {
   const ix = new Indexer({
     rpc: DUMMY_RPC, pool: DUMMY_POOL, startBlock: 0, authorityKey: null,
-    portalFactory: FACTORY, receiveFactory: RECEIVE_FACTORY,
+    portalFactory: FACTORY, portalPrivFactory: PRIV_FACTORY,
   });
   const derived = deriveStealthAddress(META, EPHEMERAL);
   const record = await ix.portal.issue(
@@ -352,27 +352,27 @@ test("a replayed Swept range converges: the first mark wins, no re-mark", async 
   assert.equal(record.sweptAmount, "123");
 });
 
-// The receive factory's sweep tx: Swept then Announced, both from RECEIVE_FACTORY.
-function receiveSweepLogs(salt: string, ephemeralPub: string, viewTag: number, txHash: string, amount: bigint): ParsedLog[] {
-  const base = { blockNumber: 9, txHash, address: RECEIVE_FACTORY.toLowerCase(), blockTimestamp: NOW + 50 };
+// The priv factory's sweep tx: Swept then Announced, both from PRIV_FACTORY.
+function privSweepLogs(salt: string, ephemeralPub: string, viewTag: number, txHash: string, amount: bigint): ParsedLog[] {
+  const base = { blockNumber: 9, txHash, address: PRIV_FACTORY.toLowerCase(), blockTimestamp: NOW + 50 };
   return [
     { ...base, name: "Swept", logIndex: 0, args: { salt, sweeper: "0x" + "df".repeat(20), amount } },
     { ...base, name: "Announced", logIndex: 1, args: { salt, ephemeralPub, viewTag } },
   ];
 }
 
-test("receive-factory Swept flips a record issued through the announce path", async () => {
+test("priv-factory Swept flips a record issued through the announce path", async () => {
   const { ix } = await sweepFixture();
   const d = deriveStealthAddress(META, EPHEMERAL + 7n);
   const announced = await ix.portal.issue(
     {
       name: "alice", owner: ownerCompressed, ephemeralPub: d.ephemeralPub, viewTag: d.viewTag,
-      stealthAddr: d.address, destination: create2Address(RECEIVE_FACTORY, portalSalt(d.address), RECEIVE_INITCODE_HASH),
-      factory: RECEIVE_FACTORY, rail: "evm",
+      stealthAddr: d.address, destination: create2Address(PRIV_FACTORY, portalSalt(d.address), PRIV_INITCODE_HASH),
+      factory: PRIV_FACTORY, rail: "evm",
     },
     NOW,
   );
-  ix.applyLogs(receiveSweepLogs(portalSalt(announced.stealthAddr), d.ephemeralPub, d.viewTag, "0xrsweep", 55n));
+  ix.applyLogs(privSweepLogs(portalSalt(announced.stealthAddr), d.ephemeralPub, d.viewTag, "0xrsweep", 55n));
   assert.equal(announced.swept, true);
   assert.equal(announced.sweptTxHash, "0xrsweep");
   // The same-tx Announced found its record already indexed: no duplicate row.
@@ -383,7 +383,7 @@ test("Announced with an UNKNOWN salt backfills a swept row from chain data alone
   const { ix } = await sweepFixture();
   const d = deriveStealthAddress(META, EPHEMERAL + 9n);
   const before = ix.portal.list().length;
-  ix.applyLogs(receiveSweepLogs(portalSalt(d.address), d.ephemeralPub, d.viewTag, "0xlost", 77n));
+  ix.applyLogs(privSweepLogs(portalSalt(d.address), d.ephemeralPub, d.viewTag, "0xlost", 77n));
 
   const rows = ix.portal.list();
   assert.equal(rows.length, before + 1);
@@ -396,14 +396,14 @@ test("Announced with an UNKNOWN salt backfills a swept row from chain data alone
   assert.equal(row.ephemeralPub, d.ephemeralPub);
   assert.equal(row.viewTag, d.viewTag);
   assert.equal(row.destination, "0x" + "df".repeat(20));
-  assert.equal(row.factory, RECEIVE_FACTORY);
+  assert.equal(row.factory, PRIV_FACTORY);
   assert.equal(row.swept, true);
   assert.equal(row.sweptTxHash, "0xlost");
   assert.equal(row.sweptAmount, "77");
   // Already swept, so it never enters the bot's work feed.
   assert.equal(ix.portal.unswept().some((r) => r.stealthAddr === row.stealthAddr), false);
   // Replay converges: the same range again adds nothing.
-  ix.applyLogs(receiveSweepLogs(portalSalt(d.address), d.ephemeralPub, d.viewTag, "0xlost", 77n));
+  ix.applyLogs(privSweepLogs(portalSalt(d.address), d.ephemeralPub, d.viewTag, "0xlost", 77n));
   assert.equal(ix.portal.list().length, before + 1);
 });
 

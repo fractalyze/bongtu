@@ -30,12 +30,12 @@
 //   POLL_MS       rescan period in ms (default 15000)
 //   CIRCUITS_OUT  zkey/wasm directory for the mode's circuit (default
 //                 <repo>/circuits/out)
-//   MODE          "receive" => consumer-family sweeps: depositPriv proofs
-//                 through the ReceiveFactory (record `receiveFactory`),
+//   MODE          "priv" => consumer-family sweeps: depositPriv proofs
+//                 through the PortalPrivFactory (record `portalPrivFactory`),
 //                 minting no-auditor notes. Default "enterprise" (the portal).
-//   MODULE        receive mode: DepositPrivModule address (else the modules
+//   MODULE        priv mode: DepositPrivModule address (else the modules
 //                 record's `depositPrivModule`)
-//   MIN_SWEEP     receive mode: dust threshold in token base units (default 0)
+//   MIN_SWEEP     priv mode: dust threshold in token base units (default 0)
 //   PORTAL_OPERATOR_TOKEN  shared secret for the indexer's attributed unswept
 //                 feed (never logged)
 
@@ -96,11 +96,11 @@ async function main(): Promise<void> {
   const deps: SweeperDeps = {
     chain,
     fetchUnswept: () => indexer.unswept(undefined, undefined, cfg.operatorToken ?? undefined),
-    prove: makeCircuitProver(cfg.circuitsOut, cfg.mode === "receive" ? "depositPriv" : "deposit"),
+    prove: makeCircuitProver(cfg.circuitsOut, cfg.mode === "priv" ? "depositPriv" : "deposit"),
     rand: randField,
-    ...(cfg.mode === "receive"
+    ...(cfg.mode === "priv"
       ? {
-          receive: {
+          priv: {
             module: cfg.depositPrivModule as string, // resolveConfig throws when missing in this mode
             minSweep: cfg.minSweep,
             // The work-feed row carries name+owner; the v2 consumer pair lives
@@ -123,12 +123,12 @@ async function main(): Promise<void> {
   console.log(
     `bongtu sweeper: mode=${cfg.mode} rpc=${cfg.rpc} factory=${cfg.factory} pool=${cfg.pool} token=${cfg.token} ` +
       `indexer=${cfg.indexerUrl} chainId=${cfg.chainId} pollMs=${cfg.pollMs} sweeper=${account.address}` +
-      (cfg.mode === "receive" ? ` module=${cfg.depositPrivModule} minSweep=${cfg.minSweep}` : ""),
+      (cfg.mode === "priv" ? ` module=${cfg.depositPrivModule} minSweep=${cfg.minSweep}` : ""),
   );
   const api = await startApi(chain, state, cfg.port);
   console.log(
-    cfg.mode === "receive"
-      ? `API listening on :${api.port} (GET /health) — receive sweeps: depositPriv, full-balance above MIN_SWEEP, no fee, retries by rescan`
+    cfg.mode === "priv"
+      ? `API listening on :${api.port} (GET /health) — priv sweeps: depositPriv, full-balance above MIN_SWEEP, no fee, retries by rescan`
       : `API listening on :${api.port} (GET /health) — portal sweeps: full-balance, no fee, retries by rescan`,
   );
 

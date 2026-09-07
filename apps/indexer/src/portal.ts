@@ -2,7 +2,7 @@
 // POST /pay/{name} time (Slice ⑤ — a CEX sender can never announce, so
 // issuance-time recording is what makes plain transfers workable), the rows the
 // PAY PAGE writes at POST /portal/announce time (browser-side derivation), the
-// rows a receive-factory `Announced` event BACKFILLS from chain data, plus the
+// rows a priv-factory `Announced` event BACKFILLS from chain data, plus the
 // swept/unswept state either factory's Swept event flips.
 //
 // ATTRIBUTION SPLIT (the receive product's unlinkability surface): rows store
@@ -214,7 +214,7 @@ export class PortalRegistry {
   }
 
   /**
-   * Ingest a receive-factory Announced(salt, ephemeralPub, viewTag) log — the
+   * Ingest a priv-factory Announced(salt, ephemeralPub, viewTag) log — the
    * chain-only recovery path. A known salt is a no-op: the row was written at
    * announce time and the same tx's Swept already flipped it (validating chain
    * against store is the recipient's own scan's job, not a server overwrite).

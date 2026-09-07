@@ -43,7 +43,7 @@ export interface IssuedPayment {
 /** Everything one issuance consumes, injectable for the headless tests. */
 export interface PayDeps {
   indexerUrl: string;
-  receiveFactory: string;
+  portalPrivFactory: string;
   sweeperInitCodeHash: string;
   fetchFn?: typeof fetch;
   drawScalar?: () => bigint;
@@ -77,8 +77,8 @@ export function recordProblem(record: NameRecord | null): string | null {
  * announcement and a passed parity check).
  */
 export async function issuePayment(label: string, deps: PayDeps): Promise<IssuedPayment> {
-  if (!deps.receiveFactory || !deps.sweeperInitCodeHash) {
-    throw new Error("이 페이지가 아직 설정되지 않았어요 (receive factory unconfigured)");
+  if (!deps.portalPrivFactory || !deps.sweeperInitCodeHash) {
+    throw new Error("이 페이지가 아직 설정되지 않았어요 (portalPriv factory unconfigured)");
   }
   const fetchFn = deps.fetchFn ?? fetch;
   const record = await resolveName(deps.indexerUrl, label, fetchFn);
@@ -91,7 +91,7 @@ export async function issuePayment(label: string, deps: PayDeps): Promise<Issued
     (deps.drawScalar ?? randomEphemeralScalar)(),
   );
   const destination = create2Address(
-    deps.receiveFactory,
+    deps.portalPrivFactory,
     portalSalt(derived.address),
     deps.sweeperInitCodeHash,
   );

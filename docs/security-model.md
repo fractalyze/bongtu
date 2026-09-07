@@ -153,7 +153,7 @@ duty for an alarm to protect.
 The pool-edge machinery that turns a plain kKRW transfer into a shielded note
 ([portal.md](portal.md)) adds three parties the tables above do not cover. The
 claims here are the SHIPPED wording — the gate leg
-(`deploy/gates/receive_leg.ts`) asserts the unlinkability half mechanically.
+(`deploy/gates/portal_priv_leg.ts`) asserts the unlinkability half mechanically.
 
 | party | holds | can read |
 |---|---|---|
