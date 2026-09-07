@@ -1,6 +1,6 @@
 # Stealth payment receiving on Tron
 
-Author: JunBeom Lee. Status: draft.
+Author: JunBeom Lee. Status: accepted.
 Origin: conversation
 
 ## Problem
