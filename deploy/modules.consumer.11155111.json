@@ -1,0 +1,15 @@
+{
+  "chainId": 11155111,
+  "chunkArity": 86,
+  "consumerDisburseModule": "0x711B21c31FB8392c6FF8657F5cFFbcc1A53D3400",
+  "depositPrivModule": "0x690b8C88a6D148B795D742C692e1A21c61FD19cC",
+  "depositPrivVerifier": "0x459f80A457f11328eBd67aeBFa9F90D05c58b27f",
+  "disbursePrivVerifier": "0xcD079781130db3bb9c6fbc42abF21F616Cae444C",
+  "pool": "0x17A89cC5FF3395Bb01464c9E422749CcDbFa8C3f",
+  "transfer10x2PrivModule": "0xDf139355d8103Fb43f8E0ee1d526D453585CAb0C",
+  "transfer10x2PrivVerifier": "0x960BDc691bB5F6BAfa45Ee9DD188BB4B925Bcc82",
+  "transferPrivModule": "0xC8D2473e9a8021afCc0c2B746ea674925A3c7d57",
+  "transferPrivVerifier": "0x93365980784ef504613EF5822ce1289CF858Fc10",
+  "withdrawPrivModule": "0x1007D41Fed9B13F4B56f2E9BFA5Bcd5940C8e320",
+  "withdrawPrivVerifier": "0x2a72fea8e97fF79069B3D0165A5DB1Fef7F9322C"
+}

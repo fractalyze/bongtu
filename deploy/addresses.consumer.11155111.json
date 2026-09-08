@@ -1,0 +1,13 @@
+{
+  "batchSize": 256,
+  "chainId": 11155111,
+  "gatewaySigner": "0xd95cc73748DefFaB162E2E248E2C3593e1C31E33",
+  "gatewayUrl": "https://phrase-meditation-sends-solid.trycloudflare.com/ens/{sender}/{data}.json",
+  "owner": "0xe92a97e645351268F3d60d5a27EB842A5b293058",
+  "pool": "0x17A89cC5FF3395Bb01464c9E422749CcDbFa8C3f",
+  "poolImpl": "0x594408F216d096E8BCB21cdceb58a14186895892",
+  "portalPrivFactory": "0xd18A234f8B53616402A5207a76D7BCc329ca536B",
+  "poseidon": "0xD030602597CC7F47107e6F96d0d1D6b73a71698F",
+  "resolver": "0x9D6a62C5dfE749875d94131Fe31e7d1272B58b02",
+  "token": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+}
