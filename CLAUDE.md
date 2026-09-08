@@ -71,6 +71,12 @@ not re-derive what those files own.
   (`realproofs.arbiterKey` == disburse256 `public[9..10]` — the `Deploy.s.sol` default). Only
   override `ARBITER_KEY_X/Y` alongside freshly re-proven fixtures, or the smoke deposit
   reverts `InvalidProof`.
+- **Anvil-pass ≠ live-pass (two measured classes)**: never pass viem `writeContract` an
+  `account:` ADDRESS value — it downgrades to node-side `eth_sendTransaction`, which anvil's
+  unlocked accounts accept and every real RPC refuses ("unknown account"); the walletClient's
+  hoisted local account must sign. And any HTTP surface browsers consume cross-origin (the CCIP
+  gateway) needs CORS asserted in tests — Node-fetch gates enforce no CORS, so a missing header
+  reads as server-side 200 while the wallet sees nothing.
 - **Local-pass ≠ CI-pass**: hosted runners lack the dev-box defaults (the `BONGTU_NODE_MODULES`
   fallback path, prebuilt `circuits/out` / `chains/evm/out`, fast spawns). Check any new CI-run
   test against a clean env before pushing — see `.dev/ci.md`. In particular, refresh
