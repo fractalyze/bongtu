@@ -204,6 +204,107 @@ project's domain differs from the wallet's default — the wallet-web project's
 `VITE_PAY_BASE_URL` (the Receive screen's copy-payment-link host). The anvil
 drill for this script is `gates/test_deploy_portal_priv.sh`.
 
+### Deploy the Sepolia payment-name demo stack
+
+The payment name's free acceptance environment
+([docs/portal.md](../docs/portal.md#the-payment-name-ens-front-door)): a
+consumer-only pool wrapping Circle's Sepolia USDC, the priv factory, and the
+CCIP resolver, on chain 11155111 — the live Maroo pool is never touched. The
+anvil drill for the whole contract ladder is
+`gates/test_deploy_consumer_name.sh`; the automated resolution gate is
+`gates/name_leg.ts` inside `e2e_m0.sh`. Every step below is a human step
+(user-held keys); the demo costs nothing but faucet funds.
+
+**Step 0 — canary.** Before deploying anything, resolve
+`test.offchaindemo.eth` in each wallet that matters (Phantom especially):
+that measures its CCIP-Read support for free. Record the result in the
+wallet-support matrix ([docs/portal.md](../docs/portal.md#the-payment-name-ens-front-door)).
+
+**1. Register the root name** on Sepolia ENS (the ENS app against Sepolia,
+free) from the name-owner wallet. Everything below is parameterized on
+`{root}.eth`.
+
+**2. Deploy the contracts** (deployer funded from a Sepolia faucet):
+
+```sh
+cd bongtu/chains/evm
+export DEPLOYER_KEY=0x<funded-sepolia-key>     # .env (gitignored)
+export LIVE_RPC=https://<sepolia-rpc>
+
+# the consumer-only pool wrapping Circle's Sepolia USDC — copy the token
+# address from Circle's published record AT DEPLOY TIME, by field name
+TOKEN_ADDRESS=0x<circle-sepolia-usdc> \
+forge script ../deploy/forge/DeployConsumerOnly.s.sol:DeployConsumerOnly \
+  --rpc-url "$LIVE_RPC" --broadcast --skip-simulation
+
+# the priv factory, against the CONSUMER record pair
+RECORD_PROFILE=consumer \
+forge script ../deploy/forge/DeployPortalPriv.s.sol:DeployPortalPriv \
+  --rpc-url "$LIVE_RPC" --broadcast --skip-simulation
+
+# the resolver: signer = the gateway key's ADDRESS, URL = the public gateway
+GATEWAY_SIGNER=0x<address-of-ENS_GATEWAY_KEY> \
+GATEWAY_URL="https://<indexer-host>/ens/{sender}/{data}.json" \
+forge script ../deploy/forge/DeployNameResolver.s.sol:DeployNameResolver \
+  --rpc-url "$LIVE_RPC" --broadcast --skip-simulation
+```
+
+Commit the resulting `deploy/addresses.consumer.11155111.json` +
+`modules.consumer.11155111.json`. Wire everything downstream from that pair
+BY FIELD NAME.
+
+**3. `setResolver` on the root name** (one Sepolia tx from the name-owner
+wallet, in the ENS app): point `{root}.eth` at the recorded `resolver`.
+Wildcard resolution makes every directory label resolve with no further
+per-name transaction.
+
+**4. Host the indexer/gateway publicly over HTTPS** (MetaMask's resolver
+snap fetches the gateway URL directly, so a tunnel or public host is
+required). Env, beyond the standard table in
+[`apps/indexer/README.md`](../apps/indexer/README.md): `CHAIN_ID=11155111`, a
+Sepolia RPC (`LOG_CHUNK=10000` suits rate-capped public RPC), `POOL` +
+`PORTAL_PRIV_FACTORY` from the consumer record, `PORTAL_OPERATOR_TOKEN`
+(shared with the bot), `ENS_RESOLVER` (the record's `resolver`),
+`ENS_GATEWAY_KEY` (the signing key whose address step 2 recorded as
+`gatewaySigner`), `ENS_GATEWAY_CHAIN_ID=11155111`. No `AUTHORITY_KEY`
+exists on this profile.
+
+**5. Run the sweeper bot** (`MODE=priv`, CPU prover, explicit env per
+[`apps/sweeper/README.md`](../apps/sweeper/README.md)); fund its key from a
+Sepolia faucet — `/health` alarms on a zero gas balance.
+
+**6. Point the web apps** at the demo: wallet-web + pay-web with
+`VITE_TOKEN_SYMBOL=USDC`, `VITE_TOKEN_DECIMALS=6`, `VITE_CHAIN_NAME=Sepolia`,
+`VITE_PORTAL_PRIV_FACTORY` + `VITE_SWEEPER_INITCODE_HASH` from the record,
+and the indexer URL. The browser fallback is a DNS wildcard on the product
+domain redirecting `{label}.<domain>` to the pay page's `/p/{label}`.
+
+**7. The acceptance loop** (spec R6, run personally): register a v2 payment
+name; in MetaMask (extension 13.49+, **Sepolia selected**) type
+`{label}.{root}.eth` into the send field and note the resolved address;
+close the popup or wait 60 s (the extension's forward cache is 60 s per
+(name, chain), UI-session scoped; mobile caches nothing) and resolve again —
+the two addresses differ; confirm both appear on `GET
+/portal/announcements` and match the recipient's view-key scan; send faucet
+USDC (Circle's Sepolia faucet) to one; the bot sweeps it unattended; the
+shielded balance shows in wallet-web. An Etherscan name-page refresh is the
+secondary freshness display (it re-resolves per load).
+
+**Signer rotation** (a leaked gateway key signs redirections — detectable,
+per the evidence chain — until rotated): the resolver owner calls
+`setSigner(newAddress)` (one tx), the indexer's `ENS_GATEWAY_KEY` env swaps
+to the new key, restart. `setGatewayUrls` is the same lever for a URL move.
+
+**Mainnet promotion** (the ladder after the demo passes; posture:
+[docs/security-model.md](../docs/security-model.md#stealth-receiving-the-portalreceive-edge)
+— real value on unaudited contracts, self-test scale, root unadvertised,
+audit before anything beyond): register the real `.eth` 2LD; run the same
+three deploys against mainnet (a few dollars at the measured ~0.05 gwei);
+commit `addresses.consumer.1.json`; the mainnet gateway serves
+`ENS_GATEWAY_CHAIN_ID=1` (coinType 60); fund the mainnet bot key; re-run
+the loop with real USDC. Only the pool's USDC is swept — ETH sent to a
+destination is permanently stranded (the C1 warning in security-model.md).
+
 ### Deploy the dedicated ct-free enterprise pool (second pool, same chain)
 
 One command stands a dedicated enterprise pool BESIDE the chain's shared pool —
