@@ -268,8 +268,14 @@ Canonical data stays at the top; everything else is grouped by what runs it.
 - `DeployConsumerOnly.s.sol` — the consumer-only profile (`initializeConsumerOnly`: no arbiter key
   exists; consumer modules are the whole op surface).
 - `ConsumerModuleKit.sol` — the one declaration of the consumer module-set deploy + its record writer.
+- `DeployNameResolver.s.sol` — the payment name's CCIP resolver (`PortalPrivResolver`) beside a
+  recorded priv factory: signer + gateway URL from env, recorded into the consumer record by field
+  name (`resolver`, `gatewaySigner`, `gatewayUrl`); rerun-guarded.
 - `Smoke.s.sol` — real-deposit smoke tx against the deployed pool.
 - `AddressBook.sol` — the one declaration of the addresses-file field list, plus its read + merge-write.
+- `ConsumerBook.sol` — the same declaration for the consumer record pair
+  (`addresses.consumer.<chainid>.json`), so add-on scripts merge-write without dropping each
+  other's fields.
 
 `live/` — TypeScript drivers against the canonical LIVE pool (`addresses.<chainid>.json`). Each needs
 `DEPLOYER_KEY` and pins `gasPrice` from `GAS_PRICE_PIN_GWEI`:
@@ -289,10 +295,16 @@ Canonical data stays at the top; everything else is grouped by what runs it.
   portal leg (`portal_leg.ts`), the arbiter-free consumer leg (`consumer_leg.ts`: profile deploy +
   V3 upgrade, CPU-proved consumer ops + disburse chunk txs, PUBLIC indexer, self-scan discovery +
   batch-interior spend via the auth-free `/path`, and the committed disbursePriv256 calldata replay),
-  and the receive leg (`portal_priv_leg.ts`: pay-page issuance, distinct-EOA payments, receive-mode
-  depositPriv sweeps, the R7 unlinkability grep, self-scan discovery).
+  the receive leg (`portal_priv_leg.ts`: pay-page issuance, distinct-EOA payments, receive-mode
+  depositPriv sweeps, the R7 unlinkability grep, self-scan discovery), and the payment-name leg
+  (`name_leg.ts`: the wallet's CCIP-Read loop against the real resolver + gateway indexer —
+  per-resolution freshness, announce-before-return, tamper/expiry rejection, coinType routing,
+  sweep + self-scan).
 - `test_deploy_portal_priv.sh` — the receive-factory add-on deploy drill (module-set precondition,
   happy path, rerun refusal).
+- `test_deploy_consumer_name.sh` — the consumer-record ladder drill (DeployConsumerOnly →
+  DeployPortalPriv `RECORD_PROFILE=consumer` → DeployNameResolver on a scratch anvil, asserting the
+  record fields land, both rerun refusals, and the factory-first precondition).
 - `test_one_shot_deploy.sh` — scratch-anvil drill of the deploy: B=256, all six verifier getters
   wired and matching the record, Initializable version 1, `currentEpoch() == 0`.
 - `upload_circuits.sh` — publishes the wallet's proving assets to the Vercel Blob store.

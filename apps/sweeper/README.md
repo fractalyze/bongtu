@@ -54,6 +54,15 @@ without either, one clear line each):
 | `MIN_SWEEP`    | priv mode: `0` (dust threshold, token base units) |
 | `PORTAL_OPERATOR_TOKEN` | unset — REQUIRED once the indexer gates its attributed feed (401 without) |
 
+A non-Maroo profile (the Sepolia payment-name demo,
+[`deploy/README.md`](../../deploy/README.md#deploy-the-sepolia-payment-name-demo-stack))
+is env only — no code or default change: set `CHAIN_ID`, `RPC`, and the
+record-derived `POOL`/`FACTORY`/`MODULE` explicitly (from
+`deploy/addresses.consumer.<chainid>.json` + `modules.consumer.<chainid>.json`
+BY FIELD NAME), `TOKEN` to the chain's pool token (Sepolia USDC), `MODE=priv`,
+and `MIN_SWEEP` in that token's base units (USDC has 6 decimals, so a `0`
+threshold sweeps dust).
+
 Endpoint: `GET /health` → `{ ok, sweeper, balanceWei, lastSweepAt, unswept }`,
 `ok=false` when the gas balance is zero (an unfunded sweeper silently stops
 shielding payments — that must be visible). The key is never logged and never

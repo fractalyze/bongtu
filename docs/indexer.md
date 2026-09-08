@@ -132,6 +132,8 @@ existing and refusing.
 | `POST /portal/announce` | pay-page issuance `{ label, ephemeralPub, viewTag, stealthAddr }` — the derivation happened in the SENDER'S BROWSER; the server resolves the label, **recomputes the destination itself** against the receive factory (a client destination is not even accepted) and returns the public record. **409** for a stealth address already recorded (first write wins — the page announces before it displays, so the honest record always exists first); 404 unknown label or **`PORTAL_PRIV_FACTORY` unset** | none — same recorded spam posture as `/pay` |
 | `GET /portal/announcements?cursor=&limit=` | every recorded announcement in the **attribution-free public projection** `[{ kind:"portal", seq, rail, factory, ephemeralPub, viewTag, stealthAddr, destination, createdAt, swept, sweptTxHash, sweptAmount }]` — **no `name`, no `owner`, by design**: this projection is the serving surface of the receive product's unlinkability claim, and the recipient's own view key decides which rows are its own (`scanStealthAnnouncement`). 404 unless a factory is configured | none |
 | `GET /portal/unswept?cursor=&limit=` | the unswept subset **with attribution** (`name`, `owner` — what the sweep bot needs to build the deposit) — the bot's work feed. Records flip `swept` when a factory's `Swept(salt, sweeper, amount)` log is ingested (salt = `portalSalt(stealthAddr)`); a receive-factory `Announced(salt, ephemeralPub, viewTag)` log additionally BACKFILLS a row for a salt the store has lost — the chain-only recovery path | **`x-operator-token` header == `PORTAL_OPERATOR_TOKEN`** when that env is set (401 otherwise); open when unset (local depositor-facing flows) |
+| `GET /ens/{sender}/{data}.json` | the CCIP-Read name gateway (ERC-3668 GET transport; `sender` = the resolver address, `data` = the ENSIP-10 `resolve` calldata from the `OffchainLookup` revert). A served lookup IS an issuance: fresh derivation against the queried chain's priv factory, announcement recorded first, then `{ data }` = the abi-encoded `(result, expires ≤ 300 s, sig)` the resolver's `resolveWithProof` verifies, `Cache-Control: no-store`. Anything unservable — foreign sender, node/name mismatch, unknown or v1-only label, unserved coinType — 4xxes and mints NOTHING (see § The name gateway); **404 unless `ENS_RESOLVER` is configured** | none — same recorded spam posture as `/pay` |
+| `POST /ens` | the same lookup over the ERC-3668 POST transport (`{ sender, data }` body) | none |
 | `GET /names/{name}` | one name-directory record `{ name, owner, viewPub, spendPub, noteViewPub?, kemEk?, updatedAt }` (see § Name directory); 404 unknown, 400 non-canonical name | none |
 | `POST /names` | owner-signed registration `{ name, owner, viewPub, spendPub, [noteViewPub, kemEk,] ts, sig }` (see § Name directory); 400 malformed / lone consumer half, 401 bad sig/ts/cross-form, **409** taken by another owner | the owner's bjj signature in the payload |
 | `GET /notes?owner=&ts=&sig=` (or `token=`) | one owner's decrypted notes `[{ owner, value, salt, leafIndex, commitment, txHash, spent }]` | read-auth, **arbiter mode only** |
@@ -336,6 +338,27 @@ signs both full-width zero-sentinels. Rationale and the exact digest forms:
 Wire shapes + the client half (`buildNameRegistration`, `buildNameRegistrationV2`, `registerName`,
 `resolveName`): `@bongtu/core/indexerApi`; server half: `apps/indexer/src/names.ts` +
 `api/routes/names.ts`; stealth meta-address semantics: `packages/core/src/notes/stealth.ts`.
+
+## The name gateway (CCIP-Read)
+
+With `ENS_RESOLVER` set (plus `ENS_GATEWAY_KEY`, the secp256k1 response-signing key, and
+`ENS_GATEWAY_CHAIN_ID`, the one funds chain served), the `/ens` routes turn the indexer into the
+payment name's gateway ([portal.md](portal.md#the-payment-name-ens-front-door)): `PortalPrivResolver`
+reverts every wallet's `resolve` at these URLs, and each served lookup derives a fresh destination,
+announces it through the same first-write-wins `portal.issue` path a pay-page issuance uses, then
+signs. The signing key follows the `AUTHORITY_KEY` handling rule — memory only, never logged, never
+served; the gateway tests grep responses for it.
+
+Routing is ENSIP-11: the legacy `addr(bytes32)` form carries no coinType — it is what a wallet on an
+ENS-native chain asks its own registry — so it means "this deployment's chain" and is always served;
+the `addr(bytes32,uint256)` form names an explicit chain, and only `ENS_GATEWAY_CHAIN_ID`'s coinType
+answers. Any other coinType, and every fence (foreign `sender`, node mismatch, unknown label, a label
+without the full v2 consumer identity), fails closed with a 4xx and **mints no row**.
+
+Resolution-minted rows extend the recorded spam posture, with a wrinkle worth naming: any resolving
+surface mints — an Etherscan name-page refresh is a public, scriptable mint trigger (MetaMask's
+500 ms input debounce merely moderates keystroke volume). Rows stay hints: the bot sweeps only
+funded addresses, and rate limiting is ops.
 
 ## Announcement feed
 

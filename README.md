@@ -116,6 +116,7 @@ have not been re-run on it yet.
 | **GPU prover service** | The employer-side proving box: three circuits held resident on one GPU, in-process witness workers, ~0.5 s warm proof for the 256-batch. Auth- and origin-gated, so only the employer's own console can reach it. Run on demand rather than kept up: it holds ~25 GB of GPU while resident, and the payroll console is the only surface that needs it — the wallet proves in the browser. |
 | **Indexer (arbiter mode)** | Mirrors the on-chain tree, decrypts every authority envelope, serves per-owner `/notes` + `/history` behind signature read-auth, and raises disclosure alarms when a batch's ciphertext disagrees with the chain. |
 | **BongtuPool on Maroo Testnet** | The UUPS-proxied pool in [Status](#status): six Groth16 verifiers, the five consumer modules, the IMT, the kKRW escrow, and the enforced 2054-element disclosure on every disburse. |
+| **Payment name (ENS front door)** | `{label}.{root}.eth` resolves to a **fresh** stealth destination on every lookup: `PortalPrivResolver` (ENSIP-10 wildcard, ERC-3668 CCIP-Read) plus the indexer's `/ens` gateway — announce-before-return, signed expiry-bounded answers, ENSIP-11 chain routing ([docs/portal.md](docs/portal.md#the-payment-name-ens-front-door)). Deploys as a free Sepolia demo stack (consumer-only pool + USDC + resolver, [runbook](deploy/README.md#deploy-the-sepolia-payment-name-demo-stack)); the Maroo pool is untouched. |
 
 The two web apps are static; the only server-side pieces are the employer's own prover and the
 institution's arbiter indexer — exactly the two parties that hold those roles in the design.
@@ -232,7 +233,7 @@ System guarantees and inter-component contracts live in [`docs/`](docs/), one fi
 - [Indexer](docs/indexer.md): the mirror invariant, single-transaction persist and gap-only resume, the HTTP API and its read-auth, the arbiter-mode trust boundary.
 - [Wallet](docs/wallet.md): the two wallets on one engine — the shared core (keys, lock, in-browser proving, spend chains), the enterprise wallet, the consumer wallet.
 - [Relayer](docs/relayer.md): the gas-sponsoring withdraw submitter and why a proof-bound recipient makes third-party submission safe.
-- [Portal](docs/portal.md): stealth deposits and stealth receiving — a plain transfer from any wallet becomes a shielded note via CREATE2 destinations and the sweep bot; the receive product adds browser-side issuance and consumer-family (no-auditor) sweeps.
+- [Portal](docs/portal.md): stealth deposits and stealth receiving — a plain transfer from any wallet becomes a shielded note via CREATE2 destinations and the sweep bot; the receive product adds browser-side issuance, consumer-family (no-auditor) sweeps, and the ENS payment name (a CCIP-Read resolver answering a fresh destination per resolution).
 - [Solana rail](docs/solana-rail.md): the same op families on Solana — one program, PDA state, Transaction v1, the 1-tx disburse binding with institution-served disclosure.
 - [Consumer family](docs/consumer.md): the no-auditor op family — op-module core, the five consumer circuits, self-scan discovery, deploy profiles, op-level audit semantics.
 - [Error surfaces](docs/errors.md): the consequence-class taxonomy and its surfaces (toast = event, banner = state), the money-state line, the no-telemetry stance.

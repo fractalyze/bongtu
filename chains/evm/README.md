@@ -20,6 +20,13 @@ src/
                        all extending the shared abstract base ConsumerOpModule;
                        each wires one verifier, owns one public layout, and routes every
                        state effect through BongtuPool.applyOp*
+  Portal*.sol          the stealth-deposit front door (docs/portal.md): the shared
+                       PortalFactoryBase/PortalSweeperBase, the enterprise pair
+                       (PortalFactory/PortalSweeper, pool.deposit) and the consumer pair
+                       (PortalPrivFactory/PortalPrivSweeper, depositPriv module), plus
+                       PortalPrivResolver — the payment name's stateless ENSIP-10 wildcard
+                       resolver (ERC-3668 CCIP-Read; every resolve reverts OffchainLookup at
+                       the gateway, resolveWithProof verifies signer + expiry)
   verifiers/           snarkjs-generated Groth16 verifiers, contract-renamed only:
                        Deposit, Transfer, Transfer10, Transfer10x2, Withdraw,
                        Disburse (1x16 dev), Disburse256 (prod), and the consumer family
@@ -46,6 +53,10 @@ test/
   ConsumerModules.t.sol the five consumer modules vs the real verifiers + committed consumer
                        fixtures: accepts, disburse chunk lifecycle, canonical-form binding,
                        cross-family note interop, module-level negatives
+  Portal*.t.sol        the front-door contracts: factory/sweeper pairs (committed CREATE2
+                       parity vectors, sweep guards) and the resolver (OffchainLookup shape,
+                       signed-response accept + expiry/tamper rejection, the TS/Sol
+                       signature-preimage parity vector)
   Upgrade.t.sol        UUPS upgrade gate (state survives an implementation swap; initializer
                        runs once; the V3 module payload + applyOp gate post-upgrade)
   GasReport.t.sol      per-operation gas via gasleft() deltas
