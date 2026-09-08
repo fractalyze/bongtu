@@ -13,6 +13,12 @@ Trust posture, failure modes, and the announce wire contract are owned by
 [docs/portal.md](../../docs/portal.md) (receive section) and
 [docs/indexer.md](../../docs/indexer.md) (`POST /portal/announce`).
 
+This page is also the payment name's browser fallback
+([docs/portal.md](../../docs/portal.md#the-payment-name-ens-front-door)): a
+sender whose wallet resolves no ENS opens `{label}.<product domain>`, and a
+DNS wildcard on that product-owned domain redirects to `/p/{label}` here —
+plain hosting on the deployment's origin, no ENS machinery in this app.
+
 ## Run
 
 ```bash
@@ -33,6 +39,9 @@ set or the announce route 404s.
   `deploy/addresses.<chainid>.json` `portalPrivFactory`).
 - `VITE_SWEEPER_INITCODE_HASH` — the factory's `sweeperInitCodeHash` (the
   committed parity vector's value; see `chains/evm/test/PortalPriv.t.sol`).
+- `VITE_CHAIN_NAME` / `VITE_TOKEN_SYMBOL` — the network and asset the facts
+  card states (defaults `Maroo` / `kKRW`; the Sepolia payment-name demo sets
+  `Sepolia` / `USDC`).
 
 The last two pin the CREATE2 mapping the page computes locally, so a hostile
 indexer can at worst hide a payment, never redirect one: the server's

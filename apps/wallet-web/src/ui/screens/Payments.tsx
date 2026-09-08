@@ -18,10 +18,10 @@ import { parseAbi } from "viem";
 
 import { getPortalAnnouncements } from "@bongtu/core/indexerApi";
 import { ERC20_ABI_FRAGMENTS } from "@bongtu/core/network";
-import { formatKkrw } from "@bongtu/client/money";
+import { formatToken } from "@bongtu/client/money";
 import { keyCache } from "@bongtu/ui/keyCache";
 
-import { DEFAULTS } from "../../config.js";
+import { DEFAULTS, TOKEN } from "../../config.js";
 import { consumerErrorMessage } from "../../lib/errors.js";
 import {
   buildPaymentRows,
@@ -66,8 +66,8 @@ function Row({ row }: { row: PaymentRow }): ReactNode {
       </span>
       <span className="flex flex-col items-end gap-1 flex-none">
         <span className="font-bold tabular-nums text-[0.92rem] leading-[1.25] text-pos">
-          +{formatKkrw(row.amount)}
-          <span className="text-muted font-semibold text-[0.72rem] ml-1">kKRW</span>
+          +{formatToken(row.amount, TOKEN.decimals)}
+          <span className="text-muted font-semibold text-[0.72rem] ml-1">{TOKEN.symbol}</span>
         </span>
         <span className={`rounded-full px-2 py-0.5 text-[0.68rem] font-semibold ${pill.className}`}>
           {pill.label}

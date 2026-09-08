@@ -35,10 +35,38 @@ export function testnetFromEnv(value: string | undefined): boolean {
   return (value ?? "true") !== "false";
 }
 
+/**
+ * Token display facts from ENV (spec payment-name R12): the Maroo kKRW/18
+ * defaults keep every existing build byte-identical; the Sepolia demo profile
+ * sets USDC/6 — without the decimals knob a 6-decimal balance would render
+ * wrong by a factor of 10^12. Pure so the node runner can pin it.
+ */
+export function tokenFromEnv(
+  symbol: string | undefined,
+  decimals: string | undefined,
+): { symbol: string; decimals: number } {
+  // `decimals || "18"`, not ??: Number("") is 0, and an empty env var must
+  // mean "unset", never a silent 0-decimals display.
+  const d = Number(decimals || "18");
+  if (!Number.isInteger(d) || d < 0 || d > 36) {
+    throw new Error(`VITE_TOKEN_DECIMALS must be an integer number of decimals (got "${decimals}")`);
+  }
+  return { symbol: symbol || "kKRW", decimals: d };
+}
+
+export const TOKEN = tokenFromEnv(import.meta.env?.VITE_TOKEN_SYMBOL, import.meta.env?.VITE_TOKEN_DECIMALS);
+
+/** The network display name from ENV (the R12 profile knob's sibling): a
+ * non-Maroo profile must not caption its screens "Maroo Testnet". Pure so the
+ * node runner can pin the default. */
+export function chainNameFromEnv(value: string | undefined): string {
+  return value || CHAIN_NAME;
+}
+
 export const DEFAULTS = {
   chainId: CHAIN_ID,
   // The chain's display name, for the screens that show which network this is.
-  chainName: CHAIN_NAME,
+  chainName: chainNameFromEnv(import.meta.env?.VITE_CHAIN_NAME),
   // Testnet posture from ENV, never copy checks (see testnetFromEnv).
   testnet: testnetFromEnv(import.meta.env?.VITE_TESTNET),
   rpc: RPC_URL,

@@ -12,6 +12,7 @@ import type { ReactNode } from "react";
 import { StagedProgress, type StagedStep } from "./StagedProgress.js";
 import { DownloadProgress } from "./DownloadProgress.js";
 import { ScreenHeader } from "./ScreenHeader.js";
+import { TOKEN } from "../../config.js";
 import { Button } from "./controls.js";
 import { IconShieldCheck, IconWallet } from "./icons.js";
 import type { CircuitDownloadView } from "../hooks.js";
@@ -38,7 +39,7 @@ function Panel({
 export function AmountHero({ amount }: { amount: string }): ReactNode {
   return (
     <div className="text-center text-[1.9rem] [font-weight:750] py-2 tabular-nums">
-      {amount} <span className="text-[0.62em] font-semibold text-muted ml-1">kKRW</span>
+      {amount} <span className="text-[0.62em] font-semibold text-muted ml-1">{TOKEN.symbol}</span>
     </div>
   );
 }
@@ -105,19 +106,19 @@ export function FlowHint({ direction }: { direction: "shield" | "unshield" }): R
   const publicCard = (
     <span className="flex flex-col items-center gap-1.5 bg-surface border border-border rounded-xl px-4 py-3 min-w-[104px]">
       <IconWallet size={22} className="text-primary" />
-      <span className="text-[0.8rem] font-semibold text-muted">Public kKRW</span>
+      <span className="text-[0.8rem] font-semibold text-muted">{`Public ${TOKEN.symbol}`}</span>
     </span>
   );
   const privateCard = (
     <span className="flex flex-col items-center gap-1.5 bg-pos-bg border border-[#cfe5d6] rounded-xl px-4 py-3 min-w-[104px]">
       <IconShieldCheck size={22} className="text-pos" />
-      <span className="text-[0.8rem] font-semibold text-pos">Private kKRW</span>
+      <span className="text-[0.8rem] font-semibold text-pos">{`Private ${TOKEN.symbol}`}</span>
     </span>
   );
   const [from, to] =
     direction === "shield" ? [publicCard, privateCard] : [privateCard, publicCard];
   const label =
-    direction === "shield" ? "Public kKRW to Private kKRW" : "Private kKRW to Public kKRW";
+    direction === "shield" ? `Public ${TOKEN.symbol} to Private ${TOKEN.symbol}` : `Private ${TOKEN.symbol} to Public ${TOKEN.symbol}`;
   return (
     <div className="flex items-center justify-center gap-3" aria-label={label}>
       {from}

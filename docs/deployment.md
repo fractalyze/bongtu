@@ -219,7 +219,13 @@ The script-by-script inventory (forge scripts, live drivers, gates) is owned by
   Vercel Blob store under a `CIRCUITS_VERSION` path, refusing assets whose zkey hash misses the
   pin in the wallet's `config.ts`.
 - `deploy/forge/AddressBook.sol` declares the `addresses.<chainid>.json` field list once, with a
-  read + merge-write so a script names only the fields it changes.
+  read + merge-write so a script names only the fields it changes. `ConsumerBook.sol` is the same
+  contract for the consumer record pair (`addresses.consumer.<chainid>.json`), which is what lets
+  the consumer-only profile's add-on scripts — the priv factory
+  (`DeployPortalPriv RECORD_PROFILE=consumer`) and the name resolver (`DeployNameResolver.s.sol`)
+  — compose without dropping each other's fields (drill:
+  `deploy/gates/test_deploy_consumer_name.sh`; runbook:
+  [`deploy/README.md`](../deploy/README.md#deploy-the-sepolia-payment-name-demo-stack)).
 - **`--skip-simulation` is required** on every forge script run: `Deploy.s.sol` deploys Poseidon
   via inline-assembly `create`, which forge's on-chain simulation cannot model. The deployer key
   lives in `.env` (gitignored, template `.env.example`); `chains/evm/broadcast/` and

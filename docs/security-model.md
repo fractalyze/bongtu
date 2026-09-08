@@ -151,14 +151,16 @@ duty for an alarm to protect.
 ## Stealth receiving: the portal/receive edge
 
 The pool-edge machinery that turns a plain kKRW transfer into a shielded note
-([portal.md](portal.md)) adds three parties the tables above do not cover. The
-claims here are the SHIPPED wording — the gate leg
-(`deploy/gates/portal_priv_leg.ts`) asserts the unlinkability half mechanically.
+([portal.md](portal.md)) adds four parties the tables above do not cover. The
+claims here are the SHIPPED wording — the gate legs
+(`deploy/gates/portal_priv_leg.ts`, `deploy/gates/name_leg.ts`) assert the
+unlinkability half mechanically.
 
 | party | holds | can read |
 |---|---|---|
 | **pay-page / indexer operator** | the announcement store and the name directory it serves | **the identity→payment mapping**: which label each issuance was announced under, every destination, every amount. It issues the URLs and records the announcements — operator-blindness (OMR/TEE class work) is out of scope and excluded from the claim. It can HIDE an unswept payment (a swept one is recoverable from the on-chain `Announced` event alone); it can never redirect one — the pay page recomputes the destination locally and fails closed on mismatch |
 | **sweep bot (operator key)** | the factory-owner EOA key + the token-gated attributed work feed | the same mapping, operator-side. Redirection-resistance rests on this key (the portal v1 concession): `sweep` is onlyOwner because the deposit proof binds no owner. On the **receive** pair it cannot OPEN what it mints — the depositPriv witness is built from the recipient's public triple, and the notes seal to keys only the recipient holds |
+| **name gateway (CCIP-Read) operator** | the response-signing key + the same announcement store (the gateway runs inside the indexer, [portal.md](portal.md#the-payment-name-ens-front-door)) | **every resolution query — sender IP, name, timing — BEFORE any payment exists**: a strictly earlier signal than the pay page's, since a wallet resolves while the sender is still typing. It can censor (refuse or fail a resolution); it cannot redirect silently: the resolver contract accepts only answers signed by the owner-set signer, every honest answer has a public announcement row the recipient's view key audits, and a signed answer with no honest row — or a row no view key claims — is non-repudiable evidence of misbehavior. Detection is after the fact; prevention is not claimed |
 | **chain observer** | nothing | the plain transfer (sender, destination, amount), the sweep tx (destination, deposit `pub[0]`, ciphertext) — and NO datum linking two payments to each other or to the recipient's registered identity: recipient keys appear in no calldata or log in the clear |
 
 **The precise privacy statement** (use this wording, not "the amount is
@@ -166,6 +168,23 @@ shielded"): the **per-payment amount is public twice** — once in the plain
 transfer, once in the deposit's public `pub[0]`. What is shielded is note
 ownership, the recipient's aggregate balance, and all onward flow; what is
 unlinkable is payment-to-payment and payment-to-identity, on-chain.
+
+**Stranded assets: the resolved address is a contract, not the stealth EOA.**
+Every front door (pay page and name alike) answers with the factory's CREATE2
+sweeper address; the derived stealth keys control the stealth EOA, never that
+destination. The shipped sweeper family is ERC20-only with no payable path,
+and the factory deploys only that initcode and is not upgradeable — so native
+ETH, or any token other than the pool's, sent to an undeployed destination
+has no recovery path under the shipped contracts (after deployment the
+sweeper at least rejects plain ETH transfers). An ENS-resolved name makes an
+accidental ETH send easy in MetaMask; the docs promise is only ever "the
+pool's ERC20 is swept", and everything else is permanently stranded.
+
+**Posture per rung.** The receive and name contracts are unaudited. The demo
+rung runs on Sepolia faucet funds, where stranding and contract risk cost
+nothing. The mainnet promotion rung puts real value on unaudited contracts:
+it runs at self-test scale with the root name unadvertised and documented
+caps, and an audit precedes anything beyond that.
 
 ## Post-quantum: the hybrid authority-envelope key
 

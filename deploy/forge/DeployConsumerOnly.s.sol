@@ -10,6 +10,7 @@ import {IERC20} from "bongtu-src/utils/IERC20.sol";
 import {MockERC20} from "bongtu-test/mocks/MockERC20.sol";
 
 import {ConsumerModuleKit, ConsumerModuleRecord} from "./ConsumerModuleKit.sol";
+import {ConsumerBook, ConsumerRecord} from "./ConsumerBook.sol";
 
 /// @title DeployConsumerOnly — the CONSUMER-ONLY deploy profile (OPMOD §9
 ///        resolved default; issue #6 acceptance: "a consumer-only profile
@@ -106,18 +107,19 @@ contract DeployConsumerOnly is Script {
     }
 
     function _writeRecords(Deployed memory d, address deployer, uint256 batchSize) private {
-        string memory o = "bongtu-consumer-only";
-        vm.serializeUint(o, "chainId", block.chainid);
-        vm.serializeAddress(o, "owner", deployer);
-        vm.serializeUint(o, "batchSize", batchSize);
-        vm.serializeAddress(o, "poseidon", d.poseidon);
-        vm.serializeAddress(o, "token", d.token);
-        vm.serializeAddress(o, "poolImpl", d.impl);
-        string memory js = vm.serializeAddress(o, "pool", address(d.pool));
-        vm.writeJson(js, string.concat("../../deploy/addresses.consumer.", vm.toString(block.chainid), ".json"));
-        ConsumerModuleKit.write(
-            string.concat("../../deploy/modules.consumer.", vm.toString(block.chainid), ".json"), d.mods
-        );
+        // ConsumerBook owns the field list (add-on scripts merge-write the
+        // same record; a hand-serialized subset here would drop their fields
+        // on a redeploy).
+        ConsumerRecord memory r;
+        r.chainId = block.chainid;
+        r.owner = deployer;
+        r.batchSize = batchSize;
+        r.poseidon = d.poseidon;
+        r.token = d.token;
+        r.poolImpl = d.impl;
+        r.pool = address(d.pool);
+        ConsumerBook.write(ConsumerBook.path(), r);
+        ConsumerModuleKit.write(ConsumerBook.modulesPath(), d.mods);
     }
 
     function _log(Deployed memory d) private pure {

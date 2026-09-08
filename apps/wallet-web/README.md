@@ -48,6 +48,8 @@ All are build-time Vite injects: an existing deployment does not pick up a chang
 | `VITE_INDEXER_PROXY_TARGET` | `http://localhost:8600` | dev/preview only: where the Vite `/indexer` proxy forwards (`vite.shared.ts`) |
 | `VITE_TESTNET` | `true` | the literal `false` switches every testnet-only affordance (mint/faucet UI, Testnet chips) off in one place |
 | `VITE_WC_PROJECT_ID` | unset | unset, the connect modal lists installed extensions only; set, the WalletConnect QR / deep-link path joins it |
+| `VITE_TOKEN_SYMBOL` / `VITE_TOKEN_DECIMALS` | `kKRW` / `18` | the pool token's display facts — every amount the UI renders formats/parses through them (`src/config.ts` TOKEN). A non-Maroo profile sets both (the Sepolia payment-name demo: `USDC` / `6` — without the decimals knob a 6-decimal balance renders wrong by ten orders of magnitude) |
+| `VITE_CHAIN_NAME` | `Maroo` | the network name testnet-facing copy states |
 
 **Ops note: `/indexer` must target a PUBLIC-mode indexer instance.** The consumer
 wallet's whole contract is that it only ever reads the public endpoints, but the

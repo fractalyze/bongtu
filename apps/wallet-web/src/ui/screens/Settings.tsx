@@ -7,7 +7,7 @@
 
 import { useId } from "react";
 import type { ReactNode } from "react";
-import { DEFAULTS } from "../../config.js";
+import { DEFAULTS, TOKEN } from "../../config.js";
 import { useWallet } from "../App.js";
 import { IconExternalLink } from "../components/icons.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
@@ -102,7 +102,7 @@ export function Settings(): ReactNode {
           <Row label="Network" value={`${DEFAULTS.chainName} · chain ${DEFAULTS.chainId}`} />
           <Row label="Pool" full={DEFAULTS.pool} href={`${EXPLORER}/address/${DEFAULTS.pool}`} mono />
           <Row
-            label="Token (kKRW)"
+            label={`Token (${TOKEN.symbol})`}
             full={DEFAULTS.token}
             href={`${EXPLORER}/address/${DEFAULTS.token}`}
             mono

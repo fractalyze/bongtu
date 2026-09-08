@@ -14,7 +14,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import * as config from "../src/config.js";
-import { CIRCUIT_ASSET_BYTES, CIRCUITS_VERSION, DEFAULTS, testnetFromEnv } from "../src/config.js";
+import {
+  CIRCUIT_ASSET_BYTES,
+  CIRCUITS_VERSION,
+  DEFAULTS,
+  chainNameFromEnv,
+  testnetFromEnv,
+  tokenFromEnv,
+} from "../src/config.js";
 import {
   CHAIN_ID,
   CHAIN_NAME,
@@ -71,6 +78,23 @@ test("testnetFromEnv: only the literal 'false' flips testnet off", () => {
 });
 
 // ============================ (2) ABSENCE ====================================
+
+test("tokenFromEnv: Maroo defaults pinned; a non-integer decimals refuses the build", () => {
+  assert.deepEqual(tokenFromEnv(undefined, undefined), { symbol: "kKRW", decimals: 18 });
+  assert.deepEqual(tokenFromEnv("USDC", "6"), { symbol: "USDC", decimals: 6 });
+  assert.equal(tokenFromEnv("USDC", "").decimals, 18, 'empty env means unset, never Number("")=0');
+  // A silently-coerced bad value would render every balance off by orders of
+  // magnitude, so garbage throws at module load instead of displaying.
+  for (const bad of ["6.5", "abc", "-1", "37"]) {
+    assert.throws(() => tokenFromEnv("USDC", bad), /VITE_TOKEN_DECIMALS/, `decimals "${bad}" must throw`);
+  }
+});
+
+test("chainNameFromEnv: sdk name by default, env profile overrides", () => {
+  assert.equal(chainNameFromEnv(undefined), CHAIN_NAME);
+  assert.equal(chainNameFromEnv(""), CHAIN_NAME);
+  assert.equal(chainNameFromEnv("Sepolia"), "Sepolia");
+});
 
 test("no discovery knob: self-scan IS the product, so no mode reaches the config", () => {
   assert.ok(!("discovery" in DEFAULTS), "DEFAULTS carries no discovery mode");

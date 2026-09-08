@@ -18,6 +18,8 @@ export const INDEXER_URL: string = import.meta.env?.VITE_INDEXER_URL ?? "/indexe
 export const PORTAL_PRIV_FACTORY: string = import.meta.env?.VITE_PORTAL_PRIV_FACTORY ?? "";
 export const SWEEPER_INITCODE_HASH: string = import.meta.env?.VITE_SWEEPER_INITCODE_HASH ?? "";
 
-/** The payment coordinates the facts card shows (one rail today). */
-export const CHAIN_NAME = "Maroo";
-export const TOKEN_SYMBOL = "kKRW";
+/** The payment coordinates the facts card shows: env-overridable so a
+ * non-Maroo profile (the Sepolia USDC demo, spec payment-name R12) states
+ * the right network and asset without a fork. */
+export const CHAIN_NAME: string = import.meta.env?.VITE_CHAIN_NAME ?? "Maroo";
+export const TOKEN_SYMBOL: string = import.meta.env?.VITE_TOKEN_SYMBOL ?? "kKRW";

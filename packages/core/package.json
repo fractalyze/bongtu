@@ -9,6 +9,7 @@
     "./babyjub": "./src/crypto/babyjub.ts",
     "./consumer": "./src/notes/consumer.ts",
     "./eddsa": "./src/crypto/eddsa.ts",
+    "./ens": "./src/chain/ens.ts",
     "./envelope": "./src/crypto/envelope.ts",
     "./errors": "./src/errors.ts",
     "./extern": "./src/chain/extern.ts",

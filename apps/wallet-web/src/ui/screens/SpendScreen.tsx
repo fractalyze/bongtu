@@ -24,7 +24,7 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { getAddress } from "viem";
-import { DEFAULTS } from "../../config.js";
+import { DEFAULTS, TOKEN } from "../../config.js";
 import type { SpendOutcome } from "@bongtu/client/spend";
 import { consumerCircuitOf, type ConsumerRecipient } from "@bongtu/client/consumer";
 import { normalizeName } from "@bongtu/core/indexerApi";
@@ -32,7 +32,7 @@ import { resolveConsumerRecipient } from "../../lib/payName.js";
 import { consumerErrorMessage } from "../../lib/errors.js";
 import { useWallet } from "../App.js";
 import { useActionMachine, stepsForRun } from "../actionMachine.js";
-import { formatKkrw, parseKkrw } from "@bongtu/client/money";
+import { formatToken, parseToken } from "@bongtu/client/money";
 import { amountError, evmAddressError, shortenPubkey } from "../format.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
 import { activeStep, chainSteps, SPEND_STEPS } from "../components/StagedProgress.js";
@@ -67,7 +67,7 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
 
   // The raw-wei amount the protocol layer receives; 0n while the input is invalid.
   const amountWei = useMemo(() => {
-    const p = parseKkrw(amount);
+    const p = parseToken(amount, TOKEN.decimals);
     return p.ok ? p.wei : 0n;
   }, [amount]);
 
@@ -107,7 +107,7 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
 
   const title = isTransfer ? "Send" : "Withdraw";
   const terminalWord = isTransfer ? "payment" : "withdrawal";
-  const review = formatKkrw(amountWei);
+  const review = formatToken(amountWei, TOKEN.decimals);
 
   function confirm(): void {
     if (!ops) return;
@@ -294,8 +294,8 @@ export function SpendScreen({ kind }: { kind: "transfer" | "withdraw" }): ReactN
         )}
 
         <Field
-          label="Amount (kKRW)"
-          hint={<>Balance: {balance === null ? "—" : formatKkrw(balance)} kKRW</>}
+          label={`Amount (${TOKEN.symbol})`}
+          hint={<>Balance: {balance === null ? "—" : formatToken(balance, TOKEN.decimals)} {TOKEN.symbol}</>}
           error={amount.trim() ? amtErr : null}
         >
           <AmountInput value={amount} onValueChange={setAmount} />

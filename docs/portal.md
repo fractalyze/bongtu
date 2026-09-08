@@ -106,6 +106,54 @@ behind the shared `PORTAL_OPERATOR_TOKEN`.
   read: a cheated recipient still detects theft (funded address, no note in
   its own scan).
 
+## The payment name (ENS front door)
+
+The receive product's third front door, beside server-issued `POST
+/pay/{name}` and the browser-issuing pay page: an ENS name that RESOLVES to a
+fresh destination. `{label}.{root}.eth` is served by `PortalPrivResolver`
+(`chains/evm/src`), an ENSIP-10 wildcard resolver that stores no name and no
+address: every `resolve` reverts `OffchainLookup` (ERC-3668 CCIP-Read)
+pointing the wallet at the gateway — the indexer's `/ens` routes
+([indexer.md](indexer.md#the-name-gateway-ccip-read)) — which derives a fresh
+DKSAP destination against the queried chain's `PortalPrivFactory`, records
+the announcement FIRST (a MetaMask sender never announces, so the issuer
+must — the pay page's announce-before-display rule, applied server-side), and
+only then signs and returns. The wallet's ERC-3668 callback
+(`resolveWithProof`) verifies the owner-set signer and expiry on-chain before
+accepting the address. Every registered v2 name resolves this way at zero
+per-name on-chain cost; issuance stays the gasless owner-signed `/names`
+registration.
+
+- **Freshness is a gateway-trust property, not a protocol one** (Fluidkey's
+  production precedent and the ENSIP draft both record this). Every layer we
+  control refuses to present a reusable answer: the resolver holds no state,
+  responses are `Cache-Control: no-store` with expiry ≤ 300 s, and the one
+  cache outside our control — MetaMask's 60 s per-(name, chain) forward
+  cache — is UI-session scoped (privacy-harmless: same sender, one payment).
+- **Evidence chain, not prevention.** Every honest answer has a public
+  announcement row the recipient's view key audits for free (its normal
+  scan); a signed answer with no honest row, or a row no view key claims, is
+  non-repudiable evidence of gateway misbehavior. The gateway can censor; it
+  cannot redirect silently. Detection is after the fact — stated, not hidden
+  ([security-model.md](security-model.md#stealth-receiving-the-portalreceive-edge)).
+- **Chain routing (ENSIP-11).** The gateway serves the coinType of each chain
+  with a recorded factory and answers anything else empty, minting nothing.
+  Resolution chain == funds chain: the resolved address is always a
+  destination the sweeper serves on the chain the sender is on.
+- **Wallet support is a matrix, not a claim.** MetaMask resolves via its
+  bundled ens-resolver-snap on every network (source-verified); Rabby blocks
+  ENS sends by design; Phantom's CCIP-Read support is unverified (canary:
+  resolve `test.offchaindemo.eth` there before relying on it). Non-resolving
+  senders use the pay page — the browser fallback is a DNS wildcard on a
+  product-owned domain redirecting `{label}.<domain>` to `/p/{label}`.
+
+The automated gate is `deploy/gates/name_leg.ts` (the wallet's CCIP loop
+against the real resolver + gateway: per-resolution freshness,
+announce-before-return, tamper/expiry rejection, coinType routing, sweep and
+self-scan discovery). The Sepolia demo stack and the mainnet promotion ladder
+are the deploy runbook
+([deploy/README.md](../deploy/README.md#deploy-the-sepolia-payment-name-demo-stack)).
+
 ## PoC boundaries
 
 Issuance is unauthenticated on both write routes (anyone may mint records —

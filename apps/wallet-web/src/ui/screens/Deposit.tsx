@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { DEFAULTS } from "../../config.js";
+import { DEFAULTS, TOKEN } from "../../config.js";
 import type { ConsumerDepositOutcome } from "@bongtu/client/consumer";
 import { readTokenState } from "@bongtu/client-evm/connection";
 import { normalizeName } from "@bongtu/core/indexerApi";
@@ -20,7 +20,7 @@ import { resolveConsumerRecipient } from "../../lib/payName.js";
 import { consumerErrorMessage } from "../../lib/errors.js";
 import { useWallet } from "../App.js";
 import { useActionMachine } from "../actionMachine.js";
-import { formatKkrw, parseKkrw } from "@bongtu/client/money";
+import { formatToken, parseToken } from "@bongtu/client/money";
 import { amountError, shortenPubkey } from "../format.js";
 import { ScreenHeader } from "../components/ScreenHeader.js";
 import { SuccessPanel } from "../components/SuccessPanel.js";
@@ -66,17 +66,17 @@ export function Deposit(): ReactNode {
     void refreshTokenState();
   }, [refreshTokenState]);
 
-  const amtErr = amountError(amount, tokenBalance, "Amount exceeds your kKRW balance.");
+  const amtErr = amountError(amount, tokenBalance, `Amount exceeds your ${TOKEN.symbol} balance.`);
   // Guard on a KNOWN balance: until the token state loads the over-spend check
   // can't fire, so don't let the user start a proof that would revert.
   const formValid = tokenBalance !== null && !amtErr;
 
   // The raw-wei amount the flow receives; 0n while the input is invalid.
   const amountWei = useMemo(() => {
-    const p = parseKkrw(amount);
+    const p = parseToken(amount, TOKEN.decimals);
     return p.ok ? p.wei : 0n;
   }, [amount]);
-  const review = formatKkrw(amountWei);
+  const review = formatToken(amountWei, TOKEN.decimals);
 
   // Stale-resolve guard: the stored triple only counts while the field still
   // names the same canonical name — editing after a resolve can never mint to
@@ -213,7 +213,7 @@ export function Deposit(): ReactNode {
       <ScreenHeader title="Deposit" />
       <div className="flex flex-col gap-4">
         <p className="text-sm text-muted">
-          kKRW in, <strong>private kKRW</strong> out. Then send and withdraw with nothing
+          {TOKEN.symbol} in, <strong>{`private ${TOKEN.symbol}`}</strong> out. Then send and withdraw with nothing
           revealed.
         </p>
 
@@ -223,8 +223,8 @@ export function Deposit(): ReactNode {
         >
           <span className="text-[0.8rem] text-muted">You can deposit</span>
           <span className="text-2xl font-bold tabular-nums">
-            {tokenBalance === null ? "—" : formatKkrw(tokenBalance)}{" "}
-            <span className="text-[0.9rem] font-semibold text-muted ml-1">kKRW</span>
+            {tokenBalance === null ? "—" : formatToken(tokenBalance, TOKEN.decimals)}{" "}
+            <span className="text-[0.9rem] font-semibold text-muted ml-1">{TOKEN.symbol}</span>
           </span>
         </div>
 
@@ -233,33 +233,33 @@ export function Deposit(): ReactNode {
             <div className="flex flex-col gap-2 bg-surface border border-border-strong rounded-xl p-3.5">
               <div className="flex items-center gap-2">
                 <TestnetTag />
-                <span className="text-[0.9rem] font-semibold">First, get test kKRW</span>
+                <span className="text-[0.9rem] font-semibold">{`First, get test ${TOKEN.symbol}`}</span>
               </div>
               {/* No amount here: the mint dialog's amount is freeform, and the
                   prefill is a starting point, not an offer. */}
               <p className="text-sm text-muted">
-                Mint free test kKRW (you pay only gas), then deposit it here.
+                {`Mint free test ${TOKEN.symbol} (you pay only gas), then deposit it here.`}
               </p>
               <Button variant="primary" block disabled={!connection} onClick={() => setMintOpen(true)}>
-                Get Test kKRW
+                {`Get Test ${TOKEN.symbol}`}
               </Button>
             </div>
           ) : (
             // Non-testnet: no mint to offer — just say what's missing.
             <div className="flex flex-col gap-2 bg-surface border border-border-strong rounded-xl p-3.5">
               <p className="text-sm text-muted">
-                Depositing needs kKRW in this account. Fund it first, then come back.
+                {`Depositing needs ${TOKEN.symbol} in this account. Fund it first, then come back.`}
               </p>
             </div>
           )
         ) : (
           <>
             <Field
-              label="Amount (kKRW)"
+              label={`Amount (${TOKEN.symbol})`}
               right={
                 DEFAULTS.testnet ? (
                   <LinkButton small subtle onClick={() => setMintOpen(true)}>
-                    Need more test kKRW?
+                    {`Need more test ${TOKEN.symbol}?`}
                   </LinkButton>
                 ) : undefined
               }

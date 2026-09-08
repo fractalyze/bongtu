@@ -10,7 +10,8 @@
 // their world through this seam too.
 
 import { sumUnspent } from "@bongtu/client/balance";
-import { formatKkrw } from "@bongtu/client/money";
+import { formatToken } from "@bongtu/client/money";
+import { TOKEN } from "../config.js";
 import { scanNotice, type SelfScanState } from "@bongtu/client/selfscan";
 import type { Head } from "@bongtu/core/indexerApi";
 import { selfScanSyncState, type SyncState } from "./components/SyncDot.js";
@@ -25,7 +26,7 @@ export type BalanceHero =
   | { kind: "amount"; text: string };
 
 export function balanceHero(balance: bigint | null, loading: boolean): BalanceHero {
-  if (balance !== null) return { kind: "amount", text: formatKkrw(balance) };
+  if (balance !== null) return { kind: "amount", text: formatToken(balance, TOKEN.decimals) };
   return loading ? { kind: "loading" } : { kind: "unloaded" };
 }
 

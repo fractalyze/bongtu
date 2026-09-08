@@ -3,6 +3,7 @@
 // their headline, so this is the one place their success copy is written.
 
 import type { ReactNode } from "react";
+import { TOKEN } from "../../config.js";
 import { navigate } from "../hooks.js";
 import { Button } from "./controls.js";
 import { ExplorerLink } from "./ExplorerLink.js";
@@ -29,7 +30,7 @@ export function SuccessPanel({
         <SuccessMark />
         <h2 className="mt-1.5 text-xl font-bold">{headline}</h2>
         <p className="text-[1.8rem] [font-weight:750] my-0.5 tabular-nums">
-          {amount} <span className="text-[0.62em] font-semibold text-muted ml-1">kKRW</span>
+          {amount} <span className="text-[0.62em] font-semibold text-muted ml-1">{TOKEN.symbol}</span>
         </p>
         <ExplorerLink href={explorerUrl} />
         <Button variant="primary" block className="mt-2" onClick={() => navigate("home")}>

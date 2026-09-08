@@ -13,6 +13,7 @@
 // passes a sliced recent feed + onViewAll; the Activity screen passes the full feed.
 
 import type { ReactNode } from "react";
+import { TOKEN } from "../../config.js";
 import type { HistoryItem, HistoryKind } from "@bongtu/core/indexerApi";
 import { activityEmptyLine, presentActivity, type ActivityRowView } from "../activityView.js";
 import { LinkButton } from "./controls.js";
@@ -61,7 +62,7 @@ function Row({ row }: { row: ActivityRowView }): ReactNode {
         >
           {row.amount}
           {/* muted symbol beside a colored number — the balance hero's idiom */}
-          <span className="text-muted font-semibold text-[0.72rem] ml-1">kKRW</span>
+          <span className="text-muted font-semibold text-[0.72rem] ml-1">{TOKEN.symbol}</span>
         </span>
         {/* A selfscan row carries no timestamp (the public feed has none): the
             presenter emits null and NOTHING renders — the calm-surface rule
