@@ -94,6 +94,13 @@ async function main(): Promise<void> {
       ? `receive deposits: factory=${cfg.portalPrivFactory} (POST /portal/announce; unswept feed ${cfg.portalOperatorToken ? "operator-token gated" : "OPEN (PORTAL_OPERATOR_TOKEN unset)"})`
       : "receive deposits not configured (PORTAL_PRIV_FACTORY unset) — POST /portal/announce will 404",
   );
+  // The gateway KEY is never echoed (the AUTHORITY_KEY rule); only the served
+  // resolver + chain are boot-visible.
+  console.log(
+    cfg.ens
+      ? `name gateway: resolver=${cfg.ens.resolver} chain=${cfg.ens.chainId} (/ens CCIP-Read)`
+      : "name gateway not configured (ENS_RESOLVER unset) — /ens will 404",
+  );
   // Backend selection is CONFIG, not code paths in routes: both classes serve
   // the identical read model, so everything below this line is backend-blind.
   const ix = cfg.solana

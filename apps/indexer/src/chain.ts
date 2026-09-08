@@ -144,6 +144,12 @@ export interface ChainConfig {
   // issuance recorded against this factory's addressOf) and ingest also scans
   // this factory's Swept + Announced logs. Unset => /portal/announce 404s.
   portalPrivFactory?: string | null;
+  // The ENS/CCIP gateway (env ENS_RESOLVER is the switch): the on-chain
+  // PortalPrivResolver this gateway answers for, the response-signing key
+  // (ENS_GATEWAY_KEY, NEVER logged — the AUTHORITY_KEY rule), and the ONE
+  // funds chain served as an ENSIP-11 coinType (ENS_GATEWAY_CHAIN_ID; more
+  // chains are the spec's growth path). Unset => the /ens routes 404.
+  ens?: { resolver: string; gatewayKey: Uint8Array; chainId: number } | null;
   // Shared-secret gate for the operator-facing attributed feed (env
   // PORTAL_OPERATOR_TOKEN): set => GET /portal/unswept requires the same value
   // in the x-operator-token header (401 otherwise); unset => the feed stays
@@ -239,6 +245,24 @@ export function resolveConfig(): ChainConfig {
   const disclosureDir = process.env.DISCLOSURE_DIR || null;
   // SOLANA_RPC is the backend switch; the tree account is the one mandatory
   // companion (PoolConfig resolves through its link, state.rs).
+  // ENS_RESOLVER is the gateway switch; the signing key and the served funds
+  // chain are its mandatory companions (a resolver with no key cannot answer,
+  // a key with no chain cannot route a coinType).
+  const ens = process.env.ENS_RESOLVER
+    ? {
+        resolver: process.env.ENS_RESOLVER,
+        gatewayKey: process.env.ENS_GATEWAY_KEY
+          ? parseGatewayKey(process.env.ENS_GATEWAY_KEY)
+          : (() => { throw new Error("ENS_RESOLVER is set but ENS_GATEWAY_KEY (the response-signing key) is not"); })(),
+        chainId: ((): number => {
+          const raw = process.env.ENS_GATEWAY_CHAIN_ID;
+          if (!raw) throw new Error("ENS_RESOLVER is set but ENS_GATEWAY_CHAIN_ID (the served funds chain) is not");
+          const n = Number(raw);
+          if (!Number.isInteger(n) || n < 0) throw new Error(`ENS_GATEWAY_CHAIN_ID must be a chain id (got "${raw}")`);
+          return n;
+        })(),
+      }
+    : null;
   const solana = process.env.SOLANA_RPC
     ? {
         rpc: process.env.SOLANA_RPC,
@@ -246,7 +270,7 @@ export function resolveConfig(): ChainConfig {
         treeAccount: process.env.SOLANA_TREE || (() => { throw new Error("SOLANA_RPC is set but SOLANA_TREE (the TreeState account) is not"); })(),
       }
     : null;
-  return { rpc, pool, startBlock, authorityKey, authorityKemKey, databaseUrl, portalFactory, portalPrivFactory, portalOperatorToken, kemGraceSeconds, disclosureDir, disclosureGraceSeconds, solana };
+  return { rpc, pool, startBlock, authorityKey, authorityKemKey, databaseUrl, portalFactory, portalPrivFactory, portalOperatorToken, kemGraceSeconds, disclosureDir, disclosureGraceSeconds, solana, ens };
 }
 
 /** Parse AUTHORITY_KEM_KEY (the 2400-byte ML-KEM-768 decapsulation key) from
@@ -267,6 +291,19 @@ export function parseKemKey(s: string): Uint8Array {
   }
   const out = new Uint8Array(h.length / 2);
   for (const i of Array(out.length).keys()) out[i] = parseInt(h.slice(2 * i, 2 * i + 2), 16);
+  return out;
+}
+
+/** Parse ENS_GATEWAY_KEY (a 32-byte secp256k1 response-signing key) from
+ *  0x-optional hex. The AUTHORITY_KEY handling rule applies: never logged,
+ *  never served; malformed material dies at boot, not at the first lookup. */
+export function parseGatewayKey(s: string): Uint8Array {
+  const h = s.trim().replace(/^0[xX]/, "");
+  if (h.length !== 64 || /[^0-9a-fA-F]/.test(h)) {
+    throw new Error("ENS_GATEWAY_KEY must be a 32-byte hex secp256k1 private key");
+  }
+  const out = new Uint8Array(32);
+  for (const i of Array(32).keys()) out[i] = parseInt(h.slice(2 * i, 2 * i + 2), 16);
   return out;
 }
 
