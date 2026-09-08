@@ -9,7 +9,8 @@
 import { encodeAddress } from "@bongtu/core/pubkey";
 import type { HistoryItem, HistoryKind } from "@bongtu/core/indexerApi";
 import { ACTIVITY_VERB, activityDirection, type ActivityDirection } from "@bongtu/client/activity";
-import { formatKkrw } from "@bongtu/client/money";
+import { formatToken } from "@bongtu/client/money";
+import { TOKEN } from "../config.js";
 import { relativeTime, shortenPubkey } from "./format.js";
 
 /** Everything one activity row renders, precomputed. */
@@ -52,7 +53,7 @@ export function presentActivityRow(item: HistoryItem, explorerBase: string): Act
     // name, never a crash.
     verb: ACTIVITY_VERB[item.kind] ?? item.kind,
     direction,
-    amount: `${sign(direction)}${formatKkrw(item.amount)}`,
+    amount: `${sign(direction)}${formatToken(item.amount, TOKEN.decimals)}`,
     counterparty,
     time: item.blockTimestamp === undefined ? null : relativeTime(item.blockTimestamp),
     explorerHref: `${explorerBase.replace(/\/+$/, "")}/tx/${item.txHash}`,

@@ -12,7 +12,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { useAccount } from "wagmi";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
-import { DEFAULTS } from "../../config.js";
+import { DEFAULTS, TOKEN } from "../../config.js";
 import { useWallet } from "../App.js";
 import { LOGIN_IDLE, loginPendingStep, startLoginPending } from "@bongtu/ui/loginPending";
 import { hasInjectedWallet, metamaskDeepLink, walletConnectEnabled } from "@bongtu/ui/wagmi";
@@ -66,7 +66,7 @@ export function Onboarding(): ReactNode {
           <EnvelopeLogo size={52} />
         </span>
         <h1 className="text-[2rem] leading-tight font-bold mb-1 tracking-[-0.02em] text-primary">bongtu</h1>
-        <p className="text-muted">The privacy wallet for kKRW on {DEFAULTS.chainName}.</p>
+        <p className="text-muted">{`The privacy wallet for ${TOKEN.symbol} on `}{DEFAULTS.chainName}.</p>
         {DEFAULTS.testnet && <TestnetTag className="inline-block mt-2" />}
       </div>
 
@@ -78,11 +78,11 @@ export function Onboarding(): ReactNode {
           <span>
             {DEFAULTS.testnet ? (
               <>
-                <strong className="text-ink">Get kKRW</strong>: mint free test kKRW here.
+                <strong className="text-ink">{`Get ${TOKEN.symbol}`}</strong>{`: mint free test ${TOKEN.symbol} here.`}
               </>
             ) : (
               <>
-                <strong className="text-ink">Get kKRW</strong>: fund your account with kKRW.
+                <strong className="text-ink">{`Get ${TOKEN.symbol}`}</strong>{`: fund your account with ${TOKEN.symbol}.`}
               </>
             )}
           </span>
@@ -92,7 +92,7 @@ export function Onboarding(): ReactNode {
             <IconDeposit size={18} />
           </span>
           <span>
-            <strong className="text-ink">Deposit</strong>: it becomes private kKRW.
+            <strong className="text-ink">Deposit</strong>{`: it becomes private ${TOKEN.symbol}.`}
           </span>
         </li>
         <li className="flex gap-2.5 items-center text-[0.9rem] text-muted">

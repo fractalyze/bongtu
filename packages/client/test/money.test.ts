@@ -15,9 +15,11 @@ import assert from "node:assert/strict";
 
 import {
   formatKkrw,
+  formatToken,
   amountCaretIndex,
   groupAmountInput,
   parseKkrw,
+  parseToken,
   allowanceLabel,
   MAX_NOTE_WEI,
   MAX_UINT256,
@@ -200,4 +202,16 @@ test("amountCaretIndex: caret lands after the same significant char across regro
   assert.equal(amountCaretIndex("1,234.5", 5), 6);
   // full string
   assert.equal(amountCaretIndex("12", 2), 2);
+});
+
+test("formatToken/parseToken at 6 decimals (the USDC demo profile): grouped, truncated, lossless", () => {
+  // 1,234.56789 USDC in 6-decimal base units.
+  assert.equal(formatToken(1_234_567_890n, 6), "1,234.56789");
+  assert.equal(formatToken(1_000_000n, 6), "1");
+  assert.equal(formatToken(1n, 6), "0.000001");
+  assert.deepEqual(parseToken("1,234.56789", 6), { ok: true, wei: 1_234_567_890n });
+  assert.equal(parseToken("1.0000001", 6).ok, false, "7 fraction digits exceed a 6-decimal token");
+  // The kKRW wrappers stay byte-identical to the 18-decimal defaults.
+  assert.equal(formatKkrw(15n * 10n ** 17n), formatToken(15n * 10n ** 17n, 18));
+  assert.deepEqual(parseKkrw("1.5"), parseToken("1.5", 18));
 });

@@ -7,7 +7,8 @@
 // so the only recipient grammar the forms know is the name one (lib/payName.ts).
 
 import { isAddress } from "viem";
-import { parseKkrw } from "@bongtu/client/money";
+import { parseToken } from "@bongtu/client/money";
+import { TOKEN } from "../config.js";
 
 /**
  * Why an amount can't be spent yet, or null when it can: the parse rules (money.ts
@@ -21,7 +22,7 @@ export function amountError(
   balance: bigint | null,
   tooMuch = "Amount exceeds your balance.",
 ): string | null {
-  const p = parseKkrw(raw);
+  const p = parseToken(raw, TOKEN.decimals);
   if (!p.ok) return p.error;
   if (p.wei <= 0n) return "Amount must be greater than zero.";
   if (balance !== null && p.wei > balance) return tooMuch;

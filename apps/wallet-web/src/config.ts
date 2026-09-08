@@ -35,6 +35,25 @@ export function testnetFromEnv(value: string | undefined): boolean {
   return (value ?? "true") !== "false";
 }
 
+/**
+ * Token display facts from ENV (spec payment-name R12): the Maroo kKRW/18
+ * defaults keep every existing build byte-identical; the Sepolia demo profile
+ * sets USDC/6 — without the decimals knob a 6-decimal balance would render
+ * wrong by a factor of 10^12. Pure so the node runner can pin it.
+ */
+export function tokenFromEnv(
+  symbol: string | undefined,
+  decimals: string | undefined,
+): { symbol: string; decimals: number } {
+  const d = Number(decimals ?? "18");
+  if (!Number.isInteger(d) || d < 0 || d > 36) {
+    throw new Error(`VITE_TOKEN_DECIMALS must be an integer number of decimals (got "${decimals}")`);
+  }
+  return { symbol: symbol || "kKRW", decimals: d };
+}
+
+export const TOKEN = tokenFromEnv(import.meta.env?.VITE_TOKEN_SYMBOL, import.meta.env?.VITE_TOKEN_DECIMALS);
+
 export const DEFAULTS = {
   chainId: CHAIN_ID,
   // The chain's display name, for the screens that show which network this is.

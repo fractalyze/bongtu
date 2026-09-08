@@ -57,28 +57,35 @@ export function amountCaretIndex(formatted: string, significantBefore: number): 
  * the user actually holds). Trailing zeros and a then-dangling point are dropped, so a
  * whole amount reads "1,000" and a half one "1,000.5"; 1e11 wei of dust renders "0".
  */
-export function formatKkrw(raw: string | bigint): string {
+export function formatToken(raw: string | bigint, decimals = 18): string {
+  const unit = 10n ** BigInt(decimals);
   const signed = typeof raw === "bigint" ? raw : BigInt(raw);
   const neg = signed < 0n;
   const v = neg ? -signed : signed;
-  const whole = (v / WEI_PER_KKRW).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  const frac = (v % WEI_PER_KKRW)
+  const whole = (v / unit).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const frac = (v % unit)
     .toString()
-    .padStart(18, "0")
+    .padStart(decimals, "0")
     .slice(0, DISPLAY_FRACTION_DIGITS)
     .replace(/0+$/, "");
   return `${neg ? "-" : ""}${whole}${frac ? `.${frac}` : ""}`;
 }
 
+/** The kKRW rendering (decimals()=18 on the Maroo token). */
+export function formatKkrw(raw: string | bigint): string {
+  return formatToken(raw, 18);
+}
+
 export type ParsedKkrw = { ok: true; wei: bigint } | { ok: false; error: string };
 
 /**
- * Parse a hand-typed kKRW amount ("1,000", "1.5", ".25" is rejected) to raw wei.
- * At most 6 fraction digits are accepted — beyond MetaMask-style display precision a
- * typo is far likelier than intent, and rejecting keeps parse(format(x)) lossless.
- * The 2^100 belt is enforced here so an over-range note never reaches the prover.
+ * Parse a hand-typed token amount ("1,000", "1.5", ".25" is rejected) to raw
+ * base units. Fraction digits are capped at min(6, decimals) — beyond
+ * MetaMask-style display precision a typo is far likelier than intent, and
+ * rejecting keeps parse(format(x)) lossless. The 2^100 belt is enforced here
+ * so an over-range note never reaches the prover.
  */
-export function parseKkrw(input: string): ParsedKkrw {
+export function parseToken(input: string, decimals = 18): ParsedKkrw {
   const t = input.trim();
   if (!t) return { ok: false, error: "Enter an amount." };
   // Commas are accepted ONLY as strict 3-digit grouping ("1,000,000.5") — a
@@ -90,14 +97,21 @@ export function parseKkrw(input: string): ParsedKkrw {
   const m = /^(\d+)(?:\.(\d*))?$/.exec(v);
   if (!m) return { ok: false, error: "Enter a valid amount, like 1000 or 1.5." };
   const frac = m[2] ?? "";
-  if (frac.length > DISPLAY_FRACTION_DIGITS) {
-    return { ok: false, error: "Use at most 6 decimal places." };
+  const maxFrac = Math.min(DISPLAY_FRACTION_DIGITS, decimals);
+  if (frac.length > maxFrac) {
+    return { ok: false, error: `Use at most ${maxFrac} decimal places.` };
   }
-  const wei = BigInt(m[1]) * WEI_PER_KKRW + BigInt(frac.padEnd(18, "0") || "0");
+  const unit = 10n ** BigInt(decimals);
+  const wei = BigInt(m[1]) * unit + BigInt(frac.padEnd(decimals, "0") || "0");
   if (wei >= MAX_NOTE_WEI) {
-    return { ok: false, error: "Amount is too large for a single note (max ~1.26 trillion kKRW)." };
+    return { ok: false, error: "Amount is too large for a single note." };
   }
   return { ok: true, wei };
+}
+
+/** The kKRW parse (decimals()=18 on the Maroo token). */
+export function parseKkrw(input: string): ParsedKkrw {
+  return parseToken(input, 18);
 }
 
 /** The allowance line: an unlimited (MaxUint256) approval reads "Unlimited" — the

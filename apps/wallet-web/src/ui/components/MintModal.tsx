@@ -18,7 +18,8 @@ import {
   walletErrorMessage,
   type Connection,
 } from "@bongtu/client-evm/connection";
-import { parseKkrw } from "@bongtu/client/money";
+import { parseToken } from "@bongtu/client/money";
+import { TOKEN } from "../../config.js";
 import { shortenPubkey } from "../format.js";
 import { ExplorerLink } from "./ExplorerLink.js";
 import { Modal } from "./Modal.js";
@@ -38,7 +39,7 @@ export function MintSuccess({
 }): ReactNode {
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-sm">Test kKRW added to your account.</p>
+      <p className="text-sm">{`Test ${TOKEN.symbol} added to your account.`}</p>
       <div className="flex items-center justify-between gap-3 flex-wrap">
         {/* shortenPubkey is the app's one middle-shortener (addresses, keys, and
             here a tx hash) — the full hash is one tap away behind the link. */}
@@ -68,7 +69,7 @@ export function MintModal({
   const [tx, setTx] = useState<{ hash: string; explorerUrl: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const parsed = parseKkrw(amount);
+  const parsed = parseToken(amount, TOKEN.decimals);
   const amtErr = !parsed.ok
     ? parsed.error
     : parsed.wei <= 0n
@@ -105,10 +106,10 @@ export function MintModal({
     <Modal
       title={
         <span className="inline-flex items-center gap-2">
-          Get Test kKRW <TestnetTag />
+          {`Get Test ${TOKEN.symbol}`} <TestnetTag />
         </span>
       }
-      ariaLabel="Get Test kKRW"
+      ariaLabel={`Get Test ${TOKEN.symbol}`}
       onClose={onClose}
     >
       {tx ? (
@@ -116,9 +117,9 @@ export function MintModal({
       ) : (
         <div className="flex flex-col gap-3">
           <p className="text-sm text-muted">
-            Mints test kKRW to your connected account — you only pay gas.
+            {`Mints test ${TOKEN.symbol} to your connected account — you only pay gas.`}
           </p>
-          <Field label="Amount (kKRW)" error={amount.trim() ? amtErr : null}>
+          <Field label={`Amount (${TOKEN.symbol})`} error={amount.trim() ? amtErr : null}>
             <AmountInput value={amount} onValueChange={setAmount} disabled={pending} />
           </Field>
           {error && <ErrorBanner message={error} />}

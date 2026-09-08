@@ -7,6 +7,7 @@
 // never a fabricated zero — and formatKkrw as the one number edge (never Number).
 
 import type { ReactNode } from "react";
+import { TOKEN } from "../../config.js";
 import { balanceHero } from "../homeView.js";
 import { shortenPubkey } from "../format.js";
 import { useCopyFeedback } from "../hooks.js";
@@ -37,7 +38,7 @@ export function BalanceCard({
             <span className="text-[2.1rem] [font-weight:750] tracking-[-0.02em] tabular-nums">
               {hero.text}
             </span>
-            <span className="text-muted font-semibold">kKRW</span>
+            <span className="text-muted font-semibold">{TOKEN.symbol}</span>
           </>
         )}
       </div>
