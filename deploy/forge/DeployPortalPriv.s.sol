@@ -6,6 +6,7 @@ import {Script, console2} from "forge-std/Script.sol";
 import {PortalPrivFactory} from "bongtu-src/PortalPrivFactory.sol";
 
 import {AddressBook, AddressRecord} from "./AddressBook.sol";
+import {ConsumerBook, ConsumerRecord} from "./ConsumerBook.sol";
 
 /// @title DeployPortalPriv — the consumer portal factory as an ADD-ON deploy.
 ///
@@ -28,6 +29,13 @@ contract DeployPortalPriv is Script {
 
     function run() external returns (address factory) {
         uint256 deployerKey = vm.envOr("DEPLOYER_KEY", DEFAULT_ANVIL_KEY);
+        // RECORD_PROFILE=consumer targets the consumer-only record pair
+        // (addresses.consumer + modules.consumer) — the profile a chain with
+        // no enterprise pool runs (the Sepolia demo). Explicit env, not file
+        // sniffing: a chain can legitimately hold BOTH records.
+        if (keccak256(bytes(vm.envOr("RECORD_PROFILE", string("enterprise")))) == keccak256("consumer")) {
+            return _runConsumer(deployerKey);
+        }
         AddressRecord memory r = AddressBook.read(AddressBook.path());
         require(r.portalPrivFactory == address(0), "portalPriv factory already recorded for this chain");
         require(r.pool != address(0), "no pool recorded");
@@ -54,11 +62,43 @@ contract DeployPortalPriv is Script {
         return address(f);
     }
 
+    /// @dev The consumer-profile twin of the enterprise `run` body: same
+    ///      preconditions and rerun guard against the consumer record pair.
+    function _runConsumer(uint256 deployerKey) private returns (address) {
+        ConsumerRecord memory r = ConsumerBook.read(ConsumerBook.path());
+        require(r.portalPrivFactory == address(0), "portalPriv factory already recorded for this chain");
+        require(r.pool != address(0), "no pool recorded");
+        address depositPrivModule = _depositPrivModuleAt(ConsumerBook.modulesPath());
+        require(depositPrivModule != address(0), "no depositPrivModule recorded (deploy the consumer module set first)");
+        address bot = vm.envOr("BOT", vm.addr(deployerKey));
+
+        console2.log("== bongtu portalPriv factory deploy (consumer profile) ==");
+        console2.log("chainId          :", block.chainid);
+        console2.log("pool             :", r.pool);
+        console2.log("depositPrivModule:", depositPrivModule);
+        console2.log("bot              :", bot);
+
+        vm.startBroadcast(deployerKey);
+        PortalPrivFactory f = new PortalPrivFactory(bot);
+        vm.stopBroadcast();
+
+        require(f.owner() == bot, "factory owner != bot");
+        require(f.sweeperInitCodeHash() != bytes32(0), "sweeper initcode hash empty");
+
+        r.portalPrivFactory = address(f);
+        ConsumerBook.write(ConsumerBook.path(), r);
+        console2.log("portalPrivFactory:", address(f));
+        return address(f);
+    }
+
     /// @dev The consumer module record lives in its own file (see
     ///      ConsumerModuleKit's header for why it is not in the AddressBook);
     ///      only the one module the sweep drives is needed here.
     function _depositPrivModule() internal view returns (address) {
-        string memory p = string.concat("../../deploy/modules.", vm.toString(block.chainid), ".json");
+        return _depositPrivModuleAt(string.concat("../../deploy/modules.", vm.toString(block.chainid), ".json"));
+    }
+
+    function _depositPrivModuleAt(string memory p) internal view returns (address) {
         if (!vm.exists(p)) return address(0);
         return vm.parseJsonAddress(vm.readFile(p), ".depositPrivModule");
     }
