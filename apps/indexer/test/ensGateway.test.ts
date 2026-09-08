@@ -37,6 +37,7 @@ import { PortalRegistry } from "../src/portal.js";
 import type { Indexer } from "../src/ingest.js";
 import { handleEnsResolve } from "../src/api/routes/ensGateway.js";
 import type { RouteContext } from "../src/api/router.js";
+import { resolveConfig } from "../src/chain.js";
 
 const OWNER = deriveKeypair(987654321987654321n);
 const ownerCompressed = packPubkey(OWNER.publicKey);
@@ -223,6 +224,40 @@ test("fences fail closed and mint nothing", async () => {
   const { ix: offIx } = await seededIx({ ens: null });
   const off = await handleEnsResolve(ctx(offIx), RESOLVER, data, () => EPHEMERAL, NOW);
   assert.equal(off.status, 404, "unconfigured gateway 404s");
+});
+
+test("a failed announce write aborts the resolution: no signed response (R3)", async () => {
+  const { ix } = await seededIx();
+  // The store failing mid-write is the seam: announce-before-return means the
+  // handler must PROPAGATE (router catch-all 500) rather than fall through to
+  // signing — a signed answer with no announcement row would break the R4
+  // evidence chain. A later try/catch around portal.issue flips this test red.
+  (ix as { portal: unknown }).portal = {
+    issue: async () => { throw new Error("announce store down"); },
+  };
+  await assert.rejects(
+    handleEnsResolve(ctx(ix), RESOLVER, addrCall("jun.demo.eth"), () => EPHEMERAL, NOW),
+    /announce store down/,
+  );
+});
+
+test("boot refuses ENS_RESOLVER without the priv factory", () => {
+  const saved = { ...process.env };
+  try {
+    process.env.POOL = "0x" + "01".repeat(20);
+    process.env.ENS_RESOLVER = RESOLVER;
+    process.env.ENS_GATEWAY_KEY = "11".repeat(32);
+    process.env.ENS_GATEWAY_CHAIN_ID = String(CHAIN_ID);
+    delete process.env.PORTAL_PRIV_FACTORY;
+    assert.throws(() => resolveConfig(), /PORTAL_PRIV_FACTORY/);
+    process.env.PORTAL_PRIV_FACTORY = PRIV_FACTORY;
+    assert.equal(resolveConfig().ens?.chainId, CHAIN_ID);
+  } finally {
+    for (const k of ["POOL", "ENS_RESOLVER", "ENS_GATEWAY_KEY", "ENS_GATEWAY_CHAIN_ID", "PORTAL_PRIV_FACTORY"]) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
 });
 
 test("no response or error ever carries the signing key", async () => {

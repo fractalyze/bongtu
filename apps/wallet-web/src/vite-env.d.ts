@@ -14,6 +14,8 @@ interface ImportMetaEnv {
    *  ride build-time env, never a chain read (config.ts tokenFromEnv). */
   readonly VITE_TOKEN_SYMBOL?: string;
   readonly VITE_TOKEN_DECIMALS?: string;
+  /** The network display name beside those amounts (default "Maroo Testnet"). */
+  readonly VITE_CHAIN_NAME?: string;
 }
 
 interface ImportMeta {

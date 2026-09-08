@@ -3,8 +3,9 @@
 `chains/evm/src/BongtuPool.sol` is the whole consensus surface: one shielded pool holding the
 single-frontier IMT, the nullifier set, ERC-20 custody, the arbiter epoch list, six Groth16
 verifier calls, and the `applyOp` gate the consumer op modules drive. Everything else in
-`chains/evm/src/` is a generated verifier, an interface, a proxy/ownership util, the portal pair
-([portal.md](portal.md)), or a consumer op module ([below](#the-op-module-layer)). How to build
+`chains/evm/src/` is a generated verifier, an interface, a proxy/ownership util, the portal
+family — the factory/sweeper pairs and the stateless payment-name resolver
+([portal.md](portal.md)) — or a consumer op module ([below](#the-op-module-layer)). How to build
 and test the folder is owned by [`chains/evm/README.md`](../chains/evm/README.md).
 
 ## Entry points

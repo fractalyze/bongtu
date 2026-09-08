@@ -154,6 +154,31 @@ Ordered work units, one commit each, every unit with the test that proves it.
 - **Lock file**: no new dependencies anywhere; if one proves necessary the
   CLAUDE.md scratch-dir regen procedure applies.
 
+## Deviations recorded during build
+
+- **Legacy `addr(bytes32)` means "this deployment's chain", not
+  "mainnet-only".** U3's text above ("bare coinType-60 when mainnet is not a
+  configured funds chain = empty answer") shipped differently: the legacy
+  form carries no coinType and is what a wallet on an ENS-NATIVE chain
+  (Sepolia's own registry, the demo's actual resolution path) asks, so the
+  gateway serves it as own-chain semantics. Under the planned text the demo
+  would resolve nothing. Explicit ENSIP-11 coinTypes still route strictly
+  (unserved = empty, no row — unit + leg), and signed answers bind to the
+  per-chain resolver address, so nothing is replayable cross-chain.
+- **ENSIP-15 normalization narrowed to ASCII-lowercase + the directory
+  grammar, fail closed** (U1's "ENSIP-15-safe normalization guard"). Full
+  ENSIP-15 needs a normalization library (C9's lock hazard) for labels the
+  directory mostly cannot hold anyway. Residue: a directory-grammar-valid
+  label that ENSIP-15 forbids (hyphens in positions 3-4) resolves when a
+  client queries the gateway directly, though ENSIP-15-conforming wallets
+  refuse to send such a name — spec C8's "pay-page-only" wording overstates
+  the narrowing. Covered by the C3 row-minting posture; no funds or privacy
+  impact.
+- **U6's client-fidelity mitigation** runs viem's built-in ERC-3668
+  `ccipRead` loop end to end instead of `getEnsAddress` with a
+  universalResolver override — the latter needs an ENS registry the gate
+  chain deliberately does not deploy (the plan's stated risk posture).
+
 ## Proving gates
 
 - Per iteration: core tests, indexer `npm run test:unit`, forge

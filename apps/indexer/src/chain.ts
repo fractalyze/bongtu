@@ -245,9 +245,11 @@ export function resolveConfig(): ChainConfig {
   const disclosureDir = process.env.DISCLOSURE_DIR || null;
   // SOLANA_RPC is the backend switch; the tree account is the one mandatory
   // companion (PoolConfig resolves through its link, state.rs).
-  // ENS_RESOLVER is the gateway switch; the signing key and the served funds
-  // chain are its mandatory companions (a resolver with no key cannot answer,
-  // a key with no chain cannot route a coinType).
+  // ENS_RESOLVER is the gateway switch; the signing key, the served funds
+  // chain, and the priv factory are its mandatory companions (a resolver with
+  // no key cannot answer, a key with no chain cannot route a coinType, and a
+  // gateway with no factory would boot "configured" while 404ing every
+  // lookup).
   const ens = process.env.ENS_RESOLVER
     ? {
         resolver: process.env.ENS_RESOLVER,
@@ -263,6 +265,9 @@ export function resolveConfig(): ChainConfig {
         })(),
       }
     : null;
+  if (ens && !portalPrivFactory) {
+    throw new Error("ENS_RESOLVER is set but PORTAL_PRIV_FACTORY (the served funds chain's factory) is not");
+  }
   const solana = process.env.SOLANA_RPC
     ? {
         rpc: process.env.SOLANA_RPC,
