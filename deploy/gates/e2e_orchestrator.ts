@@ -62,6 +62,7 @@ import { proofArgs } from "../live/lib/viem_client.js";
 import { runPortalLeg } from "./portal_leg.js";
 import { runConsumerLeg } from "./consumer_leg.js";
 import { runPortalPrivLeg } from "./portal_priv_leg.js";
+import { runNameLeg } from "./name_leg.js";
 
 // ok() / step() and the failure count are the toolbox's (deploy/live/lib/proof_toolbox.ts),
 // shared with the live driver (deploy/live/payroll_e2e.ts).
@@ -494,6 +495,14 @@ async function main(): Promise<void> {
   // from distinct EOAs -> priv-mode depositPriv sweeps -> negative grep +
   // self-scan discovery. Throws when E2E_PORTAL_PRIV_DATABASE_URL is unset.
   await runPortalPrivLeg(rig);
+
+  // ========================== PAYMENT NAME ================================
+  // The name front door's gate (payment-name R1-R6, R13): CCIP-Read
+  // resolution through the real resolver + gateway indexer, per-resolution
+  // freshness, announce-before-return, tamper/expiry rejection, coinType
+  // routing, then pay + sweep + self-scan discovery. Throws when
+  // E2E_NAME_DATABASE_URL is unset — no silent skip.
+  await runNameLeg(rig);
 
   const failures = failureCount();
   console.log(`\n${failures === 0 ? "E2E PASS — full cross-circuit spend cycle verified on live anvil" : `E2E FAIL — ${failures} assertion(s) failed`}`);
