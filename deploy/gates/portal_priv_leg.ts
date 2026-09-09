@@ -15,10 +15,16 @@
 //            chain's addressOf
 //   PAY      two plain ERC-20 transfers from TWO DISTINCT funded EOAs (all a
 //            stock wallet can do)
+//   FUNDED   mine past FUNDED_CONFIRMATIONS (default depth, deliberately not
+//            zeroed) and restart -> the boot ingest's transfer tail flags both
+//            rows funded with the exact paid amounts BEFORE any sweep runs —
+//            the bot's only trigger from here on
 //   GATE     the attributed work feed 401s without the operator token
 //   SWEEP    apps/sweeper runOnce AS A LIBRARY in priv mode: depositPriv
 //            proofs sealed to the registered consumer triple, submitted
 //            through the PortalPrivFactory with the announcement tuple
+//   BACKFILL a third issuance funded while the indexer is STOPPED flips
+//            funded after resume (the gap-only cursor, spec R3)
 //   ASSERT   R7: (a) the two destinations differ; (b) NEGATIVE GREP — neither
 //            payment tx (calldata or logs), neither sweep tx calldata, nor the
 //            public feed body carries the recipient's label or any registered
@@ -212,6 +218,18 @@ export async function runPortalPrivLeg(rig: Rig): Promise<void> {
       paymentTxs.push(receipt.transactionHash);
     }
 
+    // ========== FUNDED (confirmation depth -> boot ingest's tail) ===========
+    step("PORTAL-PRIV: mine past FUNDED_CONFIRMATIONS, restart -> both rows flip funded pre-sweep");
+    // Two zero-value self-transfers advance head past the DEFAULT confirmation
+    // depth (2) — the depth is exercised, not zeroed; anvil mines per tx.
+    await token.write("transfer", [rig.address, 0n]);
+    await token.write("transfer", [rig.address, 0n]);
+    // POLL_MS=0 (header recipe): the restart's boot ingest is the one pass
+    // where the transfer tail scans the payment blocks.
+    await stopIndexer(child.proc);
+    child.proc = spawnIndexer(indexerEnv);
+    await waitHealthy(indexerUrl);
+
     // ==================== GATE (operator token, spec C3) ====================
     step("PORTAL-PRIV: the attributed work feed is operator-token gated");
     await fetchUnswept(indexerUrl).then(
@@ -221,6 +239,13 @@ export async function runPortalPrivLeg(rig: Rig): Promise<void> {
     const unswept = await fetchUnswept(indexerUrl, -1, 5000, fetch, OPERATOR_TOKEN);
     ok(payments.every((p) => unswept.some((r) => r.destination.toLowerCase() === p.issued.destination.toLowerCase())),
       "both issuances on the token-authed work feed, attributed");
+    for (const p of payments) {
+      const row = unswept.find((r) => r.destination.toLowerCase() === p.issued.destination.toLowerCase());
+      ok(row !== undefined && row.funded === true && row.fundedAmount === p.amount.toString(),
+        `funded flag set by the transfer tail with the exact paid amount (${p.amount}) BEFORE any sweep`);
+      ok(row !== undefined && row.fundedTxHash !== null && row.fundedAt !== null,
+        "funded row carries the first transfer's coordinates");
+    }
 
     // ================= SWEEP (receive-mode runOnce, library) ================
     step("PORTAL-PRIV: sweeper runOnce in priv mode (depositPriv, real CPU prover)");
@@ -336,6 +361,21 @@ export async function runPortalPrivLeg(rig: Rig): Promise<void> {
       `R7(d): self-scan discovered BOTH payments as unspent notes (${PAY_A}, ${PAY_B})`);
     const balance = scanned.notes.filter((n) => !n.spent).reduce((a, n) => a + BigInt(n.value), 0n);
     ok(balance === PAY_A + PAY_B, "self-scan balance == the two payments, shielded");
+
+    // ============== BACKFILL (fund while stopped, flip on resume) ===========
+    step("PORTAL-PRIV: a payment landing while the indexer is DOWN flips funded after resume (R3)");
+    const issuedC = await issuePayment(RECEIVE_NAME, payDeps);
+    await stopIndexer(child.proc);
+    const PAY_C = 977n;
+    await token.write("transfer", [issuedC.destination, PAY_C]);
+    await token.write("transfer", [rig.address, 0n]); // confirmation depth
+    await token.write("transfer", [rig.address, 0n]);
+    child.proc = spawnIndexer(indexerEnv);
+    await waitHealthy(indexerUrl);
+    const afterResume = await fetchUnswept(indexerUrl, -1, 5000, fetch, OPERATOR_TOKEN);
+    const rowC = afterResume.find((r) => r.destination.toLowerCase() === issuedC.destination.toLowerCase());
+    ok(rowC !== undefined && rowC.funded === true && rowC.fundedAmount === PAY_C.toString(),
+      `gap-only cursor: the while-down payment (${PAY_C}) is funded after resume, no full rescan`);
   } finally {
     await stopIndexer(child.proc);
   }
