@@ -277,12 +277,15 @@ export async function sweepRecord(deps: SweeperDeps, record: PortalRecord): Prom
   const now = await readBalance(chain, record.destination);
   if (now < amount) return null;
 
+  // Never pass a per-call `account`: an ADDRESS value downgrades viem to
+  // node-side signing (eth_sendTransaction), which anvil's unlocked accounts
+  // accept but every real RPC refuses ("unknown account") — the walletClient's
+  // hoisted local account must sign.
   const hash = await chain.walletClient.writeContract({
     address: chain.factory as Address,
     abi: SWEEP_ABI,
     functionName: "sweep",
     args: sweepArgs(record.stealthAddr, chain.pool, calldata, kemCiphertext),
-    account: chain.sweeper as Address,
     // 3x headroom over the node's quote — the packages/client chainGasPrice
     // rationale the relayer also follows: eth_gasPrice IS the current floor.
     gasPrice: (await chain.publicClient.getGasPrice()) * 3n,
@@ -323,7 +326,6 @@ export async function sweepPrivRecord(deps: SweeperDeps, record: PortalRecord): 
     abi: PRIV_SWEEP_ABI,
     functionName: "sweep",
     args: privSweepArgs(record, priv.module, calldata, kemCiphertexts),
-    account: chain.sweeper as Address,
     gasPrice: (await chain.publicClient.getGasPrice()) * 3n,
   });
   await chain.publicClient.waitForTransactionReceipt({ hash });

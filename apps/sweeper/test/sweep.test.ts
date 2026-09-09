@@ -188,11 +188,15 @@ test("a funded record sweeps with the EXACT factory tuple, owners = the record o
   const write = calls.find((c) => c.name === "writeContract");
   assert.ok(write, "writeContract was called");
   const p = write.params as {
-    address: string; functionName: string; args: unknown[]; gasPrice: bigint; account: string;
+    address: string; functionName: string; args: unknown[]; gasPrice: bigint; account?: unknown;
   };
   assert.equal(p.address, FACTORY, "the sweep goes through the factory, not the pool");
   assert.equal(p.functionName, "sweep");
-  assert.equal(p.account, SWEEPER);
+  // No per-call account: an ADDRESS value flips viem to node-side signing
+  // (eth_sendTransaction), which only anvil's unlocked accounts accept — a
+  // live RPC refuses with "unknown account". The walletClient's hoisted local
+  // account signs.
+  assert.equal("account" in p, false, "write must not override the walletClient's local account");
   // THE tuple: [salt, pool, a, b, c, pub, kemCiphertext] — salt from the ONE
   // portalSalt padding rule, proof coords as bigints (relayer withdrawArgs
   // discipline). Deep-equality, not shape-checking: any drift here is a
@@ -429,10 +433,10 @@ test("priv mode: a funded record sweeps with the EXACT priv tuple, sealed to the
 
   const write = calls.find((c) => c.name === "writeContract");
   assert.ok(write, "writeContract was called");
-  const p = write.params as { address: string; functionName: string; args: unknown[]; account: string };
+  const p = write.params as { address: string; functionName: string; args: unknown[]; account?: unknown };
   assert.equal(p.address, PRIV_FACTORY, "the sweep goes through the priv factory");
   assert.equal(p.functionName, "sweep");
-  assert.equal(p.account, SWEEPER);
+  assert.equal("account" in p, false, "write must not override the walletClient's local account");
   // THE priv tuple: [salt, module, a, b, c, pub16, kemCiphertexts,
   // ephemeralPub, viewTag] — deep-equality on everything deterministic; the two
   // kem cts are REAL per-output encapsulations (CSPRNG inside sealing), so
