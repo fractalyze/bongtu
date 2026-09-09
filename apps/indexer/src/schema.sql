@@ -179,7 +179,10 @@ ALTER TABLE portal_announcements ADD COLUMN IF NOT EXISTS funded_amount TEXT;   
 ALTER TABLE portal_announcements ADD COLUMN IF NOT EXISTS funded_tx_hash TEXT;        -- first qualifying transfer
 ALTER TABLE portal_announcements ADD COLUMN IF NOT EXISTS funded_at BIGINT;           -- unix seconds of that transfer
 ALTER TABLE portal_announcements ADD COLUMN IF NOT EXISTS funded_block BIGINT;        -- watermark half 1
-ALTER TABLE portal_announcements ADD COLUMN IF NOT EXISTS funded_log_index INTEGER;   -- watermark half 2
+-- BIGINT, not INTEGER: the boot reconciliation's watermark uses a
+-- block-end sentinel (Number.MAX_SAFE_INTEGER) that a 32-bit column would
+-- reject, rolling back every persist and wedging ingest permanently.
+ALTER TABLE portal_announcements ADD COLUMN IF NOT EXISTS funded_log_index BIGINT;    -- watermark half 2
 CREATE INDEX IF NOT EXISTS portal_destination_idx ON portal_announcements (destination);
 
 -- The funded tail's own scan cursor (ingest_cursor's twin): lags the pool
