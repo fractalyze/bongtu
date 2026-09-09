@@ -5,14 +5,20 @@ The portal-deposit operator bot (PoC; the portal design is
 a plain kKRW transfer to the CREATE2 destination the resolver issued; this bot —
 holding the PortalFactory owner key, `sweep` being `onlyOwner` per the portal
 design's recorded v1 trust concession — watches the indexer's `/portal/unswept` feed and, for
-each **funded** destination, builds a deposit minting the full balance to the
-announced recipient's bjj key, proves it on CPU snarkjs, and calls
-`factory.sweep`. The indexer flips `swept` from the factory's `Swept` event; the
-bot never marks state itself.
+each row served **`funded`** (the indexer's transfer tail watched the payment
+land — [`docs/indexer.md`](../../docs/indexer.md#the-funded-tail)), builds a
+deposit minting the full balance to the announced recipient's bjj key, proves
+it on CPU snarkjs, and calls `factory.sweep`. The indexer flips `swept` from
+the factory's `Swept` event; the bot never marks state itself.
 
 PoC boundaries (stated, not hidden): no batching, no fee, full-balance sweeps
 only, retries by rescan. Unswept rows are HINTS (issuance is unauthenticated) —
-only a nonzero ERC-20 balance triggers work.
+the flag is the trigger (an unfunded row costs zero chain reads; in priv mode
+a below-`MIN_SWEEP` observed amount skips read-free too), and the balance
+read on a flagged row remains the proof of payment. A feed with no `funded`
+field at all (an indexer predating the transfer tail) sweeps NOTHING — the
+stuck `unswept` count in `/health` is the signal; upgrade and restart the
+indexer first (the `deploy/README.md` ordering note).
 
 ## Modes
 

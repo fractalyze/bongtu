@@ -41,10 +41,15 @@ in-process read model, so the API stays synchronous, with Postgres as the durabl
     |
     +-- getLogs [from .. head]  --> applyLogs (pure)  --> buffered rows
     |
+    +-- funded tail (portal surface configured): token Transfer logs to open
+    |     destinations over [fundedCursor+1 .. head - FUNDED_CONFIRMATIONS]
+    |     --> markFunded (watermarked)  --> buffered funded flips
+    |
     +-- persist(head):  ONE transaction
-          { event rows, nullifiers, leaf DELTA, notes/history/alarms, block cursor := head }
-          COMMIT  -> buffers cleared, in-memory cursor advanced
-          ROLLBACK-> nothing moved; the next poll re-scans from the unadvanced cursor
+          { event rows, nullifiers, leaf DELTA, notes/history/alarms,
+            funded flips, funded cursor, block cursor := head }
+          COMMIT  -> buffers cleared, in-memory cursors advanced
+          ROLLBACK-> nothing moved; the next poll re-scans from the unadvanced cursors
 ```
 
 Two properties fall out and both are load-bearing:
@@ -110,6 +115,23 @@ retries — which is why the tuning guidance for rate-capped providers sits in t
 Block timestamps for the arbiter history feed are fetched once per distinct block, in waves of 16,
 so a cold backfill does not open one socket per block.
 
+## The funded tail
+
+With a portal surface configured, each ingest round runs a second scan: the pool token's ERC-20
+`Transfer` logs (token address from `pool.token()` — chain state, no env) filtered server-side on
+the `to` topic against the open (unswept) destination set, the address list chunked at 500 per call
+because providers cap topic arrays far below block-range caps. The window lags head by
+`FUNDED_CONFIRMATIONS` (default 2) under its own cursor (`funded_cursor`), one more participant in
+the same atomic persist — a funded flip and the window that produced it commit together, and a
+replayed window is absorbed by each row's persisted `(block, logIndex)` watermark (the amount is
+cumulative; replay cannot double-count). The flag is set once and never cleared: a beyond-depth
+reorg leaves a flagged row whose zero balance the bot's read skips. A store with no funded cursor
+(pre-feature) gets a one-time balance reconciliation at boot, pinned to a snapshot block and
+seeding the cursor there; `FUNDED_RECONCILE_ON_BOOT=1` re-runs that pass on demand — there is
+deliberately NO periodic reconciliation, so a tail bug is a visible stall (a funded payment the
+feed never flags), not a masked one. The consumer is the sweep bot: its trigger is the served
+flag, and its balance read remains the proof of payment (`docs/portal.md`).
+
 ## HTTP API
 
 Routing is a plain ordered table (`src/api/router.ts`): each route is a pure function of the
@@ -131,7 +153,7 @@ existing and refusing.
 | `POST /pay/{name}` | resolve-time portal issuance — derives a fresh stealth address for the name's meta-address, eth_calls `factory.addressOf(portalSalt(addr))` for the CREATE2 sweeper destination, records the announcement, returns `{ destination, ephemeralPub, viewTag, stealthAddr, factory }`; **404 unless `PORTAL_FACTORY` is set** | none — unauthenticated by design (a recorded PoC spam surface, `src/api/routes/portal.ts`) |
 | `POST /portal/announce` | pay-page issuance `{ label, ephemeralPub, viewTag, stealthAddr }` — the derivation happened in the SENDER'S BROWSER; the server resolves the label, **recomputes the destination itself** against the receive factory (a client destination is not even accepted) and returns the public record. **409** for a stealth address already recorded (first write wins — the page announces before it displays, so the honest record always exists first); 404 unknown label or **`PORTAL_PRIV_FACTORY` unset** | none — same recorded spam posture as `/pay` |
 | `GET /portal/announcements?cursor=&limit=` | every recorded announcement in the **attribution-free public projection** `[{ kind:"portal", seq, rail, factory, ephemeralPub, viewTag, stealthAddr, destination, createdAt, swept, sweptTxHash, sweptAmount }]` — **no `name`, no `owner`, by design**: this projection is the serving surface of the receive product's unlinkability claim, and the recipient's own view key decides which rows are its own (`scanStealthAnnouncement`). 404 unless a factory is configured | none |
-| `GET /portal/unswept?cursor=&limit=` | the unswept subset **with attribution** (`name`, `owner` — what the sweep bot needs to build the deposit) — the bot's work feed. Records flip `swept` when a factory's `Swept(salt, sweeper, amount)` log is ingested (salt = `portalSalt(stealthAddr)`); a receive-factory `Announced(salt, ephemeralPub, viewTag)` log additionally BACKFILLS a row for a salt the store has lost — the chain-only recovery path | **`x-operator-token` header == `PORTAL_OPERATOR_TOKEN`** when that env is set (401 otherwise); open when unset (local depositor-facing flows) |
+| `GET /portal/unswept?cursor=&limit=` | the unswept subset **with attribution** (`name`, `owner` — what the sweep bot needs to build the deposit) plus the funded verdict (`funded`, `fundedAmount`, `fundedTxHash`, `fundedAt` — the transfer tail's flag, the bot's sweep trigger; operator-feed-only, the public projection stays field-free) — the bot's work feed. Records flip `swept` when a factory's `Swept(salt, sweeper, amount)` log is ingested (salt = `portalSalt(stealthAddr)`); a receive-factory `Announced(salt, ephemeralPub, viewTag)` log additionally BACKFILLS a row for a salt the store has lost — the chain-only recovery path | **`x-operator-token` header == `PORTAL_OPERATOR_TOKEN`** when that env is set (401 otherwise); open when unset (local depositor-facing flows) |
 | `GET /ens/{sender}/{data}.json` | the CCIP-Read name gateway (ERC-3668 GET transport; `sender` = the resolver address, `data` = the ENSIP-10 `resolve` calldata from the `OffchainLookup` revert). A served lookup IS an issuance: fresh derivation against the queried chain's priv factory, announcement recorded first, then `{ data }` = the abi-encoded `(result, expires ≤ 300 s, sig)` the resolver's `resolveWithProof` verifies, `Cache-Control: no-store`. Anything unservable — foreign sender, node/name mismatch, unknown or v1-only label, unserved coinType — 4xxes and mints NOTHING (see § The name gateway); **404 unless `ENS_RESOLVER` is configured** | none — same recorded spam posture as `/pay` |
 | `POST /ens` | the same lookup over the ERC-3668 POST transport (`{ sender, data }` body) | none |
 | `GET /names/{name}` | one name-directory record `{ name, owner, viewPub, spendPub, noteViewPub?, kemEk?, updatedAt }` (see § Name directory); 404 unknown, 400 non-canonical name | none |

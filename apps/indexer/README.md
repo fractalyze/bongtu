@@ -44,6 +44,8 @@ Env knobs (`src/index.ts`):
 | `PORTAL_FACTORY` | unset | PortalFactory address → portal deposits live (`POST /pay/{name}` + `/portal/*`, Swept-log ingest). Unset → those routes 404 and boot logs one line saying so |
 | `PORTAL_PRIV_FACTORY` | unset | PortalPrivFactory address → the receive product lives (`POST /portal/announce` recorded against this factory's `addressOf`; `Swept` + `Announced` log ingest with chain-side backfill). Unset → `/portal/announce` 404s (one boot line) |
 | `PORTAL_OPERATOR_TOKEN` | unset | shared secret gating the ATTRIBUTED sweep-bot feed: set → `GET /portal/unswept` requires the same value in the `x-operator-token` header (401 otherwise). Unset → open (local depositor-facing flows). The public `/portal/announcements` projection carries no attribution either way. Never logged |
+| `FUNDED_CONFIRMATIONS` | `2` | blocks the funded transfer tail lags behind head before flagging an issued destination funded ([`docs/indexer.md`](../../docs/indexer.md#the-funded-tail)). The flag + observed amount ride the operator feed as `funded`/`fundedAmount`/`fundedTxHash`/`fundedAt` — the sweep bot's trigger. Needs a portal factory configured; a non-integer refuses to boot |
+| `FUNDED_RECONCILE_ON_BOOT` | unset | `1` forces the one-time open-row balance reconciliation at boot — the recovery lever for a suspect store. It otherwise runs only when no `funded_cursor` row exists (first boot on a pre-feature store) |
 | `ENS_RESOLVER` | unset | the deployed `PortalPrivResolver` address → the payment name's CCIP-Read gateway lives (`/ens` routes, [`docs/indexer.md`](../../docs/indexer.md#the-name-gateway-ccip-read)); lookups from any other `sender` fail closed. Unset → `/ens` 404s (one boot line). Requires `PORTAL_PRIV_FACTORY` and the two below |
 | `ENS_GATEWAY_KEY` | unset | the gateway's secp256k1 response-signing key (32-byte hex) — its address must be the resolver's owner-set signer. Required when `ENS_RESOLVER` is set (boot refuses otherwise). Same handling rule as `AUTHORITY_KEY`: memory only, never logged, never served |
 | `ENS_GATEWAY_CHAIN_ID` | unset | the ONE funds chain served as an ENSIP-11 coinType (the chain `PORTAL_PRIV_FACTORY` lives on); any other queried coinType answers empty and mints nothing. Required when `ENS_RESOLVER` is set |
@@ -135,9 +137,9 @@ src/
   modules.ts      the op-module registry mirror (consumer op family watch-set)
   kemchunks.ts    consumer-disburse kem-ct chunk assembly (calldata fetch + keccak recheck)
   names.ts        the name-directory records + v1/v2 signature forms
-  portal.ts       portal issuance records + swept/unswept state
+  portal.ts       portal issuance records + swept/unswept state + the funded verdict (transfer-tail flag, watermark, funded cursor)
   postgres.ts     PostgresStore + PostgresLedger (the ONE runtime backend): persist derived state + boot-reconstruct + resume (raw pg, no ORM)
-  schema.sql      idempotent Postgres schema (events / nullifiers / leaves / cursor / notes / history / alarms)
+  schema.sql      idempotent Postgres schema (events / nullifiers / leaves / block + funded cursors / notes / history / alarms / portal rows)
   solana/         the Solana rail backend (SOLANA_RPC switch)
   api/            router + readAuth + viewtoken + one file per route
 test/             unit tests + the anvil conformance scenario (run.sh) + the Postgres integration gate (pg_integration.sh)

@@ -297,6 +297,15 @@ The demo posture is resolve-to-view-and-copy only, then paste-send on
 Sepolia (step 7); suppressing the chain-ambiguous answer forms when
 resolution chain != funds chain is a named follow-up.
 
+Funded detection knobs (defaults suit the demo): `FUNDED_CONFIRMATIONS=2`
+(the transfer-tail lag), `FUNDED_RECONCILE_ON_BOOT=1` only to force the
+one-time balance reconciliation on a suspect store. **Restart ordering on
+an upgrade to the funded-tail build: the INDEXER first** — the bot's only
+sweep trigger is the `funded` field this indexer serves, so a new bot
+against an old indexer sweeps nothing (visible as a stuck `unswept` count
+in the bot's `/health`); the indexer's first boot heals pre-existing rows
+via the reconciliation pass, after which the bot follows.
+
 **5. Run the sweeper bot** (`MODE=priv`, CPU prover, explicit env per
 [`apps/sweeper/README.md`](../apps/sweeper/README.md)); fund its key from a
 Sepolia faucet — `/health` alarms on a zero gas balance.

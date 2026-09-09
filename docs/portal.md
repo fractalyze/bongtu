@@ -41,15 +41,21 @@ Two products share this machinery, on separate contract pairs:
 
 ## Sweep mechanics
 
-The bot watches `/portal/unswept`, and on funding has the factory deploy the
-sweeper (idempotent — a second payment to the same address just sweeps again)
-and call `sweep`: approve exactly `pub[0]`, then `pool.deposit`. Guards run
-before the pool call (`NothingToSweep`, `SweepExceedsBalance`), and the bot
-re-reads the balance between proving and sending — a payment landing
-mid-flight can only grow the balance past `pub[0]`, the one direction the
-contract permits. The indexer flips `swept` off the on-chain `Swept` event;
-the bot keeps no state, so a crash resumes by rescan with nothing to
-reconcile.
+Funded detection is the indexer's: its ingest round tails the pool token's
+`Transfer` logs to every open issued destination (a lagged window,
+`FUNDED_CONFIRMATIONS` behind head) and flags the matching row `funded` with
+the observed amount — set once, never cleared. The bot watches
+`/portal/unswept` and acts only on flagged rows, so an unfunded row costs
+zero chain reads no matter how many exist; the flag is still a hint, and the
+balance read remains the proof of payment. On a funded row the factory
+deploys the sweeper (idempotent — a second payment to the same address just
+sweeps again) and calls `sweep`: approve exactly `pub[0]`, then
+`pool.deposit`. Guards run before the pool call (`NothingToSweep`,
+`SweepExceedsBalance`), and the bot re-reads the balance between proving and
+sending — a payment landing mid-flight can only grow the balance past
+`pub[0]`, the one direction the contract permits. The indexer flips `swept`
+off the on-chain `Swept` event; the bot keeps no state, so a crash resumes
+by rescan with nothing to reconcile.
 
 ## The trust concession, stated plainly
 
@@ -157,7 +163,10 @@ are the deploy runbook
 ## PoC boundaries
 
 Issuance is unauthenticated on both write routes (anyone may mint records —
-a spam surface the route headers state; the bot treats rows as hints and
-sweeps only funded addresses); sweeps are full-balance, unbatched, one in
-flight; no fee model beyond the dust threshold. Run mechanics:
-`apps/sweeper/README.md`; page mechanics: `apps/pay-web/README.md`.
+a spam surface the route headers state; a row only ever costs the bot
+attention once someone pays gas to fund it: the indexer's transfer tail
+flags funded rows, the bot reads balances only there, and the flag-then-
+verify pair keeps rows hints rather than commands); sweeps are
+full-balance, unbatched, one in flight; no fee model beyond the dust
+threshold. Run mechanics: `apps/sweeper/README.md`; page mechanics:
+`apps/pay-web/README.md`.
