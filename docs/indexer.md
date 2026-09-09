@@ -349,6 +349,11 @@ announces it through the same first-write-wins `portal.issue` path a pay-page is
 signs. The signing key follows the `AUTHORITY_KEY` handling rule — memory only, never logged, never
 served; the gateway tests grep responses for it.
 
+The `/ens` surface (alone in this API) answers with permissive CORS and serves the OPTIONS
+preflight: browser wallets fetch the gateway cross-origin, and a response they cannot READ
+displays as "no address found" while the server logs 200 — the failure mode is invisible from the
+server side.
+
 Routing is ENSIP-11: the legacy `addr(bytes32)` form carries no coinType — it is what a wallet on an
 ENS-native chain asks its own registry — so it means "this deployment's chain" and is always served;
 the `addr(bytes32,uint256)` form names an explicit chain, and only `ENS_GATEWAY_CHAIN_ID`'s coinType

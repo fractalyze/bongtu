@@ -155,12 +155,32 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
  *  by whoever knows the origins it binds to — startApi, once the port is bound —
  *  so there is exactly ONE assembly point and no path that can mint tokens for an
  *  origin clients never dial. */
+/** ERC-3668 gateway responses MUST carry CORS: browser wallets fetch the
+ *  /ens URLs cross-origin, and without these headers the fetch reaches the
+ *  server but the wallet cannot READ the answer — the server logs 200 while
+ *  the wallet reports the name unresolvable (measured live against MetaMask;
+ *  Node-fetch gates never catch this class because CORS is browser-only).
+ *  Scoped to /ens: no other surface is built for cross-origin browser
+ *  consumption (the web apps ride same-origin proxies). */
+const ENS_CORS: Record<string, string> = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET, POST, OPTIONS",
+  "access-control-allow-headers": "content-type",
+};
+
 export function makeHandler(ix: IndexerHost, tokens: ViewTokenService | null) {
   const activeRoutes = ix.arbiterMode ? [...routes, notes, history, authChallenge, authRedeem] : routes;
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
       const pathname = url.pathname;
+      const ensSurface = pathname === "/ens" || pathname.startsWith("/ens/");
+      if (ensSurface && req.method === "OPTIONS") {
+        res.writeHead(204, ENS_CORS);
+        return void res.end();
+      }
+      const writeOut = (status: number, body: unknown, headers?: Record<string, string>): void =>
+        writeJson(res, status, body, ensSurface ? { ...(headers ?? {}), ...ENS_CORS } : headers);
       for (const route of activeRoutes) {
         if (route.method !== req.method) continue;
         const params: string[] | null =
@@ -180,13 +200,13 @@ export function makeHandler(ix: IndexerHost, tokens: ViewTokenService | null) {
             })()
           : {};
         if (bodyRead.err) {
-          return writeJson(res, 400, { error: `bad request body: ${bodyRead.err.message}` });
+          return writeOut(400, { error: `bad request body: ${bodyRead.err.message}` });
         }
         const body = bodyRead.body;
         const { status, body: resBody, headers } = await route.handle({ ix, tokens, params, query: url.searchParams, body, headers: req.headers });
-        return writeJson(res, status, resBody, headers);
+        return writeOut(status, resBody, headers);
       }
-      return writeJson(res, 404, { error: "not found", path: pathname });
+      return writeOut(404, { error: "not found", path: pathname });
     } catch (e) {
       return writeJson(res, 500, { error: (e as Error).message });
     }

@@ -36,8 +36,10 @@ import { NameRegistry } from "../src/names.js";
 import { PortalRegistry } from "../src/portal.js";
 import type { Indexer } from "../src/ingest.js";
 import { handleEnsResolve } from "../src/api/routes/ensGateway.js";
+import { makeHandler } from "../src/api/router.js";
 import type { RouteContext } from "../src/api/router.js";
 import { resolveConfig } from "../src/chain.js";
+import { createServer } from "node:http";
 
 const OWNER = deriveKeypair(987654321987654321n);
 const ownerCompressed = packPubkey(OWNER.publicKey);
@@ -257,6 +259,38 @@ test("boot refuses ENS_RESOLVER without the priv factory", () => {
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];
     }
+  }
+});
+
+test("the /ens surface carries CORS over HTTP; other surfaces do not", async () => {
+  // Browser wallets consume the gateway cross-origin (ERC-3668): a response
+  // without access-control-allow-origin reaches the wallet but cannot be
+  // READ by it, which displays as "no address found" while the server logs
+  // 200. Pinned at the HTTP layer because the header is attached there, not
+  // in the route handler.
+  const { ix } = await seededIx();
+  const server = createServer((req, res) => void makeHandler(ix, null)(req, res));
+  await new Promise<void>((r) => server.listen(0, () => r()));
+  const addr = server.address();
+  const base = `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`;
+  try {
+    const served = await fetch(`${base}/ens/${RESOLVER}/${addrCall("jun.demo.eth")}.json`);
+    assert.equal(served.status, 200);
+    assert.equal(served.headers.get("access-control-allow-origin"), "*");
+
+    const fence = await fetch(`${base}/ens/${RESOLVER}/0xdeadbeef.json`);
+    assert.equal(fence.status, 400, "fences too: the wallet must be able to READ the refusal");
+    assert.equal(fence.headers.get("access-control-allow-origin"), "*");
+
+    const preflight = await fetch(`${base}/ens`, { method: "OPTIONS" });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get("access-control-allow-methods"), "GET, POST, OPTIONS");
+
+    const other = await fetch(`${base}/portal/announcements`);
+    assert.equal(other.headers.get("access-control-allow-origin"), null,
+      "CORS stays scoped to the gateway surface");
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
   }
 });
 
