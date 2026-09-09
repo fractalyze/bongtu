@@ -33,7 +33,7 @@ import type { PortalIssuance, PortalPublicRecord, PortalRecord } from "@bongtu/c
 
 import { NameRegistry } from "../src/names.js";
 import { PortalRegistry } from "../src/portal.js";
-import { Indexer, type ParsedLog } from "../src/ingest.js";
+import { fundedWindow, Indexer, type ParsedLog } from "../src/ingest.js";
 import {
   handlePayPortal,
   handlePortalAnnounce,
@@ -553,6 +553,42 @@ test("openDestinations serves every unswept row (funded rows included) and drops
   portal.markSwept(portalSalt(rows[1].stealthAddr), "0xsweep", 7n);
   assert.deepEqual(portal.openDestinations(), [rows[0], rows[2]].map((r) => r.destination.toLowerCase()));
   void ix;
+});
+
+test("fundedWindow: the confirmation lag holds and empty windows are null", () => {
+  // Nothing scanned yet (cursor -1), head 10, depth 2: scan [0, 8].
+  assert.deepEqual(fundedWindow(10, -1, 2), { from: 0, to: 8 });
+  // A transfer landing at head stays unflagged until the lag clears: with the
+  // cursor at 8, heads 9 and 10 leave nothing confirmed to scan…
+  assert.equal(fundedWindow(9, 8, 2), null);
+  assert.equal(fundedWindow(10, 8, 2), null);
+  // …and head 11 finally exposes block 9.
+  assert.deepEqual(fundedWindow(11, 8, 2), { from: 9, to: 9 });
+  // Depth 0 scans to head; a caught-up cursor yields null, never a backward window.
+  assert.deepEqual(fundedWindow(5, 2, 0), { from: 3, to: 5 });
+  assert.equal(fundedWindow(5, 5, 0), null);
+});
+
+test("flushInto stages the funded UPDATE with the watermark pair, and commitFlush drains it", async () => {
+  const { ix, record } = await sweepFixture();
+  ix.portal.markFunded(record.destination, 100n, "0xt1", 10, 5, NOW);
+  const queries: { sql: string; params: unknown[] }[] = [];
+  const client = {
+    query: async (sql: string, params: unknown[]) => {
+      queries.push({ sql, params });
+      return { rows: [] };
+    },
+  };
+  await ix.portal.flushInto(client as never);
+  const funded = queries.filter((q) => q.sql.includes("funded = TRUE"));
+  assert.equal(funded.length, 1);
+  assert.deepEqual(funded[0].params, [record.seq, "100", "0xt1", NOW, 10, 5]);
+  // The postgres.ts discipline: buffers survive the flush (a rolled-back
+  // transaction retries them) and drain only at commitFlush.
+  ix.portal.commitFlush();
+  const after: unknown[] = [];
+  await ix.portal.flushInto({ query: async (sql: string) => { after.push(sql); return { rows: [] }; } } as never);
+  assert.equal(after.length, 0);
 });
 
 test("funded fields ride the operator feed and NEVER the public projection (spec R8)", async () => {

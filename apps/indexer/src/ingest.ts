@@ -28,6 +28,8 @@ import {
   decodeFunctionData,
   http,
   keccak256,
+  parseAbi,
+  parseAbiItem,
   toBytes,
   type Abi,
   type Address,
@@ -47,7 +49,7 @@ import { emitAlarm, emitDisclosureAlarm } from "./alarms.js";
 import { projectFeedEntry } from "./projection.js";
 import { connect, PostgresStore, PostgresLedger } from "./postgres.js";
 import { NameRegistry } from "./names.js";
-import { PortalRegistry } from "./portal.js";
+import { FundedCursorStore, PortalRegistry } from "./portal.js";
 import { ModuleRegistry } from "./modules.js";
 import { KemChunkStore } from "./kemchunks.js";
 import { IndexerHostBase } from "./host.js";
@@ -76,6 +78,34 @@ function isViemPreKemProbeError(e: unknown): boolean {
 }
 
 const H = 32; // IMT height — a system-wide constant (SPEC §4)
+
+// The funded tail's log shapes (spec R1/R4): the pool token's ERC-20 Transfer,
+// filtered server-side on the indexed `to` topic, and the balanceOf read the
+// boot reconciliation pins to its snapshot block.
+const TRANSFER_EVENT = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 value)");
+const ERC20_BALANCE_ABI = parseAbi(["function balanceOf(address) view returns (uint256)"]);
+// Addresses per getLogs `to`-topic filter call: providers cap topic-array
+// sizes far below any block-range cap, so the open destination set is chunked
+// here (the LOG_CHUNK sibling knob, fixed — per-window call count grows with
+// the row set, per-call cost does not).
+const FUNDED_DEST_CHUNK = 500;
+
+/**
+ * The funded tail's scan window: `[lastScanned + 1, head - confirmations]`,
+ * or null when the confirmation lag leaves nothing to scan (spec R2 — a
+ * transfer inside the unconfirmed window is picked up by a later pass, never
+ * the one that first sees it). Pure so the unit suite pins the lag semantics
+ * without a chain.
+ */
+export function fundedWindow(
+  head: number,
+  lastScanned: number,
+  confirmations: number,
+): { from: number; to: number } | null {
+  const to = head - confirmations;
+  const from = lastScanned + 1;
+  return to >= from ? { from, to } : null;
+}
 
 // The dispatch gate's emitter→handler map (OPMOD §1.4 mirror invariant):
 // decodeEventLog dispatches on topic0 across the COMBINED ABI, so a watched
@@ -183,6 +213,14 @@ export class Indexer extends IndexerHostBase {
   // bootPostgres in flush == commit order.
   private participants: PersistParticipant[] = [];
   private blockCursor: BlockCursor | null = null;
+  // The funded tail's cursor pair (spec R3): the store facade over the
+  // funded_cursor table and its BlockCursor participant. Participant exists
+  // only when a portal surface is configured (no factory, no rows, no tail) —
+  // an unconditional participant would throw on flush with no advanceTo.
+  private fundedCursorStore: FundedCursorStore | null = null;
+  private fundedCursor: BlockCursor | null = null;
+  // pool.token() read once at first use — chain state, no address env (R1).
+  private tokenAddr: string | null = null;
 
   constructor(cfg: ChainConfig) {
     super(cfg);
@@ -252,6 +290,111 @@ export class Indexer extends IndexerHostBase {
         args: [salt as `0x${string}`],
       }),
     );
+  }
+
+  /** pool.token(), read once and cached — the funded tail's scan address.
+   *  Chain state on both pool profiles, so no token env exists to drift. */
+  private async tokenAddress(): Promise<string> {
+    this.tokenAddr = this.tokenAddr ?? String(await this.read("token"));
+    return this.tokenAddr;
+  }
+
+  /**
+   * The funded tail's one window scan (spec R1/R4): pool-token Transfer logs
+   * to any OPEN destination, chunked twice — the destination list per
+   * provider topic caps (FUNDED_DEST_CHUNK), the block range per LOG_CHUNK
+   * with the scanRange bisect-on-error behavior. Hits are marked in chain
+   * order (the watermark is monotone), each stamped with its block time via
+   * the same refuse-zero policy as the feed (a wrong fundedAt would be
+   * permanent).
+   */
+  private async scanTransfers(from: number, to: number): Promise<void> {
+    const open = this.portal.openDestinations();
+    if (open.length === 0) return;
+    const token = await this.tokenAddress();
+    const hits: { to: string; value: bigint; txHash: string; blockNumber: number; logIndex: number }[] = [];
+    const walk = async (dests: Address[], lo: number, hi: number): Promise<void> => {
+      try {
+        const raw = await this.publicClient.getLogs({
+          address: token as Address,
+          event: TRANSFER_EVENT,
+          args: { to: dests },
+          fromBlock: BigInt(lo),
+          toBlock: BigInt(hi),
+        });
+        for (const log of raw) {
+          hits.push({
+            to: String(log.args.to),
+            value: log.args.value as bigint,
+            txHash: log.transactionHash,
+            blockNumber: Number(log.blockNumber),
+            logIndex: log.logIndex,
+          });
+        }
+      } catch (e) {
+        if (hi > lo) {
+          const mid = Math.floor((lo + hi) / 2);
+          await walk(dests, lo, mid);
+          await walk(dests, mid + 1, hi);
+        } else {
+          throw e;
+        }
+      }
+    };
+    const CHUNK = Number(process.env.LOG_CHUNK || 50000);
+    for (const i of Array.from({ length: Math.ceil(open.length / FUNDED_DEST_CHUNK) }, (_, k) => k * FUNDED_DEST_CHUNK)) {
+      const dests = open.slice(i, i + FUNDED_DEST_CHUNK) as Address[];
+      const walkChunks = async (lo: number): Promise<void> => {
+        if (lo > to) return;
+        await walk(dests, lo, Math.min(lo + CHUNK - 1, to));
+        await walkChunks(lo + CHUNK);
+      };
+      await walkChunks(from);
+    }
+    hits.sort((a, b) => a.blockNumber - b.blockNumber || a.logIndex - b.logIndex);
+    const blockNums = [...new Set(hits.map((h) => h.blockNumber))];
+    const tsByBlock = new Map<number, number>();
+    for (const n of blockNums) {
+      const ts = await this.blockTimestamp(n);
+      if (!ts) {
+        throw new Error(`no timestamp for block ${n} after retries — refusing to persist a funded flag with a zero fundedAt`);
+      }
+      tsByBlock.set(n, ts);
+    }
+    for (const h of hits) {
+      this.portal.markFunded(h.to, h.value, h.txHash, h.blockNumber, h.logIndex, tsByBlock.get(h.blockNumber)!);
+    }
+  }
+
+  /**
+   * The one-time balance reconciliation (spec R3): on a store with no funded
+   * cursor (pre-feature) — or when FUNDED_RECONCILE_ON_BOOT=1 forces it (the
+   * C2 recovery lever) — read every open destination's balance PINNED to one
+   * snapshot block and flag the funded ones, then seed the cursor AT that
+   * block: everything at or before it is inside the balances, everything
+   * after is the event tail's. The watermark is set to the snapshot block's
+   * end (max logIndex) so a replayed window at that block cannot
+   * double-count. Marks land durably with the first persist; a crash before
+   * it re-runs the pass (no cursor row yet) — idempotent by construction.
+   */
+  private async reconcileFunded(): Promise<void> {
+    const head = Number(await this.publicClient.getBlockNumber({ cacheTime: 0 }));
+    const open = this.portal.openDestinations();
+    const token = await this.tokenAddress();
+    for (const dest of open) {
+      const bal = (await this.publicClient.readContract({
+        address: token as Address,
+        abi: ERC20_BALANCE_ABI,
+        functionName: "balanceOf",
+        args: [dest as Address],
+        blockNumber: BigInt(head),
+      })) as bigint;
+      if (bal > 0n) {
+        this.portal.markFunded(dest, bal, "boot-reconciliation", head, Number.MAX_SAFE_INTEGER, Math.floor(Date.now() / 1000));
+      }
+    }
+    this.fundedCursorStore!.lastBlock = Math.max(this.fundedCursorStore!.lastBlock, head);
+    console.log(`funded reconciliation: ${open.length} open destination(s) checked at block ${head}`);
   }
 
   /** Live head state straight from the contract (the mirror is asserted against it). */
@@ -496,6 +639,16 @@ export class Indexer extends IndexerHostBase {
     if (this.tree.nextLeafIndex() !== at.nextLeafIndex) {
       throw new Error(`ingest: mirror nextLeafIndex ${this.tree.nextLeafIndex()} != contract ${at.nextLeafIndex} @block ${head}`);
     }
+    // The funded tail (spec R1): scan its lagged window against the SAME head
+    // this round pinned, then advance its cursor — monotone even when the
+    // confirmation lag leaves nothing to scan, so the participant always has
+    // a target. Runs after applyLogs so a row issued and swept in this very
+    // range is already excluded from the open set.
+    if (this.fundedCursor && this.fundedCursorStore) {
+      const win = fundedWindow(head, this.fundedCursorStore.lastBlock, this.cfg.fundedConfirmations ?? 2);
+      if (win) await this.scanTransfers(win.from, win.to);
+      this.fundedCursor.advanceTo(Math.max(win ? win.to : -1, this.fundedCursorStore.lastBlock));
+    }
     // Persist ALL derived rows for this batch AND advance the block cursor in ONE
     // transaction (see `persist`). The cursor reaches H iff every row for blocks
     // <= H is durable, so a crash can never leave the leaves table ahead of the
@@ -551,14 +704,32 @@ export class Indexer extends IndexerHostBase {
     const kem = new KemChunkStore(pool);
     await kem.boot();
     this.kem = kem;
+    // The funded tail's cursor + the one-time reconciliation (spec R3): only
+    // with a portal surface configured — no factory means no rows and no
+    // tail, and a cursor participant that never sees advanceTo would throw.
+    this.fundedCursorStore = new FundedCursorStore(pool);
+    await this.fundedCursorStore.boot();
+    const hasPortalSurface = Boolean(this.cfg.portalFactory || this.cfg.portalPrivFactory);
+    if (hasPortalSurface && (this.fundedCursorStore.lastBlock < 0 || this.cfg.fundedReconcileOnBoot)) {
+      await this.reconcileFunded();
+    }
+    this.fundedCursor = hasPortalSurface ? new BlockCursor(this.fundedCursorStore) : null;
     // The DECLARED persist participant set (persist.ts), in flush == commit
-    // order; the block cursor is itself a participant, LAST, so every row for
+    // order; the cursors are themselves participants, LAST, so every row for
     // block H is staged in the transaction before the cursor that claims H.
     this.blockCursor = new BlockCursor(store);
     // The list captures the boot-time instances on purpose: boot is one-shot,
     // and persist must never desync from the store routes serve — do not
     // reassign this.store after boot without rebuilding this list.
-    this.participants = [store, ...(this.ledger ? [this.ledger] : []), this.portal, this.modules, this.kem, this.blockCursor];
+    this.participants = [
+      store,
+      ...(this.ledger ? [this.ledger] : []),
+      this.portal,
+      this.modules,
+      this.kem,
+      ...(this.fundedCursor ? [this.fundedCursor] : []),
+      this.blockCursor,
+    ];
     // Accepted-unassembled recovery: an accepted chunk whose submit-tx calldata
     // could not be decoded at ingest time persisted with NULL bytes. Boot
     // re-attempts the fetch+decode once per such chunk — an RPC that failed or

@@ -59,6 +59,29 @@ export function toPublic(r: PortalRecord): PortalPublicRecord {
   };
 }
 
+/** The funded tail's persisted resume point (`funded_cursor`, ingest_cursor's
+ *  single-row twin) — a BlockCursor-compatible store facade, so persist.ts's
+ *  one cursor-participant implementation serves both cursors. No row means a
+ *  pre-feature store: boot runs the one-time balance reconciliation and the
+ *  first persist writes the seed. */
+export class FundedCursorStore {
+  lastBlock = -1;
+  constructor(private readonly pool: Pool | null = null) {}
+
+  async boot(): Promise<void> {
+    if (!this.pool) return;
+    const res = await this.pool.query("SELECT last_block FROM funded_cursor WHERE id = 1");
+    if (res.rows.length > 0) this.lastBlock = Number(res.rows[0].last_block);
+  }
+
+  async persistCursorInto(client: PoolClient, block: number): Promise<void> {
+    await client.query(
+      "INSERT INTO funded_cursor (id, last_block) VALUES (1, $1) ON CONFLICT (id) DO UPDATE SET last_block = EXCLUDED.last_block",
+      [block],
+    );
+  }
+}
+
 /** The first-write-wins refusal, typed so the announce route can answer 409
  *  (any other issue() failure stays the catch-all 500). */
 export class DuplicateStealthAddressError extends Error {

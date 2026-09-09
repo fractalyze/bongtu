@@ -31,6 +31,14 @@
 //                              same value in x-operator-token (401 otherwise);
 //                              unset => the feed stays open (local/dev flows).
 //                              NEVER logged.
+//   FUNDED_CONFIRMATIONS       blocks the funded transfer tail lags behind
+//                              head before flagging an issued destination
+//                              funded (default 2; needs a portal factory)
+//   FUNDED_RECONCILE_ON_BOOT   "1" forces the one-time open-row balance
+//                              reconciliation at boot — the recovery lever
+//                              for a suspect store; it otherwise runs only
+//                              when no funded cursor exists (first boot on a
+//                              pre-feature store)
 //   AUTHORITY_KEY              arbiter PRIVATE key (bjj scalar) => ARBITER MODE:
 //                              decrypt every op's authority envelope, build the
 //                              note ledger, serve /notes + within-batch /path.

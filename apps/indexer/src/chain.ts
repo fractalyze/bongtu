@@ -160,6 +160,14 @@ export interface ChainConfig {
   // Parsed ONCE here at boot — garbage refuses to boot like every other knob;
   // routes read it off the Indexer, never process.env.
   kemGraceSeconds?: number;
+  // Funded detection (the transfer tail over issued destinations): blocks the
+  // tail lags behind head before flagging a transfer funded (env
+  // FUNDED_CONFIRMATIONS, default 2 — the spec R2 reorg posture), and the
+  // boot-time override (env FUNDED_RECONCILE_ON_BOOT=1) forcing the one-time
+  // balance reconciliation even when a funded cursor exists — the ops
+  // recovery lever for a suspect store (spec C2: no periodic net exists).
+  fundedConfirmations?: number;
+  fundedReconcileOnBoot?: boolean;
   // Directory of institution-held disclosure blobs ({startLeafIndex}.json,
   // one JSON array of 32-byte hex elements per disburse batch) — the
   // SOLR §3.3.2 serving store behind GET /disclosure. Unset => nothing held
@@ -234,6 +242,16 @@ export function resolveConfig(): ChainConfig {
   const portalPrivFactory = process.env.PORTAL_PRIV_FACTORY || null;
   const portalOperatorToken = process.env.PORTAL_OPERATOR_TOKEN || null;
   const kemGraceSeconds = parseKemGraceSeconds(process.env.KEM_GRACE_SECONDS);
+  // Same fail-fast posture: garbage refuses to boot rather than NaN-lagging
+  // the funded tail forever.
+  const fundedConfirmations = ((): number => {
+    const raw = process.env.FUNDED_CONFIRMATIONS;
+    if (raw === undefined || raw === "") return 2;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 0) throw new Error(`FUNDED_CONFIRMATIONS must be a non-negative integer (got "${raw}")`);
+    return n;
+  })();
+  const fundedReconcileOnBoot = process.env.FUNDED_RECONCILE_ON_BOOT === "1";
   // Same fail-fast posture as the kem grace knob: garbage refuses to boot.
   const disclosureGraceSeconds = ((): number => {
     const raw = process.env.DISCLOSURE_GRACE_SECONDS;
@@ -275,7 +293,7 @@ export function resolveConfig(): ChainConfig {
         treeAccount: process.env.SOLANA_TREE || (() => { throw new Error("SOLANA_RPC is set but SOLANA_TREE (the TreeState account) is not"); })(),
       }
     : null;
-  return { rpc, pool, startBlock, authorityKey, authorityKemKey, databaseUrl, portalFactory, portalPrivFactory, portalOperatorToken, kemGraceSeconds, disclosureDir, disclosureGraceSeconds, solana, ens };
+  return { rpc, pool, startBlock, authorityKey, authorityKemKey, databaseUrl, portalFactory, portalPrivFactory, portalOperatorToken, kemGraceSeconds, fundedConfirmations, fundedReconcileOnBoot, disclosureDir, disclosureGraceSeconds, solana, ens };
 }
 
 /** Parse AUTHORITY_KEM_KEY (the 2400-byte ML-KEM-768 decapsulation key) from
