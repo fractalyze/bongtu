@@ -71,6 +71,13 @@ function record(over: Partial<PortalRecord> = {}): PortalRecord {
     swept: false,
     sweptTxHash: null,
     sweptAmount: null,
+    // Served funded by default: these tests model the upgraded indexer's feed.
+    // fundedAmount stays null so the dust gate falls open to the balance read
+    // (the pre-flag pipeline shape) unless a test sets an observed amount.
+    funded: true,
+    fundedAmount: null,
+    fundedTxHash: "0xfund",
+    fundedAt: 1_700_000_100,
     ...over,
   };
 }
@@ -472,6 +479,60 @@ test("priv mode: a below-MIN_SWEEP balance is dust — no prove, no tx, stays un
   at.chain.factory = PRIV_FACTORY;
   await runOnce(makePrivDeps(at.chain, [[rec]], captured, { minSweep: 10n }), initialState());
   assert.equal(captured.length, 1, "at-threshold balance sweeps");
+});
+
+// ====================== (priv/enterprise) THE FUNDED GATE ====================
+
+test("an unfunded row costs ZERO chain reads: the flag is the trigger (spec R5)", async () => {
+  const rec = record({ funded: false, fundedTxHash: null, fundedAt: null });
+  const { chain, calls } = fakeChain({ balances: { [rec.destination]: [1000n] } });
+  const captured: ProvingRequest[] = [];
+  const proveCalls: { name: string }[] = [];
+  const state = initialState();
+  await runOnce(makeDeps(chain, [[rec]], captured, proveCalls), state);
+  assert.equal(calls.filter((c) => c.name.startsWith("balanceOf")).length, 0, "no balance read for an unfunded row");
+  assert.equal(proveCalls.length, 0);
+  assert.equal(calls.filter((c) => c.name === "writeContract").length, 0);
+  assert.equal(state.unswept, 1, "the row still counts as unswept work (the C1 observable)");
+});
+
+test("a feed with no funded field at all (un-upgraded indexer) sweeps nothing, visibly", async () => {
+  const { funded, fundedAmount, fundedTxHash, fundedAt, ...legacyShape } = record();
+  void funded; void fundedAmount; void fundedTxHash; void fundedAt;
+  const legacy = legacyShape as PortalRecord;
+  const { chain, calls } = fakeChain({ balances: { [legacy.destination]: [1000n] } });
+  const state = initialState();
+  await runOnce(makeDeps(chain, [[legacy]], [], []), state);
+  assert.equal(calls.filter((c) => c.name.startsWith("balanceOf")).length, 0, "no read against a flagless row");
+  assert.equal(calls.filter((c) => c.name === "writeContract").length, 0, "nothing sweeps");
+  assert.equal(state.unswept, 1, "the stuck unswept count is the rollout observable");
+});
+
+test("at most two balance reads per funded row: the proof-sizing read and the pre-send re-read", async () => {
+  const rec = record();
+  const { chain, calls } = fakeChain({ balances: { [rec.destination]: [700n] } });
+  await runOnce(makeDeps(chain, [[rec]], [], []), initialState());
+  assert.equal(calls.filter((c) => c.name === `balanceOf:${rec.destination}`).length, 2);
+});
+
+test("priv mode: a below-MIN_SWEEP OBSERVED amount skips with zero chain reads (spec R9)", async () => {
+  const dust = privRecord({ fundedAmount: "9" });
+  const real = privRecord({
+    seq: 7,
+    fundedAmount: "10",
+    stealthAddr: "0x00000000000000000000000000000000000d0007",
+    destination: "0x00000000000000000000000000000000000de577",
+  });
+  const { chain, calls } = fakeChain({ balances: { [real.destination]: [10n] } });
+  chain.factory = PRIV_FACTORY;
+  const captured: ProvingRequest[] = [];
+  await runOnce(makePrivDeps(chain, [[dust, real]], captured, { minSweep: 10n }), initialState());
+  assert.equal(
+    calls.filter((c) => c.name === `balanceOf:${dust.destination}`).length,
+    0,
+    "the dust-priced grief costs no RPC read at all",
+  );
+  assert.equal(captured.length, 1, "the at-threshold observed amount proceeds to the normal pipeline");
 });
 
 test("mode row filtering: each bot keeps its own factory's rows; backfilled rows reach nobody", async () => {

@@ -14,8 +14,13 @@
 // event — at which point its balance is 0 and the funded-only gate skips it.
 //
 // WHY FUNDED-ONLY: issuance is unauthenticated (api/routes/portal.ts records
-// the spam surface), so unswept rows are HINTS. The ERC-20 balance read is the
-// proof of payment.
+// the spam surface), so unswept rows are HINTS. The bot's TRIGGER is the
+// indexer's `funded` flag (its transfer tail watched the payment land), so an
+// unfunded row costs zero chain reads — but the flag is still a hint: the
+// ERC-20 balance read remains the proof of payment, and pub[0] binds to it.
+// A feed with no funded field at all (an un-upgraded indexer) therefore
+// sweeps NOTHING — visible as a stuck `unswept` count in /health; restart
+// the indexer on the funded-tail build first (deploy/README.md ordering).
 //
 // WHY THE RACE WITH A FRESH PAYMENT IS SAFE: the proof binds pub[0] to the
 // balance read BEFORE proving; a payment landing during the multi-second proof
@@ -351,17 +356,35 @@ export function recordBelongsTo(record: PortalRecord, deps: SweeperDeps): boolea
 
 /**
  * One poll round: fetch the unswept feed, keep this bot's rows, and process
- * them SEQUENTIALLY — one record in flight at a time by construction (each
- * await completes before the next record's balance read), so the bot never
- * races itself into double-sweeping one destination. A record's failure is
- * logged and the round moves on: the next rescan retries it (PoC — no queue,
- * no backoff per record). The mode picks the per-record path: priv deps
- * present => depositPriv through the priv factory, else the enterprise
- * portal deposit.
+ * the FUNDED ones SEQUENTIALLY — one record in flight at a time by
+ * construction (each await completes before the next record's balance read),
+ * so the bot never races itself into double-sweeping one destination. A
+ * record's failure is logged and the round moves on: the next rescan retries
+ * it (PoC — no queue, no backoff per record). The mode picks the per-record
+ * path: priv deps present => depositPriv through the priv factory, else the
+ * enterprise portal deposit.
+ *
+ * The funded gate is what removed per-row chain polling (spec R5): a row not
+ * served `funded === true` is never touched — including every row from an
+ * un-upgraded indexer with no funded field, which keeps `state.unswept`
+ * nonzero as the C1 rollout observable. The priv dust gate runs on the
+ * indexer's OBSERVED amount before any RPC read (spec R9): a dust-priced
+ * flag griefs the attacker's gas, not this bot's RPC budget. A funded row
+ * with no observed amount (not a shape our indexer serves) falls open to
+ * the balance read rather than silently skipping a real payment.
  */
 export async function runOnce(deps: SweeperDeps, state: SweeperState): Promise<void> {
-  const records = (await deps.fetchUnswept()).filter((r) => recordBelongsTo(r, deps));
-  state.unswept = records.length;
+  const mine = (await deps.fetchUnswept()).filter((r) => recordBelongsTo(r, deps));
+  state.unswept = mine.length;
+  const records = mine
+    .filter((r) => r.funded === true)
+    .filter(
+      (r) =>
+        !deps.priv ||
+        r.fundedAmount === undefined ||
+        r.fundedAmount === null ||
+        BigInt(r.fundedAmount) >= deps.priv.minSweep,
+    );
   for (const record of records) {
     try {
       const hash = deps.priv ? await sweepPrivRecord(deps, record) : await sweepRecord(deps, record);
