@@ -252,6 +252,19 @@ export interface PortalRecord extends PortalPublicRecord {
   name: string;
   /** compressed bjj pubkey of the name's owner (the recipient's in-pool identity). */
   owner: string;
+  /** the indexer's Transfer-tail verdict: a confirmed pool-token transfer
+   *  landed at `destination`. Set once, never cleared (a beyond-depth reorg
+   *  leaves a flagged row the bot's zero-balance read skips). The bot's sweep
+   *  trigger — the balance read stays the proof of payment. Absent on an
+   *  un-upgraded indexer, which a flag-driven bot treats as "no work". */
+  funded?: boolean;
+  /** decimal, token base units; cumulative observed transfer value (dust
+   *  gating without an RPC read). null until funded. */
+  fundedAmount?: string | null;
+  /** the FIRST qualifying transfer's tx hash / unix block time (operator
+   *  forensics; the arrival-notice surface later). null until funded. */
+  fundedTxHash?: string | null;
+  fundedAt?: number | null;
 }
 
 /** What the pay page POSTs to /portal/announce: the browser-side derivation's

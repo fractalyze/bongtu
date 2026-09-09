@@ -35,7 +35,8 @@ import { portalSalt } from "@bongtu/core/stealth";
 /** What the issuance/announce routes hand the registry (seq/createdAt/swept are ours). */
 export type PortalIssuanceFields = Omit<
   PortalRecord,
-  "kind" | "seq" | "createdAt" | "swept" | "sweptTxHash" | "sweptAmount"
+  | "kind" | "seq" | "createdAt" | "swept" | "sweptTxHash" | "sweptAmount"
+  | "funded" | "fundedAmount" | "fundedTxHash" | "fundedAt"
 >;
 
 /** The public projection: the attributed row minus name/owner. A dedicated
@@ -71,9 +72,18 @@ export class PortalRegistry {
   private readonly records: PortalRecord[] = [];
   // portalSalt(record.stealthAddr) -> record: the Swept/Announced-matching index.
   private readonly bySalt = new Map<string, PortalRecord>();
+  // lowercase destination -> record: the funded tail's Transfer(to) match.
+  // Destinations are CREATE2 images of distinct salts, so the map is 1:1.
+  private readonly byDestination = new Map<string, PortalRecord>();
+  // seq -> the funded replay watermark: the highest (block, logIndex) whose
+  // transfer value is already inside fundedAmount. Registry-internal (never
+  // served); persisted with the row so a crash-replayed window cannot
+  // double-accumulate.
+  private readonly fundedWatermark = new Map<number, { block: number; logIndex: number }>();
   // Write-behind buffers of chain-derived writes staged for the ingest transaction.
   private pendingSwept: PortalRecord[] = [];
   private pendingInserts: PortalRecord[] = [];
+  private pendingFunded: PortalRecord[] = [];
   private seq = 0;
 
   constructor(private readonly pool: Pool | null = null) {}
@@ -85,7 +95,8 @@ export class PortalRegistry {
     if (!this.pool) return;
     const res = await this.pool.query(
       `SELECT seq, name, owner, ephemeral_pub, view_tag, stealth_addr, destination,
-              factory, rail, created_at, swept, swept_tx_hash, swept_amount
+              factory, rail, created_at, swept, swept_tx_hash, swept_amount,
+              funded, funded_amount, funded_tx_hash, funded_at, funded_block, funded_log_index
        FROM portal_announcements ORDER BY seq ASC`,
     );
     for (const r of res.rows) {
@@ -104,7 +115,17 @@ export class PortalRegistry {
         swept: r.swept as boolean,
         sweptTxHash: (r.swept_tx_hash as string | null) ?? null,
         sweptAmount: (r.swept_amount as string | null) ?? null,
+        funded: (r.funded as boolean | null) ?? false,
+        fundedAmount: (r.funded_amount as string | null) ?? null,
+        fundedTxHash: (r.funded_tx_hash as string | null) ?? null,
+        fundedAt: r.funded_at === null || r.funded_at === undefined ? null : Number(r.funded_at),
       });
+      if (r.funded_block !== null && r.funded_block !== undefined) {
+        this.fundedWatermark.set(Number(r.seq), {
+          block: Number(r.funded_block),
+          logIndex: Number(r.funded_log_index),
+        });
+      }
     }
     this.seq = this.records.length > 0 ? this.records[this.records.length - 1].seq + 1 : 0;
   }
@@ -112,6 +133,7 @@ export class PortalRegistry {
   private index(record: PortalRecord): void {
     this.records.push(record);
     this.bySalt.set(portalSalt(record.stealthAddr), record);
+    this.byDestination.set(record.destination.toLowerCase(), record);
   }
 
   /** First-write-wins probe: is this stealth address already recorded? The
@@ -152,6 +174,10 @@ export class PortalRegistry {
       swept: false,
       sweptTxHash: null,
       sweptAmount: null,
+      funded: false,
+      fundedAmount: null,
+      fundedTxHash: null,
+      fundedAt: null,
     };
     if (this.hasStealth(record.stealthAddr)) throw new DuplicateStealthAddressError(record.stealthAddr);
     if (this.pool) {
@@ -195,6 +221,46 @@ export class PortalRegistry {
    *  Served only behind the operator token (routes/portal.ts). */
   unswept(cursor = -1, limit = Infinity): PortalRecord[] {
     return this.records.filter((r) => !r.swept && r.seq > cursor).slice(0, limit);
+  }
+
+  /** Every open (unswept) destination, lowercase — the funded tail's
+   *  Transfer(to) filter set. Funded-but-unswept rows stay in it so a second
+   *  payment before the sweep keeps accumulating (the R9 amount). */
+  openDestinations(): string[] {
+    return this.records.filter((r) => !r.swept).map((r) => r.destination.toLowerCase());
+  }
+
+  /**
+   * Mark the record at `destination` funded off a confirmed pool-token
+   * Transfer log — the markSwept discipline verbatim: applied to the read
+   * model NOW, staged for the ingest transaction, replay-idempotent. The
+   * idempotence key is the per-row (block, logIndex) watermark: a replayed
+   * window's transfers at or below it are already inside `fundedAmount`, so
+   * they no-op instead of double-counting. The flag itself is set once and
+   * never cleared (spec R2: a beyond-depth reorg leaves a flagged row whose
+   * zero balance the bot's read skips). A swept row no-ops — there is no
+   * re-sweep path, and the tail's filter set excludes it anyway.
+   */
+  markFunded(
+    destination: string,
+    value: bigint,
+    txHash: string,
+    blockNumber: number,
+    logIndex: number,
+    blockTimestamp: number,
+  ): void {
+    const record = this.byDestination.get(destination.toLowerCase());
+    if (!record || record.swept || value <= 0n) return;
+    const mark = this.fundedWatermark.get(record.seq);
+    if (mark && (blockNumber < mark.block || (blockNumber === mark.block && logIndex <= mark.logIndex))) {
+      return;
+    }
+    record.funded = true;
+    record.fundedAmount = (BigInt(record.fundedAmount ?? "0") + value).toString();
+    record.fundedTxHash = record.fundedTxHash ?? txHash;
+    record.fundedAt = record.fundedAt ?? blockTimestamp;
+    this.fundedWatermark.set(record.seq, { block: blockNumber, logIndex });
+    this.pendingFunded.push(record);
   }
 
   /**
@@ -253,6 +319,12 @@ export class PortalRegistry {
       swept: true,
       sweptTxHash: fields.txHash,
       sweptAmount: fields.amount.toString(),
+      // A backfilled row is swept by construction, so the funded tail never
+      // touches it — the fields exist for shape consistency only.
+      funded: false,
+      fundedAmount: null,
+      fundedTxHash: null,
+      fundedAt: null,
     };
     this.seq++;
     this.records.push(record);
@@ -287,11 +359,24 @@ export class PortalRegistry {
         [r.seq, r.sweptTxHash, r.sweptAmount],
       );
     }
+    for (const r of this.pendingFunded) {
+      // The row values are read at flush time, so a record funded twice in
+      // one buffer writes its final accumulated state (idempotent UPDATE).
+      const mark = this.fundedWatermark.get(r.seq);
+      await client.query(
+        `UPDATE portal_announcements
+         SET funded = TRUE, funded_amount = $2, funded_tx_hash = $3, funded_at = $4,
+             funded_block = $5, funded_log_index = $6
+         WHERE seq = $1`,
+        [r.seq, r.fundedAmount, r.fundedTxHash, r.fundedAt, mark?.block ?? null, mark?.logIndex ?? null],
+      );
+    }
   }
 
   /** Drop the write-behind buffers AFTER the indexer's COMMIT (never before). */
   commitFlush(): void {
     this.pendingSwept = [];
     this.pendingInserts = [];
+    this.pendingFunded = [];
   }
 }

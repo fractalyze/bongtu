@@ -168,3 +168,25 @@ ALTER TABLE portal_announcements ADD COLUMN IF NOT EXISTS rail TEXT;
 -- Safe on live data: every recorded stealth address is a fresh 160-bit
 -- derivation, so pre-existing duplicates cannot exist.
 CREATE UNIQUE INDEX IF NOT EXISTS portal_stealth_addr_uniq ON portal_announcements (stealth_addr);
+-- Funded detection (src/portal.ts markFunded, driven by the ingest transfer
+-- tail): chain-derived like swept — set once, never cleared; the amount is
+-- CUMULATIVE observed transfer value and the (block, log_index) pair is the
+-- replay watermark that keeps a re-delivered window from double-counting.
+-- Pre-feature rows read funded = FALSE and are healed by the boot
+-- reconciliation pass. Additive, so old rows and old code keep working.
+ALTER TABLE portal_announcements ADD COLUMN IF NOT EXISTS funded BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE portal_announcements ADD COLUMN IF NOT EXISTS funded_amount TEXT;         -- decimal, cumulative
+ALTER TABLE portal_announcements ADD COLUMN IF NOT EXISTS funded_tx_hash TEXT;        -- first qualifying transfer
+ALTER TABLE portal_announcements ADD COLUMN IF NOT EXISTS funded_at BIGINT;           -- unix seconds of that transfer
+ALTER TABLE portal_announcements ADD COLUMN IF NOT EXISTS funded_block BIGINT;        -- watermark half 1
+ALTER TABLE portal_announcements ADD COLUMN IF NOT EXISTS funded_log_index INTEGER;   -- watermark half 2
+CREATE INDEX IF NOT EXISTS portal_destination_idx ON portal_announcements (destination);
+
+-- The funded tail's own scan cursor (ingest_cursor's twin): lags the pool
+-- cursor by FUNDED_CONFIRMATIONS and commits in the same atomic persist, so
+-- funded flips and the window that produced them are never split by a crash.
+-- No row = pre-feature store; boot runs the one-time balance reconciliation.
+CREATE TABLE IF NOT EXISTS funded_cursor (
+  id         INTEGER PRIMARY KEY,  -- always 1 (single-row table)
+  last_block BIGINT  NOT NULL
+);

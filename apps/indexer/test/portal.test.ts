@@ -140,6 +140,10 @@ test("issuance happy path: fixed randomness -> deterministic destination, record
     swept: false,
     sweptTxHash: null,
     sweptAmount: null,
+    funded: false,
+    fundedAmount: null,
+    fundedTxHash: null,
+    fundedAt: null,
   } satisfies PortalRecord);
 });
 
@@ -494,4 +498,74 @@ test("PORTAL_OPERATOR_TOKEN unset: the work feed stays open (local depositor-fac
   const open = await portalUnswept.handle(ctx(ix));
   assert.equal(open.status, 200);
   assert.equal((open.body as PortalRecord[])[0].name, "alice");
+});
+
+// ==================== (6) FUNDED MARKING (the transfer tail's registry half) ==
+
+test("markFunded flips an open row once and accumulates across distinct transfers", async () => {
+  const { ix, record } = await sweepFixture();
+  assert.equal(record.funded, false);
+  ix.portal.markFunded(record.destination, 100n, "0xt1", 10, 0, NOW + 1);
+  assert.equal(record.funded, true);
+  assert.equal(record.fundedAmount, "100");
+  assert.equal(record.fundedTxHash, "0xt1");
+  assert.equal(record.fundedAt, NOW + 1);
+  // A second, later transfer accumulates; the FIRST transfer's coordinates stay.
+  ix.portal.markFunded(record.destination, 50n, "0xt2", 11, 3, NOW + 2);
+  assert.equal(record.fundedAmount, "150");
+  assert.equal(record.fundedTxHash, "0xt1");
+  assert.equal(record.fundedAt, NOW + 1);
+  // Case-insensitive destination match (logs carry checksummed addresses).
+  ix.portal.markFunded(record.destination.toUpperCase().replace("0X", "0x"), 25n, "0xt3", 12, 0, NOW + 3);
+  assert.equal(record.fundedAmount, "175");
+});
+
+test("the funded watermark: a replayed (block, logIndex) never double-counts", async () => {
+  const { ix, record } = await sweepFixture();
+  ix.portal.markFunded(record.destination, 100n, "0xt1", 10, 5, NOW);
+  // The crash-replay path re-delivers the same window: same log, then an
+  // EARLIER log the first pass already covered — both no-op.
+  ix.portal.markFunded(record.destination, 100n, "0xt1", 10, 5, NOW);
+  ix.portal.markFunded(record.destination, 7n, "0xt0", 10, 2, NOW);
+  assert.equal(record.fundedAmount, "100");
+  // Strictly later logs still accumulate.
+  ix.portal.markFunded(record.destination, 1n, "0xt2", 10, 6, NOW);
+  assert.equal(record.fundedAmount, "101");
+});
+
+test("markFunded no-ops: unknown destination, swept row, zero value", async () => {
+  const { ix, record } = await sweepFixture();
+  ix.portal.markFunded("0x" + "77".repeat(20), 100n, "0xt", 10, 0, NOW);
+  assert.equal(record.funded, false);
+  ix.portal.markFunded(record.destination, 0n, "0xt", 10, 0, NOW);
+  assert.equal(record.funded, false);
+  ix.applyLogs([sweptLog(portalSalt(record.stealthAddr), "0xsweep", 123n)]);
+  ix.portal.markFunded(record.destination, 100n, "0xt", 11, 0, NOW);
+  assert.equal(record.funded, false);
+});
+
+test("openDestinations serves every unswept row (funded rows included) and drops swept ones", async () => {
+  const { ix, portal } = await threeRecords();
+  const rows = portal.list();
+  assert.deepEqual(portal.openDestinations(), rows.map((r) => r.destination.toLowerCase()));
+  portal.markFunded(rows[0].destination, 5n, "0xt", 10, 0, NOW);
+  assert.equal(portal.openDestinations().length, 3, "a funded row keeps accumulating until swept");
+  portal.markSwept(portalSalt(rows[1].stealthAddr), "0xsweep", 7n);
+  assert.deepEqual(portal.openDestinations(), [rows[0], rows[2]].map((r) => r.destination.toLowerCase()));
+  void ix;
+});
+
+test("funded fields ride the operator feed and NEVER the public projection (spec R8)", async () => {
+  const { ix, portal } = await threeRecords();
+  portal.markFunded(portal.list()[0].destination, 42n, "0xt", 10, 0, NOW);
+  const work = (await portalUnswept.handle(ctx(ix))).body as PortalRecord[];
+  assert.equal(work[0].funded, true);
+  assert.equal(work[0].fundedAmount, "42");
+  assert.equal(work[1].funded, false);
+  const pub = (await portalAnnouncements.handle(ctx(ix))).body as PortalPublicRecord[];
+  for (const row of pub) {
+    for (const field of ["funded", "fundedAmount", "fundedTxHash", "fundedAt"]) {
+      assert.equal(field in (row as object), false, `public row leaks ${field}`);
+    }
+  }
 });
