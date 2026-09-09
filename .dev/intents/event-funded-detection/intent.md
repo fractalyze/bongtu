@@ -1,6 +1,6 @@
 # Event-driven funded detection for issued destinations
 
-Author: JunBeom Lee. Status: draft.
+Author: JunBeom Lee. Status: accepted.
 Origin: conversation
 
 ## Problem
