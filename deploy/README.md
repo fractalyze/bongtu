@@ -306,6 +306,13 @@ against an old indexer sweeps nothing (visible as a stuck `unswept` count
 in the bot's `/health`); the indexer's first boot heals pre-existing rows
 via the reconciliation pass, after which the bot follows.
 
+**450815 (Maroo) exception — do NOT move that stack's bot to the
+funded-tail build.** The live kKRW at `addresses.450815.json` `token` is
+an event-less deploy of the old mock: its bytecode cannot emit `Transfer`
+(measured on-chain), the pool's token is fixed at initialize, so the tail
+can never see a payment there. The Maroo receive bot stays on the
+balance-polling build until that stack's token story changes.
+
 **5. Run the sweeper bot** (`MODE=priv`, CPU prover, explicit env per
 [`apps/sweeper/README.md`](../apps/sweeper/README.md)); fund its key from a
 Sepolia faucet — `/health` alarms on a zero gas balance.

@@ -5,7 +5,13 @@ import {IERC20} from "../../src/utils/IERC20.sol";
 
 /// @notice Plain 18-decimal ERC-20 (NON fee-on-transfer, NON rebasing) — the
 ///         only shape BongtuPool supports (SPEC §5.3). Faucet-mintable for tests.
+///         Emits the standard Transfer event: EIP-20 REQUIRES it ("MUST trigger
+///         when tokens are transferred"), and the indexer's funded tail detects
+///         payments from exactly this log — an event-less mock hid that whole
+///         path from every anvil gate while real tokens served it fine.
 contract MockERC20 is IERC20 {
+    event Transfer(address indexed from, address indexed to, uint256 value);
+
     string public name = "mock kKRW";
     string public symbol = "kKRW";
     uint8 public decimals = 18;
@@ -16,6 +22,7 @@ contract MockERC20 is IERC20 {
     function mint(address to, uint256 amount) external {
         balanceOf[to] += amount;
         totalSupply += amount;
+        emit Transfer(address(0), to, amount);
     }
 
     function transfer(address to, uint256 amount) external returns (bool) {
@@ -40,5 +47,6 @@ contract MockERC20 is IERC20 {
         require(balanceOf[from] >= amount, "balance");
         balanceOf[from] -= amount;
         balanceOf[to] += amount;
+        emit Transfer(from, to, amount);
     }
 }

@@ -132,6 +132,11 @@ deliberately NO periodic reconciliation, so a tail bug is a visible stall (a fun
 feed never flags), not a masked one. The consumer is the sweep bot: its trigger is the served
 flag, and its balance read remains the proof of payment (`docs/portal.md`).
 
+Detection requires the pool token to emit the standard `Transfer` event (EIP-20 mandates it).
+Measured exception: the live Maroo kKRW's deployed bytecode predates the mock's event fix and
+emits nothing — that stack's bot stays on the balance-polling build
+([`deploy/README.md`](../deploy/README.md)).
+
 ## HTTP API
 
 Routing is a plain ordered table (`src/api/router.ts`): each route is a pure function of the

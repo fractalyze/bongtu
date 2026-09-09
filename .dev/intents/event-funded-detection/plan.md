@@ -111,6 +111,28 @@ indexer-first restart ordering note from concern C1).
 
 Proves it: docs-only; the U4 gate run stands.
 
+## Deviations recorded during build
+
+- **MockERC20 was ERC-20-noncompliant (no Transfer events) — fixed.** The
+  repo's mock token (`chains/evm/test/mocks/MockERC20.sol`, what every anvil
+  gate and `Deploy.s.sol` deploy) emitted no events at all, so the funded
+  tail saw nothing on any gate while a real token (EIP-20 mandates the
+  event; Circle USDC complies) would have worked. The standalone priv-leg
+  smoke caught it. The mock now emits `Transfer` on transfer/transferFrom
+  (and from `address(0)` on mint); forge 180/180 unchanged.
+- **Measured: the LIVE Maroo kKRW cannot serve the funded tail.** The
+  deployed 450815 token (`addresses.450815.json` `token`,
+  `0x18396AF3535cC1A26675bAE90379f1a90754A939`) predates the mock fix: its
+  on-chain bytecode does not contain the Transfer topic constant (verified
+  via eth_getCode — no `ddf252ad…` PUSH32), so it can never emit the log
+  and the tail is structurally blind there. The pool's token is fixed at
+  initialize (no setter), so this is permanent for that pool. Consequence,
+  documented in the runbook: the 450815 receive bot must STAY on the
+  pre-funded (balance-polling) build; the flag-driven bot is for stacks
+  whose token emits standard events (the Sepolia USDC demo, any future
+  deploy of the fixed mock). A polling-mode knob for such stacks is a named
+  follow-up candidate, not built here.
+
 ## Risks
 
 - **RPC `to`-topic list caps**: providers cap topic-array sizes untypically
