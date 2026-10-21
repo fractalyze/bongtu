@@ -42,6 +42,10 @@ test("createKeyCache derives under the deployment's KDF config", async () => {
   const cache = createKeyCache({ currentAccount: async () => ACCOUNT });
   const unlocked = await cache.unlock(connection, expected.compressedPubkey);
   assert.equal(unlocked.compressedPubkey, expected.compressedPubkey, "same KDF config ⇒ same identity");
+  // unlock() armed the REAL 10-minute idle timer; the client runner has no
+  // --test-force-exit, so an undisarmed timer keeps the suite alive ~10min
+  // (observed as the CI node job hitting its 20-min timeout).
+  cache.lock();
 });
 
 test("createKeyCache re-checks the edge's LIVE account before reusing a held key", async () => {
