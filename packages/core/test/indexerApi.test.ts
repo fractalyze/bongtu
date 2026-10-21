@@ -418,3 +418,68 @@ test("fetchUnswept and getPortalAnnouncements send cursor/limit and parse the fe
   assert.deepEqual(await fetchUnswept("http://localhost:8600", undefined, undefined, defaults.fn), []);
   assert.equal(defaults.calls[0]?.url, "http://localhost:8600/portal/unswept?cursor=-1&limit=5000");
 });
+
+// --- the bound IndexerClient (issue #15 C1) ---------------------------------------
+//
+// Interface-level gates for the class layer ONLY — every method delegates to the
+// free functions above, whose protocol behavior the earlier suites already pin,
+// so these cases cover exactly what the class ADDS: the constructor-bound seam,
+// tear-off safety, the frozen error string surviving delegation, 404-as-answer,
+// and the asOwner capability matrix at the type level.
+
+import { IndexerClient } from "@bongtu/core/indexerApi";
+import { classifyIndexerRead } from "@bongtu/core/errors";
+
+test("IndexerClient routes every read through the constructor fetchFn, base trimmed once", async () => {
+  const cases: { call: (c: IndexerClient) => Promise<unknown>; url: string }[] = [
+    { call: (c) => c.head(), url: "http://localhost:8600/head" },
+    { call: (c) => c.nullifiers(), url: "http://localhost:8600/nullifiers" },
+    { call: (c) => c.events(41, 7), url: "http://localhost:8600/events?cursor=41&limit=7" },
+    // the free-function defaults (cursor -1, the 5000 cap) still apply through
+    // the delegation, so a bare tear-off call hits the same URL it always did.
+    { call: (c) => c.unswept(), url: "http://localhost:8600/portal/unswept?cursor=-1&limit=5000" },
+  ];
+  for (const { call, url } of cases) {
+    const { fn, calls } = fakeFetch(200, "[]");
+    await call(new IndexerClient("http://localhost:8600/", { fetchFn: fn }));
+    assert.equal(calls[0]?.url, url);
+  }
+});
+
+test("a class read throws the frozen error string classifyIndexerRead parses", async () => {
+  const client = new IndexerClient("http://localhost:8600", { fetchFn: fakeFetch(401, "expired token").fn });
+  const err = await client.head().then(
+    () => null,
+    (e: Error) => e,
+  );
+  assert.equal(err?.message, "http://localhost:8600/head -> 401: expired token");
+  assert.deepEqual(classifyIndexerRead(err), { kind: "unauthorized", status: 401 });
+});
+
+test("client.resolveName keeps 404-as-answer: null, not a throw", async () => {
+  const client = new IndexerClient("http://localhost:8600", { fetchFn: fakeFetch(404, "no such name").fn });
+  assert.equal(await client.resolveName("nobody"), null);
+});
+
+test("methods survive tear-off (arrow properties keep their instance)", async () => {
+  const { fn, calls } = fakeFetch(200, JSON.stringify({ root: "1", nextLeafIndex: 0 }));
+  const { head } = new IndexerClient("http://localhost:8600", { fetchFn: fn });
+  assert.deepEqual(await head(), { root: "1", nextLeafIndex: 0 });
+  assert.equal(calls[0]?.url, "http://localhost:8600/head");
+});
+
+test("asOwner encodes the capability matrix: signed /path is key-only, paged history token-only", () => {
+  const kp = deriveKeypair(OWNER_SCALAR);
+  const compressed = packPubkey(kp.publicKey);
+  const client = new IndexerClient("http://localhost:8600", { fetchFn: fakeFetch(200, "[]").fn });
+  const byToken = client.asOwner(compressed, { token: "tok.en" });
+  const byKey = client.asOwner(compressed, { key: kp.formattedPrivateKey });
+  // @ts-expect-error — a token cannot open a within-batch leaf: the server
+  // requires the owner's signature there, so the type refuses before the 401.
+  void byToken.signedPath;
+  // @ts-expect-error — a key-mode binding is transient: nothing survives to
+  // page a second request with, so paged history is token-only.
+  void byKey.historyPage;
+  assert.equal(typeof byToken.historyPage, "function");
+  assert.equal(typeof byKey.signedPath, "function");
+});

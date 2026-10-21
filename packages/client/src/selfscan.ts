@@ -54,10 +54,6 @@ import { consumerViewTag, openConsumerOutput, CONSUMER_CT_LEN } from "@bongtu/co
 import { foldToRoot } from "@bongtu/core/imt";
 import { unpackPubkey } from "@bongtu/core/pubkey";
 import {
-  getEventsFrom,
-  getHead,
-  getNullifiers,
-  getPath,
   type EventKind,
   type FeedEvent,
   type Head,
@@ -410,22 +406,15 @@ export function decodeScanState(raw: string | null): SelfScanState | null {
 // --- the fetch shell ---------------------------------------------------------
 
 /** The four public reads one scan needs — injectable so the whole shell gates
- *  headlessly on recorded data (the balance.ts pure-core + injected-IO pattern). */
+ *  headlessly on recorded data (the balance.ts pure-core + injected-IO pattern).
+ *  The real IO is an `IndexerClient` (indexerClient.ts), which satisfies this
+ *  STRUCTURALLY — no hand-built binding to drift; the interface stays for the
+ *  headless suite's recorded fakes. */
 export interface SelfScanIo {
   events(cursor: number, limit?: number): Promise<FeedEvent[]>;
   nullifiers(): Promise<string[]>;
   head(): Promise<Head>;
   path(leafIndex: number): Promise<PathResult>;
-}
-
-/** The real IO against an indexer base URL — every endpoint key-free/auth-free. */
-export function selfScanIo(indexerUrl: string): SelfScanIo {
-  return {
-    events: (cursor, limit) => getEventsFrom(indexerUrl, cursor, limit),
-    nullifiers: () => getNullifiers(indexerUrl),
-    head: () => getHead(indexerUrl),
-    path: (leafIndex) => getPath(indexerUrl, leafIndex),
-  };
 }
 
 const dedupePending = (entries: PendingDiscovery[]): PendingDiscovery[] => {

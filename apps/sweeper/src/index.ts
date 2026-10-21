@@ -33,7 +33,7 @@
 import { createPublicClient, createWalletClient, defineChain, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-import { fetchUnswept } from "@bongtu/core/indexerApi";
+import { IndexerClient } from "@bongtu/core/indexerApi";
 import { randField } from "@bongtu/client/spend";
 
 import { bootError, resolveConfig } from "./config.js";
@@ -78,9 +78,12 @@ async function main(): Promise<void> {
     publicClient: createPublicClient({ chain: chainDef, transport }),
     walletClient: createWalletClient({ account, chain: chainDef, transport }),
   };
+  // The bound client's tear-off IS the deps entry — arrow properties keep their
+  // instance, and the free-function defaults (cursor -1, 5000 cap) still apply.
+  const indexer = new IndexerClient(cfg.indexerUrl);
   const deps: SweeperDeps = {
     chain,
-    fetchUnswept: () => fetchUnswept(cfg.indexerUrl),
+    fetchUnswept: indexer.unswept,
     prove: makeDepositProver(cfg.circuitsOut),
     rand: randField,
   };

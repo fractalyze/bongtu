@@ -40,13 +40,7 @@ import type { LegProgress, SpendStage } from "@bongtu/client/spendFlow";
 import { sumUnspent } from "@bongtu/client/balance";
 import { formatKkrw, groupAmountInput } from "@bongtu/client/money";
 import { encodeAddress } from "@bongtu/core/pubkey";
-import {
-  buildNotesTokenUrl,
-  buildNotesUrl,
-  fetchNotes,
-  obtainViewToken,
-  type OwnerNote,
-} from "@bongtu/client/indexerClient";
+import { IndexerClient, obtainViewToken, type OwnerNote } from "@bongtu/client/indexerClient";
 import { DEFAULTS } from "../config.js";
 import { errorDetails, payrollErrorMessage } from "../lib/errors.js";
 import { openInjectedConnection, watchInjectedAccount } from "../lib/connect.js";
@@ -81,6 +75,10 @@ import { Button, CellInput, Spinner, TestnetBadge, shortHex } from "./controls.j
 import { DepositModal } from "./DepositModal.js";
 
 const INDEXER_URL = DEFAULTS.indexerUrl;
+
+// ONE bound client for the console — the token-vs-key read branches below share
+// its asOwner bindings instead of hand-picking URL builders.
+const indexer = new IndexerClient(INDEXER_URL);
 const AUTO_REFRESH_MS = 3000;
 
 /** What every balance-shaped slot says before the first read lands. */
@@ -202,19 +200,19 @@ export function Console({ onSignOut }: { onSignOut: () => void }): ReactNode {
    *  an empty lock: there is nothing to read with. */
   const readNotes = useCallback(async (): Promise<OwnerNote[] | null> => {
     if (!wallet) return null;
-    if (wallet.viewToken) return fetchNotes(buildNotesTokenUrl(INDEXER_URL, wallet.pubkey, wallet.viewToken));
+    if (wallet.viewToken) return indexer.asOwner(wallet.pubkey, { token: wallet.viewToken }).notes();
     const identity = keyCache.peek(wallet.pubkey);
     if (!identity) return null;
-    return fetchNotes(buildNotesUrl(INDEXER_URL, wallet.pubkey, identity.keypair.formattedPrivateKey));
+    return indexer.asOwner(wallet.pubkey, { key: identity.keypair.formattedPrivateKey }).notes();
   }, [wallet]);
 
   /** The same read for a user ACTION, which may open the lock (and push its
    *  deadline out) because a person is waiting on the answer. */
   const loadNotes = useCallback(async (): Promise<OwnerNote[]> => {
     if (!wallet) throw new Error("Connect your wallet first.");
-    if (wallet.viewToken) return fetchNotes(buildNotesTokenUrl(INDEXER_URL, wallet.pubkey, wallet.viewToken));
+    if (wallet.viewToken) return indexer.asOwner(wallet.pubkey, { token: wallet.viewToken }).notes();
     const identity = await keyCache.unlock(wallet.connection, wallet.pubkey);
-    return fetchNotes(buildNotesUrl(INDEXER_URL, wallet.pubkey, identity.keypair.formattedPrivateKey));
+    return indexer.asOwner(wallet.pubkey, { key: identity.keypair.formattedPrivateKey }).notes();
   }, [wallet]);
 
   const refresh = useCallback(async (): Promise<void> => {

@@ -618,3 +618,14 @@ test("scan-state codec: round trip, and anything malformed decodes to null (full
   assert.equal(decodeScanState('{"v":1,"cursor":"x","scannedNextLeafIndex":0,"notes":[],"pending":[]}'), null);
   assert.deepEqual(decodeScanState(encodeScanState(EMPTY_SCAN_STATE)), EMPTY_SCAN_STATE);
 });
+
+// --- issue #15 C1: the real IO binding is the IndexerClient itself ----------------
+
+import { IndexerClient } from "@bongtu/client/indexerClient";
+
+test("IndexerClient structurally satisfies SelfScanIo (no hand-built binding to drift)", () => {
+  // The assignment IS the assertion: it compiles only while the class keeps the
+  // four read signatures this engine scans through.
+  const io: SelfScanIo = new IndexerClient("http://localhost:8600");
+  assert.equal(typeof io.events, "function");
+});

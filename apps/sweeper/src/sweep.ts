@@ -76,12 +76,12 @@ export interface SweeperChain {
 }
 
 /** Everything one sweep round consumes, injectable (the relayer deps posture):
- *  the typed indexer client (@bongtu/core/indexerApi fetchUnswept — never a
+ *  the typed indexer client (@bongtu/core/indexerApi IndexerClient.unswept — never a
  *  hand-rolled fetch), the prover, and the randomness/KEM draws behind the
  *  deposit's fresh crypto material. */
 export interface SweeperDeps {
   chain: SweeperChain;
-  /** one page of unswept records (index.ts binds fetchUnswept(INDEXER_URL)). */
+  /** one page of unswept records (index.ts binds the IndexerClient's unswept). */
   fetchUnswept: () => Promise<PortalRecord[]>;
   /** ProvingRequest -> Groth16 calldata (prover.ts CPU snarkjs; a fake in tests). */
   prove: (request: ProvingRequest) => Promise<Calldata>;
