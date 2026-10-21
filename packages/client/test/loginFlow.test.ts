@@ -14,7 +14,7 @@ import { runLogin, type RunLoginDeps } from "@bongtu/client/loginFlow";
 import { chainSwitchMessage, type Connection } from "@bongtu/client/connection";
 import type { WalletIdentity } from "@bongtu/client/derive";
 import { KEY_CHANGED_MESSAGE } from "@bongtu/client/loginGuard";
-import { loadKeyBinding, saveKeyBinding, type StorageLike } from "@bongtu/client/session";
+import { SessionStore, type StorageLike } from "@bongtu/client/session";
 
 const CONNECTION = { address: "0xabc", transport: "injected" } as unknown as Connection;
 const IDENTITY = {
@@ -103,19 +103,20 @@ function memStorage(): StorageLike & { map: Map<string, string> } {
   };
 }
 
-/** runLogin over the REAL binding store, backed by `storage`. */
-function overStorage(calls: string[], storage: StorageLike) {
+/** runLogin over the REAL binding store. */
+function overStore(calls: string[], store: SessionStore) {
   return fakes(calls, {
-    loadKeyBinding: (eoa) => loadKeyBinding(eoa, storage),
+    loadKeyBinding: store.loadKeyBinding,
     saveKeyBinding: (eoa, pubkey) => {
       calls.push("saveBinding");
-      saveKeyBinding(eoa, pubkey, storage);
+      store.saveKeyBinding(eoa, pubkey);
     },
   });
 }
 
 test("a binding left by ANOTHER deployment does not refuse the login", async () => {
   const storage = memStorage();
+  const store = new SessionStore(storage);
   // What the device kept from a DIFFERENT deployment (another chain, another pool):
   // a real binding for this same account, naming a key this build cannot derive.
   storage.map.set(
@@ -124,20 +125,20 @@ test("a binding left by ANOTHER deployment does not refuse the login", async () 
   );
 
   const calls: string[] = [];
-  const res = await runLogin({ indexerUrl: "http://x" }, overStorage(calls, storage));
+  const res = await runLogin({ indexerUrl: "http://x" }, overStore(calls, store));
   assert.equal(res.session.compressedPubkey, "cpk1", "the login completes on the new identity");
-  assert.equal(loadKeyBinding("0xabc", storage), "cpk1", "and this deployment records its own binding");
+  assert.equal(store.loadKeyBinding("0xabc"), "cpk1", "and this deployment records its own binding");
 });
 
 test("but a DIFFERENT key under THIS deployment still refuses — the guard is intact", async () => {
-  const storage = memStorage();
-  saveKeyBinding("0xabc", "a-different-key", storage);
+  const store = new SessionStore(memStorage());
+  store.saveKeyBinding("0xabc", "a-different-key");
 
   const calls: string[] = [];
   await assert.rejects(
-    () => runLogin({ indexerUrl: "http://x" }, overStorage(calls, storage)),
+    () => runLogin({ indexerUrl: "http://x" }, overStore(calls, store)),
     new RegExp(KEY_CHANGED_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
   );
   assert.ok(!calls.includes("saveSession") && !calls.includes("saveBinding"), "refusals write nothing");
-  assert.equal(loadKeyBinding("0xabc", storage), "a-different-key", "the remembered key is not overwritten");
+  assert.equal(store.loadKeyBinding("0xabc"), "a-different-key", "the remembered key is not overwritten");
 });

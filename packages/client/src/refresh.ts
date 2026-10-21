@@ -165,6 +165,19 @@ export const REFRESH_FAILED_TOAST = "Refresh failed. Showing the last loaded dat
 export const AUTO_REFRESH_MS = 3000;
 
 /**
+ * Whether `cur` holds a note-state that `pre`'s set does not, keyed by
+ * (commitment, spent) — spending flips a note's key, so a spend registers as
+ * change even when the note COUNT stands still. The one note-set comparison
+ * snapshotChanged and actionReflected share. A module-level function rather than
+ * a method: OwnerSnapshot is a wire-shaped interface (plain JSON off the
+ * loaders), and this file's style is free functions over that data.
+ */
+function noteSetChanged(pre: OwnerSnapshot, cur: OwnerSnapshot): boolean {
+  const keys = new Set(pre.notes.map((n) => `${n.commitment}:${n.spent}`));
+  return cur.notes.some((n) => !keys.has(`${n.commitment}:${n.spent}`));
+}
+
+/**
  * Whether a fresh read differs from what the screen already shows. The auto
  * refresh loop applies a snapshot ONLY when this is true: applying wholesale
  * resets activity paging to page one (by design — older pages were read against
@@ -175,8 +188,7 @@ export function snapshotChanged(pre: OwnerSnapshot, cur: OwnerSnapshot): boolean
   if (pre.notes.length !== cur.notes.length || pre.history.length !== cur.history.length) return true;
   if (pre.historyNextBefore !== cur.historyNextBefore) return true;
   if ((pre.history[0]?.seq ?? -1) !== (cur.history[0]?.seq ?? -1)) return true;
-  const keys = new Set(pre.notes.map((n) => `${n.commitment}:${n.spent}`));
-  return cur.notes.some((n) => !keys.has(`${n.commitment}:${n.spent}`));
+  return noteSetChanged(pre, cur);
 }
 
 export interface RefreshSinks {
@@ -244,8 +256,7 @@ export function actionReflected(pre: OwnerSnapshot, cur: OwnerSnapshot, txHash: 
   if (cur.history.some((h) => h.txHash.toLowerCase() === wanted)) return true;
   if (cur.history.length > pre.history.length) return true;
   if (cur.notes.length !== pre.notes.length) return true;
-  const preKeys = new Set(pre.notes.map((n) => `${n.commitment}:${n.spent}`));
-  return cur.notes.some((n) => !preKeys.has(`${n.commitment}:${n.spent}`));
+  return noteSetChanged(pre, cur);
 }
 
 export interface PollForActionOptions {

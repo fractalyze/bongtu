@@ -58,7 +58,7 @@ import {
   type HistoryItem,
 } from "@bongtu/client/indexerClient";
 import { appendHistoryPage } from "@bongtu/client/activity";
-import { clearKeyBindings, clearSession, loadSession, type StoredSession } from "@bongtu/client/session";
+import { SessionStore, type StoredSession } from "@bongtu/client/session";
 import { markLockIntroSeen, shouldShowLockIntro } from "../lib/lockIntro.js";
 import {
   loadOwnerSnapshot,
@@ -81,6 +81,11 @@ import { Deposit } from "./screens/Deposit.js";
 import { SpendScreen } from "./screens/SpendScreen.js";
 import { Activity } from "./screens/Activity.js";
 import { Settings } from "./screens/Settings.js";
+
+// ONE store over the browser's real localStorage — the receiver every session
+// read/write in this shell goes through (loginFlow's default deps construct their
+// own over the same localStorage; the storage IS the state, so they agree).
+const sessionStore = new SessionStore();
 
 // --- wallet context --------------------------------------------------------------
 
@@ -260,11 +265,11 @@ export function App(): ReactNode {
   const endSession = useCallback((reason: string | null, forget = false): void => {
     keyCache.lock(); // signing out drops the spending key too, not just the token
     toasts.clear(); // stale event toasts must not follow the user to onboarding
-    clearSession();
+    sessionStore.clearSession();
     scanRef.current = null;
     setScannedNextLeafIndex(null);
     if (forget) {
-      clearKeyBindings();
+      sessionStore.clearKeyBindings();
       // A clean device keeps no decrypted amounts either (scanStore).
       if (scanOwnerRef.current !== null) clearScanState(scanOwnerRef.current);
       // wagmi drops + forgets the connector (for WalletConnect that ends the
@@ -377,7 +382,7 @@ export function App(): ReactNode {
   useEffect(() => {
     if (restored.current) return; // StrictMode double-mount guard
     restored.current = true;
-    const stored = loadSession();
+    const stored = sessionStore.loadSession();
     if (!stored) {
       // Nothing to restore — still warm wagmi's remembered connector (silent), so
       // the Connect button can skip the modal for a wallet that is already live.
@@ -391,7 +396,7 @@ export function App(): ReactNode {
       const conn = await restoreConnection(stored.eoaAddress);
       if (!conn) {
         // account changed or no longer authorised — require a fresh connect.
-        clearSession();
+        sessionStore.clearSession();
         return;
       }
       setConnection(conn);
