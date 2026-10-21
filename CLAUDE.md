@@ -80,6 +80,10 @@ not re-derive what those files own.
   gates run there silently test the WRONG branch's packages. Before running tests in a
   fresh isolated worktree, recreate the workspace symlinks (`node_modules/@bongtu/<name>
   -> ../../packages/<name>` etc. inside that worktree); two agents hit this on 2026-09-04.
+  Recreate ALL NINE (main's own node_modules may be missing `client-evm`/`client-solana`,
+  which then breaks typecheck with confusing split-viem errors — verified 2026-09-06),
+  and note a fresh worktree's `circuits/out/` is EMPTY: run `circuits/build/prove_all.sh`
+  (targeted is fine) before any gate that proves on CPU.
 - **package-lock.json regen**: npm 11.5 on this box reuses the actual node_modules tree and
   silently DROPS the ~49 cross-platform optional entries (@esbuild/*, @rollup/rollup-*) —
   the box tolerates it but Vercel's `npm ci` rejects the lock and every git-integration
